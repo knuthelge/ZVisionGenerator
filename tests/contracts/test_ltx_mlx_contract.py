@@ -47,7 +47,8 @@ from ltx_pipelines_mlx.utils.stepwise import StepwisePreview  # noqa: E402
 
 
 from ltx_pipelines_mlx.ti2vid_two_stages import TI2VidTwoStagesPipeline  # noqa: E402
-from zvisiongenerator.utils.config import load_config, ltx_mlx_packs, ltx_mlx_text_encoder_repo_id  # noqa: E402
+from zvisiongenerator.utils.model_metadata import builtin_aliases
+from zvisiongenerator.utils.ltx_facts import ltx_gemma_repo_id, ltx_load_options  # noqa: E402
 from zvisiongenerator.backends.mac.video import _encoder_tiling, _upscale_stage1  # noqa: E402
 from zvisiongenerator.utils.video_upscale import MAX_LTX_UPSCALE_STEPS  # noqa: E402
 from zvisiongenerator.utils.model_files import ltx_mlx_bundled_text_encoder, ltx_mlx_transformer_file, ltx_mlx_upsampler_file, ltx_mlx_video_decoder_file  # noqa: E402
@@ -388,7 +389,7 @@ class TestPinnedPackFilesContract:
 
     @pytest.fixture
     def packs(self):
-        return ltx_mlx_packs(load_config())
+        return ltx_load_options(None, "darwin", upscale=False)["mlx_packs"]
 
     @staticmethod
     def _folder(root, files):
@@ -398,8 +399,7 @@ class TestPinnedPackFilesContract:
 
     @pytest.fixture(params=["ltx-4", "ltx-8", "ltx25-4"])
     def pack(self, request, tmp_path, packs):
-        config = load_config()
-        reference = config["model_aliases"][request.param]["darwin"]
+        reference = builtin_aliases()[request.param]["darwin"]
         files = packs[reference].files
         return SimpleNamespace(alias=request.param, files=files, folder=self._folder(tmp_path, files), bundled=request.param == "ltx25-4")
 
@@ -448,7 +448,7 @@ class TestPinnedPackFilesContract:
     def test_the_configured_gemma_3_is_the_pipelines_default(self):
         default = inspect.signature(BasePipeline.__init__).parameters["gemma_model_id"].default
 
-        assert ltx_mlx_text_encoder_repo_id(load_config()) == default
+        assert ltx_gemma_repo_id() == default
         assert inspect.signature(DistilledPipeline.__init__).parameters["gemma_model_id"].default == default
 
 

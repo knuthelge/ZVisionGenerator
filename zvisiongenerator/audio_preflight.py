@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from zvisiongenerator.backends import prompt_enhancer_session
 from zvisiongenerator.core.audio_types import AudioGenerationRequest
 from zvisiongenerator.preflight import print_enhancer_licence, print_enhancer_phase, release_enhancer_memory
-from zvisiongenerator.utils.config import model_reference
+from zvisiongenerator.utils.paths import join_huggingface_revision
 from zvisiongenerator.utils.enhance_record import build_audio_enhance_record, enhancer_tier
 from zvisiongenerator.utils.prompt_enhance import EnhanceResult, enhance_options
 from zvisiongenerator.utils.prompt_enhance_audio import TASK_LABELS, AudioEnhanceContext, AudioEnhanceSettings, enhance_audio_caption
@@ -142,6 +142,6 @@ def _enhanced(
 ) -> AudioGenerationRequest:
     """Return *request* with the enhanced text as its prompt, the user's own text as ``prompt_input`` and the record of how it was written."""
     print(f"Enhanced {TASK_LABELS[task].lower()}: {result.prompt}")
-    tier = enhancer_tier(config, platform_key=sys.platform, model=model_reference(*reference))
+    tier = enhancer_tier(config, platform_key=sys.platform, model=join_huggingface_revision(*reference))
     record = build_audio_enhance_record(settings, task=task, repo=reference[0], revision=reference[1], tier=tier)
     return replace(request, prompt=result.prompt, prompt_input=own_text, enhance_record=record)

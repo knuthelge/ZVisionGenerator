@@ -2,20 +2,21 @@
 
 Ideogram 4 Instant (fal's 8-step distilled Ideogram 4) has no ungated repo in a layout the backends load, so it is
 built once into a model folder of its own: the transformer from a single BF16 file, the text encoder, VAE, tokenizer
-and scheduler from the base model's repo. The ``ideogram4_instant`` config block pins every source.
+and scheduler from the base model's repo. The ``ideo`` entry of the model metadata pins every source.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
 
+from zvisiongenerator.downloads.declaration import model_targets, role_targets
+from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.built_model import is_models_dir_child, read_build_record, write_record
-from zvisiongenerator.utils.paths import split_huggingface_revision
+from zvisiongenerator.utils.model_metadata import for_platform, model_entry
+from zvisiongenerator.utils.paths import join_huggingface_revision, split_huggingface_revision
 
 __all__ = [
-    "COMPONENT_PATTERNS",
     "INSTANT_DIR_NAME",
     "LICENSE_FILES",
     "LINKED_COMPONENTS",
@@ -23,6 +24,7 @@ __all__ = [
     "InstantSource",
     "instant_downloads_dir",
     "instant_source",
+    "instant_targets",
     "is_built",
     "is_instant_dir",
     "write_build_record",
@@ -38,13 +40,11 @@ _RECORD_VERSION = 1
 LINKED_COMPONENTS = ("scheduler", "text_encoder", "tokenizer", "vae")
 # Ideogram's license agreement and attribution notice travel with the model.
 LICENSE_FILES = ("LICENSE.md", "NOTICE")
-# The files of the components repo the build downloads (the transformer comes from the single-file checkpoint).
-COMPONENT_PATTERNS = ("model_index.json", "transformer/config.json", *LICENSE_FILES, *(f"{name}/*" for name in LINKED_COMPONENTS))
 
 
 @dataclass(frozen=True)
 class InstantSource:
-    """Where one platform's Ideogram 4 Instant build comes from.
+    """Where one platform's Ideogram 4 Instant build comes from; its fields are the build record.
 
     Attributes:
         transformer_repo: Hugging Face repo holding the single-file BF16 transformer.
@@ -71,38 +71,25 @@ class InstantSource:
         return split_huggingface_revision(self.components)[1]
 
 
-def instant_source(config: dict[str, Any], platform_key: str) -> InstantSource:
-    """Return the Ideogram 4 Instant build source for *platform_key* from *config*'s ``ideogram4_instant`` block.
+def instant_targets(platform_key: str) -> tuple[DownloadTarget, DownloadTarget]:
+    """Return the ``components`` and ``transformer`` targets of the ``ideo`` entry of the model metadata for *platform_key*."""
+    pairs = model_targets(INSTANT_DIR_NAME, platform_key)
+    (components,) = role_targets(pairs, "components")
+    (transformer,) = role_targets(pairs, "transformer")
+    return components, transformer
 
-    Raises:
-        ValueError: If the block is missing or incomplete, or has no entry for *platform_key*.
-    """
-    block = config.get("ideogram4_instant")
-    if not isinstance(block, dict):
-        raise ValueError("config 'ideogram4_instant' must be a mapping.")
-    transformer = block.get("transformer")
-    if not isinstance(transformer, dict) or not all(isinstance(transformer.get(key), str) and transformer[key] for key in ("repo", "revision", "filename")):
-        raise ValueError("config 'ideogram4_instant.transformer' needs 'repo', 'revision' and 'filename'.")
-    components = _platform_value(block, "components", platform_key)
-    transformer_format = _platform_value(block, "transformer_format", platform_key)
-    if transformer_format not in TRANSFORMER_FORMATS:
-        raise ValueError(f"config 'ideogram4_instant.transformer_format.{platform_key}' must be one of {', '.join(TRANSFORMER_FORMATS)}.")
+
+def instant_source(platform_key: str) -> InstantSource:
+    """Return the Ideogram 4 Instant build source for *platform_key*, read from the ``ideo`` entry of the model metadata."""
+    components, transformer = instant_targets(platform_key)
+    (transformer_file,) = transformer.allow_patterns
     return InstantSource(
-        transformer_repo=transformer["repo"],
-        transformer_revision=transformer["revision"],
-        transformer_file=transformer["filename"],
-        components=components,
-        transformer_format=transformer_format,
+        transformer_repo=transformer.repo_id,
+        transformer_revision=transformer.revision,
+        transformer_file=transformer_file,
+        components=join_huggingface_revision(components.repo_id, components.revision),
+        transformer_format=for_platform(model_entry(INSTANT_DIR_NAME)["transformer_format"], platform_key),
     )
-
-
-def _platform_value(block: dict[str, Any], key: str, platform_key: str) -> str:
-    """Return ``block[key][platform_key]`` as a non-empty string."""
-    values = block.get(key)
-    value = values.get(platform_key) if isinstance(values, dict) else None
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"config 'ideogram4_instant.{key}' has no entry for '{platform_key}'.")
-    return value
 
 
 def instant_downloads_dir(target: Path) -> Path:
@@ -115,7 +102,7 @@ def is_instant_dir(path: str | Path) -> bool:
     return is_models_dir_child(path, (INSTANT_DIR_NAME,))
 
 
-def _record(source: InstantSource) -> dict[str, Any]:
+def _record(source: InstantSource) -> dict[str, str | int]:
     """Return the build record of a folder built from *source*."""
     return {"version": _RECORD_VERSION, **asdict(source)}
 

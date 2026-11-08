@@ -6,6 +6,7 @@ import warnings
 
 import pytest
 
+from tests._factories import use_enhancer_models
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
@@ -22,13 +23,13 @@ from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.prompt_enhance_audio import AudioEnhanceSettings, audio_settings_from_mapping
 from zvisiongenerator.utils.provenance import build_image_config_payload, build_video_config_payload, recorded_settings
 
-_CONFIG = {
-    "prompt_enhancer": {
-        "model": {"linux": "org/fast"},
-        "revision": {"linux": "r1"},
-        "smart": {"model": {"linux": "org/smart"}},
-    }
-}
+_CONFIG: dict = {}
+
+
+@pytest.fixture(autouse=True)
+def _enhancer_models(monkeypatch, tmp_path):
+    """Declare the Fast enhancer as ``org/fast@r1`` and the Smart one as ``org/smart``."""
+    use_enhancer_models(monkeypatch, tmp_path, fast="org/fast@r1", smart="org/smart")
 
 
 class TestTier:
@@ -36,13 +37,13 @@ class TestTier:
     def test_tier_comes_from_the_configured_models(self, model, tier):
         assert enhancer_tier(_CONFIG, platform_key="linux", model=model) == tier
 
-    @pytest.mark.parametrize("configured", ["~/models/fast", "{home}/models/fast"])
-    @pytest.mark.parametrize("recorded", ["~/models/fast", "{home}/models/fast"])
-    def test_a_local_tier_folder_matches_however_home_is_written(self, tmp_path, monkeypatch, configured, recorded):
+    @pytest.mark.parametrize("configured", ["~/models/mine", "{home}/models/mine"])
+    @pytest.mark.parametrize("recorded", ["~/models/mine", "{home}/models/mine"])
+    def test_a_local_custom_folder_matches_however_home_is_written(self, tmp_path, monkeypatch, configured, recorded):
         monkeypatch.setenv("HOME", str(tmp_path))
-        (tmp_path / "models" / "fast").mkdir(parents=True)
-        config = {"prompt_enhancer": {"model": {"linux": configured.format(home=tmp_path)}}}
-        assert enhancer_tier(config, platform_key="linux", model=recorded.format(home=tmp_path)) == "fast"
+        (tmp_path / "models" / "mine").mkdir(parents=True)
+        config = {"prompt_enhancer": {"user_model": configured.format(home=tmp_path)}}
+        assert enhancer_tier(config, platform_key="linux", model=recorded.format(home=tmp_path)) == "custom"
 
 
 class TestBuild:

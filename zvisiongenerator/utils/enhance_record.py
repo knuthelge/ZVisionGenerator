@@ -7,7 +7,8 @@ from typing import Any
 
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan
 from zvisiongenerator.utils.audio_writers import SCRIPT_TASK, ScriptSettings, script_settings_from_mapping, script_settings_summary, script_settings_to_mapping
-from zvisiongenerator.utils.config import enhancer_tier_models, model_reference, split_model_revision
+from zvisiongenerator.utils.config import configured_enhancer_models, split_model_revision
+from zvisiongenerator.utils.paths import join_huggingface_revision
 from zvisiongenerator.utils.paths import collapse_home, expand_home
 from zvisiongenerator.utils.prompt_enhance import ENHANCE_AXES, ENHANCE_FORMATS, EnhanceSettings, settings_from_mapping, settings_to_mapping
 from zvisiongenerator.utils.prompt_enhance_audio import (
@@ -47,7 +48,7 @@ def enhancer_tier(config: dict[str, Any], *, platform_key: str, model: str) -> s
         repo, revision = split_model_revision(expand_home(model))
     except ValueError:
         return "custom"
-    for tier, (tier_repo, tier_revision) in enhancer_tier_models(config, platform_key=platform_key).items():
+    for tier, (tier_repo, tier_revision) in configured_enhancer_models(config, platform_key=platform_key).items():
         if (expand_home(tier_repo), tier_revision) == (repo, revision):
             return tier
     return "custom"
@@ -66,7 +67,7 @@ def build_enhance_record(settings: EnhanceSettings, *, mode: str, repo: str, rev
         options.pop("note", None)
     if options.get("parts") is None:
         options.pop("parts", None)
-    return {"settings": options, "model": collapse_home(model_reference(repo, revision)), "tier": tier, "format": fmt}
+    return {"settings": options, "model": collapse_home(join_huggingface_revision(repo, revision)), "tier": tier, "format": fmt}
 
 
 def build_audio_enhance_record(settings: AudioEnhanceSettings, *, task: str, repo: str, revision: str | None, tier: str) -> dict[str, Any]:
@@ -76,7 +77,7 @@ def build_audio_enhance_record(settings: AudioEnhanceSettings, *, task: str, rep
     """
     return {
         "settings": audio_settings_to_mapping(settings, changed_only=True),
-        "model": collapse_home(model_reference(repo, revision)),
+        "model": collapse_home(join_huggingface_revision(repo, revision)),
         "tier": tier,
         "format": "text",
         "task": task,
@@ -87,7 +88,7 @@ def build_script_enhance_record(settings: ScriptSettings, *, repo: str, revision
     """Return the ``enhance`` block of a speech text the script helper wrote: what it did (``action``, and for a fit the time and pace), the model, its tier, the format and the ``task``."""
     return {
         "settings": script_settings_to_mapping(settings),
-        "model": collapse_home(model_reference(repo, revision)),
+        "model": collapse_home(join_huggingface_revision(repo, revision)),
         "tier": tier,
         "format": "text",
         "task": SCRIPT_TASK,

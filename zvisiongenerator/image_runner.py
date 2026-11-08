@@ -31,9 +31,11 @@ from zvisiongenerator.image_review import make_image_review
 from zvisiongenerator.job_controls import announce_repeat, pause_until_resumed, seed_range
 from zvisiongenerator.matte_room import MatteRoom
 from zvisiongenerator.review import ReviewOutcome, review_enabled
+from zvisiongenerator.utils.model_metadata import model_display_name
 from zvisiongenerator.utils import generate_filename, format_generation_info
 from zvisiongenerator.utils.alignment import round_to_alignment
-from zvisiongenerator.utils.config import get_variant_key, model_capabilities, model_display_name, resolve_scheduler_class, sharpening_amounts
+from zvisiongenerator.utils.config import get_variant_key, resolve_scheduler_class, sharpening_amounts
+from zvisiongenerator.utils.model_metadata import model_capabilities
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.upscale import default_upscale_denoise
@@ -56,14 +58,14 @@ def _active_seconds(started: float, review: ReviewOutcome) -> float:
     return time.time() - started - review.wait_seconds
 
 
-def _negative_prompt_warning(config: dict[str, Any], args: argparse.Namespace, model_info: ImageModelInfo) -> str:
+def _negative_prompt_warning(args: argparse.Namespace, model_info: ImageModelInfo) -> str:
     """Return the warning for negative prompts a model ignores; a variant of a supporting family gets its own wording."""
     variant = get_variant_key(model_info)
-    if variant is None or not model_capabilities(config, model_info.family)["supports_negative_prompt"]:
+    if variant is None or not model_capabilities(model_info.family)["supports_negative_prompt"]:
         return f"{model_info.family} models do not support negative prompts — ignoring."
     # args.model is the resolved models-folder path by now; its folder name is the alias.
-    name = model_display_name(config, Path(args.model).name)
-    hint = model_capabilities(config, model_info.family, variant)["negative_prompt_hint"]
+    name = model_display_name(Path(args.model).name)
+    hint = model_capabilities(model_info.family, variant)["negative_prompt_hint"]
     return f"{name} does not support negative prompts; it was ignored.{f' {hint}' if hint else ''}"
 
 
@@ -137,9 +139,9 @@ def run_batch(
         RuntimeError: When *plan*'s iteration order differs from the batch loop.
     """
 
-    # Resolve supports_negative_prompt from config; a preset variant may override the family's value
+    # Resolve supports_negative_prompt from the family's capabilities; a variant may override the family's value
     _family = model_info.family
-    capabilities = model_capabilities(config, _family, get_variant_key(model_info))
+    capabilities = model_capabilities(_family, get_variant_key(model_info))
     supports_neg = capabilities["supports_negative_prompt"]
     max_references = capabilities["max_reference_images"]
 
@@ -185,7 +187,7 @@ def run_batch(
     if not supports_neg:
         has_negatives = any(neg and neg.strip() for prompts in prompts_data.values() for _, neg in prompts)
         if has_negatives:
-            warnings.warn(_negative_prompt_warning(config, args, model_info), stacklevel=2)
+            warnings.warn(_negative_prompt_warning(args, model_info), stacklevel=2)
 
     # Calculate total iterations for progress tracking
     total_iterations = args.runs * sum(len(prompts) for prompts in prompts_data.values())
@@ -388,7 +390,7 @@ def run_batch(
                             seed=seed,
                             steps=args.steps,
                             guidance=args.guidance,
-                            scheduler=resolve_scheduler_class(args.scheduler, config, backend.name),
+                            scheduler=resolve_scheduler_class(args.scheduler, backend.name),
                             scheduler_name=args.scheduler,
                             quantize=getattr(args, "quantize", None),
                             steps_explicit=getattr(args, "steps_explicit", False),

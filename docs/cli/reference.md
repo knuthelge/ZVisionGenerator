@@ -115,7 +115,7 @@ MiniMax H3 extends only 24 fps sources whose width and height are multiples of 3
 
 | Option | Default | Description |
 |---|---|---|
-| `-m`, `--model` | *(required)* | The audio model: `yue2` (music), `qwen3_tts` (speech) or `sa3` (sound), as set in [`audio_model_presets`](../concepts/configuration.md#audio_model_presets). The model decides which of the options below it takes |
+| `-m`, `--model` | *(required)* | The audio model: `yue2` (music), `qwen3_tts` (speech) or `sa3` (sound), whose settings are in [`audio_model_presets`](../concepts/configuration.md#audio_model_presets). The model decides which of the options below it takes |
 | `--kind` | the model's first kind | What to make: `music`, `speech` or `sound`. A model that makes one kind needs none. A kind the model doesn't make is refused, naming the kinds it does. The kind decides which of the options below apply |
 | `--prompt` | *(required)* | The style of a song, the text to read (up to 10,000 characters, read in parts, with [Delivery marks](../concepts/audio.md#marks) in square brackets), or the description of a sound |
 | `--lyrics` | none | The lyrics of a song, with `[verse]` and `[chorus]` tags. Without lyrics, or with only `[section]` tags, the take is an instrumental, and the tags set its length. Music models only |

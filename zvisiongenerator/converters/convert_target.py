@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.utils.model_metadata import alias_map
 from zvisiongenerator.utils.stored_quant import discard_partial, parse_stored_quant_name, partial_dir, promote_partial, sweep_stale_partials
 
 __all__ = ["PROGRESS_PREFIX", "Progress", "checked_target", "progress_line", "write_into"]
@@ -34,7 +35,7 @@ def checked_target(models_dir: Path, name: str, *, force: bool, config: dict[str
         ValueError: If *name* is a configured alias or a stored-copy name (``<name>@q4`` and the like).
         FileExistsError: If the folder exists and *force* is not set.
     """
-    if name in (config.get("model_aliases") or {}):
+    if name in alias_map(config):
         raise ValueError(f"'{name}' is a model alias; choose another name for the converted model.")
     if parse_stored_quant_name(name) is not None:
         raise ValueError(f"'{name}' is reserved for stored copies (<name>@q4 / <name>@q8 / <name>@mlx-te4); choose another name.")

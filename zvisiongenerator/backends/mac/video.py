@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from zvisiongenerator.core.video_types import AudioTrack, ExtendSource
-    from zvisiongenerator.utils.h3_preset import HubFiles
+    from zvisiongenerator.downloads.target import HubFiles
 
 # Pixels per latent cell of the video VAE encoder.
 _LATENT_PIXELS = 32
@@ -145,7 +145,7 @@ def _resolve_model_dir(
         folder = snapshot_with(pack, download)
         missing = [name for name in pack.files if not (folder / name).is_file()]
         if missing:
-            raise FileNotFoundError(f"{pack.repo_id}@{pack.revision} has no {', '.join(missing)}; the pinned file list in the config does not match that revision.")
+            raise FileNotFoundError(f"{pack.repo_id}@{pack.revision} has no {', '.join(missing)}; the pinned file list in the model metadata does not match that revision.")
         return str(folder)
     reference = parse_huggingface_repo_reference(model_path)
     if reference is None or reference.revision is None:

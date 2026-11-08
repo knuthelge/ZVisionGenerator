@@ -9,6 +9,7 @@ from typing import Any
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_seedvr2_upscaler, supports_seedvr2
 from zvisiongenerator.converters.list_assets import list_loras, list_models, list_video_models
+from zvisiongenerator.schedulers import SCHEDULER_CLASSES
 from zvisiongenerator.seedvr2_loader import build_seedvr2_setup
 from zvisiongenerator.utils.config import load_config, resolve_enhancer_model
 from zvisiongenerator.utils.image_model_detect import detect_image_model
@@ -119,7 +120,7 @@ def load_web_config() -> WebUiConfig:
         image_size_options={ratio: tuple(size_map.keys()) for ratio, size_map in image_sizes.items()},
         video_ratios=tuple(video_sizes.keys()),
         video_size_options={ratio: tuple(size_map.keys()) for ratio, size_map in video_sizes.items()},
-        scheduler_options=tuple(app_config.get("schedulers", {}).keys()),
+        scheduler_options=tuple(SCHEDULER_CLASSES),
         image_size_dimensions={ratio: {size: (dims["width"], dims["height"]) for size, dims in size_map.items()} for ratio, size_map in image_sizes.items()},
         video_size_dimensions={ratio: {size: (dims["width"], dims["height"]) for size, dims in size_map.items()} for ratio, size_map in video_sizes.items()},
         quantize_options=_resolve_quantize_options(ui_config),
@@ -145,6 +146,7 @@ def _resolve_seedvr2(app_config: dict[str, Any], data_dir: Path) -> SeedVR2Setup
     budget = memory_budget()
     return build_seedvr2_setup(
         app_config,
+        platform_key=sys.platform,
         weights=upscaler.weights,
         budget_bytes=budget.gpu_bytes if budget else None,
         system_bytes=budget.system_bytes if budget else None,

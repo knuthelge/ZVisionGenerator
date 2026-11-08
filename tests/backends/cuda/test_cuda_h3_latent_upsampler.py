@@ -75,17 +75,17 @@ def test_the_result_is_float32_on_the_cpu() -> None:
     assert out.device.type == "cpu"
 
 
-def test_a_file_missing_one_tensor_raises_naming_the_config_key(tmp_path: Path) -> None:
+def test_a_file_missing_one_tensor_raises_naming_the_file(tmp_path: Path) -> None:
     path = tmp_path / "net.safetensors"
     _save_tiny(path, drop="conv_out.bias")
-    with pytest.raises(RuntimeError, match=r"video_model_presets\.h3\.diffusers\.latent_upsampler"):
+    with pytest.raises(RuntimeError, match=r"does not match the H3 latent upscaler"):
         load_latent_upsampler(path, "cpu", build=_TINY)
 
 
-def test_a_file_with_the_wrong_shapes_raises_naming_the_config_key(tmp_path: Path) -> None:
+def test_a_file_with_the_wrong_shapes_raises_naming_the_file(tmp_path: Path) -> None:
     path = tmp_path / "net.safetensors"
     _save_tiny(path)
-    with pytest.raises(RuntimeError, match=r"video_model_presets\.h3\.diffusers\.latent_upsampler"):
+    with pytest.raises(RuntimeError, match=r"does not match the H3 latent upscaler"):
         load_latent_upsampler(path, "cpu", build=partial(LatentResizer3D, channels=64, in_blocks=2, out_blocks=2))
 
 

@@ -131,8 +131,6 @@ class TestDefaultResolution:
         mocks["run_batch"] = _capture
         mocks["load_config"] = lambda: {
             "sizes": _sizes_config(),
-            "model_presets": {},
-            "schedulers": {},
             "generation": {"default_ratio": "2:3", "default_size": "m", "default_steps": 10, "default_guidance": 3.5},
         }
 
@@ -182,7 +180,6 @@ class TestRunnerSizeLookup:
             "sizes": _sizes_config(),
             "generation": {"seed_min": 1, "seed_max": 100},
             "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-            "model_presets": {"zimage": {"supports_negative_prompt": True}},
         }
         args = _make_args(ratio=ratio, size=size, width=width_override, height=height_override)
         model_info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
@@ -258,7 +255,6 @@ class TestRunnerFilenameIntegration:
             "sizes": {"2:3": {"m": {"width": 832, "height": 1216}}},
             "generation": {"seed_min": 1, "seed_max": 100},
             "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-            "model_presets": {"zimage": {"supports_negative_prompt": True}},
         }
         args = _make_args(ratio="2:3", size="m", width=width_override, height=height_override)
         model_info = ImageModelInfo(family="zimage", is_distilled=False, size=None)

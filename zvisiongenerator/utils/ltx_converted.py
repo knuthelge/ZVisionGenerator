@@ -17,7 +17,7 @@ __all__ = ["CONVERTED_LTX_LAYOUT", "CONVERTED_LTX_MANIFEST", "LTX_FAMILY_MODEL_T
 CONVERTED_LTX_MANIFEST = "ziv-ltx.json"
 # The converter model type of each LTX version: also the kind of a folder converted from it. The one list of LTX versions.
 LTX_MODEL_TYPES = {"ltx-2.3": "2.3", "ltx-2.5": "2.5"}
-# The model type of the config's LTX family block; every other version has a ``versions`` block naming its model type.
+# The model type of the metadata's LTX family block; every other version has a ``versions`` block naming its model type.
 LTX_FAMILY_MODEL_TYPE = "ltx-2.3"
 CONVERTED_LTX_LAYOUT = 1
 

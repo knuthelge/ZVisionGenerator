@@ -61,7 +61,12 @@ Code above the backends asks capability questions, such as `supports_video_exten
 
 ## Config
 
-Config is one plain `dict`: the packaged `config.yaml`, deep-merged with the user's `config.yaml` from the data folder by `utils/config.load_config()`. Values resolve as CLI flag, then model preset variant, then model preset family, then global default. Per-model capabilities, such as `supports_img2img` or `dimension_max`, are config data in `model_presets`, so the web layer never branches on a model family. Video families (LTX and MiniMax H3) are described the same way, with frame rules, steps and capabilities per platform; see [Video families](backends.md#video-families). See [Configuration](../concepts/configuration.md).
+Configuration is split in two by who may change it.
+
+- **Settings** are one plain `dict`: the packaged `config.yaml`, deep-merged with the user's `config.yaml` from the data folder by `utils/config.load_config()`. They are what a user may change: sizes, steps, guidance, schedulers, the `settings` of a model, the `ui`. Values resolve as CLI flag, then model preset variant, then model preset family, then global default.
+- **Model facts** say what a built-in model is: its pins, files, names, download sizes, memory needs, limits, capabilities, frame rules and licences. They live in the packaged `utils/model_metadata.yaml`, which `utils/model_metadata.load_model_metadata()` reads directly. The file is never merged with the user's and never mutated, so a user file cannot change a fact. A reader that merges settings into facts copies at the merge. See [Add a built-in model](how-to.md#add-a-built-in-model).
+
+The web layer never branches on a model family: per-model capabilities, such as `supports_img2img` or `dimension_max`, and video frame rules are facts, read through the metadata's readers. A model id ties a model's facts to its settings (`audio_model_presets.<id>`). Video families (LTX and MiniMax H3) are described the same way; see [Video families](backends.md#video-families). See [Configuration](../concepts/configuration.md).
 
 ## The Web UI
 

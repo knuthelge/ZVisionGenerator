@@ -1,6 +1,6 @@
 """Describe a video model family: the frame counts it accepts, the steps it offers and what it can do.
 
-These are plain values read from ``video_model_presets.<family>`` in the config, so a caller asks the family instead of
+These are plain values built from the family's facts in the model metadata and its step and frame settings in the config, so a caller asks the family instead of
 branching on its name. Everything here is pure.
 """
 
@@ -61,7 +61,7 @@ class VideoFamily:
     """A video model family as the config describes it.
 
     Attributes:
-        name: The family id (the ``video_model_presets`` key).
+        name: The family id (the ``video_families`` key of the model metadata).
         label: How the family reads in messages.
         frame_rule: The frame counts it accepts.
         capabilities: What it can do on every platform.

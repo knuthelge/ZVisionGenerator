@@ -34,6 +34,7 @@ from tests.backends.cuda._helpers import (
 )
 
 import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
+from zvisiongenerator.utils.ltx_facts import SEPARATE_TRANSFORMER_IGNORE
 from zvisiongenerator.backends.cuda.video.backend import (
     DiffusersVideoBackend,
     _UPSAMPLER_CONFIG,
@@ -78,13 +79,13 @@ def test_load_reads_the_prepared_copies_of_the_configured_checkpoint(monkeypatch
     _patch_runtime(monkeypatch, _make_runtime())
     checkpoint = ("example-org/ltx", "ltx-distilled.safetensors")
 
-    model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", quantize=quantize, transformer_source=checkpoint)
+    model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", quantize=quantize, transformer_source=checkpoint, repo_ignore=SEPARATE_TRANSFORMER_IGNORE)
 
     assert fake_weights.prepared == [(Path("/fake/hub/ltx-distilled.safetensors"), quantize)]
     assert fake_weights.transformers == [{"prepared": Path("/fake/cache/transformer"), "bits": quantize}]
     assert model.text_encoder.prepared == Path("/fake/cache/text-encoder")
     assert fake_weights.placements == [("components", True), (quantize, True)]
-    assert fake_weights.repo_dirs == [False]  # the repo's own transformer weights are not downloaded
+    assert fake_weights.repo_dirs == [SEPARATE_TRANSFORMER_IGNORE]  # the repo's own transformer weights are not downloaded
 
 
 def test_the_picked_name_names_the_prepared_copy(monkeypatch, fake_weights):
@@ -135,7 +136,7 @@ def test_without_a_checkpoint_the_repos_own_transformer_is_prepared(monkeypatch,
     DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=8, mode="t2v", low_memory=False)
 
     assert fake_weights.prepared == [(Path("/fake/repo/transformer"), 8)]
-    assert fake_weights.repo_dirs == [True]
+    assert fake_weights.repo_dirs == [()]
     assert fake_weights.placements == [("components", False), (8, False)]
 
 
@@ -533,7 +534,7 @@ def test_upscale_load_requires_upsampler_source(monkeypatch):
     _patch_runtime(monkeypatch, _make_runtime())
     downloads = _patch_upsampler_io(monkeypatch)
 
-    with pytest.raises(ValueError, match="latent_upsampler"):
+    with pytest.raises(ValueError, match="latent upsampler"):
         DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", upscale=True)
 
     assert downloads == []
@@ -543,7 +544,7 @@ def test_upscale_load_requires_upsampler_source(monkeypatch):
 def test_upsampler_weight_mismatch_is_reported(monkeypatch):
     _FakeUpsamplerModel.load_error = RuntimeError("Missing key(s) in state_dict")
 
-    with pytest.raises(RuntimeError, match="latent_upsampler") as excinfo:
+    with pytest.raises(RuntimeError, match="latent upsampler") as excinfo:
         _load_upscale_model(monkeypatch, low_memory=False)
 
     assert "Missing key(s)" in str(excinfo.value)

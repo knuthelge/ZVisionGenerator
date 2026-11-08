@@ -26,6 +26,7 @@ from tests.backends.cuda._helpers import (
 )
 
 import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
+from zvisiongenerator.utils.ltx_facts import SEPARATE_TRANSFORMER_IGNORE
 import zvisiongenerator.backends.cuda.video.sampler as _sampler_module
 from zvisiongenerator.backends.cuda.video.backend import (
     DiffusersVideoBackend,
@@ -83,25 +84,16 @@ def snapshot_calls(monkeypatch) -> list[tuple[str, dict[str, Any]]]:
 
 
 class TestRepoRevisions:
-    def test_a_pinned_repo_downloads_that_revision_without_the_extra_patterns(self, snapshot_calls):
+    def test_a_pinned_repo_downloads_that_revision_without_the_ignored_patterns(self, snapshot_calls):
         extra = ("LTX-2.5-*.safetensors", "samples/*")
 
-        assert _repo_dir(_LTX25_REPO, with_transformer=True, extra_ignore=extra) == Path("/cache/snapshot")
+        assert _repo_dir(_LTX25_REPO, ignore=extra) == Path("/cache/snapshot")
 
         assert snapshot_calls == [("unsloth/LTX-2.5-FP8", {"revision": _PIN, "ignore_patterns": list(extra)})]
 
-    def test_the_extra_patterns_follow_the_separate_transformer_ones(self, snapshot_calls):
-        from zvisiongenerator.backends.cuda.download_plan import SEPARATE_TRANSFORMER_IGNORE
-
-        _repo_dir(_LTX25_REPO, with_transformer=False, extra_ignore=("samples/*",))
-
-        assert snapshot_calls[0][1]["ignore_patterns"] == [*SEPARATE_TRANSFORMER_IGNORE, "samples/*"]
-
-    def test_an_unpinned_repo_passes_no_revision_and_keeps_the_2_3_patterns(self, snapshot_calls):
-        from zvisiongenerator.backends.cuda.download_plan import SEPARATE_TRANSFORMER_IGNORE
-
-        _repo_dir("owner/ltx", with_transformer=True)
-        _repo_dir("owner/ltx", with_transformer=False)
+    def test_an_unpinned_repo_passes_no_revision_and_the_finished_ignore_list_as_it_is(self, snapshot_calls):
+        _repo_dir("owner/ltx", ignore=())
+        _repo_dir("owner/ltx", ignore=SEPARATE_TRANSFORMER_IGNORE)
 
         assert snapshot_calls == [
             ("owner/ltx", {"ignore_patterns": None}),
@@ -109,7 +101,7 @@ class TestRepoRevisions:
         ]
 
     def test_a_local_folder_is_used_as_it_is(self, snapshot_calls, tmp_path):
-        assert _repo_dir(str(tmp_path), with_transformer=True) == tmp_path
+        assert _repo_dir(str(tmp_path), ignore=()) == tmp_path
         assert snapshot_calls == []
 
     def test_a_failed_download_names_the_reference(self, monkeypatch):
@@ -121,7 +113,7 @@ class TestRepoRevisions:
         monkeypatch.setattr(huggingface_hub, "snapshot_download", _fail)
 
         with pytest.raises(RuntimeError, match="offline") as excinfo:
-            _repo_dir(_LTX25_REPO, with_transformer=True)
+            _repo_dir(_LTX25_REPO, ignore=())
         assert _LTX25_REPO in str(excinfo.value)
 
     @pytest.mark.parametrize(("repo_id", "expected"), [("owner/up@" + _PIN, {"revision": _PIN}), ("owner/up", {})])
@@ -149,20 +141,43 @@ class TestRepoDirArguments:
         monkeypatch.setattr(video_diffusers_module, "_repo_dir", _repo_dir_fake)
         return calls
 
-    def test_a_load_without_extra_patterns_passes_no_extra_ignore(self, monkeypatch, repo_dir_calls):
+    def test_a_load_without_an_ignore_list_downloads_the_whole_repo(self, monkeypatch, repo_dir_calls):
         _patch_runtime(monkeypatch, _make_runtime())
 
         DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v")
         DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", repo_ignore=())
 
-        assert repo_dir_calls == [{"with_transformer": True}, {"with_transformer": True}]
+        assert repo_dir_calls == [{"ignore": ()}, {"ignore": ()}]
 
-    def test_the_configured_patterns_reach_the_repo_download(self, monkeypatch, repo_dir_calls):
+    @pytest.mark.parametrize("model_name", ["ltx-4", "ltx-8", "ltx25-4", None])
+    def test_the_repo_download_skips_what_the_plan_skips(self, monkeypatch, model_name):
+        """The backend's download and the download plan take the repo's ignore list from the same load options."""
+        import huggingface_hub
+
+        from zvisiongenerator.backends.cuda.download_plan import video_download_plan
+        from zvisiongenerator.utils.ltx_facts import ltx_load_options
+
+        options = ltx_load_options(model_name, "linux", upscale=False)
+        skipped: list[Any] = []
+        monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda repo, ignore_patterns=None, **kwargs: skipped.append(ignore_patterns) or "/cache/repo")
+        monkeypatch.setattr(video_diffusers_module, "_repo_dir", _repo_dir)  # the real one, not the suite's fake
+        monkeypatch.setattr(video_diffusers_module, "_download_hub_file", lambda *args: Path("/fake/transformer.safetensors"))
+        monkeypatch.setattr("zvisiongenerator.backends.cuda.video.memory_estimate.ltx_system_estimate", lambda *args: None)
+        monkeypatch.setattr(video_diffusers_module, "_check_system_memory", lambda *args, **kwargs: True)
+        monkeypatch.setattr(video_diffusers_module, "_prepared_weights", lambda *args: (Path("/fake/t"), Path("/fake/e")))
+
+        video_diffusers_module._stock_weights("owner/ltx", model_name, options["transformer_source"], 4, None, options["repo_ignore"])
+        (repo_target, *_) = video_download_plan("owner/ltx", family="ltx", transformer_source=options["transformer_source"], repo_ignore=options["repo_ignore"])
+
+        assert skipped == [None if repo_target.ignore_patterns is None else list(repo_target.ignore_patterns)]
+        assert skipped[0]  # every case skips something
+
+    def test_the_given_patterns_reach_the_repo_download(self, monkeypatch, repo_dir_calls):
         _patch_runtime(monkeypatch, _make_runtime())
 
-        DiffusersVideoBackend().load_model(_LTX25_REPO, quantize=4, mode="t2v", repo_ignore=["LTX-2.5-*.safetensors", "samples/*"])
+        DiffusersVideoBackend().load_model(_LTX25_REPO, quantize=4, mode="t2v", repo_ignore=("LTX-2.5-*.safetensors", "samples/*"))
 
-        assert repo_dir_calls == [{"with_transformer": True, "extra_ignore": ("LTX-2.5-*.safetensors", "samples/*")}]
+        assert repo_dir_calls == [{"ignore": ("LTX-2.5-*.safetensors", "samples/*")}]
 
 
 class TestAbsentOptionalComponents:

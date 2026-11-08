@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import re
 import textwrap
@@ -10,40 +11,42 @@ from typing import Any
 import pytest
 import yaml
 
-from tests._audio_presets import QWEN_BASE_REPO, QWEN_CUSTOM_REPO, audio_config, qwen3_tts_preset, sa3_preset, sa3_two_kind_preset, yue2_preset
-from tests._factories import load_packaged_config
+from tests._audio_presets import QWEN_BASE_REPO, QWEN_CUSTOM_REPO, YUE2_REPO, YUE2_VAE_REPO, audio_config, qwen3_tts_preset, sa3_two_kind_preset, yue2_preset
+from tests._factories import load_packaged_config, packaged_metadata_copy, use_model_metadata
 from tests._paths import REPO_ROOT
 
 from zvisiongenerator.utils import config as config_module
 from zvisiongenerator.utils.audio_preset import AudioLimits, AudioVoice, parse_audio_presets
+from zvisiongenerator.utils.model_metadata import load_model_metadata, model_ids
 
 
-def _parse_one(**changes):
-    """Parse the yue2 preset after applying *changes* (top-level keys; ``None`` deletes the key)."""
-    preset = yue2_preset()
-    for key, value in changes.items():
-        if value is None:
-            del preset[key]
-        else:
-            preset[key] = value
-    return parse_audio_presets({"audio_model_presets": {"yue2": preset}})
+def _packaged_entry(model_id: str) -> dict[str, Any]:
+    """Return a private copy of the packaged metadata entry of *model_id*."""
+    return packaged_metadata_copy()["models"][model_id]
+
+
+def _serve(monkeypatch, tmp_path, model_id: str, entry: dict[str, Any]) -> None:
+    """Serve the packaged metadata with the ``models`` entry *model_id* replaced by *entry*."""
+    data = packaged_metadata_copy()
+    data["models"][model_id] = entry
+    use_model_metadata(monkeypatch, tmp_path, data)
 
 
 class TestParse:
-    def test_a_config_without_the_section_has_no_presets(self):
-        assert parse_audio_presets({}) == ()
+    def test_the_presets_come_in_metadata_order_keyed_by_model_id(self):
+        assert [preset.id for preset in parse_audio_presets(audio_config())] == list(model_ids("audio"))
 
-    def test_the_presets_come_in_config_order_keyed_by_model_id(self):
-        presets = parse_audio_presets(audio_config())
+    def test_the_packaged_presets_name_their_kinds_and_labels(self):
+        presets = {preset.id: preset for preset in parse_audio_presets(audio_config())}
 
-        assert [(preset.id, preset.kinds, preset.label) for preset in presets] == [
-            ("yue2", ("music",), "YuE2 3B"),
-            ("qwen3_tts", ("speech",), "Qwen3-TTS 1.7B"),
-            ("sa3", ("sound",), "Stable Audio 3 Medium"),
+        assert [(presets[model_id].kinds, presets[model_id].label) for model_id in ("yue2", "qwen3_tts", "sa3")] == [
+            (("music",), "YuE2 3B"),
+            (("speech",), "Qwen3-TTS 1.7B"),
+            (("sound", "music"), "Stable Audio 3 Medium"),
         ]
 
     def test_qwen3_tts_values(self):
-        (qwen,) = parse_audio_presets(audio_config(qwen3_tts=qwen3_tts_preset()))
+        qwen = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "qwen3_tts")
 
         assert (qwen.takes_lyrics("speech"), qwen.sets_length("speech"), qwen.follows_voice("speech")) == (False, False, True)
         assert qwen.limits == AudioLimits(max_new_tokens=1200, part_chars=500, max_text_chars=10000, min_voice_seconds=3, max_voice_seconds=30)
@@ -51,9 +54,36 @@ class TestParse:
         assert qwen.family == "qwen3_tts"
         assert [files.repo_id for files in qwen.files] == [QWEN_CUSTOM_REPO.split("@")[0]]
 
+    def test_the_files_are_the_declared_targets_and_the_voice_files_the_voice_role(self):
+        presets = {preset.id: preset for preset in parse_audio_presets(audio_config())}
+
+        assert [(files.repo_id, files.revision) for files in presets["yue2"].files] == [("m-a-p/YuE2-3B", YUE2_REPO.split("@")[1]), ("m-a-p/YuE2-Vae", YUE2_VAE_REPO.split("@")[1])]
+        assert presets["yue2"].voice_files == ()
+        assert [(files.repo_id, files.revision) for files in presets["qwen3_tts"].voice_files] == [("Qwen/Qwen3-TTS-12Hz-1.7B-Base", QWEN_BASE_REPO.split("@")[1])]
+        assert "speech_tokenizer/model.safetensors" in presets["qwen3_tts"].voice_files[0].patterns
+
+    def test_a_model_without_a_config_block_has_no_settings(self):
+        sa3 = next(preset for preset in parse_audio_presets({"audio_model_presets": {"yue2": audio_config()["audio_model_presets"]["yue2"]}}) if preset.id == "sa3")
+
+        assert dict(sa3.settings) == {}
+
+    def test_a_config_id_with_no_entry_is_ignored(self):
+        config = audio_config()
+        config["audio_model_presets"]["demo"] = {"settings": {"cfg": 1.0}}
+
+        assert [preset.id for preset in parse_audio_presets(config)] == list(model_ids("audio"))
+
+    def test_the_other_keys_of_a_config_entry_are_ignored(self):
+        config = audio_config()
+        config["audio_model_presets"]["sa3"].update({"label": "Other", "kinds": ["speech"], "files": []})
+
+        sa3 = next(preset for preset in parse_audio_presets(config) if preset.id == "sa3")
+
+        assert (sa3.label, sa3.kinds) == ("Stable Audio 3 Medium", ("sound", "music"))
+
     def test_the_values_are_frozen_and_do_not_alias_the_config(self):
-        config = audio_config(yue2=yue2_preset())
-        (yue2,) = parse_audio_presets(config)
+        config = audio_config()
+        yue2 = parse_audio_presets(config)[0]
 
         with pytest.raises(dataclasses.FrozenInstanceError):
             yue2.label = "other"  # type: ignore[misc]
@@ -61,6 +91,23 @@ class TestParse:
             yue2.settings["cfg"] = 2.0  # type: ignore[index]
         config["audio_model_presets"]["yue2"]["settings"]["cfg"] = 9.0
         assert yue2.settings["cfg"] == 1.0
+
+    def test_parsing_changes_neither_the_config_nor_the_metadata(self):
+        config = audio_config()
+        config_before = copy.deepcopy(config)
+        metadata_before = copy.deepcopy(load_model_metadata())
+
+        parse_audio_presets(config)
+
+        assert config == config_before
+        assert load_model_metadata() == metadata_before
+
+    def test_a_changed_config_is_read_again(self):
+        config = audio_config()
+        parse_audio_presets(config)
+        config["audio_model_presets"]["yue2"]["settings"]["cfg"] = 3.0
+
+        assert parse_audio_presets(config)[0].settings["cfg"] == 3.0
 
 
 class TestKinds:
@@ -74,7 +121,7 @@ class TestKinds:
         ]
 
     def test_a_model_decides_per_kind(self):
-        (sa3,) = parse_audio_presets(audio_config(sa3=sa3_two_kind_preset()))
+        sa3 = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "sa3")
 
         assert sa3.kinds == ("sound", "music")
         assert sa3.default_kind == "sound"
@@ -84,52 +131,47 @@ class TestKinds:
             (False, False, False, False),
         ]
 
-    def test_the_first_kind_is_the_default(self):
-        preset = sa3_two_kind_preset()
-        preset["kinds"] = ["music", "sound"]
-        (sa3,) = parse_audio_presets(audio_config(sa3=preset))
+    def test_the_first_kind_is_the_default(self, monkeypatch, tmp_path):
+        entry = _packaged_entry("sa3")
+        entry["kinds"] = ["music", "sound"]
+        _serve(monkeypatch, tmp_path, "sa3", entry)
+
+        sa3 = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "sa3")
 
         assert sa3.default_kind == "music"
 
     def test_a_model_with_lyrics_follows_them_for_its_length(self):
-        (yue2,) = parse_audio_presets(audio_config(yue2=yue2_preset()))
+        yue2 = parse_audio_presets(audio_config())[0]
 
         assert yue2.lyrics is True
         assert (yue2.takes_lyrics("music"), yue2.sets_length("music")) == (True, False)
         assert (yue2.takes_lyrics("sound"), yue2.sets_length("sound")) == (False, False)
 
-    def test_the_limits_are_the_union_over_the_kinds(self):
-        preset = sa3_two_kind_preset()
-        preset["kinds"] = ["sound", "speech"]
-        preset["limits"] = {**qwen3_tts_preset()["limits"], "max_seconds": 380}
-        (model,) = parse_audio_presets(audio_config(sa3=preset))
+    def test_the_limits_are_the_entrys_limits(self, monkeypatch, tmp_path):
+        entry = _packaged_entry("sa3")
+        entry["kinds"] = ["sound", "speech"]
+        entry["limits"] = {**qwen3_tts_preset()["limits"], "max_seconds": 380}
+        _serve(monkeypatch, tmp_path, "sa3", entry)
+
+        model = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "sa3")
 
         assert model.limits == AudioLimits(max_seconds=380, max_new_tokens=1200, part_chars=500, max_text_chars=10000, min_voice_seconds=3, max_voice_seconds=30)
-
-    def test_a_voice_model_may_carry_voices_next_to_another_kind(self):
-        preset = qwen3_tts_preset()
-        preset["kinds"] = ["speech", "sound"]
-        preset["limits"]["max_seconds"] = 30
-        (model,) = parse_audio_presets(audio_config(qwen3_tts=preset))
-
-        assert model.default_voice == "ryan"
-        assert model.limits.max_seconds == 30
 
 
 class TestPlatformSettings:
     def test_a_platform_overrides_the_shared_settings(self):
-        preset = qwen3_tts_preset()
-        preset["platforms"] = {"cuda": {"memory_gb": 5.8, "settings": {"language": "English"}}}
-        (qwen,) = parse_audio_presets({"audio_model_presets": {"qwen3_tts": preset}})
+        config = audio_config()
+        config["audio_model_presets"]["qwen3_tts"]["platforms"] = {"cuda": {"settings": {"language": "English"}}}
+        qwen = next(preset for preset in parse_audio_presets(config) if preset.id == "qwen3_tts")
 
         assert qwen.settings_for("cuda")["language"] == "English"
         assert qwen.settings_for("mps")["language"] == "auto"
         assert qwen.settings_for("cuda")["join_pause_ms"] == 300
 
     def test_a_platform_adds_a_key_the_shared_settings_lack(self):
-        preset = yue2_preset()
-        preset["platforms"] = {"cuda": {"memory_gb": 6.7, "settings": {"weight_swap": True}}}
-        (yue2,) = parse_audio_presets(audio_config(yue2=preset))
+        config = audio_config()
+        config["audio_model_presets"]["yue2"]["platforms"] = {"cuda": {"settings": {"weight_swap": True}}}
+        yue2 = parse_audio_presets(config)[0]
 
         assert yue2.settings_for("cuda")["weight_swap"] is True
         assert "weight_swap" not in yue2.settings_for("mps")
@@ -139,18 +181,20 @@ class TestPlatformSettings:
 
         assert not [preset.id for preset in presets if {"weight_swap", "codec_device"} & set(preset.settings)]
 
-    def test_the_memory_peak_belongs_to_the_platform_it_was_measured_on(self):
-        preset = yue2_preset()
-        del preset["platforms"]["mps"]
-        (yue2,) = parse_audio_presets(audio_config(yue2=preset))
+    def test_the_memory_peak_belongs_to_the_platform_it_was_measured_on(self, monkeypatch, tmp_path):
+        entry = _packaged_entry("yue2")
+        del entry["platforms"]["mps"]
+        _serve(monkeypatch, tmp_path, "yue2", entry)
 
-        assert yue2.memory_gb_for("cuda") == 6.7
-        assert yue2.memory_gb_for("mps") is None
+        yue2 = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "yue2")
 
-    def test_a_preset_without_platforms_uses_the_shared_values_everywhere(self):
-        preset = sa3_preset()
-        del preset["platforms"]
-        (sa3,) = parse_audio_presets(audio_config(sa3=preset))
+        assert (yue2.memory_gb_for("cuda"), yue2.memory_gb_for("mps")) == (6.7, None)
+
+    def test_a_preset_without_platforms_uses_the_shared_values_everywhere(self, monkeypatch, tmp_path):
+        entry = _packaged_entry("sa3")
+        del entry["platforms"]
+        _serve(monkeypatch, tmp_path, "sa3", entry)
+        sa3 = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "sa3")
 
         assert sa3.settings_for("mps") == dict(sa3.settings)
         assert sa3.memory_gb_for("cuda") is None
@@ -158,153 +202,90 @@ class TestPlatformSettings:
 
 class TestPlatformBackend:
     def test_a_platform_runs_its_own_family_and_keeps_the_presets_files(self):
-        (yue2,) = _parse_one(platforms={"mps": {"family": "yue2_mlx"}})
+        qwen = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "qwen3_tts")
 
-        mac = yue2.on_platform("mps")
+        mac = qwen.on_platform("mps")
 
-        assert (mac.family, mac.files, mac.voice_files) == ("yue2_mlx", yue2.files, yue2.voice_files)
-        assert yue2.on_platform("cuda") == yue2
-
-    @pytest.mark.parametrize("key", ["files", "voice_files"])
-    def test_a_platform_does_not_take_its_own_files(self, key):
-        with pytest.raises(ValueError, match=f"platforms.mps.{key} is not a known key"):
-            _parse_one(platforms={"mps": {key: [{"repo": "m-a-p/YuE2-3B@" + "a" * 40, "files": ["model.safetensors"]}]}})
-
-
-class TestParseOnce:
-    def test_the_same_section_is_parsed_once_and_a_changed_one_again(self):
-        config = audio_config(yue2=yue2_preset())
-
-        first = parse_audio_presets(config)
-        assert parse_audio_presets(config) is first
-        config["audio_model_presets"]["yue2"]["label"] = "Other"
-        assert parse_audio_presets(config)[0].label == "Other"
+        assert (mac.family, mac.files, mac.voice_files) == ("qwen3_tts_mlx", qwen.files, qwen.voice_files)
+        assert qwen.on_platform("cuda") == qwen
 
 
 class TestRefusals:
-    @pytest.mark.parametrize("key", ["label", "kinds", "family", "files", "limits"])
-    def test_a_missing_required_key(self, key):
-        with pytest.raises(ValueError, match=f"missing the required key '{key}'"):
-            _parse_one(**{key: None})
+    def test_a_model_with_lyrics_needs_the_section_list_of_an_empty_lyrics_box(self):
+        config = audio_config()
+        del config["audio_model_presets"]["yue2"]["settings"]["instrumental_sections"]
 
-    @pytest.mark.parametrize("kinds", [[], "music"], ids=["empty", "not a list"])
-    def test_kinds_must_be_a_non_empty_list(self, kinds):
-        with pytest.raises(ValueError, match="kinds must be a non-empty list of kinds"):
-            _parse_one(kinds=kinds)
+        with pytest.raises(ValueError, match="instrumental_sections is required for a model that sings lyrics"):
+            parse_audio_presets(config)
 
-    def test_an_unknown_kind(self):
-        with pytest.raises(ValueError, match="kinds must only list music, speech, sound, got 'video'"):
-            _parse_one(kinds=["music", "video"])
+    def test_a_model_without_lyrics_needs_no_section_list(self, monkeypatch, tmp_path):
+        entry = _packaged_entry("yue2")
+        del entry["lyrics"]
+        _serve(monkeypatch, tmp_path, "yue2", entry)
+        config = audio_config()
+        config["audio_model_presets"]["yue2"]["settings"] = {}
 
-    def test_a_repeated_kind(self):
-        with pytest.raises(ValueError, match="kinds must not repeat a kind"):
-            _parse_one(kinds=["music", "music"])
+        assert parse_audio_presets(config)[0].lyrics is False
 
-    def test_the_single_kind_key_is_not_a_preset_key(self):
-        with pytest.raises(ValueError, match="kind is not a known key"):
-            _parse_one(kind="music")
+    @pytest.mark.parametrize("section", [[], "yue2"], ids=["list", "text"])
+    def test_the_section_must_be_a_mapping(self, section):
+        with pytest.raises(ValueError, match="audio_model_presets' must be a mapping"):
+            parse_audio_presets({"audio_model_presets": section})
 
-    def test_lyrics_need_a_model_that_makes_music(self):
-        with pytest.raises(ValueError, match="lyrics is only for a model that makes music"):
-            _parse_one(kinds=["sound"], lyrics=True)
+    def test_an_entry_must_be_a_mapping(self):
+        config = audio_config()
+        config["audio_model_presets"]["sa3"] = ["steps"]
 
-    def test_lyrics_need_the_section_list_of_an_empty_lyrics_box(self):
-        settings = {key: value for key, value in yue2_preset()["settings"].items() if key != "instrumental_sections"}
+        with pytest.raises(ValueError, match=r"audio_model_presets\.sa3' must be a mapping"):
+            parse_audio_presets(config)
 
-        with pytest.raises(ValueError, match="instrumental_sections is required when lyrics is true"):
-            _parse_one(settings=settings)
+    def test_settings_must_be_a_mapping(self):
+        config = audio_config()
+        config["audio_model_presets"]["sa3"]["settings"] = 8
 
-    def test_lyrics_must_be_a_boolean(self):
-        with pytest.raises(ValueError, match="lyrics must be true or false"):
-            _parse_one(lyrics="yes")
+        with pytest.raises(ValueError, match=r"audio_model_presets\.sa3'\.settings must be a mapping"):
+            parse_audio_presets(config)
 
-    def test_a_music_model_without_lyrics_needs_no_section_list(self):
-        (model,) = _parse_one(lyrics=None, settings={})
+    def test_platform_settings_must_be_a_mapping(self):
+        config = audio_config()
+        config["audio_model_presets"]["sa3"]["platforms"] = {"cuda": {"settings": 8}}
 
-        assert model.lyrics is False
-
-    def test_voices_need_a_model_that_makes_speech(self):
-        with pytest.raises(ValueError, match="voices is only for a model that makes speech"):
-            _parse_one(voices=qwen3_tts_preset()["voices"])
-
-    def test_a_key_that_is_not_a_preset_key(self):
-        with pytest.raises(ValueError, match="capabilities is not a known key"):
-            _parse_one(capabilities={"lyrics": True})
-
-    def test_a_platform_that_is_not_cuda_or_mps(self):
-        with pytest.raises(ValueError, match="platforms.rocm is not a known key"):
-            _parse_one(platforms={"rocm": {}})
-
-    def test_a_platform_key_that_is_not_an_override(self):
-        with pytest.raises(ValueError, match="platforms.cuda.label is not a known key"):
-            _parse_one(platforms={"cuda": {"label": "YuE2 on CUDA"}})
-
-    def test_a_music_model_without_max_seconds(self):
-        with pytest.raises(ValueError, match="limits.max_seconds is required for a model that makes music"):
-            _parse_one(limits={})
-
-    @pytest.mark.parametrize("name", ["max_new_tokens", "part_chars", "max_text_chars", "min_voice_seconds", "max_voice_seconds"])
-    def test_a_speech_model_without_one_of_its_limits(self, name):
-        preset = qwen3_tts_preset()
-        del preset["limits"][name]
-
-        with pytest.raises(ValueError, match=f"limits.{name} is required for a model that makes speech"):
-            parse_audio_presets({"audio_model_presets": {"qwen3_tts": preset}})
-
-    def test_a_limit_that_belongs_to_another_kind(self):
-        with pytest.raises(ValueError, match="limits.part_chars is not a known key"):
-            _parse_one(limits={"max_seconds": 360, "part_chars": 500})
-
-    @pytest.mark.parametrize("repo", ["m-a-p/YuE2-3B", "m-a-p/YuE2-3B@main", "m-a-p/YuE2-3B@8f24312f"])
-    def test_a_repo_that_is_not_pinned_to_a_commit(self, repo):
-        with pytest.raises(ValueError, match="must be pinned to a 40-character commit"):
-            _parse_one(files=[{"repo": repo, "files": ["model.safetensors"]}])
-
-    def test_files_that_are_not_a_list(self):
-        with pytest.raises(ValueError, match="files must be a non-empty list"):
-            _parse_one(files=[])
+        with pytest.raises(ValueError, match=r"platforms\.cuda\.settings must be a mapping"):
+            parse_audio_presets(config)
 
 
 class TestLoadConfig:
-    """``load_config`` refuses a malformed section, so the app does not start with it."""
+    """``load_config`` takes the audio settings as they are: the audio models are the metadata's, so a user entry cannot add one."""
 
     def _load_with_user_config(self, monkeypatch, tmp_path, text: str):
         (tmp_path / "config.yaml").write_text(textwrap.dedent(text), encoding="utf-8")
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         return config_module.load_config()
 
-    def test_a_preset_with_an_unknown_kind_is_refused(self, monkeypatch, tmp_path):
-        text = f"""
+    def test_a_user_entry_that_names_no_model_adds_none(self, monkeypatch, tmp_path):
+        text = """
         audio_model_presets:
           demo:
-            label: Demo
-            kinds: [video]
-            family: stable_audio_3
-            files: [{{repo: "{QWEN_BASE_REPO}", files: [config.json]}}]
-            limits: {{max_seconds: 10}}
-        """
-        with pytest.raises(ValueError, match="kinds must only list"):
-            self._load_with_user_config(monkeypatch, tmp_path, text)
-
-    def test_a_valid_preset_loads_and_its_id_is_a_known_model(self, monkeypatch, tmp_path):
-        text = f"""
-        audio_model_presets:
-          demo:
-            label: Demo
-            kinds: [sound, music]
-            family: stable_audio_3
-            files: [{{repo: "{QWEN_BASE_REPO}", files: [config.json]}}]
-            limits: {{max_seconds: 10}}
-            platforms:
-              cuda: {{memory_gb: 1}}
+            settings: {cfg: 1.0}
         """
         config = self._load_with_user_config(monkeypatch, tmp_path, text)
 
-        assert [preset.id for preset in parse_audio_presets(config)] == ["yue2", "qwen3_tts", "sa3", "demo"]
+        assert [preset.id for preset in parse_audio_presets(config)] == list(model_ids("audio"))
+
+    def test_a_user_setting_is_merged_over_the_shipped_one(self, monkeypatch, tmp_path):
+        text = """
+        audio_model_presets:
+          sa3:
+            settings: {steps: 12}
+        """
+        config = self._load_with_user_config(monkeypatch, tmp_path, text)
+
+        sa3 = next(preset for preset in parse_audio_presets(config) if preset.id == "sa3")
+        assert (sa3.settings["steps"], sa3.settings["cfg_scale"]) == (12, 1.0)
 
 
 class TestConfigurationDocExample:
-    """The example in the configuration docs is the three presets, so it is parsed and checked like the config."""
+    """The example in the configuration docs is the three presets' settings, so it is parsed and checked like the config."""
 
     def _example(self) -> dict:
         text = (REPO_ROOT / "docs" / "concepts" / "configuration.md").read_text(encoding="utf-8")
@@ -316,7 +297,7 @@ class TestConfigurationDocExample:
     def test_the_example_parses(self):
         presets = parse_audio_presets(self._example())
 
-        assert [preset.id for preset in presets] == ["yue2", "qwen3_tts", "sa3"]
+        assert [preset.id for preset in presets] == list(model_ids("audio"))
 
     def test_the_example_holds_the_shipped_values(self):
         example = self._example()["audio_model_presets"]
@@ -324,84 +305,53 @@ class TestConfigurationDocExample:
 
         for model_id, preset in expected.items():
             documented = example[model_id]
-            for key in ("label", "kinds", "family", "files", "limits", "settings", "platforms"):
-                assert documented[key] == preset[key], f"{model_id}.{key}"
-            assert documented.get("lyrics", False) == preset.get("lyrics", False), f"{model_id}.lyrics"
+            assert documented["settings"] == preset["settings"], model_id
 
 
 def _shipped_presets() -> dict[str, Any]:
-    """Return the three presets as the packaged config ships them: Stable Audio makes sound and music."""
-    return audio_config(yue2=yue2_preset(), qwen3_tts=qwen3_tts_preset(), sa3=sa3_two_kind_preset())["audio_model_presets"]
+    """Return the three fixture presets: facts and settings in one block, Stable Audio making sound and music."""
+    return {"yue2": yue2_preset(), "qwen3_tts": qwen3_tts_preset(), "sa3": sa3_two_kind_preset()}
 
 
 class TestShippedPresets:
-    """The packaged ``config.yaml`` ships the three presets the tests use as fixtures."""
+    """The packaged ``config.yaml`` holds the settings of the three presets the tests use as fixtures, and nothing else."""
 
-    def test_the_packaged_config_holds_the_fixture_presets(self):
+    def test_the_packaged_config_holds_the_fixture_settings(self):
         shipped = load_packaged_config()["audio_model_presets"]
 
-        assert list(shipped) == ["yue2", "qwen3_tts", "sa3"]
+        assert list(shipped) == list(model_ids("audio"))
         for model_id, preset in _shipped_presets().items():
-            assert shipped[model_id] == preset, model_id
-        assert shipped["qwen3_tts"] == qwen3_tts_preset()
+            assert shipped[model_id] == {"settings": preset["settings"]}, model_id
 
 
 class TestVoices:
-    """A speech preset lists its built-in voices, the first of them the default."""
-
-    def _parse(self, **changes):
-        preset = qwen3_tts_preset()
-        preset.update(changes)
-        return parse_audio_presets({"audio_model_presets": {"qwen3_tts": preset}})[0]
+    """A speech model lists its built-in voices, the first of them the default."""
 
     def test_the_voices_keep_their_order_and_the_first_is_the_default(self):
-        preset = self._parse()
+        preset = next(item for item in parse_audio_presets(audio_config()) if item.id == "qwen3_tts")
 
         assert [voice.id for voice in preset.voices][:3] == ["ryan", "aiden", "vivian"]
         assert preset.voices[0] == AudioVoice("ryan", "Ryan", "English")
         assert preset.default_voice == "ryan"
         assert len(preset.voices) == 9
 
-    def test_a_preset_without_voices_has_no_default_voice(self):
-        (yue2,) = parse_audio_presets(audio_config(yue2=yue2_preset()))
+    def test_a_model_without_voices_has_no_default_voice(self):
+        yue2 = parse_audio_presets(audio_config())[0]
 
         assert (yue2.voices, yue2.default_voice) == ((), None)
 
-    @pytest.mark.parametrize(
-        "voices",
-        [[], "ryan", [{"id": "ryan", "label": "Ryan"}], [{"id": "ryan", "label": "Ryan", "language": "English", "x": 1}], [{"id": "a", "label": "A", "language": "x"}] * 2],
-        ids=["empty", "not a list", "missing language", "unknown key", "repeated id"],
-    )
-    def test_malformed_voices_are_refused(self, voices):
-        with pytest.raises(ValueError, match="voices"):
-            self._parse(voices=voices)
-
-    @pytest.mark.parametrize("key", ["voices", "voice_files"])
-    def test_only_a_speech_model_has_voices_or_voice_files(self, key):
-        preset = yue2_preset()
-        preset[key] = qwen3_tts_preset()[key]
-
-        with pytest.raises(ValueError, match=f"{key} is only for a model that makes speech"):
-            parse_audio_presets({"audio_model_presets": {"yue2": preset}})
-
 
 class TestVoiceFiles:
-    """The cloning files are a second file list, parsed like ``files``."""
+    """The cloning files are the targets of the ``voice`` role."""
 
-    def test_voice_files_are_parsed_like_files(self):
-        (preset,) = parse_audio_presets(audio_config(qwen3_tts=qwen3_tts_preset()))
+    def test_voice_files_are_the_voice_role_targets(self):
+        preset = next(item for item in parse_audio_presets(audio_config()) if item.id == "qwen3_tts")
 
         assert [(files.repo_id, files.revision) for files in preset.voice_files] == [("Qwen/Qwen3-TTS-12Hz-1.7B-Base", QWEN_BASE_REPO.split("@")[1])]
         assert "speech_tokenizer/model.safetensors" in preset.voice_files[0].patterns
+        assert [files.repo_id for files in preset.files] == ["Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]
 
-    def test_a_preset_without_voice_files_has_none(self):
-        (yue2,) = parse_audio_presets(audio_config(yue2=yue2_preset()))
+    def test_a_model_without_voice_targets_has_no_voice_files(self):
+        yue2 = parse_audio_presets(audio_config())[0]
 
         assert yue2.voice_files == ()
-
-    def test_voice_files_must_be_pinned_to_a_commit(self):
-        preset = qwen3_tts_preset()
-        preset["voice_files"] = [{"repo": "Qwen/Qwen3-TTS-12Hz-1.7B-Base", "files": ["config.json"]}]
-
-        with pytest.raises(ValueError, match=r"voice_files\[0\]\.repo must be pinned"):
-            parse_audio_presets({"audio_model_presets": {"qwen3_tts": preset}})

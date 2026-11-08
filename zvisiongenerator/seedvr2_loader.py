@@ -21,10 +21,10 @@ from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
 from zvisiongenerator.image_model_loader import LOADING_PHASE, SAVING_QUANT_PHASE, store_copy
 from zvisiongenerator.utils.seedvr2 import (
     SEEDVR2_BITS,
-    SEEDVR2_REPO,
     SeedVR2Setup,
     SeedVR2Weights,
     pick_seedvr2_tier,
+    seedvr2_files,
     seedvr2_row_name,
     seedvr2_settings,
     seedvr2_tier_label,
@@ -53,20 +53,21 @@ def seedvr2_weights_dir(model: str, models_dir: Path, weights: SeedVR2Weights) -
     return models_dir / _WEIGHTS_DIR_NAME / seedvr2_row_name(model, weights)
 
 
-def seedvr2_downloaded(model: str, models_dir: Path, weights: SeedVR2Weights) -> bool:
-    """Return whether *model* loads without a download: its current stored copy, or both of its downloaded files."""
+def seedvr2_downloaded(model: str, models_dir: Path, weights: SeedVR2Weights, *, platform_key: str) -> bool:
+    """Return whether *model* loads without a download: its current stored copy, or both of its downloaded files (as declared for *platform_key*)."""
     folder = seedvr2_weights_dir(model, models_dir, weights)
     if weights.stores_copy:
         return manifest_matches(folder, _manifest(model))
-    return all((folder / name).is_file() for _repo, name in weights.files[model])
+    return all((folder / name).is_file() for _repo, name in seedvr2_files(model, platform_key))
 
 
-def build_seedvr2_setup(config: dict[str, Any], *, weights: SeedVR2Weights, budget_bytes: int | None, system_bytes: int | None, models_dir: Path) -> SeedVR2Setup:
+def build_seedvr2_setup(config: dict[str, Any], *, platform_key: str, weights: SeedVR2Weights, budget_bytes: int | None, system_bytes: int | None, models_dir: Path) -> SeedVR2Setup:
     """Return the tier a plain upscale uses with *config* on this machine, and whether its weights are on disk.
 
     Args:
         config: Loaded config dict.
-        weights: The engine's weights; they name the config tier list that applies.
+        platform_key: The platform whose tiers and files apply.
+        weights: The engine's weights.
         budget_bytes: The accelerator memory budget, or ``None`` when unknown.
         system_bytes: The system memory weights stream from on a discrete GPU, or ``None`` (Apple Silicon, unknown).
         models_dir: The installed-models directory.
@@ -74,9 +75,9 @@ def build_seedvr2_setup(config: dict[str, Any], *, weights: SeedVR2Weights, budg
     Raises:
         ValueError: If the ``seedvr2`` block of *config* is invalid.
     """
-    settings = seedvr2_settings(config, weights.tiers_key)
+    settings = seedvr2_settings(config, platform_key)
     tier = pick_seedvr2_tier(settings, budget_bytes, system_bytes)
-    return SeedVR2Setup(settings=settings, tier=tier, budget_bytes=budget_bytes, downloaded=seedvr2_downloaded(tier.model, models_dir, weights), weights=weights)
+    return SeedVR2Setup(settings=settings, tier=tier, budget_bytes=budget_bytes, downloaded=seedvr2_downloaded(tier.model, models_dir, weights, platform_key=platform_key), weights=weights)
 
 
 def _delete_cached_file(repo_id: str, filename: str) -> None:
@@ -108,6 +109,7 @@ def load_seedvr2(
     model: str,
     *,
     models_dir: Path,
+    platform_key: str,
     on_phase: Callable[[str], None] | None,
     delete_cached_file: Callable[[str, str], None] = _delete_cached_file,
     files_cached: Callable[[str, str], object] = _cached_file,
@@ -121,6 +123,7 @@ def load_seedvr2(
         upscaler: The platform SeedVR2 engine.
         model: "seedvr2-3b" or "seedvr2-7b".
         models_dir: The installed-models directory; the weights live in its hidden ``.seedvr2`` folder.
+        platform_key: The platform whose declared files the tier loads from.
         on_phase: Receives :data:`LOADING_PHASE` when every file the load reads is on disk (a stored copy, the
             downloaded files, or, where a copy is stored, the tier's files in the Hugging Face cache), otherwise
             :data:`DOWNLOADING_PHASE` while the library fetches them, then (for a stored copy)
@@ -136,11 +139,12 @@ def load_seedvr2(
     """
     weights = upscaler.weights
     folder = seedvr2_weights_dir(model, models_dir, weights)
-    if seedvr2_downloaded(model, models_dir, weights):
+    if seedvr2_downloaded(model, models_dir, weights, platform_key=platform_key):
         _report(on_phase, LOADING_PHASE)
         return upscaler.load_model(model, quantize=None, model_path=str(folder))
 
-    on_disk = weights.stores_copy and _files_on_disk(weights.files[model], files_cached)
+    files = seedvr2_files(model, platform_key)
+    on_disk = weights.stores_copy and _files_on_disk(files, files_cached)
     _report(on_phase, LOADING_PHASE if on_disk else DOWNLOADING_PHASE)
     if not weights.stores_copy:
         folder.mkdir(parents=True, exist_ok=True)
@@ -148,14 +152,14 @@ def load_seedvr2(
 
     # mflux fetches any missing file, and the load keeps the quantized weights in memory, so nothing reads the
     # downloaded files again and they can be deleted once the copy is stored.
-    loaded = upscaler.load_model(model, quantize=SEEDVR2_BITS, model_path=SEEDVR2_REPO)
+    loaded = upscaler.load_model(model, quantize=SEEDVR2_BITS, model_path=files[0][0])
     _report(on_phase, SAVING_QUANT_PHASE)
     folder.parent.mkdir(parents=True, exist_ok=True)
     saved = store_copy(
         lambda partial: upscaler.save_model(loaded, partial), target=folder, manifest=_manifest(model), label=seedvr2_tier_label(model, weights), fallback="the next load saves it again"
     )
     if saved:
-        _delete_downloads(weights.files[model], delete_cached_file)
+        _delete_downloads(files, delete_cached_file)
     return loaded
 
 

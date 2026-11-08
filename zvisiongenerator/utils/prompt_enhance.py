@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 
+from zvisiongenerator.utils.model_metadata import load_model_metadata
 from zvisiongenerator.utils.color_names import color_name, parse_hex
 from zvisiongenerator.utils.prompt_quotes import lettering_spans, missing_quotes, quoted_texts
 
@@ -831,9 +832,8 @@ def validate_settings(settings: EnhanceSettings, *, mode: str) -> None:
 
 
 def resolve_enhance_ceiling(config: dict[str, Any], *, family: str | None, mode: str) -> int:
-    """Return the max enhanced-prompt word count for a model family (per-family override or global)."""
-    presets_key = "video_model_presets" if mode == "video" else "model_presets"
-    preset = (config.get(presets_key) or {}).get(family or "", {}) or {}
+    """Return the max enhanced-prompt word count for a model family (an image family's own ceiling, else the global one)."""
+    preset = load_model_metadata()["image_families"].get(family or "", {}) if mode == "image" else {}
     value = preset.get("enhance_max_words")
     if isinstance(value, int) and value > 0:
         return value

@@ -28,7 +28,8 @@ from zvisiongenerator.backends.cuda.video.h3.backend import H3VideoBackend  # no
 from zvisiongenerator.core.video_backend import VideoBackend  # noqa: E402
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment  # noqa: E402
 from zvisiongenerator.utils import hf_snapshot  # noqa: E402
-from zvisiongenerator.utils.h3_preset import H3Files, H3Preset, H3Schedule, HubFiles  # noqa: E402
+from zvisiongenerator.downloads.target import HubFiles  # noqa: E402
+from zvisiongenerator.utils.h3_preset import H3Files, H3Preset, H3Schedule  # noqa: E402
 from zvisiongenerator.utils.model_memory import MemoryBudget  # noqa: E402
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo  # noqa: E402
 
@@ -276,7 +277,7 @@ class TestLoadModel:
 
     def test_an_upscale_needs_the_8_step_schedule_in_the_preset(self, rig):
         only_four = H3Preset(**{**PRESET.__dict__, "schedules": {4: H3Schedule(4, 6.0, 3.0)}})
-        with pytest.raises(ValueError, match=r"video_model_presets\.h3\.diffusers\.schedules\.8"):
+        with pytest.raises(ValueError, match=r"8-step schedule"):
             H3VideoBackend().load_model("m", preset=only_four, upscale=True)
         assert rig.events == []
         assert H3VideoBackend().load_model("m", preset=only_four)[0].upscale is False

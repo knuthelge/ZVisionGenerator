@@ -10,13 +10,17 @@ from typing import Any
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import ExtendSource, LtxVideoUpscaleRequest, VideoFileUpscaleRequest
+from zvisiongenerator.downloads.declaration import declared_repo_ids
 from zvisiongenerator.upscale_runner import UpscaleSource
-from zvisiongenerator.utils.config import ltx_version, resolve_defaults, resolve_scheduler_class, resolve_upscale_steps, sharpening_amounts
+from zvisiongenerator.utils.model_metadata import alias_map
+from zvisiongenerator.schedulers import SCHEDULER_CLASSES
+from zvisiongenerator.utils.ltx_facts import ltx_version
+from zvisiongenerator.utils.config import resolve_defaults, resolve_scheduler_class, resolve_upscale_steps, sharpening_amounts
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import parse_lora_arg
 from zvisiongenerator.utils.paths import is_existing_file, is_explicit_local_path, resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_CREATIVE, UPSCALE_METHOD_LTX, UPSCALE_METHOD_SEEDVR2, RecordedSettings, optional_int, original_video_workflow
-from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, SEEDVR2_REPO, SeedVR2Setup
+from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, SeedVR2Setup
 from zvisiongenerator.utils.upscale import (
     UPSCALE_FACTORS,
     VIDEO_UPSCALE_FACTOR,
@@ -87,7 +91,7 @@ def plan_upscale(source: UpscaleSource, factor: int, web_config: WebUiConfig, *,
         raise ValueError("No image model is configured to refine the upscale.")
     keeps_recorded = model_name == recorded.model
 
-    model_ref = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
+    model_ref = resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform)
     model_info = detect_image_model(model_ref)
     defaults = resolve_defaults(model_info, app_config, {}, backend_name)
 
@@ -97,7 +101,7 @@ def plan_upscale(source: UpscaleSource, factor: int, web_config: WebUiConfig, *,
 
     steps = recorded.steps if keeps_recorded and recorded.steps else defaults["steps"]
     guidance = recorded.guidance if keeps_recorded and recorded.guidance is not None else defaults["guidance"]
-    scheduler = recorded.scheduler if keeps_recorded and recorded.scheduler in app_config.get("schedulers", {}) else defaults["scheduler"]
+    scheduler = recorded.scheduler if keeps_recorded and recorded.scheduler in SCHEDULER_CLASSES else defaults["scheduler"]
     lora_paths, lora_weights, dropped_loras = _existing_loras(recorded.lora) if keeps_recorded else (None, None, False)
     if dropped_loras:
         notices.append(NOTICE_LORA_MISSING)
@@ -118,7 +122,7 @@ def plan_upscale(source: UpscaleSource, factor: int, web_config: WebUiConfig, *,
         seed=recorded.seed or 0,
         steps=steps,
         guidance=guidance,
-        scheduler=resolve_scheduler_class(scheduler, app_config, backend_name),
+        scheduler=resolve_scheduler_class(scheduler, backend_name),
         scheduler_name=scheduler,
         quantize=quantize,
         upscale_factor=factor,
@@ -133,12 +137,13 @@ def plan_upscale(source: UpscaleSource, factor: int, web_config: WebUiConfig, *,
     return UpscalePlan(request=request, model_ref=model_ref, option=option, notices=tuple(notices))
 
 
-def plan_seedvr2_upscale(source: UpscaleSource, factor: int, *, setup: SeedVR2Setup) -> UpscalePlan:
+def plan_seedvr2_upscale(source: UpscaleSource, factor: int, *, setup: SeedVR2Setup, platform_key: str) -> UpscalePlan:
     """Build the SeedVR2 upscale request for *source* at *factor*.
 
     No image model is involved, so nothing is detected or defaulted from one: the request carries the source's
     recorded settings so the new file stays reusable. When the source records no seed, steps or guidance, the
     request holds class defaults and ``source_settings_known`` is False, so they are not saved as the original's.
+    The plan's ``model_ref`` is the first repo the tier's weights come from on *platform_key*.
 
     Raises:
         ValueError: If *factor* is not offered.
@@ -173,7 +178,7 @@ def plan_seedvr2_upscale(source: UpscaleSource, factor: int, *, setup: SeedVR2Se
         upscale_softness=setup.settings.softness,
         sharpen=False,
     )
-    return UpscalePlan(request=request, model_ref=SEEDVR2_REPO, option=option, notices=notices)
+    return UpscalePlan(request=request, model_ref=declared_repo_ids(setup.tier.model, platform_key)[0], option=option, notices=notices)
 
 
 def plan_video_upscale(source: ExtendSource, recorded_config: Mapping[str, Any] | None, *, setup: SeedVR2Setup) -> VideoUpscalePlan:
@@ -218,8 +223,8 @@ def ltx_upscale_model(recorded_model: str | None, web_config: WebUiConfig) -> tu
 
 def _is_ltx23(model_name: str, app_config: dict[str, Any]) -> bool:
     """Return whether *model_name* is an LTX model outside every version block and not a known LTX-2.5 repo, which makes it LTX-2.3."""
-    model_ref = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
-    return detect_video_model(model_ref).family == "ltx" and ltx_version(app_config, model_name) is None and known_ltx_repo_version(model_ref) != "2.5"
+    model_ref = resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform)
+    return detect_video_model(model_ref).family == "ltx" and ltx_version(model_name) is None and known_ltx_repo_version(model_ref) != "2.5"
 
 
 def _recorded_ltx23(model_name: str, app_config: dict[str, Any]) -> bool:
@@ -228,10 +233,10 @@ def _recorded_ltx23(model_name: str, app_config: dict[str, Any]) -> bool:
     Unlike ``_is_ltx23``, a name that resolves to neither a known LTX repo nor a local folder is not trusted, since an
     ``ltx`` in the name alone does not tell the version.
     """
-    model_ref = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
+    model_ref = resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform)
     known = known_ltx_repo_version(model_ref)
     if known is not None:
-        return known == "2.3" and ltx_version(app_config, model_name) is None
+        return known == "2.3" and ltx_version(model_name) is None
     return Path(model_ref).expanduser().is_dir() and _is_ltx23(model_name, app_config)
 
 
@@ -272,7 +277,7 @@ def plan_ltx_video_upscale(source: ExtendSource, recorded_config: Mapping[str, A
         width=source.width * VIDEO_UPSCALE_FACTOR,
         height=source.height * VIDEO_UPSCALE_FACTOR,
         model_name=model_name,
-        model_ref=resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform),
+        model_ref=resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform),
         prompt=ltx_upscale_prompt(source.scene, source.prompt, extended=original_video_workflow(recorded_config) == "extend"),
         seed=recorded_seed if recorded_seed is not None else VIDEO_UPSCALE_SEED,
         steps=ltx_upscale_steps(app_config),

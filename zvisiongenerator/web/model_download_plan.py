@@ -11,9 +11,8 @@ from zvisiongenerator.downloads.check import check_target
 from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, matte_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.space import space_need
-from zvisiongenerator.utils.config import enhancer_tier_models
+from zvisiongenerator.utils.config import configured_enhancer_models
 from zvisiongenerator.utils.licences import LicenceRecord, licence_payload
-from zvisiongenerator.utils.matte_models import MATTE_ROW_NAME
 from zvisiongenerator.utils.model_files import huggingface_cache_dir
 from zvisiongenerator.utils.seedvr2 import seedvr2_row_name
 from zvisiongenerator.web.audio_models import find_audio_model
@@ -30,6 +29,7 @@ __all__ = [
     "KIND_ENHANCER",
     "KIND_MATTE",
     "KIND_MODEL",
+    "MATTE_ROW_NAME",
     "enhancer_download_needed",
     "matte_download_needed",
     "parts_summary",
@@ -41,6 +41,8 @@ KIND_MODEL = "model"
 KIND_AUDIO = "audio"
 KIND_ENHANCER = "enhancer"
 KIND_MATTE = "matte"
+MATTE_ROW_NAME = "background-removal"
+"""The Models-page row id of the background removal models."""
 
 
 def row_plan(kind: str, name: str, web_config: WebUiConfig) -> JobDownloadPart:
@@ -102,7 +104,7 @@ def row_download_needed(
         return matte_download_needed(present=present)
     image = _image_entry(name, web_config)
     if image is not None:
-        built_plan = built_model_plan(image.resolved_path, config=web_config.app_config, platform_key=sys.platform)
+        built_plan = built_model_plan(image.resolved_path, platform_key=sys.platform)
         if built_plan is not None:
             return _any_missing(built_plan, present)
         return downloaded is False
@@ -128,7 +130,7 @@ def enhancer_download_needed(
 
 
 def matte_download_needed(*, present: Callable[[DownloadTarget], bool] = target_present_offline) -> bool:
-    """Return whether the background removal models still have files to download; a plan that cannot be made needs none."""
+    """Return whether the background removal models still have files to download."""
     return _any_missing(matte_plan(), present)
 
 
@@ -211,13 +213,13 @@ def _model_row_plan(name: str, web_config: WebUiConfig) -> JobDownloadPart:
     app_config = web_config.app_config
     image = _image_entry(name, web_config)
     if image is not None:
-        return image_model_part(name, image.resolved_path, family=image.family, config=app_config, platform_key=sys.platform)
+        return image_model_part(name, image.resolved_path, family=image.family, platform_key=sys.platform)
     setup = web_config.seedvr2
     if _is_seedvr2_row(name, web_config) and setup is not None:
-        return seedvr2_tier_part(setup.tier.model, setup.weights, Path(web_config.models_dir))
+        return seedvr2_tier_part(setup.tier.model, setup.weights, Path(web_config.models_dir), platform_key=sys.platform)
     video = next((entry for entry in web_config.video_inventory if entry.name == name), None)
     if video is not None:
-        return video_model_part(video.name, video.resolved_path, family=video.family, config=app_config, upscale=True)
+        return video_model_part(video.name, video.resolved_path, family=video.family, config=app_config, platform_key=sys.platform, upscale=True)
     raise ValueError(f"No model named '{name}' to download.")
 
 
@@ -234,7 +236,7 @@ def _image_entry(name: str, web_config: WebUiConfig) -> ImageInventoryEntry | No
 
 def _enhancer_model(tier: str, app_config: dict[str, Any]) -> tuple[str, str | None]:
     """Return the ``(repo, revision)`` configured for the enhancer *tier*; ``ValueError`` when the tier has none."""
-    model = enhancer_tier_models(app_config, platform_key=sys.platform).get(tier)
+    model = configured_enhancer_models(app_config, platform_key=sys.platform).get(tier)
     if model is None:
         raise ValueError(f"No enhancer model for '{tier}' to download.")
     return model

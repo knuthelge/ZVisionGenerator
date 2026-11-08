@@ -10,6 +10,7 @@ import pytest
 import torch
 from safetensors.torch import load_file, save_file
 
+from tests._factories import metadata_copy, use_model_metadata
 from zvisiongenerator import backends
 from zvisiongenerator.backends.mac import ltx_converted
 from zvisiongenerator.backends.mac.ltx_converted import embedded_config, mlx_name, transformer_entries, write_converted
@@ -202,13 +203,16 @@ def test_stocks_config_is_used_when_the_checkpoint_has_none(tmp_path):
 _PIN = "f" * 40
 
 
-def _pinned_config(**extra) -> dict:
-    return {"video_model_presets": {"ltx": {"mlx_base": {"q4": f"org/base@{_PIN}"}, "mlx_files": list(_PACK_FILES), **extra}}}
+def _pin_the_base(monkeypatch, tmp_path) -> None:
+    """Serve metadata whose ``ltx-4`` pack (the 4-bit converter base) is ``org/base`` at ``_PIN`` with the test pack's files."""
+    data = metadata_copy()
+    data["models"]["ltx-4"]["downloads"]["darwin"] = [{"ref": f"org/base@{_PIN}", "files": list(_PACK_FILES)}]
+    use_model_metadata(monkeypatch, tmp_path, data)
 
 
 @pytest.fixture
 def convert_with_seams(monkeypatch, tmp_path):
-    """Replace the base download, the connector check and the writer; return what they saw and a runner taking the config."""
+    """Replace the base download, the connector check and the writer; return what they saw and a runner."""
     import contextlib
     from types import SimpleNamespace
 
@@ -218,51 +222,35 @@ def convert_with_seams(monkeypatch, tmp_path):
     monkeypatch.setattr(ltx_converted, "write_converted", lambda *args, **kwargs: seen.update(own=kwargs["own_connectors"], files=kwargs["base_files"]))
     monkeypatch.setattr("zvisiongenerator.backends.mac.memory.mlx_cache_limit", lambda limit: contextlib.nullcontext())
 
-    def run(config: dict, status: str = "stock") -> dict:
+    def run(status: str = "stock") -> dict:
         seen["status"] = status
-        ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, config=config, version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
+        ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
         return seen
 
     return run
 
 
 @pytest.mark.parametrize(("status", "own"), [("changed", True), ("unknown", True), ("stock", False), ("absent", False)])
-def test_changed_and_quantized_connectors_are_kept_and_stock_ones_linked(convert_with_seams, status, own):
-    assert convert_with_seams(_pinned_config(), status)["own"] is own
+def test_changed_and_quantized_connectors_are_kept_and_stock_ones_linked(monkeypatch, tmp_path, convert_with_seams, status, own):
+    _pin_the_base(monkeypatch, tmp_path)
+
+    assert convert_with_seams(status)["own"] is own
 
 
-def test_the_base_is_the_pinned_packs_files_but_its_transformer(convert_with_seams):
-    seen = convert_with_seams(_pinned_config())
+def test_the_base_is_the_pinned_packs_files_but_its_transformer(monkeypatch, tmp_path, convert_with_seams):
+    _pin_the_base(monkeypatch, tmp_path)
 
-    assert (seen["base"].repo_id, seen["base"].revision, seen["base"].files) == ("org/base", _PIN, _BASE_FILES)
-    assert seen["files"] == _BASE_FILES
-
-
-def test_an_unpinned_base_of_a_repo_pinned_elsewhere_converts_from_that_pack(convert_with_seams):
-    config = _pinned_config()
-    config["video_model_presets"]["ltx"]["mlx_base"] = {"q4": "Org/Base", "q8": f"org/base@{_PIN}"}
-
-    seen = convert_with_seams(config)
+    seen = convert_with_seams()
 
     assert (seen["base"].repo_id, seen["base"].revision, seen["base"].files) == ("org/base", _PIN, _BASE_FILES)
     assert seen["files"] == _BASE_FILES
-
-
-def test_an_unpinned_base_cannot_convert(tmp_path):
-    from types import SimpleNamespace
-
-    config = {"video_model_presets": {"ltx": {"mlx_base": {"q4": "org/base"}}}}
-
-    with pytest.raises(ValueError, match="pinned"):
-        ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, config=config, version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
 
 
 def test_the_packaged_packs_give_a_base_without_a_transformer_for_both_versions():
-    from zvisiongenerator.utils.config import load_config, ltx_mlx_base_repo, ltx_mlx_packs
+    from zvisiongenerator.utils.ltx_facts import ltx_mlx_base_pack
 
-    config = load_config()
     for version in (None, "ltx25"):
-        pack = ltx_mlx_packs(config)[ltx_mlx_base_repo(config, 4, version)]
+        pack = ltx_mlx_base_pack(4, version)
         base = ltx_converted._base_files(pack)
 
         assert base and not any(name.startswith("transformer") for name in base)
@@ -271,7 +259,7 @@ def test_the_packaged_packs_give_a_base_without_a_transformer_for_both_versions(
 
 
 def test_the_base_is_downloaded_as_just_those_files_at_the_pin(monkeypatch, tmp_path):
-    from zvisiongenerator.utils.h3_preset import HubFiles
+    from zvisiongenerator.downloads.target import HubFiles
 
     calls: list[dict] = []
 
@@ -291,7 +279,7 @@ def test_the_base_is_downloaded_as_just_those_files_at_the_pin(monkeypatch, tmp_
 
 
 def test_a_base_file_the_revision_lacks_is_an_error(monkeypatch, tmp_path):
-    from zvisiongenerator.utils.h3_preset import HubFiles
+    from zvisiongenerator.downloads.target import HubFiles
 
     monkeypatch.setattr(ltx_converted, "snapshot_download", lambda **kwargs: str(tmp_path))
     monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo, revision: [])
@@ -301,7 +289,7 @@ def test_a_base_file_the_revision_lacks_is_an_error(monkeypatch, tmp_path):
 
 
 def test_a_failed_base_download_is_one_runtime_error(monkeypatch):
-    from zvisiongenerator.utils.h3_preset import HubFiles
+    from zvisiongenerator.downloads.target import HubFiles
 
     def fail(**kwargs):
         raise OSError("offline")
@@ -318,6 +306,6 @@ def test_macos_dispatches_to_the_mlx_writer(monkeypatch, tmp_path):
     monkeypatch.setattr(backends.sys, "platform", "darwin")
     monkeypatch.setattr(ltx_converted, "convert", lambda *args, **kwargs: calls.append((args, kwargs)))
 
-    backends.convert_ltx_checkpoint("checkpoint", tmp_path, 8, config={}, version=None, models_dir=tmp_path, lora=None, report=print)  # type: ignore[arg-type]
+    backends.convert_ltx_checkpoint("checkpoint", tmp_path, 8, version=None, models_dir=tmp_path, lora=None, report=print)  # type: ignore[arg-type]
 
     assert calls and calls[0][0][2] == 8

@@ -24,7 +24,8 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
     from zvisiongenerator.core.video_family import VideoFamily
     from zvisiongenerator.downloads.target import DownloadTarget
-    from zvisiongenerator.utils.h3_preset import H3MlxPreset, H3Preset, HubFiles
+    from zvisiongenerator.downloads.target import HubFiles
+    from zvisiongenerator.utils.h3_preset import H3MlxPreset, H3Preset
     from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, MemoryBudget
 
 __all__ = [
@@ -44,7 +45,6 @@ __all__ = [
     "get_prompt_enhancer_session",
     "get_seedvr2_upscaler",
     "get_video_backend",
-    "h3_companion_repo_ids",
     "h3_download_plan",
     "h3_load_options",
     "image_download_plan",
@@ -432,7 +432,6 @@ def supports_video_upscale_review() -> bool:
 
 
 def estimate_ltx_system_memory(
-    config: dict[str, Any],
     resolved_model: str,
     quantize: int,
     *,
@@ -448,8 +447,8 @@ def estimate_ltx_system_memory(
     from zvisiongenerator.backends.cuda.video.memory_estimate import cached_ltx_system_estimate
 
     if model_name is None:
-        return cached_ltx_system_estimate(config, resolved_model, quantize, find_local_dir=find_local_dir)
-    return cached_ltx_system_estimate(config, resolved_model, quantize, find_local_dir=find_local_dir, model_name=model_name)
+        return cached_ltx_system_estimate(resolved_model, quantize, find_local_dir=find_local_dir)
+    return cached_ltx_system_estimate(resolved_model, quantize, find_local_dir=find_local_dir, model_name=model_name)
 
 
 def convert_h3_checkpoint(
@@ -471,7 +470,7 @@ def convert_h3_checkpoint(
     if sys.platform == "darwin":
         from zvisiongenerator.backends.mac.h3_converted import convert as convert_mlx
 
-        convert_mlx(checkpoint, target, turbo=turbo, config=config, report=report)
+        convert_mlx(checkpoint, target, turbo=turbo, report=report)
         return
     if sys.platform in ("win32", "linux"):
         from zvisiongenerator.backends.cuda.video.h3.converted import convert
@@ -486,7 +485,6 @@ def convert_ltx_checkpoint(
     target: "Path",
     bits: int,
     *,
-    config: dict[str, Any],
     version: str | None,
     models_dir: "Path",
     lora: "Path | None",
@@ -504,12 +502,12 @@ def convert_ltx_checkpoint(
     if sys.platform == "darwin":
         from zvisiongenerator.backends.mac.ltx_converted import convert as convert_mlx
 
-        convert_mlx(checkpoint, target, bits, config=config, version=version, models_dir=models_dir, lora=lora, report=report)
+        convert_mlx(checkpoint, target, bits, version=version, models_dir=models_dir, lora=lora, report=report)
         return
     if sys.platform in ("win32", "linux"):
         from zvisiongenerator.backends.cuda.video.converted import convert
 
-        convert(checkpoint, target, bits, config=config, version=version, models_dir=models_dir, lora=lora, report=report)
+        convert(checkpoint, target, bits, version=version, models_dir=models_dir, lora=lora, report=report)
         return
     raise RuntimeError(f"Unsupported platform: {sys.platform}. Converting LTX checkpoints supports macOS, Windows, and Linux.")
 
@@ -559,7 +557,7 @@ def video_download_plan(
     macOS lists the model repo at its revision (a pinned pack of *mlx_packs*, by repo id, as just its files) and,
     unless the model bundles its own text encoder (a pack whose files include one, or *text_encoder_bundled* for
     another model), the *mlx_text_encoder* Gemma 3 text encoder; Windows and Linux list the diffusers repo (without the
-    *repo_ignore* patterns), the single-file *transformer_source* and, with *upscale*, the *latent_upsampler*
+    *repo_ignore* patterns, the finished list ``ltx_load_options`` makes), the single-file *transformer_source* and, with *upscale*, the *latent_upsampler*
     (each a ``(repo_id[@revision], filename)`` pair).
 
     Raises:
@@ -607,40 +605,22 @@ def h3_download_plan(model_ref: str, preset: "H3Preset | H3MlxPreset", *, upscal
     raise RuntimeError(f"MiniMax H3 is not available on this platform ({sys.platform}).")
 
 
-def h3_companion_repo_ids(config: dict[str, Any]) -> tuple[str, ...]:
-    """Return the Hugging Face repos, besides the main one, that this platform's MiniMax H3 backend downloads.
-
-    Windows and Linux download the text encoder, the turbo LoRA and the latent upscaler; macOS downloads the INT8 transformer and the turbo LoRA.
-
-    Raises:
-        ValueError: If the H3 entry of *config* is malformed.
-    """
-    if sys.platform == "darwin":
-        from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_turbo_lora
-
-        return (h3_mlx_preset(config).transformer.repo_id, h3_turbo_lora(config)[0].repo_id)
-    from zvisiongenerator.utils.h3_preset import h3_preset
-
-    preset = h3_preset(config)
-    return (preset.text_encoder.repo_id, preset.lora.repo_id, preset.latent_upsampler.repo_id)
-
-
-def h3_load_options(config: dict[str, Any], model_name: str | None, *, quiet: bool = False) -> dict[str, Any]:
-    """Return the keyword arguments this platform's MiniMax H3 backend takes in ``load_model`` beyond the mode and LoRAs.
+def h3_load_options(config: dict[str, Any], model_name: str | None, platform_key: str, *, quiet: bool = False) -> dict[str, Any]:
+    """Return the keyword arguments the MiniMax H3 backend of *platform_key* takes in ``load_model`` beyond the mode and LoRAs.
 
     Windows and Linux take the model name and the CUDA preset. macOS takes the model name, the MLX preset and the turbo
     LoRA; with *quiet* (a run with no terminal, such as the web runner) the fork's progress output is off.
 
     Raises:
-        ValueError: If the H3 entry of *config* is malformed.
+        ValueError: If the H3 files or settings are unusable.
     """
-    if sys.platform == "darwin":
+    if platform_key == "darwin":
         from zvisiongenerator.utils.h3_preset import h3_mlx_load_options
 
-        return {**h3_mlx_load_options(config, model_name), **({"verbose": False} if quiet else {})}
+        return {**h3_mlx_load_options(model_name), **({"verbose": False} if quiet else {})}
     from zvisiongenerator.utils.h3_preset import h3_load_options as cuda_load_options
 
-    return cuda_load_options(config, model_name)
+    return cuda_load_options(config, model_name, platform_key)
 
 
 def enhancer_download_plan(repo: str, revision: str | None) -> "tuple[DownloadTarget, ...]":

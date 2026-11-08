@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from zvisiongenerator.utils.config import model_reference
+from zvisiongenerator.utils.paths import join_huggingface_revision
 
 _UNSUPPORTED_TYPE_RE = re.compile(r"Model type (\S+) not supported")
 _END_TOKEN = "<|im_end|>"
@@ -49,14 +49,14 @@ def _load(repo: str, revision: str | None) -> tuple[Any, Any]:
     except ValueError as exc:
         match = _UNSUPPORTED_TYPE_RE.search(str(exc))
         if match is None or not match.group(1).endswith("_text"):
-            raise RuntimeError(f"Could not load prompt enhancer model {model_reference(repo, revision)}: {exc}") from exc
+            raise RuntimeError(f"Could not load prompt enhancer model {join_huggingface_revision(repo, revision)}: {exc}") from exc
         base_type = match.group(1).removesuffix("_text")
         try:
             return load(repo, revision=revision, model_config={"model_type": base_type})
         except Exception as retry_exc:  # noqa: BLE001 - surface any loader failure with the model name
-            raise RuntimeError(f"Could not load prompt enhancer model {model_reference(repo, revision)} (also tried model type '{base_type}'): {retry_exc}") from retry_exc
+            raise RuntimeError(f"Could not load prompt enhancer model {join_huggingface_revision(repo, revision)} (also tried model type '{base_type}'): {retry_exc}") from retry_exc
     except Exception as exc:  # noqa: BLE001 - surface any loader failure with the model name
-        raise RuntimeError(f"Could not load prompt enhancer model {model_reference(repo, revision)}: {exc}") from exc
+        raise RuntimeError(f"Could not load prompt enhancer model {join_huggingface_revision(repo, revision)}: {exc}") from exc
 
 
 class MlxPromptEnhancer:

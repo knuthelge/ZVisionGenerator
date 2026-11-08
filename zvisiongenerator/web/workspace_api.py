@@ -14,26 +14,16 @@ from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.downloads.plans import built_model_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
-from zvisiongenerator.utils.config import (
-    enhancer_tier_models,
-    ltx_mlx_text_encoder_repo_id,
-    model_display_name,
-    resolve_defaults,
-    resolve_enhancer_model,
-    resolve_video_defaults,
-    smart_enhancer_model,
-    smart_unavailable,
-    video_companion_repos,
-    video_family,
-)
+from zvisiongenerator.utils.model_metadata import alias_map, image_model_family, model_display_name, model_download_size_label
+from zvisiongenerator.utils.enhancer_models import ENHANCER_TIERS, enhancer_model_id, enhancer_tier_models, smart_unavailable
+from zvisiongenerator.utils.config import configured_enhancer_models, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, video_family
 from zvisiongenerator.utils.audio_settings import audio_settings_contract
 from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.h3_converted import CONVERTED_H3_STORAGES, read_converted_h3
-from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, enhancer_licence_model, licence_payload, load_licences
+from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, licence_payload, load_licences
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.ltx_version import ltx_model_version
-from zvisiongenerator.utils.matte_models import MATTE_DOWNLOAD_SIZE_LABEL, MATTE_LABEL, MATTE_ROW_NAME
 from zvisiongenerator.utils.hf_cache import CachedRepo, cached_model_repos, repo_disk_bytes, stranded_shared_files
 from zvisiongenerator.utils.model_files import (
     directory_bytes,
@@ -46,30 +36,30 @@ from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resol
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
 from zvisiongenerator.utils.prompt_enhance_audio import audio_matrix_contract
 from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
-from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_download_bytes, seedvr2_row_name, seedvr2_size_label, seedvr2_tier_label
+from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_row_name, seedvr2_tier_label
 from zvisiongenerator.utils.video_extend import extend_step
 from zvisiongenerator.utils.video_model_detect import detect_video_model
-from zvisiongenerator.web.audio_inventory import audio_inventory_rows, audio_repo_ids
+from zvisiongenerator.web.audio_inventory import audio_inventory_rows
 from zvisiongenerator.web.audio_models import audio_model_rows
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
-from zvisiongenerator.web.model_download_plan import KIND_MODEL, enhancer_download_needed, matte_download_needed, row_download_needed
+from zvisiongenerator.web.model_download_plan import KIND_MODEL, MATTE_ROW_NAME, enhancer_download_needed, matte_download_needed, row_download_needed
 from zvisiongenerator.web.first_run import first_run_payload
 from zvisiongenerator.web.lora_details import installed_details
 from zvisiongenerator.web.lora_index import lookup as lookup_lora_families
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
 from zvisiongenerator.web.model_delete import (
     built_downloads_freed_with,
-    built_sources_freed_with,
     cache_repos_linked_from,
     delete_scope,
     enhancer_delete_target,
+    freed_repo_ids,
     installed_models_linking_to,
     matte_delete_target,
     model_delete_target,
     seedvr2_delete_target,
     used_repo_ids,
 )
-from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
+from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, stored_quant_of
 from zvisiongenerator.web.model_status import describe_model_status
 from zvisiongenerator.web.workspace_contract import AUDIO_TRACK_CONTROLS, END_FRAME_CONTROLS, hidden_video_controls
 
@@ -135,14 +125,13 @@ def build_workspace_response(
     status = _status_resolver(web_config, image_model_defaults_map, instant_sources_count=True)
     image_entries = {entry.name: entry for entry in web_config.image_inventory}
     video_entries = {entry.name: entry for entry in web_config.video_inventory}
-    model_labels = web_config.app_config.get("model_labels") or {}
     licences = load_licences()
     image_models = [
         {
             "id": name,
-            "label": model_display_name(web_config.app_config, name),
+            "label": model_display_name(name),
             "type": "image",
-            "download_size_label": _size_label(model_labels.get(name) or {}),
+            "download_size_label": model_download_size_label(name, sys.platform),
             "licences": licence_payload(licences, name),
             **status(image_entries.get(name), "image"),
         }
@@ -151,9 +140,9 @@ def build_workspace_response(
     video_models = [
         {
             "id": name,
-            "label": model_display_name(web_config.app_config, name),
+            "label": model_display_name(name),
             "type": "video",
-            "version": _video_row_version(web_config.app_config, video_entries.get(name)),
+            "version": _video_row_version(video_entries.get(name)),
             "licences": licence_payload(licences, name),
             **status(video_entries.get(name), "video"),
         }
@@ -229,7 +218,7 @@ def build_prompt_enhancer_contract(
         "model": None,
         "revision": None,
         "downloaded": False,
-        "download_size_label": _size_label(section),
+        "download_size_label": model_download_size_label(enhancer_model_id("fast"), sys.platform),
         "default_max_words": resolve_enhance_ceiling(app_config, family=None, mode="image"),
         "video_audio": supports_video_audio(),
         "smart": None,
@@ -246,21 +235,14 @@ def build_prompt_enhancer_contract(
     if contract["downloaded"] or section.get("user_model"):
         contract["download_size_label"] = None
     if not section.get("user_model"):
-        smart = smart_enhancer_model(app_config, platform_key=sys.platform)
+        smart_downloaded = downloaded(*enhancer_tier_models(platform_key=sys.platform)["smart"])
         budget = (budget_bytes or _gpu_budget_bytes)()
         contract["smart"] = {
-            "downloaded": smart is None or downloaded(*smart),
-            "download_size_label": _size_label(section.get("smart") or {}) if smart is not None and not downloaded(*smart) else None,
-            "unavailable": smart_unavailable(app_config, platform_key=sys.platform, budget_bytes=budget),
+            "downloaded": smart_downloaded,
+            "download_size_label": None if smart_downloaded else model_download_size_label(enhancer_model_id("smart"), sys.platform),
+            "unavailable": smart_unavailable(platform_key=sys.platform, budget_bytes=budget),
         }
     return contract
-
-
-def _size_label(section: dict[str, Any]) -> str | None:
-    """Return a tier section's download size label for this platform, if any."""
-    sizes = section.get("download_size_label") or {}
-    label = sizes.get(sys.platform) if isinstance(sizes, dict) else None
-    return label if isinstance(label, str) else None
 
 
 def _gpu_budget_bytes() -> int | None:
@@ -289,8 +271,8 @@ def build_models_response(
     find_local_dir = functools.cache(find_local_model_dir)
     status = _status_resolver(web_config, image_defaults, find_local_dir)
     inventory = (*web_config.image_inventory, *web_config.video_inventory)
-    delete_info = _delete_info_resolver(data_dir / "models", find_local_dir, inventory=inventory, app_config=web_config.app_config)
-    disk_size = _disk_size_resolver(data_dir / "models", listed={entry.name for entry in inventory}, app_config=web_config.app_config, inventory=inventory)
+    delete_info = _delete_info_resolver(data_dir / "models", find_local_dir, inventory=inventory)
+    disk_size = _disk_size_resolver(data_dir / "models", listed={entry.name for entry in inventory}, inventory=inventory)
     download_needed = _download_needed_resolver(web_config)
     lora_entries = list_loras(data_dir)
     lora_details = installed_details(Path(web_config.loras_dir), [lora.name for lora in lora_entries])
@@ -298,7 +280,7 @@ def build_models_response(
     image_rows = [
         {
             "name": entry.name,
-            "label": model_display_name(web_config.app_config, entry.name),
+            "label": model_display_name(entry.name),
             "family": entry.family,
             "size_label": entry.size or "Unknown",
             "source": entry.source,
@@ -312,7 +294,7 @@ def build_models_response(
     video_rows = [
         {
             "name": entry.name,
-            "label": model_display_name(web_config.app_config, entry.name),
+            "label": model_display_name(entry.name),
             "family": entry.family,
             "supports_i2v": entry.supports_i2v,
             "source": entry.source,
@@ -383,8 +365,8 @@ def _seedvr2_model_rows(setup: SeedVR2Setup | None, models_dir: Path) -> list[di
             "downloaded": setup.downloaded,
             "memory_fit": None,
             "delete": {"kind": target.kind, "repo_id": target.repo_id, "linked_by": [], "stored_quants": []} if target is not None else None,
-            "disk_size_label": seedvr2_size_label(directory_bytes(target.path)) if target is not None else None,
-            "download_size_label": seedvr2_size_label(seedvr2_download_bytes(model, setup.weights)),
+            "disk_size_label": disk_size_label(directory_bytes(target.path)) if target is not None else None,
+            "download_size_label": model_download_size_label(model, sys.platform),
         }
     ]
 
@@ -402,14 +384,12 @@ def _enhancer_model_rows(
         budget_bytes: Returns the machine's accelerator memory, for Smart's ``unavailable`` reason.
         present: Tells whether a download target is fully on disk without using the network.
     """
-    section = app_config.get("prompt_enhancer") or {}
-    size_sections = {"fast": section, "smart": section.get("smart") or {}}
     rows = []
     licences = load_licences()
-    for tier, (repo, revision) in enhancer_tier_models(app_config, platform_key=sys.platform).items():
+    for tier, (repo, revision) in configured_enhancer_models(app_config, platform_key=sys.platform).items():
         target = enhancer_delete_target(repo)
         disk_bytes = repo_disk_bytes(target.path) if target is not None else 0
-        unavailable = smart_unavailable(app_config, platform_key=sys.platform, budget_bytes=(budget_bytes or _gpu_budget_bytes)()) if tier == "smart" else None
+        unavailable = smart_unavailable(platform_key=sys.platform, budget_bytes=(budget_bytes or _gpu_budget_bytes)()) if tier == "smart" else None
         rows.append(
             {
                 "tier": tier,
@@ -417,11 +397,11 @@ def _enhancer_model_rows(
                 "revision": revision,
                 "downloaded": downloaded(repo, revision),
                 "disk_size_label": disk_size_label(disk_bytes) if disk_bytes else None,
-                "download_size_label": _size_label(size_sections[tier]) if tier in size_sections else None,
+                "download_size_label": model_download_size_label(enhancer_model_id(tier), sys.platform) if tier in ENHANCER_TIERS else None,
                 "unavailable": unavailable,
                 "deletable": target is not None,
                 "download_needed": _enhancer_download_needed(tier, repo, revision, unavailable, present),
-                "licences": licence_payload(licences, enhancer_licence_model(tier)),
+                "licences": licence_payload(licences, enhancer_model_id(tier)),
             }
         )
     return rows
@@ -444,43 +424,27 @@ def _background_removal_row(*, present: Callable[[DownloadTarget], bool] = targe
     """
     target = matte_delete_target()
     disk_bytes = sum(repo_disk_bytes(huggingface_cache_repo_dir(repo_id)) for repo_id in target.repo_ids) if target is not None else 0
-    needed = _matte_download_needed(present)
+    needed = matte_download_needed(present=present)
     return {
         "name": MATTE_ROW_NAME,
-        "label": MATTE_LABEL,
-        "downloaded": None if needed is None else not needed,
+        "label": model_display_name(MATTE_LICENCE_MODEL),
+        "downloaded": not needed,
         "disk_size_label": disk_size_label(disk_bytes) if disk_bytes else None,
-        "download_size_label": MATTE_DOWNLOAD_SIZE_LABEL,
+        "download_size_label": model_download_size_label(MATTE_LICENCE_MODEL, sys.platform),
         "deletable": target is not None,
-        "download_needed": bool(needed),
+        "download_needed": needed,
         "licences": licence_payload(load_licences(), MATTE_LICENCE_MODEL),
     }
-
-
-def _matte_download_needed(present: Callable[[DownloadTarget], bool]) -> bool | None:
-    """Return whether the background removal models need a download; a plan that cannot be made warns and returns ``None`` (status unknown)."""
-    try:
-        return matte_download_needed(present=present)
-    except Exception as exc:  # noqa: BLE001 - one unreadable row must not break the whole listing
-        warnings.warn(f"Could not determine whether the background removal models need a download: {exc}", stacklevel=2)
-        return None
 
 
 def find_other_downloads(web_config: WebUiConfig, *, cache_dir: Path | None = None) -> tuple[CachedRepo, ...]:
     """Return the model repos in the HuggingFace cache that nothing on the Models page uses.
 
-    Used means an alias or enhancer tier loads it (with LTX companions, the MLX LTX text encoder, the repos MOSS-Image and
-    Ideogram 4 Instant are built from, the repos of the audio models and, where the SeedVR2 engine downloads through the cache to make its stored copy,
-    the SeedVR2 repo), or an installed model links into it.
+    Used means a model of this platform declares it or an alias or the custom enhancer model loads it (see
+    :func:`used_repo_ids`), or an installed model links into it.
     """
     cache_dir = cache_dir or huggingface_cache_dir()
-    # The MLX LTX text encoder counts as used everywhere; only the macOS backend downloads it.
-    extra = [
-        ltx_mlx_text_encoder_repo_id(web_config.app_config),
-        *audio_repo_ids(web_config.app_config),
-        *([SEEDVR2_REPO] if web_config.seedvr2 is not None and web_config.seedvr2.weights.stores_copy else []),
-    ]
-    used = used_repo_ids((*web_config.image_inventory, *web_config.video_inventory), web_config.app_config, platform_key=sys.platform, extra=extra)
+    used = used_repo_ids((*web_config.image_inventory, *web_config.video_inventory), web_config.app_config, platform_key=sys.platform)
     linked = cache_repos_linked_from(Path(web_config.models_dir), cache_dir)
     return tuple(repo for repo in cached_model_repos(cache_dir) if repo.repo_id.casefold() not in used and repo.path.name not in linked)
 
@@ -502,11 +466,11 @@ def _stored_quant_payload(entry: ImageInventoryEntry) -> dict[str, Any] | None:
     return None if stored is None else {"base_model": stored[0], "bits": stored[1]}
 
 
-def _video_row_version(app_config: dict[str, Any], entry: VideoInventoryEntry | None) -> str | None:
+def _video_row_version(entry: VideoInventoryEntry | None) -> str | None:
     """Return the LTX version (``"2.3"`` or ``"2.5"``) of an LTX video model, or ``None`` for other video models."""
     if entry is None or entry.family != "ltx":
         return None
-    return ltx_model_version(app_config, entry.name, entry.resolved_path)
+    return ltx_model_version(entry.name, entry.resolved_path)
 
 
 def _converted_bits(entry: VideoInventoryEntry) -> int | None:
@@ -555,7 +519,7 @@ def _status_resolver(
                 app_config=web_config.app_config,
                 family=entry.family if kind == "video" else None,
             )
-            if instant_sources_count and not described["downloaded"] and built_model_plan(entry.resolved_path, config=web_config.app_config, platform_key=sys.platform) is not None:
+            if instant_sources_count and not described["downloaded"] and built_model_plan(entry.resolved_path, platform_key=sys.platform) is not None:
                 described["downloaded"] = not row_download_needed(KIND_MODEL, entry.name, web_config, downloaded=False)
             return described
         except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
@@ -570,7 +534,6 @@ def _delete_info_resolver(
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
     *,
     inventory: tuple[ImageInventoryEntry | VideoInventoryEntry, ...] = (),
-    app_config: dict[str, Any] | None = None,
 ) -> Callable[[ImageInventoryEntry | VideoInventoryEntry], dict[str, Any] | None]:
     """Return a resolver for each model's ``delete`` field: what deleting it removes, or ``None`` when it cannot be deleted.
 
@@ -579,7 +542,7 @@ def _delete_info_resolver(
     """
 
     def _delete_info(entry: ImageInventoryEntry | VideoInventoryEntry) -> dict[str, Any] | None:
-        target = model_delete_target(entry, models_dir, find_local_dir=find_local_dir, **delete_scope(entry, inventory, app_config or {}, models_dir=models_dir, platform_key=sys.platform))
+        target = model_delete_target(entry, models_dir, find_local_dir=find_local_dir, **delete_scope(entry, inventory, models_dir=models_dir, platform_key=sys.platform))
         if target is None or not target.on_disk:
             return None
         linked_by = list(installed_models_linking_to(target.path, models_dir)) if target.kind == "huggingface" else []
@@ -593,14 +556,15 @@ def _delete_info_resolver(
 
 
 def _disk_size_resolver(
-    models_dir: Path, *, listed: set[str], app_config: dict[str, Any], inventory: tuple[ImageInventoryEntry | VideoInventoryEntry, ...] = ()
+    models_dir: Path, *, listed: set[str], inventory: tuple[ImageInventoryEntry | VideoInventoryEntry, ...] = ()
 ) -> Callable[[ImageInventoryEntry | VideoInventoryEntry], str | None]:
     """Return a resolver for each model's ``disk_size_label``: the disk its files use, or ``None`` when nothing is on disk.
 
     An installed model counts its folder (not the HuggingFace files it links to), an alias its HuggingFace download
-    with any companion repos. A model built on first use that is not built yet counts the source repos that deleting
-    it removes (see :func:`built_sources_freed_with`), and the hidden folder its build downloads into (see :func:`built_downloads_freed_with`). Stored quants count with their model unless they are rows of
-    their own (in *listed*).
+    with the companion repos deleting it frees. A model built on first use that is not built yet counts the source repos that
+    deleting it frees, and the hidden folder its build downloads into (see :func:`built_downloads_freed_with`). Either way
+    the repos are the ones of :func:`freed_repo_ids`, so the size shown is what a delete frees. Stored quants count with
+    their model unless they are rows of their own (in *listed*).
     """
 
     def _disk_size(entry: ImageInventoryEntry | VideoInventoryEntry) -> str | None:
@@ -609,11 +573,10 @@ def _disk_size_resolver(
         hub: list[Path] = []
         if entry.source == "installed":
             local.append(models_dir / entry.name)
-        elif (repo := parse_huggingface_repo_reference(entry.resolved_path)) is not None:
-            hub = [huggingface_cache_repo_dir(repo_id) for repo_id in (repo.repo_id, *video_companion_repos(entry.family, app_config, entry.resolved_path))]
         else:
-            sources = built_sources_freed_with(entry, inventory, app_config, models_dir=models_dir, platform_key=sys.platform)
-            hub = [huggingface_cache_repo_dir(repo_id) for repo_id in sources]
+            repo = parse_huggingface_repo_reference(entry.resolved_path)
+            repo_ids = (*((repo.repo_id,) if repo is not None else ()), *freed_repo_ids(entry, inventory, models_dir=models_dir, platform_key=sys.platform))
+            hub = [huggingface_cache_repo_dir(repo_id) for repo_id in repo_ids]
         total = sum(directory_bytes(path) for path in local) + sum(repo_disk_bytes(path) for path in hub)
         return disk_size_label(total) if total else None
 
@@ -732,8 +695,8 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
     family: str | None = None
     size_variant: str | None = None
     try:
-        resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
-        declared = declared_image_family(app_config, model_name)
+        resolved_model = resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform)
+        declared = image_model_family(model_name)
         if declared is not None:
             model_info = ImageModelInfo(family=declared, is_distilled=False, size=None)
         else:
@@ -798,7 +761,7 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
     frame_alignment = 1
     detected_family: str | None = None
     try:
-        resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
+        resolved_model = resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform)
         model_info = detect_video_model(resolved_model)
         detected_family = _known_family(getattr(model_info, "family", None))
         family = _resolve_video_bootstrap_family(app_config, detected_family)

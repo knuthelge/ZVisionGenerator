@@ -9,6 +9,7 @@ from typing import Any
 
 from zvisiongenerator.converters.list_assets import list_models, list_video_models
 from zvisiongenerator.utils.image_model_detect import detect_image_model
+from zvisiongenerator.utils.model_metadata import alias_map, image_model_family
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.stored_quant import parse_stored_quant_name
 from zvisiongenerator.utils.video_model_detect import detect_video_model, is_known_video_repo
@@ -36,25 +37,6 @@ class VideoInventoryEntry:
     resolved_path: str
 
 
-def declared_image_family(app_config: dict[str, Any], alias_name: str) -> str | None:
-    """Return the config-declared image family for *alias_name*, if any.
-
-    Declared families let the Web UI surface known aliases (e.g. ``ideo``)
-    without a network round-trip through ``detect_image_model``.
-
-    Args:
-        app_config: Loaded config.yaml dict.
-        alias_name: The model alias to look up.
-
-    Returns:
-        The declared family string, or ``None`` when the alias has no
-        declared family.
-    """
-    families = app_config.get("model_alias_families", {})
-    value = families.get(alias_name)
-    return value if isinstance(value, str) and value else None
-
-
 def discover_image_inventory(
     app_config: dict[str, Any],
     data_dir: Path,
@@ -77,14 +59,14 @@ def discover_image_inventory(
         )
         for entry in list_installed(data_dir)
     }
-    aliases = app_config.get("model_aliases", {})
+    aliases = alias_map(app_config)
     for alias_name in sorted(aliases):
         if alias_name in entries:
             continue
         resolved_path = _resolve_alias_path(alias_name, aliases, resolve_alias_path)
         if resolved_path is None:
             continue
-        declared = declared_image_family(app_config, alias_name)
+        declared = image_model_family(alias_name)
         if declared is not None:
             family, size = declared, None
         elif is_known_video_repo(resolved_path):
@@ -131,7 +113,7 @@ def discover_video_inventory(
         )
         for entry in list_installed(data_dir)
     }
-    aliases = app_config.get("model_aliases", {})
+    aliases = alias_map(app_config)
     for alias_name in sorted(aliases):
         if alias_name in entries:
             continue

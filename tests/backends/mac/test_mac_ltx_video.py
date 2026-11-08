@@ -28,7 +28,7 @@ from zvisiongenerator.backends.mac.video import (
     _use_low_ram_streaming,
 )
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment
-from zvisiongenerator.utils.h3_preset import HubFiles
+from zvisiongenerator.downloads.target import HubFiles
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
 

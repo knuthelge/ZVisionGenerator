@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from zvisiongenerator.utils.model_files import is_h3_model_dir, is_ltx_model_dir
-from zvisiongenerator.utils.paths import is_explicit_local_path, parse_huggingface_repo_reference
+from zvisiongenerator.utils.paths import is_explicit_local_path
 
 
 @dataclass(frozen=True)
@@ -109,16 +109,6 @@ def detect_video_model(model_path: str) -> VideoModelInfo:
                 resolution_alignment=res_align,
             )
 
-    # Configured default repo remains explicitly detectable even when the
-    # packaged default is overrideable from user config.
-    configured_default = _configured_diffusers_ltx_repo()
-    if configured_default and normalized_lower == configured_default.strip().lower():
-        return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-
-    repo_reference = parse_huggingface_repo_reference(normalized_model_path)
-    if repo_reference is not None and configured_default and repo_reference.repo_id.lower() == configured_default.strip().lower():
-        return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-
     # A local folder counts as H3 by its contents (checked first: an H3 folder's path may well contain "ltx"), and as LTX
     # when its path says so, or by its contents (e.g. a converted fine-tune).
     if _looks_like_local_model_path(normalized_model_path):
@@ -136,17 +126,3 @@ def detect_video_model(model_path: str) -> VideoModelInfo:
         frame_alignment=1,
         resolution_alignment=1,
     )
-
-
-def _configured_diffusers_ltx_repo() -> str | None:
-    """Return the configured Windows/Linux diffusers LTX repository, if any."""
-
-    try:
-        from zvisiongenerator.utils.config import load_config
-
-        config = load_config()
-    except Exception:
-        return None
-
-    default_repo = config.get("video_model_presets", {}).get("ltx", {}).get("diffusers", {}).get("default_repo")
-    return default_repo.strip() if isinstance(default_repo, str) and default_repo.strip() else None

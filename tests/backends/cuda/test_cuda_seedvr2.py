@@ -13,7 +13,18 @@ from PIL import Image
 
 from zvisiongenerator.backends.cuda import seedvr2 as module
 from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
-from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, SEEDVR2_REPO
+from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, seedvr2_files
+
+
+def _files(model: str) -> tuple[tuple[str, str], ...]:
+    """Return the declared ``(repo, file)`` pairs of the tier *model* on a Linux machine."""
+    return seedvr2_files(model, "linux")
+
+
+@pytest.fixture(autouse=True)
+def _cuda_platform(monkeypatch):
+    """Run the engine as on Linux, whatever machine the tests run on: the files it downloads are the ones declared for that platform."""
+    monkeypatch.setattr("sys.platform", "linux")
 
 
 @pytest.fixture
@@ -30,7 +41,7 @@ def hub(monkeypatch):
 
 
 def _model(model: str = "seedvr2-7b") -> module.TorchSeedVR2Model:
-    (_, dit), (_, vae) = FP8_WEIGHTS.files[model]
+    (_, dit), (_, vae) = _files(model)
     return module.TorchSeedVR2Model(model=model, dit_file=dit, vae_file=vae, model_dir="/models/.seedvr2/fp8")
 
 
@@ -46,13 +57,13 @@ class TestLoadModel:
     def test_downloads_the_tiers_transformer_and_vae_from_their_repos_into_the_folder(self, hub, tmp_path, model):
         loaded = module.TorchSeedVR2Upscaler().load_model(model, quantize=None, model_path=str(tmp_path))
 
-        (dit_repo, dit), (vae_repo, vae) = FP8_WEIGHTS.files[model]
+        (dit_repo, dit), (vae_repo, vae) = _files(model)
         assert [(c.args, c.kwargs) for c in hub.call_args_list] == [((dit_repo, dit), {"local_dir": str(tmp_path)}), ((vae_repo, vae), {"local_dir": str(tmp_path)})]
-        assert vae_repo == SEEDVR2_REPO
+        assert vae_repo == "numz/SeedVR2_comfyUI"
         assert loaded == module.TorchSeedVR2Model(model=model, dit_file=dit, vae_file=vae, model_dir=str(tmp_path))
 
     def test_files_already_in_the_folder_are_not_downloaded_again(self, hub, tmp_path):
-        for _repo, name in FP8_WEIGHTS.files["seedvr2-3b"]:
+        for _repo, name in _files("seedvr2-3b"):
             (tmp_path / name).write_bytes(b"w")
 
         module.TorchSeedVR2Upscaler().load_model("seedvr2-3b", quantize=None, model_path=str(tmp_path))
@@ -208,7 +219,7 @@ class TestRun:
         assert runner["encode_tile_size"] == runner["decode_tile_size"] == (1024, 1024)
         assert core.upscale_all_batches.call_args.kwargs["cache_model"] is False
         assert core.decode_all_batches.call_args.kwargs["cache_model"] is False
-        assert (runner["dit_model"], runner["vae_model"], runner["model_dir"]) == (*(name for _repo, name in FP8_WEIGHTS.files["seedvr2-3b"]), "/models/.seedvr2/fp8")
+        assert (runner["dit_model"], runner["vae_model"], runner["model_dir"]) == (*(name for _repo, name in _files("seedvr2-3b")), "/models/.seedvr2/fp8")
         assert core.encode_all_batches.call_args.kwargs["color_correction"] == "lab"
         assert core.postprocess_all_batches.call_args.kwargs["color_correction"] == "lab"
 

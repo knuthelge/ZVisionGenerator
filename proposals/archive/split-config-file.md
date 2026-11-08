@@ -1,6 +1,8 @@
 # Split config.yaml into a file per area
 
-**Status:** Proposed (2026-11-02)
+**Status:** Rejected (2026-11-08): `config.yaml` stays one file. The model facts left it for packaged metadata (see [Keep config.yaml for configuration](config-vs-model-metadata.md)), which cut it from 693 to 255 lines of settings with one section per area. Per-area files would add a load order for no gain to the user.
+
+The text below is the proposal as written on 2026-11-02, before the metadata move.
 
 ## Idea
 

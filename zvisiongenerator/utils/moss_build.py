@@ -2,8 +2,8 @@
 
 MOSS-Image is one model with two aliases. ``moss-sft`` is the SFT checkpoint as released; ``moss`` (Turbo) is the same
 checkpoint run with a 4-step LoRA. Each alias is built once into a model folder of its own that links the downloaded
-files; the Turbo folder also records its LoRA, which sits next to the SFT files. The ``moss_image`` config block pins
-every source.
+files; the Turbo folder also records its LoRA, which sits next to the SFT files. The ``moss`` entry of the model metadata
+pins every source.
 """
 
 from __future__ import annotations
@@ -12,15 +12,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.downloads.declaration import model_targets, role_targets
+from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.built_model import is_models_dir_child, read_build_record, write_record
-from zvisiongenerator.utils.paths import split_huggingface_revision
+from zvisiongenerator.utils.paths import join_huggingface_revision, split_huggingface_revision
 from zvisiongenerator.utils.stored_quant import is_current, parse_stored_quant_name, stored_quant_dir
 
 __all__ = [
     "LINKED_COMPONENTS",
     "SFT_DIR_NAME",
-    "SFT_IGNORE",
-    "SFT_PATTERNS",
     "TURBO_DIR_NAME",
     "TURBO_LORA_NAME",
     "MossSource",
@@ -31,6 +31,7 @@ __all__ = [
     "is_turbo_dir",
     "moss_base_dir",
     "moss_source",
+    "moss_targets",
     "require_built",
     "shared_quant_source",
     "turbo_lora_file",
@@ -44,9 +45,6 @@ TURBO_DIR_NAME = "moss"
 SFT_DIR_NAME = "moss-sft"
 # The Turbo LoRA's file name inside the Turbo folder.
 TURBO_LORA_NAME = "turbo_lora.safetensors"
-# The files of the SFT repo the build downloads; its pipeline script is never fetched or run.
-SFT_PATTERNS = ("model_index.json", "LICENSE", "transformer/*", "text_encoder/*", "tokenizer/*", "scheduler/*", "vae/*")
-SFT_IGNORE = ("*.py",)
 # The SFT repo's folders a built model folder links as they are.
 LINKED_COMPONENTS = ("transformer", "text_encoder", "tokenizer", "scheduler", "vae")
 _RECORD_VERSION = 1
@@ -79,22 +77,22 @@ class MossSource:
         return split_huggingface_revision(self.sft)[1]
 
 
-def moss_source(config: dict[str, Any]) -> MossSource:
-    """Return the MOSS-Image build source from *config*'s ``moss_image`` block.
+def moss_targets(platform_key: str) -> tuple[DownloadTarget, DownloadTarget]:
+    """Return the ``sft`` and ``turbo_lora`` targets of the ``moss`` entry of the model metadata for *platform_key*."""
+    pairs = model_targets(TURBO_DIR_NAME, platform_key)
+    (sft,) = role_targets(pairs, "sft")
+    (turbo,) = role_targets(pairs, "turbo_lora")
+    return sft, turbo
 
-    Raises:
-        ValueError: If the block is missing or incomplete, or the SFT repo has no pinned revision.
+
+def moss_source(platform_key: str) -> MossSource:
+    """Return the MOSS-Image build source: the ``sft`` and ``turbo_lora`` targets of the ``moss`` entry of the model metadata for *platform_key*.
+
+    The entry's downloads are the same on every platform; the platform key only selects among per-platform lists.
     """
-    block = config.get("moss_image")
-    if not isinstance(block, dict):
-        raise ValueError("config 'moss_image' must be a mapping.")
-    sft = block.get("sft")
-    if not isinstance(sft, str) or not sft or split_huggingface_revision(sft)[1] is None:
-        raise ValueError("config 'moss_image.sft' must be a repo with a pinned revision ('owner/repo@revision').")
-    turbo = block.get("turbo_lora")
-    if not isinstance(turbo, dict) or not all(isinstance(turbo.get(key), str) and turbo[key] for key in ("repo", "revision", "filename")):
-        raise ValueError("config 'moss_image.turbo_lora' needs 'repo', 'revision' and 'filename'.")
-    return MossSource(sft=sft, turbo_repo=turbo["repo"], turbo_revision=turbo["revision"], turbo_file=turbo["filename"])
+    sft, turbo = moss_targets(platform_key)
+    (turbo_file,) = turbo.allow_patterns
+    return MossSource(sft=join_huggingface_revision(sft.repo_id, sft.revision), turbo_repo=turbo.repo_id, turbo_revision=turbo.revision, turbo_file=turbo_file)
 
 
 def is_moss_dir(path: str | Path) -> bool:

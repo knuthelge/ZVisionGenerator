@@ -19,7 +19,7 @@ class SeedVR2Upscaler(Protocol):
     """Single-step diffusion upscaler that enlarges an existing image without a prompt.
 
     Required interface:
-    - weights: the files the engine reads, its precision and whether it keeps a stored copy
+    - weights: the precision the engine runs at and whether it keeps a stored copy
     - load_model(): load a SeedVR2 model from a path with optional quantization
     - save_model(): write a loaded (quantized) model's weights for reuse
     - upscale_image(): enlarge one image file to a target size

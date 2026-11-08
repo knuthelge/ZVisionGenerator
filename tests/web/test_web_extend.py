@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 
+from tests._audio_presets import audio_config
 from tests._factories import make_probe
 from tests._paths import FIXTURES
 from tests.web._helpers import post_video, stub_video_submission, make_web_config
@@ -389,9 +390,9 @@ def test_inspect_route_accepts_every_source_container(clip, tmp_path):
 
 def test_workspace_contract_carries_extend_only_with_the_capability(monkeypatch):
     monkeypatch.setattr(web_server, "supports_video_extend", lambda: True)
-    with_extend = web_server._build_workflow_contract()
+    with_extend = web_server._build_workflow_contract(audio_config())
     monkeypatch.setattr(web_server, "supports_video_extend", lambda: False)
-    without_extend = web_server._build_workflow_contract()
+    without_extend = web_server._build_workflow_contract(audio_config())
 
     assert "extend" in with_extend["values"] and "extend" in with_extend["definitions"]
     assert "extend" not in without_extend["values"] and "extend" not in without_extend["definitions"]

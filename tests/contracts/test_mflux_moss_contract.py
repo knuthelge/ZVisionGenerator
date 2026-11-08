@@ -34,8 +34,8 @@ from mflux.models.moss_image.weights.moss_image_weight_definition import MOSSIma
 
 from zvisiongenerator.backends.mac import moss  # noqa: E402
 from zvisiongenerator.backends.mac.moss_lora import moss_lora_mapping  # noqa: E402
-from zvisiongenerator.utils.config import load_config  # noqa: E402
-from zvisiongenerator.utils.moss_build import moss_source  # noqa: E402
+from zvisiongenerator.utils.model_metadata import model_entry  # noqa: E402
+from zvisiongenerator.utils.paths import split_huggingface_revision  # noqa: E402
 
 
 def _params(fn) -> list[str]:
@@ -65,9 +65,10 @@ class TestWeightsContract:
         assert [tokenizer.name for tokenizer in MOSSImageWeightDefinition.get_tokenizers()] == [moss._TOKENIZER]
 
     def test_mflux_pins_the_sft_revision_the_builder_downloads(self):
-        source = moss_source(load_config())
+        sft = next(target for target in model_entry("moss")["downloads"] if target["role"] == "sft")
+        repo, revision = split_huggingface_revision(sft["ref"])
 
-        assert ModelRevisions.PINNED[source.sft_repo] == source.sft_revision
+        assert ModelRevisions.PINNED[repo] == revision
 
     def test_loader_applier_and_saver_take_a_weight_definition(self):
         assert _params(WeightLoader.load)[:2] == ["weight_definition", "model_path"]

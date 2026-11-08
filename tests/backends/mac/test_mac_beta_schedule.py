@@ -110,7 +110,7 @@ class TestKleinBetaSchedule:
 
         assert seen[0][1] is None
 
-    def test_beta_constant_matches_the_packaged_config(self, image_mac):
-        from zvisiongenerator.utils.config import load_config
+    def test_beta_constant_matches_the_scheduler_classes(self, image_mac):
+        from zvisiongenerator.schedulers import SCHEDULER_CLASSES
 
-        assert load_config()["schedulers"]["beta"]["mflux_class"] == image_mac._BETA_SCHEDULER
+        assert SCHEDULER_CLASSES["beta"]["mflux"] == image_mac._BETA_SCHEDULER

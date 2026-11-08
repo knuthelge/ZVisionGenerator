@@ -18,6 +18,7 @@ import pytest
 import yaml
 
 from zvisiongenerator.core.job_plan import JobPlan
+from zvisiongenerator.utils import model_metadata as model_metadata_module
 from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.preflight import plan_iterations
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
@@ -185,8 +186,6 @@ def _patch_image_main_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock
         lambda: {
             "generation": {"default_ratio": "2:3", "default_size": "m"},
             "sizes": {"2:3": {"m": {"width": 832, "height": 1216}}},
-            "model_aliases": {},
-            "schedulers": {},
         },
     )
     monkeypatch.setattr(image_cli, "select_ratio_size_defaults", lambda *args, **kwargs: ("2:3", "m"))
@@ -221,6 +220,19 @@ def load_packaged_config() -> dict[str, Any]:
     return copy.deepcopy(shared_packaged_config())
 
 
+def video_config(**families: dict[str, Any]) -> dict[str, Any]:
+    """Return a config with the video settings of the shipped families (``ltx``, ``h3``); a family given by keyword replaces its settings.
+
+    These are the only video keys a config carries; the facts of a family (its rule, capabilities and files) are the model metadata's.
+    """
+    settings: dict[str, Any] = {
+        "ltx": {"default_steps": 8, "upscale": {"default_upscale_steps": 8, "existing_video_steps": 2}},
+        "h3": {"default_steps": 8, "default_frames": 124, "diffusers": {"ffn_chunk_tokens": 4096}},
+    }
+    settings.update(families)
+    return {"video_model_presets": settings}
+
+
 def metadata_copy() -> dict[str, Any]:
     """Return a private deep copy of the packaged model metadata, so a test may change it freely.
 
@@ -232,12 +244,96 @@ def metadata_copy() -> dict[str, Any]:
     return copy.deepcopy(load_model_metadata())
 
 
+_PACKAGED_METADATA = yaml.load(model_metadata_module.METADATA_FILE.read_text(encoding="utf-8"), Loader=model_metadata_module.YAML_LOADER)
+"""The packaged metadata, parsed once at import (before any test serves other metadata); read through ``packaged_metadata_copy``."""
+
+
+def packaged_metadata_copy() -> dict[str, Any]:
+    """Return a private deep copy of the packaged metadata, even while a test serves other metadata."""
+    return copy.deepcopy(_PACKAGED_METADATA)
+
+
+def use_built_model_pins(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    ids: tuple[str, ...] | None = ("ideo", "moss", "moss-sft"),
+    *,
+    sft: str = "org/moss-sft@" + "d" * 40,
+    lora: str = "org/moss-turbo@" + "e" * 40,
+    components: dict[str, str] | None = None,
+    transformer: str = "org/instant-transformer@" + "a" * 40,
+    keep: tuple[str, ...] = (),
+) -> None:
+    """Serve metadata holding only the models built on first use among *ids* (every model for ``None``), pinned to test repos.
+
+    The packaged models named in *keep* stay as they are.
+
+    *components* maps a platform key to the Ideogram 4 Instant components repo (default: ``org/ideo-nf4`` on every platform) and
+    *transformer* is its transformer reference. The MOSS entries pin *sft* and the Turbo LoRA *lora*.
+    """
+    data = packaged_metadata_copy()
+    if ids is not None:
+        data["models"] = {model_id: data["models"][model_id] for model_id in (*ids, *keep)}
+    for model_id in ("moss", "moss-sft"):
+        for target in data["models"].get(model_id, {}).get("downloads", ()):
+            target["ref"] = sft if target["role"] == "sft" else lora
+    pins = components or dict.fromkeys(("darwin", "win32", "linux"), "org/ideo-nf4@" + "c" * 40)
+    for platform_key, pin in pins.items():
+        for target in data["models"].get("ideo", {}).get("downloads", {}).get(platform_key, ()):
+            target["ref"] = pin if target["role"] == "components" else transformer
+    use_model_metadata(monkeypatch, tmp_path, data)
+
+
+def use_model_entries(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, models: dict[str, dict[str, Any]] | None = None, *, video_families: bool = False, enhancers: bool = False) -> None:
+    """Make the metadata hold only the ``models`` entries in *models* (none by default), so a test sees no built-in alias but its own.
+
+    Entries need a ``kind`` (``image`` or ``video``) and ``downloads`` for every platform. The metadata has no licences and no
+    image families; it keeps the packaged ``video_families`` when *video_families* is set and the packaged enhancer entries when
+    *enhancers* is set (every Web UI config reads them).
+    """
+    packaged = packaged_metadata_copy()
+    entries = {model_id: packaged["models"][model_id] for model_id in ("enhancer-fast", "enhancer-smart")} if enhancers else {}
+    data: dict[str, Any] = {"licences": {}, "models": {**entries, **(models or {})}}
+    if video_families:
+        data["video_families"] = packaged["video_families"]
+    use_model_metadata(monkeypatch, tmp_path, data)
+
+
 def use_model_metadata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, data: dict[str, Any]) -> None:
-    """Make the metadata readers read *data* instead of the packaged file for this test."""
+    """Make the metadata readers read *data* instead of the packaged file for this test.
+
+    A section *data* leaves out is served empty, as the readers expect every section of the packaged file to exist.
+    """
     from zvisiongenerator.utils import model_metadata
 
-    text = yaml.safe_dump(data)
+    text = yaml.safe_dump({"licences": {}, "image_families": {}, "video_families": {}, "models": {}, **data}, sort_keys=False)  # file order is meaningful: aliases and tiers follow it
     # Named by content: the parse is cached per path, so a second call in one test with other data must not reuse a path.
     path = tmp_path / f"model_metadata-{hashlib.sha256(text.encode()).hexdigest()[:12]}.yaml"
     path.write_text(text, encoding="utf-8")
     monkeypatch.setattr(model_metadata, "METADATA_FILE", path)
+
+
+def use_enhancer_models(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    fast: str | None = None,
+    smart: str | None = None,
+    smart_memory_gb: float | None = None,
+    fast_size: str | None = None,
+    smart_size: str | None = None,
+) -> None:
+    """Serve the packaged metadata with the enhancer tiers changed to what is given, the same on every platform; a tier left out stays as packaged.
+
+    *fast* and *smart* are a reference (``repo`` or ``repo@revision``).
+    """
+    data = metadata_copy()
+    for model_id, ref, size in (("enhancer-fast", fast, fast_size), ("enhancer-smart", smart, smart_size)):
+        entry = data["models"][model_id]
+        if ref is not None:
+            entry["downloads"] = {platform_key: [{"ref": ref, "files_from": "loader"}] for platform_key in ("darwin", "win32", "linux")}
+        if size is not None:
+            entry["download_size"] = size
+    if smart_memory_gb is not None:
+        data["models"]["enhancer-smart"]["memory_gb"] = smart_memory_gb
+    use_model_metadata(monkeypatch, tmp_path, data)

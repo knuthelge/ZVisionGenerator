@@ -13,10 +13,7 @@ import pytest
 
 from tests._licences import use_licences
 from zvisiongenerator.utils.licences import (
-    ENHANCER_LICENCE_TIERS,
-    MATTE_LICENCE_MODEL,
     LicenceRecord,
-    enhancer_licence_model,
     NOTICE_FOOTER,
     licence_notice,
     licence_payload,
@@ -25,7 +22,7 @@ from zvisiongenerator.utils.licences import (
     load_licences,
     record_notice,
 )
-from zvisiongenerator.utils.model_metadata import load_model_metadata
+from zvisiongenerator.utils.model_metadata import load_model_metadata, model_ids
 
 _SHA = "455f1273c2f08f1fc93d725c2e6f1d7fc681cd94"
 _URL = f"https://huggingface.co/owner/repo/blob/{_SHA}/LICENSE.md"
@@ -144,13 +141,6 @@ class TestPackagedRecords:
         assert set(carrying) == {"stability-community"}
         assert carrying["stability-community"] == "Powered by Stability AI"
 
-    @staticmethod
-    def _model_ids(config: dict[str, Any]) -> set[str]:
-        """Every model id the app downloads: aliases, audio presets, background removal, the SeedVR2 tiers and the enhancer tiers."""
-        enhancers = {enhancer_licence_model(tier) for tier in ENHANCER_LICENCE_TIERS}
-        seedvr2 = {tier["model"] for tier in config["seedvr2"]["tiers"]}
-        return {MATTE_LICENCE_MODEL, *seedvr2, *enhancers, *config["model_aliases"], *config["audio_model_presets"]}
-
     def test_every_entry_names_existing_records_and_every_record_is_used(self) -> None:
         models = load_model_metadata()["models"]
         record_ids = {record.id for record in load_licences()}
@@ -160,13 +150,10 @@ class TestPackagedRecords:
         assert named <= record_ids, named - record_ids
         assert record_ids <= named, record_ids - named
 
-    def test_every_model_entry_is_a_known_model(self, packaged_config_shared: dict[str, Any]) -> None:
-        assert set(load_model_metadata()["models"]) <= self._model_ids(packaged_config_shared)
-
-    def test_every_model_the_app_downloads_has_a_record(self, packaged_config_shared: dict[str, Any]) -> None:
+    def test_every_model_the_app_downloads_has_a_record(self) -> None:
         records = load_licences()
 
-        assert [model for model in sorted(self._model_ids(packaged_config_shared)) if not licences_for(records, model)] == []
+        assert [model for model in model_ids() if not licences_for(records, model)] == []
 
     @pytest.mark.parametrize(
         ("model", "expected"),
@@ -195,19 +182,6 @@ class TestPackagedRecords:
     )
     def test_the_records_of_each_model(self, model: str, expected: list[str]) -> None:
         assert [record.id for record in licences_for(load_licences(), model)] == expected
-
-
-def test_a_licences_key_in_the_user_config_has_no_effect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from zvisiongenerator.utils.config import load_config
-
-    (tmp_path / "config.yaml").write_text(f"licences:\n  flux-nc:\n    name: Mine\n    supplier: Me\n    summary: Free\n    url: {_URL}\n    models: [zit]\n", encoding="utf-8")
-    monkeypatch.setattr("zvisiongenerator.utils.config.get_ziv_data_dir", lambda: tmp_path)
-    before = load_licences()
-
-    load_config()
-
-    assert load_licences() == before
-    assert [record.id for record in licences_for(load_licences(), "zit")] == ["zimage-apache"]
 
 
 def test_a_record_notice_names_only_the_record_asked_for(serve_records) -> None:

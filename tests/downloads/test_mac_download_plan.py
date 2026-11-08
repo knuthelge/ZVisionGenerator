@@ -12,7 +12,7 @@ from zvisiongenerator.backends.mac import download_plan as mac_plan
 from zvisiongenerator.backends.mac.download_plan import MLX_LM_ALLOW_PATTERNS, enhancer_download_plan, h3_mlx_download_plan, image_download_plan, video_download_plan
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils import hf_snapshot
-from zvisiongenerator.utils.h3_preset import HubFiles
+from zvisiongenerator.downloads.target import HubFiles
 
 PIN = "a1" * 20
 GEMMA_REF = "mlx-community/gemma-3-12b-it-4bit@" + "c3" * 20
@@ -213,26 +213,19 @@ def test_module_imports_nothing_heavy() -> None:
 
 
 def _shipped_h3_ref() -> str:
-    from zvisiongenerator.utils.config import load_config
+    from zvisiongenerator.utils.model_metadata import builtin_aliases
 
-    return load_config()["model_aliases"]["h3"]
+    return builtin_aliases()["h3"]
 
 
 H3_REF = _shipped_h3_ref()
 
 
-@pytest.fixture(scope="module")
-def h3_config() -> dict:
-    from zvisiongenerator.utils.config import load_config
-
-    return load_config()
-
-
 @pytest.fixture
-def h3_plan_inputs(h3_config: dict):
+def h3_plan_inputs():
     from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_turbo_lora
 
-    return h3_mlx_preset(h3_config), h3_turbo_lora(h3_config)[0]
+    return h3_mlx_preset(), h3_turbo_lora("darwin")[0]
 
 
 def test_h3_plan_is_the_int8_transformer_the_fl2va_components_and_the_lora(h3_plan_inputs) -> None:

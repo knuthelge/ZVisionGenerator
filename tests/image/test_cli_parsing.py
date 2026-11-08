@@ -9,9 +9,10 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from zvisiongenerator.image_cli import _build_parser, main
-from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
+from zvisiongenerator.utils.matte import matte_pins
 from zvisiongenerator.utils.prompts import PromptFileInspection
 
+BIREFNET, VITMATTE = matte_pins()
 
 _IDEOGRAM = {
     "detect_image_model": lambda _path: MagicMock(family="ideogram4", size=None),
@@ -41,8 +42,6 @@ class TestCLIValidation:
     _MAIN_MOCKS = {
         "zvisiongenerator.image_cli.load_config": lambda: {
             "sizes": {"2:3": {"m": {"width": 832, "height": 1216}}},
-            "model_presets": {},
-            "schedulers": {"beta": {}},
         },
         "zvisiongenerator.image_cli.detect_image_model": lambda _: MagicMock(family="zimage", size=None),
         "zvisiongenerator.image_cli.resolve_model_path": lambda p, **kw: p,
@@ -444,8 +443,6 @@ class TestCLIValidation:
         # Config with generation.default_size = "s" and both sizes defined (nested under ratio)
         mocks["load_config"] = lambda: {
             "sizes": {"2:3": {"s": {"width": 576, "height": 864}, "m": {"width": 832, "height": 1216}}},
-            "model_presets": {},
-            "schedulers": {},
             "generation": {"default_size": "s", "default_ratio": "2:3"},
         }
 
@@ -497,8 +494,6 @@ class TestCLIValidation:
                     "16:9": {"xl": {"width": 2112, "height": 1184}},
                     "2:3": {"m": {"width": 832, "height": 1216}},
                 },
-                "model_presets": {},
-                "schedulers": {},
                 "generation": {"default_ratio": "2:3", "default_size": "m"},
             }
 

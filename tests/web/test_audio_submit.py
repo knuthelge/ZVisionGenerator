@@ -13,7 +13,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_two_kind_preset, yue2_preset
-from tests._factories import load_packaged_config
 from tests._fake_audio import fake_read_config, install_fake_audio, write_fake_audio
 from tests._paths import FIXTURES
 from tests.audio._helpers import case_request, clip, fake_backend, patch_runner, voice_folder
@@ -21,6 +20,7 @@ from tests.web._helpers import make_web_config, wait_for_status
 
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, SpeechDelivery, VoiceRef
+from zvisiongenerator.utils.model_metadata import model_ids
 from zvisiongenerator.downloads.ensure import DownloadReport
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.space import SpaceNeed
@@ -430,15 +430,10 @@ class TestRefusals:
         assert _refused(env.post(model=model)) == message
 
     def test_a_missing_model_lists_the_ones_that_run(self, env):
-        _refused(env.post(prompt="x"), "Field 'model' is required", "yue2, qwen3_tts, sa3")
+        _refused(env.post(prompt="x"), "Field 'model' is required", ", ".join(model_ids("audio")))
 
     def test_an_unknown_model_lists_the_ones_that_run(self, env):
-        _refused(env.post(model="nope", prompt="x"), "Unknown audio model 'nope'. Choose one of: yue2, qwen3_tts, sa3.")
-
-    def test_a_machine_without_audio_models_names_the_config_section(self, env):
-        env.web_config.app_config.update({**load_packaged_config(), "audio_model_presets": {}})
-
-        _refused(env.post(model="yue2", prompt="x"), "No audio models are configured", "audio_model_presets")
+        _refused(env.post(model="nope", prompt="x"), f"Unknown audio model 'nope'. Choose one of: {', '.join(model_ids('audio'))}.")
 
     @pytest.mark.parametrize("seed", ["-1", str(2**63)])
     def test_a_seed_no_model_takes_is_refused_before_anything_loads(self, env, seed):

@@ -24,7 +24,7 @@ from .paths import (
     resolve_lora_path,
     resolve_model_path,
 )
-from .platform import AliasMap, AliasValue, PlatformInfo, get_platform_info, resolve_alias
+from .platform import AliasMap, AliasValue, resolve_alias
 from .provenance import (
     EXIF_IMAGE_DESCRIPTION,
     IMAGE_CONFIG_SCHEMA,
@@ -60,7 +60,6 @@ __all__ = [
     "EnhanceSettings",
     "EXIF_IMAGE_DESCRIPTION",
     "IMAGE_CONFIG_SCHEMA",
-    "PlatformInfo",
     "RecordedSettings",
     "VIDEO_CONFIG_SCHEMA",
     "SkipSignal",
@@ -83,7 +82,6 @@ __all__ = [
     "expand_random_choices",
     "format_generation_info",
     "generate_filename",
-    "get_platform_info",
     "get_ziv_data_dir",
     "image_prompt_text",
     "is_explicit_local_path",

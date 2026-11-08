@@ -206,15 +206,4 @@ def _format_alias_target(target: AliasValue, *, platforms: dict[str, str] | None
     if isinstance(target, str):
         return target
 
-    parts: list[str] = []
-    for platform_key, platform_value in sorted(target.items()):
-        platform_label = platforms.get(platform_key, platform_key) if platforms else platform_key
-        if isinstance(platform_value, str):
-            parts.append(f"{platform_value} ({platform_label})")
-            continue
-        message = platform_value.get("message")
-        if message:
-            parts.append(f"{platform_label}: unavailable ({message})")
-        else:
-            parts.append(f"{platform_label}: unavailable")
-    return " / ".join(parts)
+    return " / ".join(f"{platform_value} ({platforms.get(platform_key, platform_key) if platforms else platform_key})" for platform_key, platform_value in sorted(target.items()))

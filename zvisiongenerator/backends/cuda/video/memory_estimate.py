@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import sys
 from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.backends.cuda.video import weights
-from zvisiongenerator.utils.config import ltx_transformer_source
+from zvisiongenerator.utils.ltx_facts import ltx_companion_file
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, estimate_ltx_cuda_system_memory
@@ -43,7 +44,6 @@ def _estimate(repo_dir: Path, block_matrices: int, transformer_rest: int, quanti
 
 
 def cached_ltx_system_estimate(
-    config: dict[str, Any],
     resolved_model: str,
     quantize: int,
     *,
@@ -52,13 +52,12 @@ def cached_ltx_system_estimate(
 ) -> LtxCudaMemoryEstimate | None:
     """Estimate LTX's system memory from files already on disk, or return ``None`` when some are missing.
 
-    Nothing is downloaded: the repo and the configured single-file transformer must be in the Hugging Face cache.
+    Nothing is downloaded: the repo and the declared single-file transformer must be in the Hugging Face cache.
 
     Args:
-        config: The loaded config, which names the single-file transformer.
         resolved_model: The model's resolved path (a local directory or a Hugging Face repo id).
         quantize: 4 or 8; a converted folder is estimated at its own level.
-        model_name: The picked model alias, which selects the version whose transformer source is read. A version
+        model_name: The picked model alias, which selects the version whose transformer companion is read. A version
             that uses the repo's own transformer has no single-file source.
         find_local_dir: Locates a downloaded model directory.
     """
@@ -71,7 +70,7 @@ def cached_ltx_system_estimate(
             return converted_ltx_system_estimate(repo_dir, converted)
         except OSError, ValueError, KeyError, TypeError:
             return None
-    source = ltx_transformer_source(config, model_name)
+    source = ltx_companion_file(model_name, sys.platform, "transformer")
     transformer_input = _cached_hub_file(*source) if source else repo_dir / "transformer"
     if transformer_input is None:
         return None

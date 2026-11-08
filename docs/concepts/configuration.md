@@ -10,7 +10,7 @@ sharpening:
   normal: 0.8
 ```
 
-Your file is merged over the defaults, key by key, so you only list what you change. The [Config page](../web-ui/config.md) writes the most common settings to the same file. Most changes apply from the next job; restart the Web UI if one doesn't.
+Your file is merged over the default settings, key by key, so you only list what you change. It holds settings only: which models the app offers, where they download from and the terms they come with are part of the app, and a key for them in your file has no effect. The [Config page](../web-ui/config.md) writes the most common settings to the same file. Most changes apply from the next job; restart the Web UI if one doesn't.
 
 ## Which value wins
 
@@ -86,33 +86,19 @@ The plain upscale of existing images. See [Plain upscale](upscaling.md#plain-ups
 | `softness` | `0.75` | 0–1: how much an image is softened before it's enlarged; `0` is off |
 | `video_softness` | `0.0` | The same for each frame of a video upscale (Windows and Linux) |
 | `reference_megapixels` | `16` | Output size the automatic choice must fit on a Mac (a typical 4×) |
-| `tiers` | | macOS: the models in quality order, with the memory figures that price them |
-| `discrete_tiers` | | Windows and Linux: the same, with the system memory each needs (`system_gb`) |
 
-With `model: auto`, the first tier that fits wins, and the last one runs when none does. On a Mac a tier fits when its estimate at `reference_megapixels` is within the GPU memory budget; on Windows and Linux when its `system_gb` is within the system memory. A tier's estimate, in GPU memory, is `weights_gb` plus the larger of `activation_floor_gb` and `activation_base_gb + activation_gb_per_mp × megapixels`. The same estimate marks sizes as **high memory**.
+With `model: auto`, the 7B model runs when it fits and the 3B model runs when it does not. On a Mac a model fits when its estimated GPU memory at `reference_megapixels` is within the GPU memory budget; on Windows and Linux when the system memory it needs is within the system memory. The same estimate marks sizes as **high memory**.
 
 ## `model_aliases`
 
-Short names for models. A value is a Hugging Face repo, or a map from platform (`darwin`, `win32`, `linux`) to a repo:
+Your own short names for models. A value is a Hugging Face repo, or a map from platform (`darwin`, `win32`, `linux`) to a repo:
 
 ```yaml
 model_aliases:
   mymodel: "my-org/my-model"
 ```
 
-A folder `~/.ziv/models/<alias>/` wins over an alias of the same name. See [Models](models.md#how-a-name-is-found).
-
-## `model_labels`
-
-How the Web UI names an alias, and its download size in the first-run dialog:
-
-```yaml
-model_labels:
-  mymodel:
-    name: "My Model"
-```
-
-An alias without a label shows its alias.
+A name the app already uses, such as `zit` or `ltx-4`, is taken: the built-in model keeps it. A folder `~/.ziv/models/<alias>/` wins over an alias of the same name. An alias is shown by its name in the Web UI. See [Models](models.md#how-a-name-is-found).
 
 ## `first_run`
 
@@ -144,11 +130,6 @@ The Web UI.
 | Key | Default | Description |
 |---|---|---|
 | `user_model` | none | A Hugging Face `owner/name[@revision]` or a local folder, used instead of Fast and Smart. The Config page's **Prompt enhancer model** |
-| `model`, `revision` | per platform | The Fast model, pinned |
-| `download_size_label` | per platform | The Fast model's first-use download, shown in the Web UI |
-| `smart.model`, `smart.revision` | per platform | The Smart model, pinned |
-| `smart.download_size_label` | per platform | The Smart model's first-use download, shown in the Web UI |
-| `smart.min_memory_gb` | 20 (macOS), 9 (Windows, Linux) | Accelerator memory Smart needs, in GiB |
 | `temperature` | `0.7` | How varied the rewrites are |
 | `max_new_tokens` | `700` | Longest rewrite the model may write |
 | `idle_release_seconds` | `120` | How long the Web UI keeps the enhancer loaded after a manual Enhance |
@@ -158,35 +139,30 @@ The Web UI.
 
 ## `model_presets` and `video_model_presets`
 
-Per-family defaults and capabilities, such as `default_steps`, `default_guidance`, `default_scheduler`, `supports_negative_prompt` and `max_reference_images`. `video_model_presets.ltx` and `video_model_presets.h3` also hold each video family's frame rule, steps, capabilities and the pinned repositories and files it loads on each platform; `video_model_presets.ltx.versions` holds LTX-2.5's differences from LTX-2.3.
+Per-family defaults for the steps, guidance and scheduler of a model. What a family can do (the sizes it accepts, whether it takes a negative prompt, a start image or reference images, and the rules for a video's frames) is part of the app.
 
-A video family's `capabilities` mapping lists what its models can do. Every capability is required and is `true` or `false`: `i2v`, `end_frame`, `extend`, `upscale`, `upscale_review`, `lora`, `audio`, `low_memory`, `audio_track` and `audio_track_upscale`. `audio_track` says the model can follow an audio file you give it, and `audio_track_upscale` says it can also upscale a clip made that way; a family that lacks the first refuses a track, and one that lacks the second refuses Upscale together with a track. The packaged config sets both to `true` for LTX, and `audio_track` to `true` and `audio_track_upscale` to `false` for MiniMax H3. `platform_capabilities` overrides capabilities for one platform (`darwin`, `win32` or `linux`).
+`model_presets.<family>` sets `default_steps`, `default_guidance`, `default_scheduler` (a scheduler per backend, `mflux` and `diffusers`, where `null` is the model's own) and `upscale.default_upscale_steps`. A family can split into variants (`variants.<name>`), such as FLUX.2 Klein distilled and base, or MOSS-Image Turbo and SFT; a variant sets its own steps, guidance and upscale steps, and they win over the family's.
 
-A family can split into variants (`variants.<name>`), such as FLUX.2 Klein distilled and base, or MOSS-Image Turbo and SFT. A variant sets its own steps, guidance and upscale steps, and may also set capability flags such as `supports_negative_prompt`; a flag it sets wins over the family's value. A variant that turns off the negative prompt may also set `negative_prompt_hint`, a sentence added to the warning shown when a negative prompt is ignored. For MOSS-Image, Turbo turns off the negative prompt and points to `moss-sft`; SFT keeps it.
+`video_model_presets` holds these settings:
 
-`max_reference_images` is how many [reference images](images.md#references) a family takes; `0`, the default, means none. FLUX.2 Klein sets `4`.
+| Key | Default | Description |
+|---|---|---|
+| `ltx.default_steps` | `8` | Steps of an LTX video |
+| `ltx.upscale.default_upscale_steps` | `8` | Steps when a video is upscaled and no steps are given; without it, the family's `default_steps` |
+| `ltx.upscale.existing_video_steps` | `2` | Refine steps, from `1` to `3`, of [upscaling an existing video](upscaling.md#macos-ltx) on macOS |
+| `h3.default_steps` | `8` | Steps of a MiniMax H3 video: `4` or `8` |
+| `h3.default_frames` | `124` | Frames of a MiniMax H3 video, 5 s at 24 fps; it replaces the frame count of the size presets |
+| `h3.diffusers.ffn_chunk_tokens` | `4096` | Windows and Linux: rows per feed-forward call. Smaller values lower the peak memory of long and large clips |
 
-`video_model_presets.ltx.upscale.existing_video_steps` (default `2`, from `1` to `3`) sets the refine steps of [upscaling an existing video](upscaling.md#macos-ltx) on macOS.
-
-You rarely need to change these. They are documented in the packaged `config.yaml`.
+You rarely need to change these.
 
 ## `audio_model_presets`
 
-The audio models: one entry per model, keyed by the model id you pass with `-m`. The packaged config ships `yue2`, `qwen3_tts` and `sa3` with their pinned sources, and the Audio tab and `ziv audio` offer them on every machine with a CUDA card or Apple silicon. You rarely need to change them. The shipped entries:
+The settings of the audio models, keyed by the model id you pass with `-m`: `yue2`, `qwen3_tts` and `sa3`. The models themselves, their downloads and limits are part of the app, and the Audio tab and `ziv audio` offer them on every machine with a CUDA card or Apple silicon. You rarely need to change a setting. The shipped values:
 
 ```yaml
 audio_model_presets:
   yue2:
-    label: "YuE2 3B"
-    kinds: [music]
-    lyrics: true
-    family: yue2
-    files:
-      - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
-        files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
-      - repo: "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
-        files: [config.json, model.safetensors, modeling_vae.py, weights_manifest.json]
-    limits: { max_seconds: 360 }
     settings:
       instrumental_sections: "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]"
       abc_max_tokens: 4096
@@ -195,78 +171,16 @@ audio_model_presets:
       memory_budget_gib: 24
       vae_core_frames: 512
       fade_seconds: 2
-    platforms:
-      cuda: { memory_gb: 6.7 }
-      mps: { memory_gb: 10.5 }
   qwen3_tts:
-    label: "Qwen3-TTS 1.7B"
-    kinds: [speech]
-    family: qwen3_tts
-    # CustomVoice: the built-in voices. It downloads with the model.
-    files:
-      - repo: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice@0c0e3051f131929182e2c023b9537f8b1c68adfe"
-        files: [config.json, generation_config.json, merges.txt, model.safetensors, preprocessor_config.json, tokenizer_config.json, vocab.json, speech_tokenizer/config.json, speech_tokenizer/configuration.json, speech_tokenizer/model.safetensors, speech_tokenizer/preprocessor_config.json]
-    # Base: cloning a voice recording. It downloads the first time a take follows a recording.
-    voice_files:
-      - repo: "Qwen/Qwen3-TTS-12Hz-1.7B-Base@fd4b254389122332181a7c3db7f27e918eec64e3"
-        files: [config.json, generation_config.json, merges.txt, model.safetensors, preprocessor_config.json, tokenizer_config.json, vocab.json, speech_tokenizer/config.json, speech_tokenizer/configuration.json, speech_tokenizer/model.safetensors, speech_tokenizer/preprocessor_config.json]
-    # The built-in voices, the first one the default; the label and the native language are the model card's.
-    voices:
-      - { id: ryan, label: Ryan, language: English }
-      - { id: aiden, label: Aiden, language: English }
-      - { id: vivian, label: Vivian, language: Chinese }
-      - { id: serena, label: Serena, language: Chinese }
-      - { id: uncle_fu, label: Uncle Fu, language: Chinese }
-      - { id: dylan, label: Dylan, language: Beijing Chinese }
-      - { id: eric, label: Eric, language: Sichuan Chinese }
-      - { id: ono_anna, label: Ono Anna, language: Japanese }
-      - { id: sohee, label: Sohee, language: Korean }
-    limits: { max_new_tokens: 1200, part_chars: 500, max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }
     settings: { language: auto, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
-    platforms:
-      cuda: { memory_gb: 6.0 }
-      mps: { family: qwen3_tts_mlx, memory_gb: 12.0 }
   sa3:
-    label: "Stable Audio 3 Medium"
-    kinds: [sound, music]
-    family: stable_audio_3
-    files:
-      - repo: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
-        files: [checkpoints/stable_audio_3_medium.safetensors]
-      - repo: "cocktailpeanut/stable-audio-3-medium@a30034d70bd58f6e6f967ef28ecaa6c52c185d6c"
-        files: [model_config.json]
-      - repo: "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870"
-        files: [t5gemma-b-b-ul2/config.json, t5gemma-b-b-ul2/generation_config.json, t5gemma-b-b-ul2/model.safetensors, t5gemma-b-b-ul2/special_tokens_map.json, t5gemma-b-b-ul2/tokenizer.json, t5gemma-b-b-ul2/tokenizer_config.json]
-    limits: { max_seconds: 380 }
     settings: { steps: 8, cfg_scale: 1.0, sample_size: 16777216 }
-    platforms:
-      cuda: { memory_gb: 6.1 }
-      mps: { memory_gb: 6.1 }
 ```
 
-| Key | Required | Description |
+| Setting | Model | Description |
 |---|---|---|
-| `label` | yes | The name the Web UI shows |
-| `kinds` | yes | The kinds of audio the model makes: a list of `music`, `speech` and `sound`, none repeated. The first one is the kind the model makes when a take names none. What a model takes is decided per kind: speech reads in a built-in voice or follows a voice recording, sound takes a length, and music takes a length unless the model has `lyrics` |
-| `lyrics` | no | `true` for a music model that sings lyrics: its music takes lyrics and their sections set the length. Needs `music` in `kinds` and the `instrumental_sections` setting. Default `false`: the model's music takes a style and a length, with no lyrics |
-| `family` | yes | Which engine runs the model: `yue2`, `qwen3_tts`, `qwen3_tts_mlx` or `stable_audio_3` |
-| `files` | yes | The downloads. Each entry has `repo`, as `owner/name@commit` with the full 40-character commit, and `files`, the file names or patterns to fetch |
-| `voices` | no | Needs `speech` in `kinds`: the built-in voices, each with an `id` (what `--speaker` takes), a `label` and the `language` it speaks natively. The first one is the default. A model without `voices` has no built-in voices and reads only in a recording's voice |
-| `voice_files` | no | Needs `speech` in `kinds`: the files that following a voice recording needs on top of `files`, in the same form. They download the first time a take follows a recording, not with the model. Without `voice_files`, a recording needs nothing extra |
-| `limits` | yes | The model's own ceilings, those of each of its kinds together: `max_seconds` for music and sound; for speech `max_new_tokens`, `part_chars`, `max_text_chars`, `min_voice_seconds` and `max_voice_seconds` |
-| `settings` | no | The model's own settings, such as `ode_steps`. A model with `lyrics` sets `instrumental_sections` here: the section list an empty Lyrics box stands for, which makes an instrumental. A speech model reads `language` here: `auto` lets the model detect the language of the text, or name one it supports to fix it. `join_pause_ms`, `join_fade_ms`, `part_level_match_db` and `edge_silence_max_ms` shape how the parts of a long text are joined |
-| `platforms.cuda`, `platforms.mps` | no | What differs on that accelerator: `settings` that win over the entry's; `family`, which replaces the entry's there; and `memory_gb`, the GPU memory the model peaked at in GiB. Leave `memory_gb` out while it is unmeasured; the Web UI then shows no memory badge. The shipped `qwen3_tts` entry uses this on macOS: its `mps` entry names the `qwen3_tts_mlx` family and uses the entry's `files` and `voice_files` |
+| `instrumental_sections` | `yue2` | The section list an empty Lyrics box stands for, which makes an instrumental. YuE2 needs it |
+| `language` | `qwen3_tts` | `auto` lets the model detect the language of the text, or name one it supports to fix it |
+| `join_pause_ms`, `join_fade_ms`, `part_level_match_db`, `edge_silence_max_ms` | `qwen3_tts` | How the parts of a long text are joined |
 
-The app refuses to start when a required key or limit is missing, when a kind in `kinds` is unknown or repeated, when `lyrics` lacks `music` or `instrumental_sections`, or when a `repo` is not pinned to a commit.
-
-## `ideogram4_instant`
-
-The pinned sources Ideogram 4 Instant is built from: the transformer, the base components per platform, and the transformer format. Changing a pin rebuilds the model folder. See [Ideogram 4 Instant](models.md#ideogram-4-instant).
-
-## `moss_image`
-
-The pinned sources MOSS-Image is built from: `sft`, the SFT repository as `owner/repo@revision`, and `turbo_lora`, the repository, revision and file name of the 4-step LoRA that makes the `moss` (Turbo) model. The `moss` and `moss-sft` model folders are built from them on first use. Changing a pin rebuilds the affected folder and, for a new LoRA, leaves the SFT folder alone. The packaged SFT revision is the one the bundled pipeline code was written for, so change it only together with that code.
-
-## Other sections
-
-`schedulers`, `platforms` and `model_alias_families` are internal: they map scheduler names to classes, platform ids to names, and aliases to model families.
+An entry can also hold `platforms.cuda.settings` and `platforms.mps.settings`, which win over `settings` on that accelerator.

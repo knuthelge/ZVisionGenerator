@@ -190,7 +190,7 @@ class TestCudaH3PlanPresence:
         from zvisiongenerator.utils.h3_preset import h3_preset
 
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
-        preset = h3_preset(load_packaged_config())
+        preset = h3_preset(load_packaged_config(), "linux")
         targets = h3_download_plan(f"{preset.repo}@{preset.revision}", preset)
         for target in targets:
             self._download(cache, target)
@@ -225,7 +225,7 @@ class TestCudaH3PlanPresence:
         from zvisiongenerator.utils.h3_preset import h3_preset
 
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
-        preset = h3_preset(load_packaged_config())
+        preset = h3_preset(load_packaged_config(), "linux")
 
         assert [target_present_offline(target) for target in h3_download_plan(preset.repo, preset)] == [False, False, False]
 

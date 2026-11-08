@@ -182,7 +182,6 @@ _CONFIG = {
     "sizes": {"2:3": {"m": {"width": 512, "height": 512}}},
     "generation": {"seed_min": 1, "seed_max": 100},
     "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-    "model_presets": {"flux1": {"enhance_max_words": 180}},
 }
 
 

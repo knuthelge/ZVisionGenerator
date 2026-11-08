@@ -100,7 +100,7 @@ def load_pairs(path: Path | str) -> dict[str, Pair]:
     """Load the raw ``{module: (lora_A, lora_B)}`` factors of the turbo LoRA, with every alpha ignored.
 
     Per-module ``.alpha`` tensors are dropped before the conversion (which would fold them into the factors) and a metadata alpha
-    is not read, so the merge scale is the config's alone.
+    is not read, so the merge scale is the family's ``lora_scale`` alone.
     """
     from safetensors.torch import load_file
 

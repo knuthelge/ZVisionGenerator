@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from tests._factories import packaged_metadata_copy, use_model_entries
 from zvisiongenerator.utils.yaml_round_trip import load_round_trip
 from zvisiongenerator.web import config_contract as config_contract_module
 from zvisiongenerator.web import config as web_config_module
@@ -38,14 +39,10 @@ def _make_app_config() -> dict[str, object]:
                 "m": {"width": 832, "height": 1216},
             },
         },
-        "schedulers": {
-            "beta": {},
-        },
         "model_aliases": {
             "zit": "Tongyi-MAI/Z-Image-Turbo",
             "ltx-8": "dgrauet/ltx-2.3-mlx-q8",
         },
-        "model_alias_families": {},
         "ui": {
             "startup_view": "gallery",
             "gallery_page_size": 8,
@@ -56,6 +53,12 @@ def _make_app_config() -> dict[str, object]:
             },
         },
     }
+
+
+@pytest.fixture(autouse=True)
+def _no_built_in_models(monkeypatch, tmp_path):
+    """Serve metadata with no models, so the aliases a test sees are the ones it writes into its config."""
+    use_model_entries(monkeypatch, tmp_path, enhancers=True)
 
 
 def _patch_minimal_web_config(monkeypatch, tmp_path, app_config=None, *, platform=None, detect_image=None, detect_video=None):
@@ -73,14 +76,6 @@ def _patch_minimal_web_config(monkeypatch, tmp_path, app_config=None, *, platfor
         monkeypatch.setattr(web_config_module, "detect_image_model", detect_image)
     if detect_video is not None:
         monkeypatch.setattr(web_config_module, "detect_video_model", detect_video)
-
-
-def test_declared_image_family_returns_configured_family():
-    app_config = _make_app_config()
-    app_config["model_alias_families"] = {"ideo": "ideogram4"}
-
-    assert model_inventory_module.declared_image_family(app_config, "ideo") == "ideogram4"
-    assert model_inventory_module.declared_image_family(app_config, "zit") is None
 
 
 def test_load_web_config_hides_stored_quants_from_model_options(monkeypatch, tmp_path):
@@ -139,7 +134,7 @@ def test_load_web_config_loads_declarative_ui_settings(monkeypatch, tmp_path):
     assert web_config.image_size_options == {"2:3": ("m",)}
     assert web_config.video_ratios == ("16:9",)
     assert web_config.video_size_options == {"16:9": ("m",)}
-    assert web_config.scheduler_options == ("beta",)
+    assert web_config.scheduler_options == ("beta", "simple")
     assert web_config.output_dir == str(tmp_path / "exports")
     assert (tmp_path / "exports").is_dir()
 
@@ -173,18 +168,14 @@ def test_load_web_config_uses_image_model_detection_for_aliases(monkeypatch, tmp
     assert web_config.image_model_options == ("custom-default",)
 
 
+_IDEO = {"kind": "image", "family": "ideogram4", "downloads": [{"ref": "ideogram-ai/ideogram-4-fp8"}]}
+
+
 def test_load_web_config_surfaces_ideo_alias_offline_via_declared_family(monkeypatch, tmp_path):
     app_config = _make_app_config()
-    app_config["model_aliases"] = {
-        "ideo": {
-            "darwin": "ideogram-ai/ideogram-4-fp8",
-            "win32": {"message": "Alias 'ideo' is macOS-only."},
-            "linux": {"message": "Alias 'ideo' is macOS-only."},
-        },
-        "custom-default": str(tmp_path / "models" / "custom-default"),
-    }
-    app_config["model_alias_families"] = {"ideo": "ideogram4"}
+    app_config["model_aliases"] = {"custom-default": str(tmp_path / "models" / "custom-default")}
     app_config["ui"]["default_models"] = {"image": "ideo"}
+    use_model_entries(monkeypatch, tmp_path, {"ideo": _IDEO}, enhancers=True)
 
     detect_calls: list[str] = []
 
@@ -210,50 +201,21 @@ def test_load_web_config_surfaces_ideo_alias_offline_via_declared_family(monkeyp
     assert detect_calls == [str(tmp_path / "models" / "custom-default")]
 
 
-_IDEO_ALIASES = {
-    "ideo": {
-        "darwin": "ideogram-ai/ideogram-4-fp8",
-        "win32": {"message": "Alias 'ideo' is macOS-only."},
-        "linux": {"message": "Alias 'ideo' is macOS-only."},
-    },
-    "portable-image": "Tongyi-MAI/Z-Image-Turbo",
-}
+_PORTABLE = {"portable-image": "Tongyi-MAI/Z-Image-Turbo"}
 _BLOCKED_ALIASES = {
-    "portable-image": "Tongyi-MAI/Z-Image-Turbo",
+    **_PORTABLE,
     "windows-only-blocked": {
         "darwin": "Tongyi-MAI/Z-Image-Turbo",
-        "win32": {"message": "Windows build is not available."},
-    },
-}
-_LTX_ALIASES = {
-    "ltx-8": {
-        "darwin": "dgrauet/ltx-2.3-mlx-q8",
-        "win32": {"message": "Alias 'ltx-8' is macOS-only."},
-        "linux": {"message": "Alias 'ltx-8' is macOS-only."},
-    },
-    "ltx-2.3": {
-        "darwin": {"message": "Alias 'ltx-2.3' is available on Windows and Linux only."},
-        "win32": "diffusers/LTX-2.3-Distilled-Diffusers",
-        "linux": "diffusers/LTX-2.3-Distilled-Diffusers",
     },
 }
 
 
-@pytest.mark.parametrize(
-    ("aliases", "families", "default_models", "options_field", "expected"),
-    [
-        (_IDEO_ALIASES, {"ideo": "ideogram4"}, {"image": "ideo"}, "image_model_options", "portable-image"),
-        (_BLOCKED_ALIASES, {}, {"image": "portable-image"}, "image_model_options", "portable-image"),
-        (_LTX_ALIASES, {}, {"video": "ltx-8"}, "video_model_options", "ltx-2.3"),
-    ],
-    ids=["ideo-alias", "blocked-alias", "ltx-video-aliases"],
-)
-def test_load_web_config_hides_aliases_the_platform_cannot_resolve(monkeypatch, tmp_path, aliases, families, default_models, options_field, expected):
-    """A platform-unavailable alias is hidden from the options and the default falls back to an available one."""
+def test_load_web_config_hides_aliases_the_platform_cannot_resolve(monkeypatch, tmp_path):
+    """A user alias that is unavailable on the platform is hidden from the options and the default falls back to an available one."""
     app_config = _make_app_config()
-    app_config["model_aliases"] = aliases
-    app_config["model_alias_families"] = families
-    app_config["ui"]["default_models"] = default_models
+    app_config["model_aliases"] = _BLOCKED_ALIASES
+    app_config["ui"]["default_models"] = {"image": "portable-image"}
+    use_model_entries(monkeypatch, tmp_path, enhancers=True)
 
     _patch_minimal_web_config(
         monkeypatch,
@@ -266,9 +228,8 @@ def test_load_web_config_hides_aliases_the_platform_cannot_resolve(monkeypatch, 
 
     web_config = web_config_module.load_web_config()
 
-    assert getattr(web_config, options_field) == (expected,)
-    default = web_config.default_models.video if "video" in default_models else web_config.default_models.image
-    assert default == expected
+    assert web_config.image_model_options == ("portable-image",)
+    assert web_config.default_models.image == "portable-image"
 
 
 def test_load_web_config_rejects_invalid_ui_mapping(monkeypatch):
@@ -522,6 +483,7 @@ def test_config_save_with_several_new_keys_keeps_trailing_comments_last(monkeypa
 
 def test_config_save_quotes_strings_that_yaml_one_one_reads_as_another_type(monkeypatch, tmp_path):
     """A value PyYAML would read as a float is written quoted, so it comes back as the string that was saved."""
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config_contract_module, "normalize_user_directory", lambda value: value)
     _old, new = _save_patch(monkeypatch, tmp_path, CONFIG_WITH_COMMENTS, {"ui.output_dir": "1.10"})
 
@@ -618,16 +580,6 @@ def test_config_save_refuses_a_file_it_cannot_round_trip_and_leaves_it_alone(mon
         config_contract_module.persist_writable_config_patch({"generation.default_size": "l"}, _persist_current())
 
     assert path.read_text(encoding="utf-8") == text
-
-
-def test_write_user_config_override_accepts_only_a_round_trip_document(monkeypatch, tmp_path):
-    """A plain dict would lose the file's comments, so the writer refuses it."""
-    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-
-    with pytest.raises(TypeError):
-        config_contract_module.write_user_config_override({"ui": {}})  # type: ignore[arg-type]
-
-    assert not (tmp_path / "config.yaml").exists()
 
 
 def test_concurrent_config_saves_do_not_drop_each_others_changes(monkeypatch, tmp_path):
@@ -731,8 +683,7 @@ def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget_and_engine(
 
 
 def _seedvr2_app_config() -> dict[str, object]:
-    tiers = [{"model": "seedvr2-7b", "weights_gb": 9.26, "activation_floor_gb": 10.79, "activation_base_gb": 1.88, "activation_gb_per_mp": 0.83}]
-    return {**_make_app_config(), "seedvr2": {"model": "auto", "softness": 0.75, "video_softness": 0.0, "reference_megapixels": 16, "tiers": tiers}}
+    return {**_make_app_config(), "seedvr2": {"model": "auto", "softness": 0.75, "video_softness": 0.0, "reference_megapixels": 16}}
 
 
 @pytest.mark.usefixtures("hub_offline")
@@ -745,6 +696,8 @@ def test_gallery_api_reports_a_seedvr2_copy_stored_after_the_server_started(monk
     from zvisiongenerator.web import server as web_server
 
     _patch_minimal_web_config(monkeypatch, tmp_path)
+    use_model_entries(monkeypatch, tmp_path, {"seedvr2-7b": packaged_metadata_copy()["models"]["seedvr2-7b"]}, enhancers=True)
+    monkeypatch.setattr("sys.platform", "darwin")  # the tiers, files and size labels are keyed by platform
     monkeypatch.setattr(web_config_module, "load_config", _seedvr2_app_config)
     monkeypatch.setattr(web_config_module, "supports_seedvr2", lambda: True)
     monkeypatch.setattr(web_config_module, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=MLX_WEIGHTS))

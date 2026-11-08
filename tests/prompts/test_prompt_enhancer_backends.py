@@ -11,8 +11,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests._factories import use_enhancer_models
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession, ensure_available, smart_budget_bytes
-from zvisiongenerator.utils.config import resolve_enhancer_model, smart_unavailable, split_model_revision
+from zvisiongenerator.utils.config import configured_enhancer_models, custom_enhancer_model, resolve_enhancer_model, split_model_revision
+from zvisiongenerator.utils.enhancer_models import enhancer_tier_models, smart_unavailable
 
 
 # ── mlx-lm adapter ──────────────────────────────────────────────────────────
@@ -338,42 +340,40 @@ class TestEnsureAvailable:
 # ── Model resolution ────────────────────────────────────────────────────────
 
 
-_CONFIG = {
-    "prompt_enhancer": {
-        "model": {"darwin": "mac/model", "win32": "win/model"},
-        "revision": {"darwin": "macrev", "win32": "winrev"},
-    }
-}
+_CONFIG: dict = {}
 
 
+@pytest.fixture
+def one_fast_model(monkeypatch, tmp_path):
+    """Declare a Fast enhancer on every platform."""
+    use_enhancer_models(monkeypatch, tmp_path, fast="fast/model@fastrev")
+
+
+@pytest.mark.usefixtures("one_fast_model")
 class TestResolveModel:
-    def test_platform_default(self):
-        assert resolve_enhancer_model(_CONFIG, platform_key="darwin") == ("mac/model", "macrev")
-        assert resolve_enhancer_model(_CONFIG, platform_key="win32") == ("win/model", "winrev")
+    def test_the_fast_model_is_the_default(self):
+        assert resolve_enhancer_model(_CONFIG, platform_key="darwin") == ("fast/model", "fastrev")
 
     def test_user_override_beats_default(self):
-        config = {"prompt_enhancer": {**_CONFIG["prompt_enhancer"], "user_model": "me/mine"}}
+        config = {"prompt_enhancer": {"user_model": "me/mine"}}
         assert resolve_enhancer_model(config, platform_key="darwin") == ("me/mine", None)
 
     def test_cli_beats_everything(self):
-        config = {"prompt_enhancer": {**_CONFIG["prompt_enhancer"], "user_model": "me/mine"}}
+        config = {"prompt_enhancer": {"user_model": "me/mine"}}
         assert resolve_enhancer_model(config, platform_key="darwin", cli_model="cli/model@v2") == ("cli/model", "v2")
-
-    def test_missing_platform(self):
-        with pytest.raises(ValueError, match="platform 'linux'"):
-            resolve_enhancer_model(_CONFIG, platform_key="linux")
 
 
 _GIB = 2**30
-_TIERED = {
-    "prompt_enhancer": {
-        "model": {"win32": "fast/model"},
-        "revision": {"win32": "fastrev"},
-        "smart": {"model": {"win32": "smart/model"}, "revision": {"win32": "smartrev"}, "min_memory_gb": {"win32": 9}},
-    }
-}
+_TIERED: dict = {}
 
 
+@pytest.fixture
+def tiered_models(monkeypatch, tmp_path):
+    """Declare a Fast enhancer and a Smart one (9 GiB needed) on every platform."""
+    use_enhancer_models(monkeypatch, tmp_path, fast="fast/model@fastrev", smart="smart/model@smartrev", smart_memory_gb=9)
+
+
+@pytest.mark.usefixtures("tiered_models")
 class TestEnhancerTiers:
     def test_fast_is_the_default(self):
         assert resolve_enhancer_model(_TIERED, platform_key="win32") == ("fast/model", "fastrev")
@@ -386,12 +386,8 @@ class TestEnhancerTiers:
         with pytest.warns(UserWarning, match="Smart enhancer is unavailable"):
             assert resolve_enhancer_model(_TIERED, platform_key="win32", cli_model="smart", budget_bytes=budget) == ("fast/model", "fastrev")
 
-    def test_smart_not_configured_warns_and_uses_fast(self):
-        with pytest.warns(UserWarning, match="Smart enhancer is unavailable"):
-            assert resolve_enhancer_model(_CONFIG, platform_key="win32", cli_model="smart", budget_bytes=64 * _GIB) == ("win/model", "winrev")
-
     def test_cli_tier_beats_user_model(self):
-        config = {"prompt_enhancer": {**_TIERED["prompt_enhancer"], "user_model": "me/mine"}}
+        config = {"prompt_enhancer": {"user_model": "me/mine"}}
         assert resolve_enhancer_model(config, platform_key="win32") == ("me/mine", None)
         assert resolve_enhancer_model(config, platform_key="win32", cli_model="fast") == ("fast/model", "fastrev")
         assert resolve_enhancer_model(config, platform_key="win32", cli_model="smart", budget_bytes=16 * _GIB) == ("smart/model", "smartrev")
@@ -401,10 +397,7 @@ class TestEnhancerTiers:
         [(16 * _GIB, None), (6 * _GIB, "Needs about 9 GB of memory; this machine has 6 GB."), (None, "Smart is not available on this machine.")],
     )
     def test_smart_unavailable(self, budget, expected):
-        assert smart_unavailable(_TIERED, platform_key="win32", budget_bytes=budget) == expected
-
-    def test_smart_unavailable_when_not_configured(self):
-        assert smart_unavailable(_CONFIG, platform_key="win32", budget_bytes=64 * _GIB) == "Smart is not available on this machine."
+        assert smart_unavailable(platform_key="win32", budget_bytes=budget) == expected
 
     def test_budget_is_probed_only_for_smart(self):
         probe = MagicMock(return_value=SimpleNamespace(gpu_bytes=8 * _GIB))
@@ -421,12 +414,29 @@ class TestEnhancerTiers:
         with pytest.raises(ValueError, match="REPO@REVISION"):
             split_model_revision(value)
 
-    def test_bundled_config_has_pinned_defaults(self, packaged_config):
-        config = packaged_config
-        for platform_key in ("darwin", "win32", "linux"):
-            repo, revision = resolve_enhancer_model({"prompt_enhancer": {k: v for k, v in config["prompt_enhancer"].items() if not k.startswith("user_")}}, platform_key=platform_key)
-            assert repo and revision and len(revision) == 40
-        assert config["model_presets"]["flux1"]["enhance_max_words"] == 180
+
+class TestCustomModel:
+    @pytest.mark.parametrize(("value", "expected"), [("me/mine", ("me/mine", None)), ("me/mine@abc", ("me/mine", "abc")), (None, None), ("  ", None), ("me/mine@", None), (7, None)])
+    def test_the_user_model_is_read_where_it_is_well_formed(self, value, expected):
+        assert custom_enhancer_model({"prompt_enhancer": {"user_model": value}}) == expected
+
+    def test_a_config_without_the_section_has_no_custom_model(self):
+        assert custom_enhancer_model({}) is None
+
+    def test_the_custom_model_is_listed_after_the_built_in_tiers(self, tiered_models):
+        config = {"prompt_enhancer": {"user_model": "me/mine"}}
+
+        assert list(configured_enhancer_models(config, platform_key="win32")) == ["fast", "smart", "custom"]
+        assert list(enhancer_tier_models(platform_key="win32")) == ["fast", "smart"]
+
+
+class TestPackagedEnhancerModels:
+    @pytest.mark.parametrize("tier", ["fast", "smart"])
+    @pytest.mark.parametrize("platform_key", ["darwin", "win32", "linux"])
+    def test_the_metadata_pins_every_tier_on_every_platform(self, platform_key, tier):
+        repo, revision = resolve_enhancer_model({}, platform_key=platform_key, cli_model=tier, budget_bytes=64 * _GIB)
+
+        assert repo and revision and len(revision) == 40
 
 
 class TestReviewFixes:

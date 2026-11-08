@@ -2,7 +2,7 @@
 
 Deletes act only on what the user picked. A converted model's folder is removed with its links, never the
 HuggingFace files those links point to; a HuggingFace download is removed from the cache while its alias
-stays in config, so the model can be downloaded again. A model built on first use (``moss``, ``moss-sft``, ``ideo``)
+stays, so the model can be downloaded again. A model built on first use (``moss``, ``moss-sft``, ``ideo``)
 is made of hard links to its source repos in the cache, so deleting its row also deletes the source repos that no other
 built model needs, and the hidden folder its build downloads into (Ideogram 4 Instant's transformer). Either way the model's stored quants
 (``<name>@q4`` / ``<name>@q8``, and the text-encoder copy ``<name>@mlx-te4`` of H3 on macOS) go too, since nothing else uses them. When aliases share one download (``ltx-4``
@@ -13,17 +13,18 @@ from __future__ import annotations
 
 import os
 import shutil
-import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.downloads.built_sources import BUILT_MODEL_NAMES, built_model_downloads, built_model_source_repos, built_model_sources
+from zvisiongenerator.downloads.built_sources import built_model_downloads
+from zvisiongenerator.downloads.declaration import declared_repo_ids
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
 from zvisiongenerator.utils.audio_preset import AudioPreset
-from zvisiongenerator.utils.config import enhancer_tier_models, video_companion_repos
-from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
+from zvisiongenerator.utils.config import custom_enhancer_model
+from zvisiongenerator.utils.matte import matte_pins
+from zvisiongenerator.utils.model_metadata import built_model_ids, model_ids
 from zvisiongenerator.utils.model_files import find_local_model_dir, huggingface_cache_repo_dir
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 from zvisiongenerator.utils.seedvr2 import SeedVR2Weights
@@ -60,8 +61,7 @@ def model_delete_target(
     *,
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
     sharing: tuple[str, ...] = (),
-    companion_repos: tuple[str, ...] = (),
-    source_repos: tuple[str, ...] = (),
+    freed_repos: tuple[str, ...] = (),
     build_downloads: tuple[Path, ...] = (),
 ) -> DeleteTarget | None:
     """Return what deleting *entry* would remove, or ``None`` when the model is not deletable.
@@ -76,16 +76,15 @@ def model_delete_target(
         find_local_dir: Resolver for fully downloaded model directories; a repo with no such directory still counts while its cache folder exists.
         sharing: Other models that load from the same download (see :func:`models_sharing`). While one of them has
             stored quants the download stays, and only *entry*'s own stored quants are deleted.
-        companion_repos: Other HuggingFace repos downloaded for this model, removed with its download.
-        source_repos: For a model built on first use, the cache repos it is made from that nothing else needs (see
-            :func:`built_sources_freed_with`). Those on disk are removed with its built folder; with no built folder
+        freed_repos: The cache repos, besides its own, that nothing else needs (see :func:`freed_repo_ids`). They are removed
+            with its download. For a model built on first use, those on disk are removed with its built folder; with no built folder
             they are the whole target, so a model that is downloaded but not built yet can be deleted too.
         build_downloads: For a model built on first use, the hidden folders of files its build downloaded outside the cache
             (see :func:`built_downloads_freed_with`). Those on disk are removed with it, and alone they make a not yet built
             model deletable.
     """
     stored_quants = stored_quant_dirs_for(models_dir, entry.name)
-    sources = tuple(repo_id for repo_id in source_repos if huggingface_cache_repo_dir(repo_id).is_dir())
+    sources = tuple(repo_id for repo_id in freed_repos if huggingface_cache_repo_dir(repo_id).is_dir())
     downloads = tuple(path for path in build_downloads if path.is_dir())
     repo = parse_huggingface_repo_reference(entry.resolved_path)
     # A built-on-first-use row that is not built has no folder of its own: its target is the sources and downloads it left on disk.
@@ -100,50 +99,49 @@ def model_delete_target(
     users = tuple(name for name in sharing if stored_quant_dirs_for(models_dir, name))
     if users:
         return DeleteTarget("copy", stored_quants[0], stored_quants=stored_quants[1:], shared_with=users) if stored_quants else None
-    return DeleteTarget("huggingface", huggingface_cache_repo_dir(repo.repo_id), repo_id=repo.repo_id, stored_quants=stored_quants, companion_repos=companion_repos)
+    return DeleteTarget("huggingface", huggingface_cache_repo_dir(repo.repo_id), repo_id=repo.repo_id, stored_quants=stored_quants, companion_repos=freed_repos)
 
 
 def delete_scope(
     entry: ImageInventoryEntry | VideoInventoryEntry,
     inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry],
-    app_config: dict[str, Any],
     *,
     models_dir: Path,
     platform_key: str,
 ) -> dict[str, tuple[str, ...]]:
-    """Return the ``sharing``, ``companion_repos``, ``source_repos`` and ``build_downloads`` arguments of :func:`model_delete_target` for *entry*."""
+    """Return the ``sharing``, ``freed_repos`` and ``build_downloads`` arguments of :func:`model_delete_target` for *entry*."""
+    inventory = tuple(inventory)
     return {
         "sharing": models_sharing(entry, inventory),
-        "companion_repos": video_companion_repos(entry.family, app_config, entry.resolved_path),
-        "source_repos": built_sources_freed_with(entry, tuple(inventory), app_config, models_dir=models_dir, platform_key=platform_key),
+        "freed_repos": freed_repo_ids(entry, inventory, models_dir=models_dir, platform_key=platform_key),
         "build_downloads": built_downloads_freed_with(entry, models_dir=models_dir),
     }
 
 
-def built_sources_freed_with(
+def freed_repo_ids(
     entry: ImageInventoryEntry | VideoInventoryEntry,
-    inventory: tuple[ImageInventoryEntry | VideoInventoryEntry, ...],
-    app_config: dict[str, Any],
+    inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry],
     *,
     models_dir: Path,
     platform_key: str,
 ) -> tuple[str, ...]:
-    """Return the source repos that deleting the built-on-first-use model *entry* frees, or ``()`` for any other model.
+    """Return the cache repos, besides its own model repo, that deleting the built-in model *entry* frees on *platform_key*.
 
-    A repo is kept only while another such model with a built folder still needs it. A row that is not built does
-    not pin anything, even when its sources happen to be in the cache. So deleting ``moss`` while ``moss-sft`` is
-    built deletes only the Turbo LoRA repo. An invalid source block in *app_config* warns and frees nothing.
+    These are the repos *entry* declares (see :func:`declared_repo_ids`) minus the ones another built-in model of
+    *inventory* still needs: one that is on disk, and whose own model repo is not the one being removed. A model is on
+    disk when its repo is in the cache or, for a model built on first use, its built folder is in *models_dir*. So deleting
+    ``moss`` while ``moss-sft`` is built frees only the Turbo LoRA repo, and deleting an LTX-2.3 pack on macOS frees the
+    shared Gemma 3 text encoder only when no other pack is on disk. A model that is not a built-in frees nothing.
     """
-    if not _is_built_model_row(entry, models_dir):
+    own = parse_huggingface_repo_reference(entry.resolved_path)
+    own_repo = own.repo_id if own is not None else None
+    declared = [repo_id for repo_id in declared_repo_ids(entry.name, platform_key) if repo_id != own_repo]
+    if not declared:
         return ()
-    others = [other for other in inventory if other.name != entry.name and other.source == "installed" and _is_built_model_row(other, models_dir)]
-    try:
-        own = built_model_sources(entry.name, app_config, platform_key=platform_key)
-        kept = {repo_id.casefold() for other in others for repo_id in built_model_sources(other.name, app_config, platform_key=platform_key)}
-    except ValueError as exc:
-        warnings.warn(f"Could not read the sources of a model built on first use: {exc}", stacklevel=2)
-        return ()
-    return tuple(repo_id for repo_id in own if repo_id.casefold() not in kept)
+    builtin = set(model_ids())
+    others = [other for other in inventory if other.name != entry.name and other.name in builtin and _is_on_disk(other, models_dir, removing=own_repo)]
+    kept = {repo_id.casefold() for other in others for repo_id in declared_repo_ids(other.name, platform_key)}
+    return tuple(repo_id for repo_id in declared if repo_id.casefold() not in kept)
 
 
 def built_downloads_freed_with(entry: ImageInventoryEntry | VideoInventoryEntry, *, models_dir: Path) -> tuple[Path, ...]:
@@ -170,14 +168,14 @@ def seedvr2_delete_target(model: str, models_dir: Path, weights: SeedVR2Weights)
     return DeleteTarget("installed", folder) if folder.is_dir() else None
 
 
-def audio_delete_target(preset: AudioPreset) -> DeleteTarget | None:
+def audio_delete_target(preset: AudioPreset, *, platform_key: str) -> DeleteTarget | None:
     """Return what deleting the audio model *preset* removes, or ``None`` when nothing of it is on disk.
 
-    The target is the model's repositories in the Hugging Face cache (a partial download counts, so an interrupted first
+    The target is the model's declared repositories in the Hugging Face cache (a partial download counts, so an interrupted first
     use can be cleared too). The cloning files of a speech model count with it. No other model loads an audio model's
     repositories, so none is kept.
     """
-    repos = tuple(dict.fromkeys(files.repo_id for files in (*preset.files, *preset.voice_files) if huggingface_cache_repo_dir(files.repo_id).is_dir()))
+    repos = tuple(repo_id for repo_id in declared_repo_ids(preset.id, platform_key) if huggingface_cache_repo_dir(repo_id).is_dir())
     if not repos:
         return None
     return DeleteTarget("huggingface", huggingface_cache_repo_dir(repos[0]), repo_id=repos[0], companion_repos=repos[1:])
@@ -200,29 +198,25 @@ def matte_delete_target() -> DeleteTarget | None:
 
     ``None`` when neither repo is in the cache. A partial download counts, so an interrupted first use can be cleared too.
     """
-    path = huggingface_cache_repo_dir(BIREFNET.repo_id)
-    companions = (VITMATTE.repo_id,) if huggingface_cache_repo_dir(VITMATTE.repo_id).is_dir() else ()
+    birefnet, vitmatte = matte_pins()
+    path = huggingface_cache_repo_dir(birefnet.repo_id)
+    companions = (vitmatte.repo_id,) if huggingface_cache_repo_dir(vitmatte.repo_id).is_dir() else ()
     if not path.is_dir() and not companions:
         return None
-    return DeleteTarget("huggingface", path, repo_id=BIREFNET.repo_id, companion_repos=companions)
+    return DeleteTarget("huggingface", path, repo_id=birefnet.repo_id, companion_repos=companions)
 
 
-def used_repo_ids(
-    inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry],
-    app_config: dict[str, Any],
-    *,
-    platform_key: str,
-    extra: Iterable[str] = (),
-) -> frozenset[str]:
-    """Return the HuggingFace repos the app loads, case-folded: aliases, their LTX companions, enhancer tiers, the background removal models, the sources of models built on first use and *extra*."""
-    entries = [entry for entry in inventory if entry.source != "installed"]
-    references = [entry.resolved_path for entry in entries]
-    references += [model[0] for model in enhancer_tier_models(app_config, platform_key=platform_key).values()]
-    ids = {repo.repo_id for reference in references if (repo := parse_huggingface_repo_reference(reference)) is not None}
-    ids.update(repo_id for entry in entries for repo_id in video_companion_repos(entry.family, app_config, entry.resolved_path))
-    ids.update(built_model_source_repos(app_config, platform_key=platform_key))
-    ids.update((BIREFNET.repo_id, VITMATTE.repo_id))
-    ids.update(extra)
+def used_repo_ids(inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry], app_config: dict[str, Any], *, platform_key: str) -> frozenset[str]:
+    """Return the HuggingFace repos the app loads on *platform_key*, case-folded.
+
+    That is every repo a built-in model declares there (see :func:`declared_repo_ids`), the repos the aliases of *inventory*
+    resolve to, and the ``prompt_enhancer.user_model`` repo.
+    """
+    ids = {repo_id for model_id in model_ids() for repo_id in declared_repo_ids(model_id, platform_key)}
+    references = [entry.resolved_path for entry in inventory if entry.source != "installed"]
+    custom = custom_enhancer_model(app_config)
+    references += [custom[0]] if custom is not None else []
+    ids.update(repo.repo_id for reference in references if (repo := parse_huggingface_repo_reference(reference)) is not None)
     return frozenset(repo_id.casefold() for repo_id in ids)
 
 
@@ -293,9 +287,20 @@ def delete_lora(loras_dir: Path, name: str) -> Path:
     return path
 
 
+def _is_on_disk(entry: ImageInventoryEntry | VideoInventoryEntry, models_dir: Path, *, removing: str | None) -> bool:
+    """Return whether the built-in model *entry* is on disk and needs repos of its own: its model repo is not *removing*.
+
+    A model with a model repo is on disk while that repo is in the cache. A model built on first use has none: its built folder in *models_dir* says so.
+    """
+    repo = parse_huggingface_repo_reference(entry.resolved_path)
+    if repo is None:
+        return _is_built_model_row(entry, models_dir) and Path(entry.resolved_path).is_dir()
+    return repo.repo_id != removing and huggingface_cache_repo_dir(repo.repo_id).is_dir()
+
+
 def _is_built_model_row(entry: ImageInventoryEntry | VideoInventoryEntry, models_dir: Path) -> bool:
     """Return whether *entry* is a model built on first use: its name and its folder in *models_dir* say so."""
-    return entry.name in BUILT_MODEL_NAMES and Path(entry.resolved_path).resolve() == (models_dir / entry.name).resolve()
+    return entry.name in built_model_ids() and Path(entry.resolved_path).resolve() == (models_dir / entry.name).resolve()
 
 
 def _delete_hub_repo(repo_dir: Path) -> None:

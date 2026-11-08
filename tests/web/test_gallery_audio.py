@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
-from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_two_kind_preset, yue2_preset
+from tests._audio_presets import audio_config, no_audio_models, qwen3_tts_preset, sa3_preset, sa3_two_kind_preset, use_audio_models, yue2_preset
 from tests._fake_audio import install_fake_audio, write_fake_audio
 from tests._paths import FIXTURES
 from tests.audio._helpers import clip, sine
@@ -76,9 +76,15 @@ def _fake_audio_tools(monkeypatch):
     install_fake_audio(monkeypatch)
 
 
-def _web_config(**presets) -> SimpleNamespace:
+@pytest.fixture(autouse=True)
+def _fixture_audio_models(monkeypatch, tmp_path):
+    """Serve the three fixture audio models (``sa3`` making sound only); a test that needs other models serves them itself."""
+    use_audio_models(monkeypatch, tmp_path)
+
+
+def _web_config() -> SimpleNamespace:
     config = make_web_config()
-    config.app_config.update(audio_config(**presets) if presets else audio_config())
+    config.app_config.update(audio_config())
     return config
 
 
@@ -135,8 +141,9 @@ class TestReuseOfSettings:
     """The Reuse leg of the round trip: the request, the payload the runner saves, and the params Reuse restores (the Vitest half carries them on to the request)."""
 
     @pytest.fixture
-    def config(self):
-        return _web_config(yue2=yue2_preset(), qwen3_tts=qwen3_tts_preset(), sa3=sa3_two_kind_preset())
+    def config(self, monkeypatch, tmp_path):
+        use_audio_models(monkeypatch, tmp_path, yue2=yue2_preset(), qwen3_tts=qwen3_tts_preset(), sa3=sa3_two_kind_preset())
+        return _web_config()
 
     @pytest.mark.parametrize("case", SETTINGS_CASES, ids=[case["name"] for case in SETTINGS_CASES])
     def test_a_take_that_sets_every_value_saves_and_reuses_them(self, tmp_path, config, case):
@@ -353,37 +360,42 @@ class TestAssetJson:
         assert "model" not in _params(payload)
         assert payload["reuse_state"]["resolved_model"] is None and payload["reuse_state"]["fallback_reasons"] == ["model_not_configured"]
 
-    def test_a_kind_with_no_runnable_model_is_an_unavailable_workflow(self, tmp_path):
+    def test_a_kind_with_no_runnable_model_is_an_unavailable_workflow(self, tmp_path, monkeypatch):
         _take(tmp_path, "rain.flac", _SOUND)
+        use_audio_models(monkeypatch, tmp_path, yue2=yue2_preset())
 
-        payload = _json(tmp_path, "rain.flac", _web_config(yue2=yue2_preset()))
+        payload = _json(tmp_path, "rain.flac", _web_config())
 
         assert payload["reuse_state"]["workflow_available"] is False and "no_audio_model" in payload["reuse_state"]["fallback_reasons"]
 
-    def test_a_kind_is_available_when_any_kind_of_a_runnable_model_is_it(self, tmp_path):
+    def test_a_kind_is_available_when_any_kind_of_a_runnable_model_is_it(self, tmp_path, monkeypatch):
         _take(tmp_path, "song.flac", _SONG)
         _take(tmp_path, "rain.flac", _SOUND)
-        web_config = _web_config(sa3=sa3_two_kind_preset())
+        use_audio_models(monkeypatch, tmp_path, sa3=sa3_two_kind_preset())
+        web_config = _web_config()
 
         song, rain = _json(tmp_path, "song.flac", web_config), _json(tmp_path, "rain.flac", web_config)
 
         assert (song["reuse_state"]["workflow_available"], rain["reuse_state"]["workflow_available"]) == (True, True)
-        assert _json(tmp_path, "song.flac", _web_config(sa3=audio_config()["audio_model_presets"]["sa3"]))["reuse_state"]["workflow_available"] is False
+        use_audio_models(monkeypatch, tmp_path, sa3=sa3_preset())
+        assert _json(tmp_path, "song.flac", _web_config())["reuse_state"]["workflow_available"] is False
 
-    def test_a_music_take_of_a_model_of_two_kinds_reuses_that_model_and_its_length(self, tmp_path):
+    def test_a_music_take_of_a_model_of_two_kinds_reuses_that_model_and_its_length(self, tmp_path, monkeypatch):
         music = {**_SONG, "model": "sa3", "prompt": "calm piano", "lyrics": "", "seconds": 45.0, "requested_seconds": 45.0}
         _take(tmp_path, "piano.flac", music)
 
-        payload = _json(tmp_path, "piano.flac", _web_config(sa3=sa3_two_kind_preset()))
+        use_audio_models(monkeypatch, tmp_path, sa3=sa3_two_kind_preset())
+        payload = _json(tmp_path, "piano.flac", _web_config())
 
         state = payload["reuse_state"]
         assert (state["resolved_workflow"], state["workflow_available"], state["model_available"], state["resolved_model"]) == ("music", True, True, "sa3")
         assert state["fallback_reasons"] == []
         assert _params(payload) == {"workflow": "music", "model": "sa3", "prompt": "calm piano", "seconds": "45", "seed": "7"}
 
-    def test_the_machine_without_audio_models_still_lists_and_plays_a_take(self, tmp_path):
+    def test_the_machine_without_audio_models_still_lists_and_plays_a_take(self, tmp_path, monkeypatch):
         _take(tmp_path, "song.flac", _SONG)
-        web_config = make_web_config()  # no audio_model_presets at all
+        no_audio_models(monkeypatch, tmp_path)
+        web_config = _web_config()
 
         payload = _json(tmp_path, "song.flac", web_config)
 

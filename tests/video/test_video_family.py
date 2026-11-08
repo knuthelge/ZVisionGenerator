@@ -1,4 +1,4 @@
-"""The video family model: its description in the config, step settling, and the LTX behaviour it must keep."""
+"""The video family model: its description from the model metadata and the config, step settling, and the LTX behaviour it must keep."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 
+from tests._factories import metadata_copy, use_model_metadata
 from tests.video._helpers import make_ltx_info
 
 from zvisiongenerator.core.video_family import ANY_FRAMES, FrameRule, VideoCapabilities, VideoFamily, settle_video_steps
@@ -132,38 +133,8 @@ def test_strict_extend_length_refuses_a_non_multiple_of_eight(frames):
 
 
 # ---------------------------------------------------------------------------
-# R2: the family description in the config
+# R2: the family description: facts from the model metadata, settings from the config
 # ---------------------------------------------------------------------------
-
-
-def _h3_block() -> dict:
-    return {
-        "label": "MiniMax H3",
-        "default_steps": 8,
-        "max_steps": 8,
-        "step_options": [4, 8],
-        "default_frames": 124,
-        "frame_rule": {"alignment": 17, "offset": 5, "round": "up"},
-        "extend_frame_step": 17,
-        "carry_frames": 22,
-        "capabilities": {
-            "i2v": True,
-            "end_frame": True,
-            "extend": True,
-            "upscale": True,
-            "upscale_review": True,
-            "lora": True,
-            "audio": True,
-            "low_memory": False,
-            "audio_track": False,
-            "audio_track_upscale": False,
-        },
-        "platform_capabilities": {"darwin": {"upscale": False, "upscale_review": False}},
-    }
-
-
-def _config_with(block: dict) -> dict:
-    return {"video_model_presets": {"h3": block}}
 
 
 def test_the_packaged_ltx_family_is_described_literally():
@@ -192,26 +163,29 @@ def test_the_packaged_families_offer_an_audio_track(family, track, track_upscale
     assert (capabilities.audio_track, capabilities.audio_track_upscale) == (track, track_upscale)
 
 
-def test_a_family_without_a_preset_block_is_none():
+def test_a_family_the_metadata_does_not_describe_is_none():
     assert video_family(load_config(), "wan") is None
-    assert video_family({}, "ltx") is None
 
 
-def test_a_family_reads_its_block_without_a_versions_overlay():
-    config = load_config()
-    config["video_model_presets"]["ltx"]["versions"] = {"ltx25": {"aliases": ["ltx25-4"], "label": "Other"}}
-
-    assert video_family(config, "ltx").label == "LTX distilled model"
+def test_a_described_family_needs_its_default_steps_setting():
+    with pytest.raises(ValueError, match=r"^video_model_presets\.ltx\.default_steps is required\.$"):
+        video_family({}, "ltx")
 
 
-def test_a_full_family_block_parses():
-    family = video_family(_config_with(_h3_block()), "h3")
+def test_a_family_reads_its_block_without_a_versions_overlay(monkeypatch, tmp_path):
+    data = metadata_copy()
+    data["video_families"]["ltx"]["versions"]["ltx25"]["label"] = "Other"
+    use_model_metadata(monkeypatch, tmp_path, data)
 
-    assert family == VideoFamily(
+    assert video_family(load_config(), "ltx").label == "LTX distilled model"
+
+
+def test_the_packaged_h3_family_is_described_literally():
+    assert video_family(load_config(), "h3") == VideoFamily(
         name="h3",
         label="MiniMax H3",
         frame_rule=FrameRule(17, 5, "up"),
-        capabilities=VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=True, upscale_review=True, lora=True, audio=True, low_memory=False, audio_track=False, audio_track_upscale=False),
+        capabilities=VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=True, upscale_review=True, lora=True, audio=True, low_memory=False, audio_track=True, audio_track_upscale=False),
         platform_capabilities={"darwin": {"upscale": False, "upscale_review": False}},
         default_steps=8,
         max_steps=8,
@@ -220,61 +194,48 @@ def test_a_full_family_block_parses():
         extend_frame_step=17,
         carry_frames=22,
         default_upscale_steps=8,
-        extend_fps=None,
+        extend_fps=24,
+        platform_carry_frames={"darwin": 1},
     )
 
 
-def test_extend_fps_is_read_from_the_block_and_the_packaged_families_declare_it():
-    assert video_family(_config_with({**_h3_block(), "extend_fps": 24}), "h3").extend_fps == 24
-    assert video_family(load_config(), "h3").extend_fps == 24
-    assert video_family(load_config(), "ltx").extend_fps is None
+def test_each_call_describes_the_family_afresh():
+    first = video_family(load_config(), "h3")
+    first.platform_capabilities["darwin"]["upscale"] = True
+
+    assert video_family(load_config(), "h3").platform_capabilities["darwin"]["upscale"] is False
 
 
-def _without(key: str):
-    block = _h3_block()
-    del block[key]
-    return block
+def _h3_settings(**changes) -> dict:
+    settings = {"default_steps": 8, "default_frames": 124, **changes}
+    return {"video_model_presets": {"h3": settings}}
 
 
-def _with(path: str, value):
-    block = _h3_block()
-    node = block
-    *parents, last = path.split(".")
-    for parent in parents:
-        node = node[parent]
-    node[last] = value
-    return block
+def test_the_ltx_family_takes_its_steps_and_upscale_steps_from_the_settings():
+    family = video_family({"video_model_presets": {"ltx": {"default_steps": 6, "upscale": {"default_upscale_steps": 5}}}}, "ltx")
+
+    assert (family.default_steps, family.default_upscale_steps) == (6, 5)
 
 
-def _without_capability(name: str):
-    block = _h3_block()
-    del block["capabilities"][name]
-    return block
+def test_the_family_takes_its_steps_frames_and_upscale_steps_from_the_settings():
+    family = video_family(_h3_settings(default_steps=4, default_frames=39, upscale={"default_upscale_steps": 6}), "h3")
+
+    assert (family.default_steps, family.default_frames, family.default_upscale_steps) == (4, 39, 6)
 
 
 @pytest.mark.parametrize(
-    ("block", "path"),
+    ("changes", "path"),
     [
-        (_without("label"), "label"),  # a missing key
-        (_without("capabilities"), "capabilities"),
-        (_with("default_steps", 0), "default_steps"),  # a value out of range
-        (_with("max_steps", "8"), "max_steps"),  # a wrong type
-        (_with("extend_frame_step", True), "extend_frame_step"),  # a bool posing as an int
-        (_with("upscale", {"default_upscale_steps": 0}), "upscale.default_upscale_steps"),  # a nested path
-        (_with("frame_rule.alignment", 0), "frame_rule.alignment"),
-        (_with("frame_rule.extra", 1), "frame_rule.extra"),  # an unknown key
-        (_with("capabilities", {"i2v": True}), "capabilities.end_frame"),
-        (_without_capability("audio_track"), "capabilities.audio_track"),
-        (_without_capability("audio_track_upscale"), "capabilities.audio_track_upscale"),
-        (_with("capabilities.audio_track", "yes"), "capabilities.audio_track"),
-        (_with("platform_capabilities", {"darwin": {"upscale": 0}}), "platform_capabilities.darwin.upscale"),
-        (_with("step_options", [8, 4]), "step_options"),  # out of order
-        (_with("default_frames", 121), "default_frames"),  # off the frame rule
+        ({"default_steps": 0}, "default_steps"),  # a value out of range
+        ({"default_steps": True}, "default_steps"),  # a bool posing as an int
+        ({"upscale": {"default_upscale_steps": 0}}, "upscale.default_upscale_steps"),  # a nested path
+        ({"upscale": "yes"}, "upscale"),
+        ({"default_frames": 121}, "default_frames"),  # off the frame rule
     ],
 )
-def test_a_malformed_family_block_names_the_key_path(block, path):
+def test_a_malformed_setting_names_the_key_path(changes, path):
     with pytest.raises(ValueError, match=rf"^{re.escape('video_model_presets.h3.' + path)}(?=\s)"):
-        video_family(_config_with(block), "h3")
+        video_family(_h3_settings(**changes), "h3")
 
 
 def test_detection_alignment_equals_the_rule_alignment():
@@ -289,8 +250,8 @@ def test_detection_alignment_equals_the_rule_alignment():
 # ---------------------------------------------------------------------------
 
 
-def _family(**overrides) -> VideoFamily:
-    return video_family(_config_with({**_h3_block(), **overrides}), "h3")
+def _family() -> VideoFamily:
+    return video_family(load_config(), "h3")
 
 
 @pytest.mark.parametrize(
@@ -366,12 +327,3 @@ def test_a_family_with_no_platform_carry_is_the_same_on_every_platform(monkeypat
 
     assert video_family_on_platform(load_config(), "ltx") == video_family(load_config(), "ltx")
     assert video_family_on_platform(load_config(), "wan") is None
-
-
-@pytest.mark.parametrize(
-    ("value", "path"),
-    [("one", "platform_carry_frames"), ({"darwin": 0}, "platform_carry_frames.darwin")],
-)
-def test_a_malformed_platform_carry_names_its_key(value, path):
-    with pytest.raises(ValueError, match=re.escape(path)):
-        video_family(_config_with({**_h3_block(), "platform_carry_frames": value}), "h3")

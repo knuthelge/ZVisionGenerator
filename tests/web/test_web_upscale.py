@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-from tests._factories import make_extend_source, make_probe
+from tests._factories import make_extend_source, make_probe, packaged_metadata_copy, use_model_metadata
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.upscale_runner import UpscaleSource
@@ -48,12 +48,23 @@ _DEFAULTS = {
 }
 
 
+_LTX_REFS = {"ltx-4": "dgrauet/ltx-2.3-mlx-q4@a", "ltx-8": "dgrauet/ltx-2.3-mlx-q8@b", "ltx25-4": "MarceloFSO/ltx-2.5-mlx-q4-fast@c", "h3": "MiniMax/H3@d"}
+
+
+@pytest.fixture(autouse=True)
+def _ltx_aliases(monkeypatch, tmp_path):
+    """Serve the four video aliases with test refs and ``ltx-4`` with a download size."""
+    data = packaged_metadata_copy()
+    for name, ref in _LTX_REFS.items():
+        data["models"][name]["downloads"] = [{"ref": ref}]
+    data["models"]["ltx-4"]["download_size"] = {"darwin": "26 GB"}
+    use_model_metadata(monkeypatch, tmp_path, data)
+
+
 def _web_config(output_dir, **overrides):
     app_config = {
         "upscale": {"default_denoise_2x": 0.4, "default_denoise_4x": 0.4, "max_megapixels": 16},
         "sharpening": {"normal": 1.0, "upscaled": 1.2, "pre_upscale": 0.8},
-        "schedulers": {"beta": {"mflux_class": "pkg.BetaScheduler"}},
-        "model_presets": {"zimage": {}, "ideogram4": {"supports_img2img": False, "supports_upscale": False, "dimension_max": 2048}},
     }
     values = dict(
         app_config=app_config,
@@ -121,7 +132,7 @@ def test_plan_carries_recorded_settings(monkeypatch, tmp_path):
     assert plan.request.quantize == 8
     assert plan.notices == ()
     assert (request.model_name, request.seed, request.steps, request.guidance) == ("zit", 42, 8, 1.5)
-    assert request.scheduler == "pkg.BetaScheduler"
+    assert request.scheduler == "zvisiongenerator.schedulers.beta_scheduler.BetaScheduler"
     assert request.scheduler_name == "beta"
     assert request.negative_prompt == "blurry"
     assert request.resolved_prompt == "a red barn"
@@ -151,7 +162,7 @@ def test_plan_inherits_transparency_from_the_recorded_generation(monkeypatch, tm
 def test_seedvr2_plan_inherits_transparency_from_the_recorded_generation(monkeypatch, generation, expected):
     _forbid_image_model_detection(monkeypatch)
 
-    plan = upscale_api.plan_seedvr2_upscale(_source(generation=generation), 2, setup=_seedvr2_setup())
+    plan = upscale_api.plan_seedvr2_upscale(_source(generation=generation), 2, setup=_seedvr2_setup(), platform_key="darwin")
 
     assert plan.request.transparent is expected
 
@@ -161,7 +172,7 @@ def test_plan_without_settings_is_not_transparent(monkeypatch, tmp_path):
     source = UpscaleSource(path="/out/imported.png", width=512, height=512)
 
     assert upscale_api.plan_upscale(source, 2, _web_config(tmp_path), backend_name="mflux").request.transparent is False
-    assert upscale_api.plan_seedvr2_upscale(source, 2, setup=_seedvr2_setup()).request.transparent is False
+    assert upscale_api.plan_seedvr2_upscale(source, 2, setup=_seedvr2_setup(), platform_key="darwin").request.transparent is False
 
 
 def test_plan_picks_denoise_by_output_size_not_the_in_run_default(monkeypatch, tmp_path):
@@ -321,7 +332,7 @@ def test_seedvr2_plan_carries_recorded_settings_without_an_image_model(monkeypat
     _forbid_image_model_detection(monkeypatch)
     source = _source(model_family="zimage", ratio="4:3", size="m", image_path="/out/ref.png", image_strength=0.6, lora="/gone.safetensors:0.8,style:1")
 
-    plan = upscale_api.plan_seedvr2_upscale(source, 2, setup=_seedvr2_setup())
+    plan = upscale_api.plan_seedvr2_upscale(source, 2, setup=_seedvr2_setup(), platform_key="darwin")
 
     request = plan.request
     assert plan.model_ref == "numz/SeedVR2_comfyUI"
@@ -342,7 +353,7 @@ def test_seedvr2_plan_without_settings_saves_no_invented_values(monkeypatch):
     _forbid_image_model_detection(monkeypatch)
     source = UpscaleSource(path="/out/imported.png", width=512, height=512)
 
-    plan = upscale_api.plan_seedvr2_upscale(source, 4, setup=_seedvr2_setup())
+    plan = upscale_api.plan_seedvr2_upscale(source, 4, setup=_seedvr2_setup(), platform_key="darwin")
 
     request = plan.request
     assert plan.notices == (upscale_api.NOTICE_SETTINGS_UNKNOWN,)
@@ -355,7 +366,7 @@ def test_seedvr2_plan_without_settings_saves_no_invented_values(monkeypatch):
 def test_seedvr2_plan_with_a_partial_record_marks_settings_unknown():
     source = _source(seed=None)
 
-    request = upscale_api.plan_seedvr2_upscale(source, 2, setup=_seedvr2_setup()).request
+    request = upscale_api.plan_seedvr2_upscale(source, 2, setup=_seedvr2_setup(), platform_key="darwin").request
 
     assert request.source_settings_known is False
     assert (request.seed, request.steps, request.guidance) == (ImageGenerationRequest.seed, ImageGenerationRequest.steps, ImageGenerationRequest.guidance)
@@ -363,28 +374,28 @@ def test_seedvr2_plan_with_a_partial_record_marks_settings_unknown():
 
 
 def test_seedvr2_plan_prompt_falls_back_to_the_recorded_template():
-    request = upscale_api.plan_seedvr2_upscale(_source(rendered_prompt=None, prompt="a {red|blue} barn"), 2, setup=_seedvr2_setup()).request
+    request = upscale_api.plan_seedvr2_upscale(_source(rendered_prompt=None, prompt="a {red|blue} barn"), 2, setup=_seedvr2_setup(), platform_key="darwin").request
 
     assert request.resolved_prompt == "a {red|blue} barn"
 
 
 def test_seedvr2_plan_ignores_an_unparseable_lora_record():
-    request = upscale_api.plan_seedvr2_upscale(_source(lora="a,,b"), 2, setup=_seedvr2_setup()).request
+    request = upscale_api.plan_seedvr2_upscale(_source(lora="a,,b"), 2, setup=_seedvr2_setup(), platform_key="darwin").request
 
     assert (request.lora_paths, request.lora_weights) == (None, None)
 
 
 def test_seedvr2_plan_warns_instead_of_refusing_a_large_output():
-    plan = upscale_api.plan_seedvr2_upscale(_source(), 4, setup=_seedvr2_setup(budget_bytes=int(20e9)))
+    plan = upscale_api.plan_seedvr2_upscale(_source(), 4, setup=_seedvr2_setup(budget_bytes=int(20e9)), platform_key="darwin")
 
     assert plan.option.allowed is True
     assert plan.option.warning == SEEDVR2_MEMORY_WARNING
-    assert upscale_api.plan_seedvr2_upscale(_source(), 2, setup=_seedvr2_setup()).option.warning is None
+    assert upscale_api.plan_seedvr2_upscale(_source(), 2, setup=_seedvr2_setup(), platform_key="darwin").option.warning is None
 
 
 def test_seedvr2_plan_rejects_unknown_factor():
     with pytest.raises(ValueError, match="factor"):
-        upscale_api.plan_seedvr2_upscale(_source(), 3, setup=_seedvr2_setup())
+        upscale_api.plan_seedvr2_upscale(_source(), 3, setup=_seedvr2_setup(), platform_key="darwin")
 
 
 @pytest.mark.parametrize(
@@ -607,7 +618,8 @@ def test_gallery_upscale_field_has_no_seedvr2_where_it_is_unsupported(tmp_path):
     assert _asset_json(tmp_path, "a.png")["upscale"]["seedvr2"] is None
 
 
-def test_gallery_upscale_field_lists_seedvr2_options(tmp_path):
+def test_gallery_upscale_field_lists_seedvr2_options(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")  # the size label is keyed by platform
     _write_png(tmp_path / "a.png", size=(1024, 1536), config={"prompt": "p", "model": "zit"})
     web_config = _web_config(tmp_path, seedvr2=_seedvr2_setup())
 
@@ -631,7 +643,8 @@ def test_gallery_upscale_field_seedvr2_warns_only_over_the_budget(tmp_path):
     assert [(option["factor"], option["allowed"], option["warning"]) for option in options] == [(2, True, None), (4, True, SEEDVR2_MEMORY_WARNING)]
 
 
-def test_gallery_upscale_field_seedvr2_download_label_follows_the_stored_copy(tmp_path):
+def test_gallery_upscale_field_seedvr2_download_label_follows_the_stored_copy(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")  # the size label is keyed by platform
     _write_png(tmp_path / "a.png")
     downloaded = replace(_seedvr2_setup(), downloaded=True)
     three_b = SeedVR2Tier("seedvr2-3b", weights_gb=4.0, activation_floor_gb=5.0, activation_base_gb=1.0, activation_gb_per_mp=0.5)
@@ -983,15 +996,11 @@ def test_video_upscale_plan_carries_the_clips_settings_and_softness():
 
 # --- macOS: LTX upscale of a gallery video ---
 
-_LTX_ALIASES = {"ltx-4": "dgrauet/ltx-2.3-mlx-q4@a", "ltx-8": "dgrauet/ltx-2.3-mlx-q8@b", "ltx25-4": "MarceloFSO/ltx-2.5-mlx-q4-fast@c", "h3": "MiniMax/H3@d"}
-
 
 def _ltx_web_config(tmp_path, *, video_model_options=("ltx-8", "ltx-4", "ltx25-4", "h3"), default_video="ltx-8", steps=2):
     web_config = _web_config(tmp_path, video_model_options=video_model_options, default_models=WebUiDefaultModels(image="zit", video=default_video))
     web_config.app_config = {
         **web_config.app_config,
-        "model_aliases": _LTX_ALIASES,
-        "model_labels": {"ltx-4": {"name": "LTX-2.3 4-bit", "download_size_label": {"darwin": "26 GB"}}},
         "video_model_presets": {"ltx": {"upscale": {"existing_video_steps": steps}, "versions": {"ltx25": {"aliases": ["ltx25-4"]}}}},
     }
     return web_config

@@ -29,6 +29,7 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 ## Generation and backends
 
 - **One exception in an image batch aborts the batch with a traceback.** No image stage returns `StageOutcome.failed` or `.retry`, so the image runner's failure and retry branches are unreachable and nothing in the loop catches exceptions (`image_runner.py`); the video runner catches per iteration. CUDA image and LTX have no `torch.cuda.OutOfMemoryError` handling (SeedVR2 and H3 do). Decision: keep as is for v1.
+- **Pin the unpinned image aliases and SeedVR2 repos.** `zit`, `klein9b`, `klein4b` and `krea2` and the SeedVR2 weights (`numz/SeedVR2_comfyUI`, `AInVFX/SeedVR2_comfyUI`) are listed in `utils/model_metadata.yaml` without a revision, so an upstream change reaches users unchecked. Pinning needs the loaders to take a revision: `image_model_detect.py:84-85` refuses a pinned reference for every family but Ideogram 4, and the image loaders pass no revision on. Fix: let the image and SeedVR2 loaders pass the revision to the Hub, lift the refusal, then pin each alias and repo to a checked commit.
 - **Extend refuses clips made with the built-in `--upscale 2`** and says "extend the original instead", but the built-in upscale discards the half-size render (`utils/video_extend.py`, `provenance.py`). Documented as "extend first, upscale last". Reword the message for generated clips, or allow it.
 - **CUDA: the first LTX run prepares copies for minutes with no phase shown and Cancel waits** (`backends/cuda/video/backend.py`, `_prepared_weights` only logs; `load_model` takes no `on_phase`/`cancelled`, unlike the image loader's `saving_quant` phase).
 - **CUDA: a SIGKILL during a stored-copy save leaves a hidden multi-GB `.partial` folder**, swept only on a retry of the same target more than an hour later (`utils/stored_quant.py`, `sweep_stale_partials`). Ctrl-C and ordinary errors clean up.
@@ -55,7 +56,6 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 
 ## Code hygiene (no user impact)
 
-- Dead config key `video_model_presets.h3.diffusers.attention` (`config.yaml`, `utils/h3_preset.py`): parsed and validated, never read.
 - Dead code: `utils/h3_memory.h3_extend_window_frames` (duplicates `video_extend.window_frames`), `web_runner.WebRunner.get_job_result_path`, `job_contract.ACTIVE_STATUSES`, the job snapshot field `supports_controls` (duplicates `supported_controls`), `backends/cuda/image/backend._make_skip_callback`, the `GET /docs/assets/{asset_name}` route (always 404 once installed), the frontend `progress_text` SSE handler, `draft.reset()`.
 - Duplicated helpers: `backends/mac/video.py` `_snapshot_download` repeats `utils/hf_snapshot.snapshot_download`; `workflows/video_stages.py` handles a `CalledProcessError` that `splice_clips` can never raise while `strip_audio` and `embed_mp4_config` still raise it.
 - `backends/cuda/video/h3/lora.py` docstring mentions a planning label ("C11's `load_copy`"); `h3/conditioning.py` imports the private `_weight_files` from `decode.py`.

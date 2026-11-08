@@ -24,8 +24,6 @@ def config():
         "generation": {"seed_min": 4, "seed_max": 2**32 - 1},
         "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
         "upscale": {"default_denoise_2x": 0.25, "default_denoise_4x": 0.45},
-        "schedulers": {},
-        "model_presets": {"zimage": {"supports_negative_prompt": True}},
     }
 
 
@@ -81,7 +79,6 @@ class TestRunnerBuildsReferences:
         from zvisiongenerator.image_runner import run_batch
         from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
-        config["model_presets"] = {"flux2_klein": {"max_reference_images": 4}}
         paths = [str(tmp_path / "a.png"), str(tmp_path / "b.png")]
         for path in paths:
             Image.new("RGB", (8, 8)).save(path)

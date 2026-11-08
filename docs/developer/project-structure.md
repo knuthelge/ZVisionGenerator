@@ -24,7 +24,7 @@ zvisiongenerator/
 ├── seedvr2_loader.py              SeedVR2 loading from its weights folder: a stored 8-bit copy (macOS) or the downloaded FP8 files
 ├── video_runner.py                Video generation run orchestration
 ├── audio_runner.py                Audio run orchestration: seeds, load once, make and save each take as FLAC, close
-├── config.yaml                    Default configuration (sizes, image, video and audio model presets)
+├── config.yaml                    Default settings only (sizes, generation, sharpening, model defaults, the enhancer's knobs, the UI); the facts about the built-in models are in `utils/model_metadata.yaml`
 ├── backends/                      Backend selection (__init__.py, the only place that picks a platform)
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
 │   ├── matte/                     Background removal on a torch device (CUDA or MPS), one code path for both platforms
@@ -139,6 +139,7 @@ zvisiongenerator/
 ├── downloads/                     Hugging Face model downloads shown as progress (see Model Downloads)
 │   ├── check.py                   Dry-run check: files and bytes a target still needs, or None when offline
 │   ├── child.py                   Run one download in a child process; relay its byte counts, stop it on request
+│   ├── declaration.py             Read the downloads a built-in model declares in the metadata as `(role, target)` pairs: its own, then its video family's companions
 │   ├── ensure.py                  Skip, wait for or run each part of a plan before a model loads
 │   ├── flights.py                 Single-flight registry: one owner per destination, waiters mirror its progress
 │   ├── hub_access.py              Where the Hugging Face token comes from, and one actionable line for a Hub refusal
@@ -147,7 +148,7 @@ zvisiongenerator/
 │   ├── progress.py                Byte counting sink for tqdm, speed meter and progress from counts
 │   ├── protocol.py                Wire prefix of the child's stdout messages
 │   ├── space.py                   Free-space estimate for the main download drive
-│   ├── target.py                  DownloadTarget, TargetCheck and DownloadProgress value objects
+│   ├── target.py                  DownloadTarget, TargetCheck, DownloadProgress and HubFiles value objects
 │   └── worker.py                  Child entry point: snapshot_download one target, print byte counts
 ├── processing/
 │   ├── contrast.py                Contrast adjustment
@@ -162,7 +163,7 @@ zvisiongenerator/
 │   ├── app_db.py                  The app database `ziv.sqlite3`: path, connections with the standard pragmas, per-component schema versions, corruption quarantine
 │   ├── app_log.py                 Error log file, cleared on every start
 │   ├── atomic_write.py            Atomic file replacement for config and prompt-file writers
-│   ├── audio_preset.py            Pure parser of the config's `audio_model_presets` section into frozen `AudioPreset` values
+│   ├── audio_preset.py            Join of the audio models of the metadata with the config's `audio_model_presets` settings into frozen `AudioPreset` values
 │   ├── audio_fade.py              Fade the end of a clip to silence
 │   ├── audio_console.py           The live progress line of `ziv audio`
 │   ├── audio_level.py             Scale a clip that peaks above a ceiling down to it (`limit_peak`)
@@ -174,17 +175,18 @@ zvisiongenerator/
 │   ├── audio_track.py             Read a user's audio track and build the window sound of an extension
 │   ├── audio_voice.py             Whether a voice recording needs the speaker's consent
 │   ├── color_names.py             Plain colour names for hex codes (nearest by OKLab), for Palette Custom
-│   ├── config.py                  Config loading (image + video)
+│   ├── config.py                  Config loading (image + video) and the settings that merge into the facts: resolved defaults, video families, the prompt enhancer's model choice
 │   ├── console.py                 Console formatting
 │   ├── curated_loras.json         The curated list: hand-checked Hugging Face LoRAs, each pinned to a commit, file, size and SHA-256, with its Hugging Face download count
 │   ├── curated_loras.py           Pure loader of the curated list: frozen `CuratedLora` entries and lookups by family, size or version, id and local name
+│   ├── enhancer_models.py         The built-in prompt-enhancer models (Fast and Smart) per platform, and why Smart cannot run on a machine, read from the metadata
 │   ├── enhance_record.py          Record how a prompt was enhanced for a generated asset, and read it back
 │   ├── ffmpeg.py                  ffmpeg availability check and install, the error for a failed ffmpeg or ffprobe run, and the hidden temp path of in-place rewrites
 │   ├── file_links.py              Hard-link model files into a new folder, copying where linking fails
 │   ├── filename.py                Output filenames ({set}_{timestamp}) and collision counters
 │   ├── h3_lora.py                 Read MiniMax H3 LoRA files of any format into diffusers' converted form
 │   ├── h3_memory.py               MiniMax H3 row arithmetic, memory estimates (CUDA GPU and system memory, macOS unified memory) and estimated generation time
-│   ├── h3_preset.py               Value types of the MiniMax H3 preset and its resolved files, parsed from the config entry
+│   ├── h3_preset.py               Value types of the MiniMax H3 preset and its resolved files, built from the metadata's declared targets and the config's H3 settings
 │   ├── h3_converted.py            The manifest of a converted MiniMax H3 model folder
 │   ├── hf_cache.py                Read the Hugging Face cache: repos, what deleting each frees, unused shared files
 │   ├── hf_snapshot.py             Find or download the files of one pinned Hugging Face revision (shared by the CUDA and macOS H3 backends)
@@ -202,18 +204,19 @@ zvisiongenerator/
 │   ├── lora_names.py              The local name a downloaded LoRA is saved under: a slug of its repository name, numbered when taken
 │   ├── lora_preview.py            Shrink an image to a small WebP: the preview kept with a downloaded LoRA and the file browser's thumbnails
 │   ├── lora_trigger.py            Read a LoRA's trigger text from a model card's instance prompt or a header's single caption
+│   ├── ltx_facts.py               The LTX facts read from the metadata: a model's version, its companion files, converter bases and the load options of its backends
 │   ├── ltx_converted.py           The manifest of a converted LTX model folder (LTX-2.3 or LTX-2.5)
 │   ├── ltx_version.py             The LTX version (2.3 or 2.5) of a video model: its alias, known repo, converted manifest, or a local folder's config files
-│   ├── matte_models.py            The pinned BiRefNet and ViTMatte repositories and the Models-page row of the background removal models
+│   ├── matte.py                   The pinned files of the background removal models, read from the metadata (`matte_pins`)
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)
-│   ├── model_metadata.py          Reader of the packaged model metadata (`load_model_metadata`, `model_entry`, `model_ids`, `for_platform`) and the YAML loader the packaged files share
-│   ├── model_metadata.yaml        Facts about the built-in models, never merged with the user's config: the licence records (one per licence, with its supplier, a summary and URLs) and a `models` entry per model naming the records that cover it
+│   ├── model_metadata.py          Reader of the packaged model metadata (`load_model_metadata`, `model_entry`, `model_ids`, `for_platform`, `family_block`, `builtin_aliases`, `model_capabilities`) and the YAML loader the packaged files share
+│   ├── model_metadata.yaml        Facts about the built-in models, never merged with the user's config: the licence records, the image and video families (capabilities, frame rules) and a `models` entry per model with its name, sizes, licences and pinned downloads per platform
 │   ├── music_mode.py              Song or instrumental: what the Lyrics box of a music take makes (the Web UI's status line mirrors it)
 │   ├── moss_build.py              MOSS-Image's pinned sources, model folders, build records and shared stored copies
 │   ├── page_cache.py              Drop model files from the page cache once written or read
-│   ├── paths.py                   ~/.ziv/ model store resolution
-│   ├── platform.py                Platform metadata and platform-aware alias values
+│   ├── paths.py                   ~/.ziv/ model store resolution, Hugging Face reference parsing and the models-folder name check (`is_folder_name`)
+│   ├── platform.py                Platform labels and platform-aware alias values
 │   ├── prompt_compose.py          Structured prompt flattening & snippets; video scene helpers (compose scene + prompt, quoted-line stripping, original-prompt check)
 │   ├── prompt_document.py         Prompt file ↔ editable document for the Web UI builder (comment-preserving, ruamel.yaml)
 │   ├── prompt_document_check.py   Builder document previews and problems, with the prompt loader's rules

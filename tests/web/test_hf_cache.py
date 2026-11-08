@@ -11,17 +11,24 @@ import huggingface_hub.constants
 import pytest
 from fastapi.testclient import TestClient
 
+from tests._factories import packaged_metadata_copy, use_built_model_pins, use_model_entries, use_model_metadata
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.hf_cache import cached_model_repos, free_stranded_shared_files, repo_disk_bytes, stranded_shared_files
-from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
+from zvisiongenerator.utils.matte import matte_pins
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web.model_delete import cache_repos_linked_from, installed_models_linking_to, used_repo_ids
-from zvisiongenerator.downloads.built_sources import built_model_sources
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.web.workspace_api import _other_downloads_payload, find_other_downloads
 
+BIREFNET, VITMATTE = matte_pins()
 _SNAPSHOT = "a" * 40
 _MATTE_REPOS = frozenset({BIREFNET.repo_id.casefold(), VITMATTE.repo_id.casefold()})
+
+
+@pytest.fixture(autouse=True)
+def _no_built_in_models(monkeypatch, tmp_path):
+    """Serve metadata with no models but the background removal ones (and the video families), so a test's repo sets hold only what it declares."""
+    use_model_entries(monkeypatch, tmp_path, {"matte": packaged_metadata_copy()["models"]["matte"]}, video_families=True)
 
 
 def _touch(path: Path, size: int = 1) -> Path:
@@ -120,72 +127,59 @@ class TestStrandedSharedFiles:
         assert stranded_shared_files(hub) == {}
 
 
-def test_used_repo_ids_cover_aliases_companions_enhancers_and_extras():
-    config = {
-        "prompt_enhancer": {"model": "org/Fast", "user_model": "/local/folder"},
-        "video_model_presets": {"ltx": {"diffusers": {"default_repo": "org/ltx", "transformer": {"repo": "org/ltx-single", "filename": "t.safetensors"}}}},
-    }
+def test_used_repo_ids_cover_declarations_aliases_and_the_custom_enhancer(monkeypatch, tmp_path):
+    packaged = packaged_metadata_copy()["models"]
+    models = {"matte": packaged["matte"], "ltx-4": packaged["ltx-4"]}
+    for model_id, repo in (("enhancer-fast", "org/Fast"), ("enhancer-smart", "org/Smart")):
+        models[model_id] = {"kind": "enhancer", "downloads": {"linux": [{"ref": repo, "files_from": "loader"}]}}
+    use_model_entries(monkeypatch, tmp_path, models, video_families=True)
+    config = {"prompt_enhancer": {"user_model": "Org/Custom@abc"}}
     inventory = [
         _alias("klein", "Org/Klein@abc123"),
-        VideoInventoryEntry(name="ltx", family="ltx", supports_i2v=True, source="alias", resolved_path="org/ltx"),
+        VideoInventoryEntry(name="ltx-4", family="ltx", supports_i2v=True, source="alias", resolved_path="diffusers/LTX-2.3-Distilled-Diffusers@432e0d3c2d1769aaa4d295f9243f7062bf6b47ee"),
         ImageInventoryEntry(name="custom", family="zimage", size=None, source="installed", resolved_path="/models/custom"),
     ]
 
-    used = used_repo_ids(inventory, config, platform_key="linux", extra=["org/SeedVR2"])
+    used = used_repo_ids(inventory, config, platform_key="linux")
 
-    assert used - _MATTE_REPOS == {"org/klein", "org/ltx", "org/ltx-single", "org/fast", "org/seedvr2"}
+    assert used - _MATTE_REPOS == {"org/klein", "diffusers/ltx-2.3-distilled-diffusers", "lightricks/ltx-2.3", "org/fast", "org/smart", "org/custom"}
+
+
+@pytest.mark.parametrize(("platform", "gemma", "ainvfx"), [("darwin", True, False), ("win32", False, True), ("linux", False, True)])
+def test_used_repo_ids_follow_the_declarations_of_the_platform(monkeypatch, tmp_path, platform, gemma, ainvfx):
+    use_model_metadata(monkeypatch, tmp_path, packaged_metadata_copy())
+    used = used_repo_ids([], {}, platform_key=platform)
+
+    assert ("mlx-community/gemma-3-12b-it-4bit" in used) is gemma
+    assert ("ainvfx/seedvr2_comfyui" in used) is ainvfx
+    assert {"zhengpeng7/birefnet", "openmoss-team/moss-image-sft", "numz/seedvr2_comfyui"} <= used
 
 
 def test_used_repo_ids_always_include_both_background_removal_repos():
     assert used_repo_ids([], {}, platform_key="linux") == _MATTE_REPOS
 
 
-_BUILT_ON_FIRST_USE_CONFIG = {
-    "model_aliases": {
-        "ideo": "ideo",
-        "moss": {"win32": "moss", "linux": "moss"},
-        "moss-sft": {"win32": "moss-sft", "linux": "moss-sft"},
-    },
-    "ideogram4_instant": {
-        "transformer": {"repo": "org/instant-transformer", "revision": "a" * 40, "filename": "t.safetensors"},
-        "components": {"darwin": "org/ideo-fp8@" + "b" * 40, "linux": "Org/Ideo-NF4@" + "c" * 40},
-        "transformer_format": {"darwin": "fp8", "linux": "bf16"},
-    },
-    "moss_image": {
-        "sft": "Org/Moss-SFT@" + "d" * 40,
-        "turbo_lora": {"repo": "org/moss-turbo", "revision": "e" * 40, "filename": "turbo.safetensors"},
-    },
+_PINS = {
+    "sft": "Org/Moss-SFT@" + "d" * 40,
+    "lora": "org/moss-turbo@" + "e" * 40,
+    "components": {"darwin": "org/ideo-fp8@" + "b" * 40, "win32": "Org/Ideo-NF4@" + "c" * 40, "linux": "Org/Ideo-NF4@" + "c" * 40},
 }
 
 
-def test_used_repo_ids_cover_the_sources_of_models_built_on_first_use():
-    linux = used_repo_ids([], _BUILT_ON_FIRST_USE_CONFIG, platform_key="linux")
-    darwin = used_repo_ids([], _BUILT_ON_FIRST_USE_CONFIG, platform_key="darwin")
+def test_used_repo_ids_cover_the_sources_of_models_built_on_first_use(monkeypatch, tmp_path):
+    use_built_model_pins(monkeypatch, tmp_path, keep=("matte",), **_PINS)
 
-    assert linux - _MATTE_REPOS == {"org/ideo-nf4", "org/moss-sft", "org/moss-turbo"}
-    # MOSS has no alias on macOS, so only the Instant components of that platform count.
-    assert darwin - _MATTE_REPOS == {"org/ideo-fp8"}
+    linux = used_repo_ids([], {}, platform_key="linux")
+    darwin = used_repo_ids([], {}, platform_key="darwin")
 
-
-def test_each_built_model_names_its_own_source_repos():
-    sources = {name: built_model_sources(name, _BUILT_ON_FIRST_USE_CONFIG, platform_key="linux") for name in ("moss", "moss-sft", "ideo", "zit")}
-
-    assert sources == {"moss": ("Org/Moss-SFT", "org/moss-turbo"), "moss-sft": ("Org/Moss-SFT",), "ideo": ("Org/Ideo-NF4",), "zit": ()}
+    assert linux - _MATTE_REPOS == {"org/ideo-nf4", "org/instant-transformer", "org/moss-sft", "org/moss-turbo"}
+    assert darwin - _MATTE_REPOS == {"org/ideo-fp8", "org/instant-transformer", "org/moss-sft", "org/moss-turbo"}
 
 
-def test_moss_sft_alone_does_not_use_the_turbo_lora_repo():
-    config = {**_BUILT_ON_FIRST_USE_CONFIG, "model_aliases": {"moss-sft": "moss-sft"}}
+def test_moss_sft_alone_does_not_use_the_turbo_lora_repo(monkeypatch, tmp_path):
+    use_built_model_pins(monkeypatch, tmp_path, ("moss-sft",), keep=("matte",), **_PINS)
 
-    assert used_repo_ids([], config, platform_key="linux") - _MATTE_REPOS == {"org/moss-sft"}
-
-
-def test_an_invalid_built_model_source_block_warns_and_counts_nothing():
-    config = {**_BUILT_ON_FIRST_USE_CONFIG, "moss_image": {}}
-
-    with pytest.warns(UserWarning, match="built on first use"):
-        used = used_repo_ids([], config, platform_key="linux")
-
-    assert used - _MATTE_REPOS == {"org/ideo-nf4"}
+    assert used_repo_ids([], {}, platform_key="linux") - _MATTE_REPOS == {"org/moss-sft"}
 
 
 def test_cache_repos_linked_from_installed_models(hub, tmp_path):
@@ -223,7 +217,7 @@ def web_config(hub, tmp_path):
         data_dir=str(tmp_path),
         models_dir=str(models_dir),
         seedvr2=None,
-        app_config={"video_model_presets": {"ltx": {"mlx_text_encoder": "org/gemma@" + "a" * 40}}},
+        app_config={},
         image_inventory=(_alias("used", "org/used"),),
         video_inventory=(),
     )
@@ -240,16 +234,16 @@ def test_the_background_removal_repos_are_not_other_downloads(web_config, hub):
     assert [repo.repo_id for repo in find_other_downloads(web_config, cache_dir=hub)] == ["org/old"]
 
 
-def test_the_repos_a_built_model_links_files_from_are_not_other_downloads(web_config, hub, monkeypatch):
+def test_the_repos_a_built_model_links_files_from_are_not_other_downloads(web_config, hub, monkeypatch, tmp_path):
     monkeypatch.setattr("sys.platform", "linux")
     for repo_id in ("Org/Moss-SFT", "org/moss-turbo", "org/ideo-nf4", "org/instant-transformer"):
         _repo(hub, repo_id, local=25_000)
-    web_config.app_config = {**web_config.app_config, **_BUILT_ON_FIRST_USE_CONFIG}
+    use_built_model_pins(monkeypatch, tmp_path, keep=("matte",), **_PINS)
 
     listed = [repo.repo_id for repo in find_other_downloads(web_config, cache_dir=hub)]
 
     # The built folders hard-link these files, so deleting them would force a re-download.
-    assert sorted(listed) == ["org/instant-transformer", "org/old"]
+    assert listed == ["org/old"]
 
 
 def test_models_payload_lists_other_downloads(web_config, hub):

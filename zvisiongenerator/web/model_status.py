@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.target import DownloadTarget
-from zvisiongenerator.utils.config import ltx_mlx_text_encoder_repo_id
+from zvisiongenerator.utils.ltx_facts import ltx_gemma_repo_id
 from zvisiongenerator.utils.h3_memory import estimate_h3_cuda_clip_memory, h3_mlx_clip_fit
 from zvisiongenerator.utils.model_files import find_local_model_dir, is_ltx_mlx_layout, ltx_mlx_bundled_text_encoder
 from zvisiongenerator.utils.model_memory import (
@@ -61,7 +62,7 @@ def describe_model_status(
         budget: This machine's memory budget, or ``None`` when this platform is not estimated.
         find_local_dir: Resolver for fully downloaded model directories.
         model_name: The name the model is picked by (``ltx-4``); on CUDA it sets a video model's quantize level.
-        app_config: The loaded config: it names the Gemma 3 text encoder and the downloads of a video model, and sets a CUDA video model's quantize level.
+        app_config: The loaded config: its video settings shape the download plan of a video model.
         family: A video model's family (``"ltx"`` or ``"h3"``); ``None`` is LTX. LTX and H3 have a memory estimate.
         target_present: Tells whether one download target is fully on disk; a video model is downloaded when every target of its plan is.
 
@@ -85,7 +86,7 @@ def describe_model_status(
         downloaded = model_dir is not None
     # An LTX-2.5 MLX pack carries its own Gemma 4; the other MLX packs need the Gemma 3 repo.
     if ltx_video and downloaded and model_dir is not None and is_ltx_mlx_layout(model_dir) and ltx_mlx_bundled_text_encoder(model_dir) is None:
-        text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo_id(app_config))
+        text_encoder_dir = find_local_dir(ltx_gemma_repo_id())
 
     memory_fit = None
     if h3_video and downloaded and budget is not None:
@@ -93,7 +94,7 @@ def describe_model_status(
     elif downloaded and model_dir is not None and budget is not None and (kind == "image" or ltx_video):
         levels = (None, *quantize_options)
         if budget.system_bytes is not None:
-            memory_fit = _cuda_image_memory_fit(model_dir, levels, budget) if kind == "image" else _cuda_video_memory_fit(resolved_path, budget, find_local_dir, model_name, app_config)
+            memory_fit = _cuda_image_memory_fit(model_dir, levels, budget) if kind == "image" else _cuda_video_memory_fit(resolved_path, budget, find_local_dir, model_name)
         elif kind == "video":
             memory_fit = _video_memory_fit(model_dir, text_encoder_dir, budget)
         else:
@@ -105,7 +106,7 @@ def _video_downloaded(resolved_path: str, family: str, model_name: str | None, a
     """Return whether every download of the video model's plan on this platform is on disk (a plan that cannot be made counts as not downloaded)."""
     from zvisiongenerator.downloads.plans import video_model_downloaded
 
-    return video_model_downloaded(resolved_path, family=family, config=app_config, model_name=model_name or resolved_path, target_present=target_present)
+    return video_model_downloaded(resolved_path, family=family, config=app_config, model_name=model_name or resolved_path, platform_key=sys.platform, target_present=target_present)
 
 
 def _h3_memory_fit(budget: MemoryBudget) -> dict[str, Any] | None:
@@ -156,9 +157,9 @@ def _cuda_image_memory_fit(model_dir: Path, levels: tuple[int | None, ...], budg
     }
 
 
-def _cuda_video_memory_fit(resolved_path: str, budget: MemoryBudget, find_local_dir: Callable[[str], Path | None], model_name: str | None, app_config: dict[str, Any] | None) -> dict[str, Any] | None:
+def _cuda_video_memory_fit(resolved_path: str, budget: MemoryBudget, find_local_dir: Callable[[str], Path | None], model_name: str | None) -> dict[str, Any] | None:
     """Return an LTX model's memory fit on a CUDA machine, or ``None`` when its level or files are unknown."""
-    system = ltx_cuda_system_memory(resolved_path, model_name, app_config, find_local_dir)
+    system = ltx_cuda_system_memory(resolved_path, model_name, find_local_dir)
     if system is None:
         return None
     staged = estimate_ltx_cuda_clip_memory(system, low_memory=True, **_REFERENCE_CLIP)

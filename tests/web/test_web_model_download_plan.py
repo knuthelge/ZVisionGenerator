@@ -11,41 +11,43 @@ import huggingface_hub
 import huggingface_hub.constants
 import pytest
 
-from tests._factories import load_packaged_config
+from tests._audio_presets import audio_config
+from tests._factories import load_packaged_config, use_built_model_pins, use_enhancer_models, video_config
 
+from zvisiongenerator.utils.model_metadata import builtin_aliases
 from zvisiongenerator.backends.cuda import download_plan as cuda_plan
 from zvisiongenerator.downloads.space import SpaceNeed
 from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
 from zvisiongenerator.utils.ideogram4_instant import instant_source, write_build_record
-from zvisiongenerator.utils.matte_models import BIREFNET, MATTE_DOWNLOAD_SIZE_LABEL, MATTE_LABEL, MATTE_ROW_NAME, VITMATTE
+from zvisiongenerator.utils.matte import matte_pins
 from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier, seedvr2_tier_label
 from zvisiongenerator.web import model_download_plan as plan_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, load_licences
 from zvisiongenerator.web import job_downloads as job_downloads_module
-from zvisiongenerator.web.model_download_plan import parts_summary, row_download_needed, row_plan
+from zvisiongenerator.web.model_download_plan import MATTE_ROW_NAME, parts_summary, row_download_needed, row_plan
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.web.workspace_api import build_models_response
 
+BIREFNET, VITMATTE = matte_pins()
+MATTE_LABEL = "Background removal"
+MATTE_DOWNLOAD_SIZE_LABEL = "548 MB"
 _TIER = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
-_CONFIG = {
-    "prompt_enhancer": {"model": "owner/enhancer"},
-    "ideogram4_instant": {
-        "transformer": {"repo": "owner/instant", "revision": "a" * 40, "filename": "instant.safetensors"},
-        "components": {"linux": "owner/base@" + "b" * 40, "darwin": "owner/base@" + "b" * 40, "win32": "owner/base@" + "b" * 40},
-        "transformer_format": {"linux": "bf16", "darwin": "fp8", "win32": "bf16"},
-    },
-    "video_model_presets": {
-        "ltx": {
-            "mlx_text_encoder": "owner/gemma",
-            "diffusers": {
-                "transformer": {"repo": "owner/ltx-transformer", "filename": "t.safetensors"},
-                "latent_upsampler": {"repo": "owner/ltx-up", "filename": "u.safetensors"},
-            },
-        }
-    },
-}
+_CONFIG = {**audio_config(), **video_config()}
+
+
+@pytest.fixture(autouse=True)
+def _pinned_instant_sources(monkeypatch, tmp_path):
+    """Pin Ideogram 4 Instant's sources to ``owner/base`` and ``owner/instant`` on every platform."""
+    components = dict.fromkeys(("darwin", "win32", "linux"), "owner/base@" + "b" * 40)
+    use_built_model_pins(monkeypatch, tmp_path, None, components=components, transformer="owner/instant@" + "a" * 40)
+
+
+@pytest.fixture(autouse=True)
+def _enhancer_models(monkeypatch, tmp_path, _pinned_instant_sources):
+    """Pin the Fast enhancer to ``owner/enhancer`` and the Smart one to ``owner/smart`` on every platform."""
+    use_enhancer_models(monkeypatch, tmp_path, fast="owner/enhancer", smart="owner/smart")
 
 
 @pytest.fixture
@@ -140,17 +142,16 @@ class TestRowPlan:
 
         assert row_plan("model", "zit", _web_config(env, image=[_image("zit", "owner/zit")])).targets is None
 
-    def test_a_row_is_labelled_by_its_configured_name(self, env, monkeypatch):
+    def test_a_row_is_labelled_by_its_metadata_name(self, env, monkeypatch):
         monkeypatch.setattr(job_downloads_module, "image_plan", MagicMock(return_value=(DownloadTarget("owner/zit"),)))
         monkeypatch.setattr(job_downloads_module, "video_plan", MagicMock(return_value=(DownloadTarget("owner/ltx"),)))
-        labels = {"zit": {"name": "Z-Image Turbo"}, "ltx-8": {"name": "LTX-2.3 8-bit"}}
-        web_config = _web_config(env, image=[_image("zit", "owner/zit")], video=[_video("ltx-8", "owner/ltx")], app_config={**_CONFIG, "model_labels": labels})
+        web_config = _web_config(env, image=[_image("zit", "owner/zit")], video=[_video("ltx-8", "owner/ltx")])
 
         image, video = row_plan("model", "zit", web_config), row_plan("model", "ltx-8", web_config)
 
         assert [(part.model_id, part.label) for part in (image, video)] == [("zit", "Z-Image Turbo"), ("ltx-8", "LTX-2.3 8-bit")]
 
-    @pytest.mark.parametrize(("kind", "name"), [("model", "nope"), ("enhancer", "nope"), ("enhancer", "smart"), ("matte", "nope"), ("lora", "zit")])
+    @pytest.mark.parametrize(("kind", "name"), [("model", "nope"), ("enhancer", "nope"), ("matte", "nope"), ("lora", "zit")])
     def test_an_unknown_row_or_kind_is_a_value_error(self, env, kind, name):
         with pytest.raises(ValueError):
             row_plan(kind, name, _web_config(env, image=[_image("zit", "owner/zit")]))
@@ -168,7 +169,7 @@ class TestDownloadNeeded:
     def test_a_built_instant_folder_needs_nothing(self, env):
         folder = env.models_dir / "ideo"
         folder.mkdir()
-        write_build_record(folder, instant_source(_CONFIG, sys.platform))
+        write_build_record(folder, instant_source(sys.platform))
         web_config = _web_config(env, image=[_image("ideo", str(folder), family="ideogram4", source="installed")])
 
         assert row_download_needed("model", "ideo", web_config, downloaded=False, present=lambda target: False) is False
@@ -191,6 +192,7 @@ class TestDownloadNeeded:
     @pytest.mark.real_download_plans
     def test_cuda_ltx_with_the_repo_but_not_the_transformer_needs_a_download(self, env, monkeypatch):
         monkeypatch.setattr("zvisiongenerator.backends.video_download_plan", cuda_plan.video_download_plan)
+        monkeypatch.setattr("zvisiongenerator.backends.sys.platform", "linux")
         web_config = _web_config(env, video=[_video("ltx-8", "owner/ltx")])
         present = {"owner/ltx"}
 
@@ -198,14 +200,14 @@ class TestDownloadNeeded:
             return target.repo_id in present
 
         assert row_download_needed("model", "ltx-8", web_config, downloaded=True, present=_present) is True
-        present.update({"owner/ltx-transformer", "owner/ltx-up"})
+        present.add("Lightricks/LTX-2.3")
         assert row_download_needed("model", "ltx-8", web_config, downloaded=True, present=_present) is False
 
     @pytest.mark.real_download_plans
     def test_the_ltx25_row_plans_one_pinned_target_and_is_needed_until_it_is_present(self, env, monkeypatch):
         monkeypatch.setattr("zvisiongenerator.backends.sys.platform", "linux")
         config = load_packaged_config()
-        pin = config["model_aliases"]["ltx25-4"]["linux"]
+        pin = builtin_aliases()["ltx25-4"]["linux"]
         web_config = _web_config(env, video=[_video("ltx25-4", pin)], app_config=config)
         target = DownloadTarget("unsloth/LTX-2.5-FP8", "7b40724fc39bbb01d9b4d72638c0d263531c88c2", None, ("LTX-2.5-*.safetensors", "samples/*"))
 
@@ -286,7 +288,7 @@ class TestModelsResponse:
         payload = build_models_response(web_config, token_source=None)
 
         rows = [*payload["image_models"], *payload["video_models"], *payload["enhancer_models"]]
-        assert {row.get("name", row.get("tier")) for row in rows} == {"zit", "seedvr2-7b@fp8", "ltx-8", "fast"}
+        assert {row.get("name", row.get("tier")) for row in rows} == {"zit", "seedvr2-7b@fp8", "ltx-8", "fast", "smart"}
         assert all(isinstance(row["download_needed"], bool) for row in rows)
 
     def test_the_listing_builds_offline_without_any_network_or_planner_that_reads_files(self, web_config, monkeypatch):
@@ -339,20 +341,9 @@ class TestModelsResponse:
         assert (row["downloaded"], row["deletable"], row["download_needed"]) == (True, True, False)
         assert row["disk_size_label"]
 
-    def test_a_background_removal_row_that_cannot_be_planned_warns_and_reads_unknown(self, monkeypatch):
-        def _boom(**_kwargs):
-            raise ValueError("bad pins")
-
-        monkeypatch.setattr(workspace_api_module, "matte_download_needed", _boom)
-
-        with pytest.warns(UserWarning, match="background removal"):
-            row = workspace_api_module._background_removal_row()
-
-        assert (row["downloaded"], row["download_needed"]) == (None, False)
-
     def test_an_unavailable_enhancer_tier_needs_no_download(self, env, monkeypatch):
         rows = workspace_api_module._enhancer_model_rows(
-            {"prompt_enhancer": {"model": "owner/enhancer", "smart": {"model": "owner/smart"}}},
+            {},
             downloaded=lambda repo, revision: False,
             budget_bytes=lambda: None,
             present=lambda target: False,
@@ -372,7 +363,12 @@ class TestRowSummary:
         checks = {target: TargetCheck(1, 100) for target in part.targets}
 
         summary = parts_summary(
-            (part,), check=checks.get, present=lambda t: False, space=MagicMock(return_value=SpaceNeed(path=tmp_path, needed_bytes=200, free_bytes=1_000)), cache_dir=lambda: tmp_path
+            (part,),
+            check=checks.get,
+            present=lambda t: False,
+            space=MagicMock(return_value=SpaceNeed(path=tmp_path, needed_bytes=200, free_bytes=1_000)),
+            cache_dir=lambda: tmp_path,
+            licences=load_licences(),
         )
 
         assert summary["parts"] == [{"label": MATTE_LABEL, "model": MATTE_LICENCE_MODEL, "bytes": 200}]
@@ -393,6 +389,7 @@ class TestRowSummary:
             present=absent,
             space=MagicMock(return_value=None),
             cache_dir=lambda: tmp_path,
+            licences=load_licences(),
         )
 
         assert looked_up == list(part.targets)
@@ -448,7 +445,7 @@ class TestInstantStatus:
     def test_a_built_folder_is_reported_from_its_files(self, env, present):
         folder = env.models_dir / "ideo"
         folder.mkdir()
-        write_build_record(folder, instant_source(_CONFIG, sys.platform))
+        write_build_record(folder, instant_source(sys.platform))
 
         assert self._status(env)["downloaded"] is True
 

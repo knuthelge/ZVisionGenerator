@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import warnings
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -11,15 +12,10 @@ from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.hf_cache import repo_disk_bytes
 from zvisiongenerator.utils.model_files import disk_size_label, huggingface_cache_repo_dir
 from zvisiongenerator.utils.model_memory import MemoryBudget
-from zvisiongenerator.web.audio_models import audio_rows, runnable_audio_models
+from zvisiongenerator.web.audio_models import audio_rows
 from zvisiongenerator.web.model_delete import audio_delete_target
 
-__all__ = ["audio_inventory_rows", "audio_repo_ids"]
-
-
-def audio_repo_ids(config: Mapping[str, Any]) -> frozenset[str]:
-    """Return every repository an audio preset of *config* loads on this machine, cloning files included, so the cache listing never offers them as unused."""
-    return frozenset(files.repo_id for preset in runnable_audio_models(config) for files in (*preset.files, *preset.voice_files))
+__all__ = ["audio_inventory_rows"]
 
 
 def audio_inventory_rows(
@@ -39,7 +35,7 @@ def _inventory_fields(preset: AudioPreset, shared: dict[str, Any]) -> dict[str, 
     """
     fields: dict[str, Any] = {"name": preset.id, "download_needed": shared["downloaded"] is False}
     try:
-        target = audio_delete_target(preset)
+        target = audio_delete_target(preset, platform_key=sys.platform)
         return {**fields, "delete": _delete_info(target), "disk_size_label": _disk_size_label(target)}
     except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
         warnings.warn(f"Could not describe audio model '{preset.id}': {exc}", stacklevel=2)

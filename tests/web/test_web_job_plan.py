@@ -29,8 +29,8 @@ _GIB = 1024**3
 
 def _use_fake_planners(monkeypatch, env) -> None:
     """Plan one target per model and (when ``env.enhance``) the enhancer, without the Hub."""
-    monkeypatch.setattr(job_downloads_module, "image_plan", lambda model_ref, *, family, config, platform_key: (DownloadTarget(_KLEIN if model_ref == "klein9b" else f"owner/{model_ref}"),))
-    monkeypatch.setattr(job_downloads_module, "video_plan", lambda model_ref, *, family, config, model_name, upscale: (DownloadTarget(f"owner/{model_ref}"),))
+    monkeypatch.setattr(job_downloads_module, "image_plan", lambda model_ref, *, family, platform_key: (DownloadTarget(_KLEIN if model_ref == "klein9b" else f"owner/{model_ref}"),))
+    monkeypatch.setattr(job_downloads_module, "video_plan", lambda model_ref, *, family, config, model_name, platform_key, upscale: (DownloadTarget(f"owner/{model_ref}"),))
     monkeypatch.setattr(job_downloads_module, "matte_plan", lambda: (DownloadTarget("owner/matte"),))
     monkeypatch.setattr(job_downloads_module, "enhancer_plan", lambda repo, revision: (DownloadTarget(repo, revision),))
     monkeypatch.setattr(job_downloads_module.prompt_enhancer_session, "plan_job_enhancer", lambda *_a, **_kw: (_ENHANCER, None) if env.enhance else None)
@@ -44,7 +44,7 @@ def plan_env(monkeypatch, tmp_path):
     )
     env.web_config.output_dir = str(tmp_path)
     packaged = load_packaged_config()
-    env.web_config.app_config.update(model_aliases=packaged["model_aliases"], audio_model_presets=packaged["audio_model_presets"])
+    env.web_config.app_config.update(audio_model_presets=packaged["audio_model_presets"])
     monkeypatch.setattr(web_server, "load_web_config", lambda: env.web_config)
     patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="flux2", is_distilled=False, size=None), defaults=make_resolved_image_defaults(), submitted=env.submitted)
     monkeypatch.setattr(web_server.download_flights, "active", env.flights.active)
@@ -87,7 +87,7 @@ class TestGeneratePlan:
         plan = response.json()
         assert [(part["label"], part["model"], part["bytes"]) for part in plan["parts"]] == [
             (_ENHANCER, _ENHANCER, 2 * _GIB),
-            ("klein9b", "klein9b", 2 * _GIB),
+            ("FLUX.2 Klein 9B", "klein9b", 2 * _GIB),
         ]
         assert plan["total_bytes"] == 4 * _GIB
         assert plan["space"]["enough"] is True
@@ -248,7 +248,7 @@ class TestGeneratePlan:
         plan = plan_env.client.post("/api/generate/plan", data=_form(model="zit")).json()
 
         assert plan["unchecked"] is True
-        assert plan["parts"] == [{"label": "zit", "model": "zit", "bytes": None}]
+        assert plan["parts"] == [{"label": "Z-Image Turbo", "model": "zit", "bytes": None}]
 
     def test_a_refusal_by_the_hub_is_a_424_with_its_message(self, plan_env, monkeypatch):
         def refuse(_parts, **_kwargs):
@@ -486,8 +486,6 @@ def upscale_env(plan_env, monkeypatch):
         {
             "upscale": {"default_denoise_2x": 0.4, "default_denoise_4x": 0.4, "max_megapixels": 16},
             "sharpening": {"normal": 1.0, "upscaled": 1.2, "pre_upscale": 0.8},
-            "schedulers": {"beta": {"mflux_class": "pkg.BetaScheduler"}},
-            "model_presets": {"flux2": {}},
         }
     )
     monkeypatch.setattr(web_server, "_media_output_root", lambda: plan_env.root.resolve())

@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import torch
 
-from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_two_kind_preset
+from tests._audio_presets import audio_config, audio_preset, qwen3_tts_preset
 from tests._fake_audio import fake_read_config as read_config
 from tests._torch_flags import current_flags, set_app_flags, set_kit_flags
 from tests.audio._helpers import clip, decode, fake_backend, patch_runner, preset, sine
@@ -506,7 +506,7 @@ class TestOutOfMemory:
         backend.close.assert_called_once()
 
     def test_only_music_that_takes_lyrics_is_told_to_shorten_them(self, monkeypatch, tmp_path):
-        (two_kinds,) = parse_audio_presets(audio_config(sa3=sa3_two_kind_preset()))
+        two_kinds = audio_preset("sa3")
         advice = {}
         for name, model, request_ in (
             ("song", YUE2, _music()),

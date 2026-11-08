@@ -74,6 +74,15 @@ class DownloadTarget:
 
 
 @dataclass(frozen=True)
+class HubFiles:
+    """A set of files of one Hub repository, pinned to a revision."""
+
+    repo_id: str
+    revision: str
+    files: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class DownloadProgress:
     """A snapshot of a running download; unknown values are ``None``."""
 

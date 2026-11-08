@@ -38,7 +38,8 @@ from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.audio_resample import resample_audio
 from zvisiongenerator.utils.audio_track import read_track, window_waveform
 from zvisiongenerator.utils.h3_memory import H3_FPS, H3_FRAMES_PER_CHUNK, H3_ROW_PIXELS
-from zvisiongenerator.utils.h3_preset import H3MlxFiles, H3MlxPreset, H3Schedule, HubFiles
+from zvisiongenerator.downloads.target import HubFiles
+from zvisiongenerator.utils.h3_preset import H3MlxFiles, H3MlxPreset, H3Schedule
 from zvisiongenerator.utils.hf_snapshot import snapshot_download as hub_snapshot_download
 from zvisiongenerator.utils.hf_snapshot import snapshot_with
 from zvisiongenerator.utils.paths import get_ziv_data_dir, parse_huggingface_repo_reference
@@ -659,7 +660,7 @@ class H3MlxVideoBackend:
                 preset: The ``H3MlxPreset`` (required): its files, its frame rule and its sigma schedules, which also set the
                     allowed ``steps``.
                 lora: The turbo LoRA's ``HubFiles`` (required).
-                lora_scale: The turbo LoRA's strength (required; the config's ``lora.scale``).
+                lora_scale: The turbo LoRA's strength (required; the family's ``lora_scale``).
                 loras: ``(path, weight)`` of each user LoRA.
                 model_name: The name the text-encoder copy is stored under; defaults to ``"h3"``.
                 models_dir: The models folder; defaults to the app's.

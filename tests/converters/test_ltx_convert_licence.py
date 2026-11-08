@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._factories import load_packaged_config
+from tests._factories import metadata_copy, use_model_metadata
 from zvisiongenerator.converters import ltx_convert
 from zvisiongenerator.downloads.target import DownloadTarget
 
@@ -24,8 +24,8 @@ def downloads(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict]:
     return calls
 
 
-def _fetch(version: str | None, label: str, config: dict | None = None) -> None:
-    ltx_convert._distilled_lora(config or load_packaged_config(), version, label)
+def _fetch(version: str | None, label: str) -> None:
+    ltx_convert._distilled_lora(version, label)
 
 
 @pytest.mark.parametrize(("version", "label", "repo"), [(None, "2.3", "Lightricks/LTX-2.3"), ("ltx25", "2.5", "lxxxy6/LTX-2.5")])
@@ -64,37 +64,14 @@ def test_nothing_is_said_when_the_lora_is_already_downloaded(capsys, downloads, 
     assert [(target.repo_id, target.allow_patterns) for target in seen] == [("Lightricks/LTX-2.3", ("ltx-2.3-22b-distilled-lora-384-1.1.safetensors",))]
 
 
-def test_every_distilled_lora_of_the_packaged_config_names_a_licence_record():
-    from zvisiongenerator.utils.config import ltx_distilled_lora_licence
-    from zvisiongenerator.utils.licences import load_licences
-
-    config = load_packaged_config()
-    records = {record.id for record in load_licences()}
-    versions = [None, *config["video_model_presets"]["ltx"]["versions"]]
-    named = {
-        version: ltx_distilled_lora_licence(config, version)
-        for version in versions
-        if (config["video_model_presets"]["ltx"] if version is None else config["video_model_presets"]["ltx"]["versions"][version]).get("distilled_lora")
-    }
-
-    assert named and all(record in records for record in named.values())
-
-
-def test_a_version_whose_lora_names_no_licence_downloads_without_a_notice(capsys, downloads, monkeypatch):
+def test_a_version_whose_lora_names_no_licence_downloads_without_a_notice(capsys, downloads, monkeypatch, tmp_path):
     monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: False)
-    config = load_packaged_config()
-    config["video_model_presets"]["ltx"]["versions"]["ltx26"] = {"distilled_lora": {"repo": "Lightricks/LTX-2.6@abc", "filename": "ltx-2.6-lora.safetensors"}}
+    data = metadata_copy()
+    data["video_families"]["ltx"]["versions"]["ltx26"] = {"model_type": "ltx-2.6", "distilled_lora": {"ref": "Lightricks/LTX-2.6@abc", "file": "ltx-2.6-lora.safetensors", "licence": None}}
+    use_model_metadata(monkeypatch, tmp_path, data)
 
-    _fetch("ltx26", "2.6", config)
+    _fetch("ltx26", "2.6")
 
     out = capsys.readouterr().out
     assert "By downloading" not in out and out.startswith("Getting Lightricks' LTX-2.6")
     assert [call["filename"] for call in downloads] == ["ltx-2.6-lora.safetensors"]
-
-
-def test_a_licence_that_is_not_a_string_is_refused(downloads):
-    config = load_packaged_config()
-    config["video_model_presets"]["ltx"]["distilled_lora"]["licence"] = ["ltx-2-community"]
-
-    with pytest.raises(ValueError, match="distilled_lora.licence"):
-        _fetch(None, "2.3", config)

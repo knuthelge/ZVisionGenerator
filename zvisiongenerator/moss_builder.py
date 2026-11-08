@@ -3,7 +3,7 @@
 Each alias (``<models dir>/moss`` and ``<models dir>/moss-sft``) is assembled in a hidden partial folder: the SFT
 repo's components are hard-linked from the Hugging Face cache, the folder's ``model_index.json`` is written with the
 alias's ``is_distilled`` flag and, for Turbo, the 4-step LoRA is linked in beside them. A build record written last
-marks the folder finished; a change to the pinned sources in config rebuilds it.
+marks the folder finished; a change to the pinned sources in the model metadata rebuilds it.
 """
 
 from __future__ import annotations
@@ -13,19 +13,19 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.image_model_loader import LOADING_PHASE
 from zvisiongenerator.utils.built_model import BUILDING_PHASE, build_in_partial
 from zvisiongenerator.utils.file_links import link_tree
 from zvisiongenerator.utils.moss_build import (
     LINKED_COMPONENTS,
-    SFT_IGNORE,
-    SFT_PATTERNS,
     TURBO_LORA_NAME,
     MossSource,
     is_built,
     is_moss_dir,
     is_turbo_dir,
     moss_source,
+    moss_targets,
     write_build_record,
 )
 
@@ -36,18 +36,18 @@ Downloader = Callable[[MossSource], Path]
 
 def ensure_moss_model(
     model_path: str,
-    config: dict[str, Any],
     *,
+    platform_key: str,
     on_phase: Callable[[str], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> bool:
-    """Build the MOSS-Image folder at *model_path* unless it is already built from the configured sources.
+    """Build the MOSS-Image folder at *model_path* unless it is already built from the pinned sources.
 
     Any other *model_path* is left alone.
 
     Args:
         model_path: The resolved model path.
-        config: The app config, whose ``moss_image`` block pins the sources.
+        platform_key: The platform whose declared sources apply (``sys.platform``).
         on_phase: Receives :data:`BUILDING_PHASE` when a build starts, then :data:`LOADING_PHASE` once it is done.
         cancelled: Checked between the build's steps; a true result stops the build.
 
@@ -55,18 +55,18 @@ def ensure_moss_model(
         Whether the model is ready (``False`` only when *cancelled* stopped the build).
 
     Raises:
-        ValueError: If the ``moss_image`` block of *config* is invalid.
         RuntimeError: If *model_path* holds something ziv did not build (see :func:`~zvisiongenerator.utils.built_model.build_in_partial`).
     """
     if not is_moss_dir(model_path):
         return True
-    source = moss_source(config)
+    source = moss_source(platform_key)
     target = Path(model_path).expanduser()
     if is_built(target, source):
         return True
     if on_phase is not None:
         on_phase(BUILDING_PHASE)
-    built = build_moss_model(source, target, turbo=is_turbo_dir(target), cancelled=cancelled)
+    sft, _turbo = moss_targets(platform_key)
+    built = build_moss_model(source, target, turbo=is_turbo_dir(target), cancelled=cancelled, download_sft=_sft_downloader(sft))
     if built and on_phase is not None:
         on_phase(LOADING_PHASE)
     return built
@@ -77,8 +77,8 @@ def build_moss_model(
     target: Path,
     *,
     turbo: bool,
+    download_sft: Downloader,
     cancelled: Callable[[], bool] | None = None,
-    download_sft: Downloader | None = None,
     download_lora: Downloader | None = None,
 ) -> bool:
     """Build the MOSS-Image folder at *target* from *source*, replacing any older build.
@@ -87,14 +87,13 @@ def build_moss_model(
         source: The pinned SFT repo and Turbo LoRA.
         target: The model folder to create.
         turbo: Whether to build the Turbo alias (distilled flag set, LoRA linked in) rather than SFT.
+        download_sft: Returns the local folder of the SFT repo.
         cancelled: Checked between the steps; a true result discards the partial folder.
-        download_sft: Returns the local folder of the SFT repo (default: the Hugging Face cache).
         download_lora: Returns the local Turbo LoRA file (default: the Hugging Face cache); only used when *turbo*.
 
     Returns:
         Whether the folder is in place (``False`` when *cancelled* stopped the build).
     """
-    download_sft = download_sft or _download_sft
     download_lora = download_lora or _download_lora
 
     def stopped() -> bool:
@@ -134,11 +133,15 @@ def _link_components(snapshot: Path, target: Path, *, turbo: bool) -> None:
     (target / "model_index.json").write_text(json.dumps(moss_model_index(sft_index, turbo=turbo), indent=2) + "\n", encoding="utf-8")
 
 
-def _download_sft(source: MossSource) -> Path:
-    """Return the SFT repo's snapshot in the Hugging Face cache, downloading the model files (never its scripts)."""
-    from huggingface_hub import snapshot_download
+def _sft_downloader(sft: DownloadTarget) -> Downloader:
+    """Return the downloader of the SFT repo: its snapshot in the Hugging Face cache, with the model files the *sft* target declares (never its scripts)."""
 
-    return Path(snapshot_download(source.sft_repo, revision=source.sft_revision, allow_patterns=list(SFT_PATTERNS), ignore_patterns=list(SFT_IGNORE)))
+    def download(source: MossSource) -> Path:
+        from huggingface_hub import snapshot_download
+
+        return Path(snapshot_download(source.sft_repo, revision=source.sft_revision, allow_patterns=list(sft.allow_patterns), ignore_patterns=list(sft.ignore_patterns)))
+
+    return download
 
 
 def _download_lora(source: MossSource) -> Path:

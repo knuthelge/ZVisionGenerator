@@ -15,7 +15,8 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from tests._factories import _make_plan
+from tests._audio_presets import audio_config
+from tests._factories import _make_plan, video_config
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import video_clip as video_clip_module
@@ -42,6 +43,8 @@ def ffprobe_cannot_read_files(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def make_web_config() -> SimpleNamespace:
     app_config = {
+        **audio_config(),
+        **video_config(),
         "generation": {
             "default_ratio": "2:3",
             "default_size": "m",
@@ -123,7 +126,7 @@ def patch_image_submit_dependencies(
     monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
     monkeypatch.setattr(web_server, "detect_image_model", lambda _model: model_info)
     monkeypatch.setattr(web_server, "get_backend_name", lambda: "mflux")
-    monkeypatch.setattr(web_server, "validate_scheduler", lambda _scheduler, _config: None)
+    monkeypatch.setattr(web_server, "validate_scheduler", lambda _scheduler: None)
     monkeypatch.setattr(web_server, "resolve_defaults", lambda _model_info, _config, _cli_overrides, _backend_name: defaults)
 
     def _capture_submit(**kwargs):

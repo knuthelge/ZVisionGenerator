@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from tests._factories import _make_args, load_packaged_config, make_extend_source
+from tests._factories import _make_args, load_packaged_config, make_extend_source, use_enhancer_models, video_config
 from tests.web._helpers import make_web_config, patch_image_submit_dependencies
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
@@ -196,9 +196,10 @@ class TestEnhanceEndpoint:
         with pytest.raises(ValueError, match="mode"):
             web_server._validate_enhance_body({"prompt": "a fox", "mode": "text", "settings": {"style": "photo"}})
 
-    def test_smart_resolves_the_smart_model(self, monkeypatch):
+    def test_smart_resolves_the_smart_model(self, monkeypatch, tmp_path):
         monkeypatch.setattr(web_server, "smart_budget_bytes", lambda choice: 64 * 2**30)
-        monkeypatch.setattr(web_server, "load_config", lambda: {"prompt_enhancer": {"model": "fast/m", "smart": {"model": "smart/m", "min_memory_gb": 9}}})
+        use_enhancer_models(monkeypatch, tmp_path, fast="fast/m", smart="smart/m", smart_memory_gb=9)
+        monkeypatch.setattr(web_server, "load_config", lambda: {})
         job = web_server._validate_enhance_body({"prompt": "a fox", "settings": {"style": "photo"}, "enhance_model": "smart"})
         assert (job["repo"], job["revision"]) == ("smart/m", None)
 
@@ -994,8 +995,14 @@ class TestGenerateFields:
 
 _PREFLIGHT_CONFIG = {
     "sizes": {"2:3": {"m": {"width": 512, "height": 512}}},
-    "prompt_enhancer": {"model": {"darwin": "a/b", "win32": "a/b", "linux": "a/b"}},
+    **video_config(),
 }
+
+
+@pytest.fixture(autouse=True)
+def _fast_enhancer(monkeypatch, tmp_path):
+    """Declare the Fast enhancer as ``a/b``, pinned to the revision ``r``, with the Smart one beside it."""
+    use_enhancer_models(monkeypatch, tmp_path, fast="a/b@r", smart="big/m@s", smart_memory_gb=9, fast_size="9 GB", smart_size="19 GB")
 
 
 class _PreflightEnhancer:
@@ -1142,21 +1149,12 @@ class TestWebPreflight:
 
 class TestWorkspaceContract:
     def _config(self, **section):
-        return SimpleNamespace(
-            app_config={
-                "prompt_enhancer": {
-                    "model": {"darwin": "a/b", "win32": "a/b", "linux": "a/b"},
-                    "revision": {"darwin": "r", "win32": "r", "linux": "r"},
-                    "download_size_label": {"darwin": "2.4 GB", "win32": "9 GB", "linux": "9 GB"},
-                    **section,
-                }
-            }
-        )
+        return SimpleNamespace(app_config={"prompt_enhancer": section})
 
     def test_not_downloaded(self):
         contract = workspace_api_module.build_prompt_enhancer_contract(self._config(), downloaded=lambda repo, rev: False)
         assert contract["model"] == "a/b" and contract["revision"] == "r"
-        assert contract["downloaded"] is False and contract["download_size_label"] in ("2.4 GB", "9 GB")
+        assert contract["downloaded"] is False and contract["download_size_label"] == "9 GB"
         assert contract["matrix"]["defaults"]["length"] == "same"
         assert contract["default_max_words"] == 300
 
@@ -1182,19 +1180,19 @@ class TestWorkspaceContract:
         assert contract["model"] == "someone/bigger-llm" and contract["download_size_label"] is None
 
     def test_smart_reports_size_and_availability(self):
-        smart = {"model": "big/m", "revision": "s", "download_size_label": {"darwin": "19 GB", "win32": "19 GB", "linux": "19 GB"}, "min_memory_gb": 9}
-        contract = workspace_api_module.build_prompt_enhancer_contract(self._config(smart=smart), downloaded=lambda repo, rev: False, budget_bytes=lambda: 6 * 2**30)
+        contract = workspace_api_module.build_prompt_enhancer_contract(self._config(), downloaded=lambda repo, rev: False, budget_bytes=lambda: 6 * 2**30)
         assert contract["smart"] == {"downloaded": False, "download_size_label": "19 GB", "unavailable": "Needs about 9 GB of memory; this machine has 6 GB."}
-        fits = workspace_api_module.build_prompt_enhancer_contract(self._config(smart=smart), downloaded=lambda repo, rev: True, budget_bytes=lambda: 16 * 2**30)
+        fits = workspace_api_module.build_prompt_enhancer_contract(self._config(), downloaded=lambda repo, rev: True, budget_bytes=lambda: 16 * 2**30)
         assert fits["smart"] == {"downloaded": True, "download_size_label": None, "unavailable": None}
 
     def test_custom_model_has_no_tiers(self):
         contract = workspace_api_module.build_prompt_enhancer_contract(self._config(user_model="me/mine"), downloaded=lambda repo, rev: False, budget_bytes=lambda: None)
         assert contract["smart"] is None
 
-    def test_missing_model_reports_error(self):
-        contract = workspace_api_module.build_prompt_enhancer_contract(SimpleNamespace(app_config={}), downloaded=lambda repo, rev: False)
-        assert contract["model"] is None and "No prompt enhancer model" in contract["error"]
+    def test_a_malformed_user_model_reports_error(self):
+        config = SimpleNamespace(app_config={"prompt_enhancer": {"user_model": "a/b@"}})
+        contract = workspace_api_module.build_prompt_enhancer_contract(config, downloaded=lambda repo, rev: False)
+        assert contract["model"] is None and "Invalid enhancer model" in contract["error"]
 
     def test_workflows_expose_enhance_controls(self):
         from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS

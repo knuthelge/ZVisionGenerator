@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests._factories import metadata_copy, use_model_metadata, video_config
+
 import zvisiongenerator.backends as backends_module
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.video_support import unsupported_video_request
@@ -11,19 +13,12 @@ from zvisiongenerator.utils.video_support import unsupported_video_request
 _ALL_ON = {"i2v": True, "end_frame": False, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": True, "audio_track": True, "audio_track_upscale": True}
 
 
-def _config(**capabilities: bool) -> dict:
-    return {
-        "video_model_presets": {
-            "ltx": {
-                "label": "LTX distilled model",
-                "default_steps": 8,
-                "frame_rule": {"alignment": 8, "offset": 1, "round": "nearest"},
-                "extend_frame_step": 8,
-                "carry_frames": 25,
-                "capabilities": {**_ALL_ON, **capabilities},
-            }
-        }
-    }
+def _config(monkeypatch, tmp_path, **capabilities: bool) -> dict:
+    """Serve metadata whose LTX family has the given capabilities (the others on) and return the config with the video settings."""
+    data = metadata_copy()
+    data["video_families"]["ltx"]["capabilities"] = {**_ALL_ON, **capabilities}
+    use_model_metadata(monkeypatch, tmp_path, data)
+    return video_config()
 
 
 @pytest.fixture(autouse=True)
@@ -31,12 +26,12 @@ def _linux(monkeypatch):
     monkeypatch.setattr(backends_module.sys, "platform", "linux")
 
 
-def test_a_request_the_family_can_do_is_not_refused():
-    assert unsupported_video_request(_config(), "ltx", image=True, extend=True, review=True) is None
+def test_a_request_the_family_can_do_is_not_refused(monkeypatch, tmp_path):
+    assert unsupported_video_request(_config(monkeypatch, tmp_path), "ltx", image=True, extend=True, review=True) is None
 
 
-def test_a_family_the_config_does_not_describe_is_not_refused():
-    assert unsupported_video_request({}, "ltx", image=True, extend=True, review=True) is None
+def test_a_family_the_metadata_does_not_describe_is_not_refused():
+    assert unsupported_video_request(video_config(), "wan", image=True, extend=True, review=True) is None
 
 
 @pytest.mark.parametrize(
@@ -49,18 +44,18 @@ def test_a_family_the_config_does_not_describe_is_not_refused():
         ("end_frame", {"end_image": True}, "LTX distilled model does not support a last-frame image. Pick another video model."),
     ],
 )
-def test_a_missing_capability_refuses_only_the_workflow_that_needs_it(capability, request_flags, message):
-    config = _config(**{capability: False})
+def test_a_missing_capability_refuses_only_the_workflow_that_needs_it(monkeypatch, tmp_path, capability, request_flags, message):
+    config = _config(monkeypatch, tmp_path, **{capability: False})
     flags = {"image": False, "extend": False, "review": False, "upscale": False}
 
     assert unsupported_video_request(config, "ltx", **{**flags, **request_flags}) == message
     assert unsupported_video_request(config, "ltx", **flags) is None
 
 
-def test_a_platform_without_extend_refuses_an_extension(monkeypatch):
+def test_a_platform_without_extend_refuses_an_extension(monkeypatch, tmp_path):
     monkeypatch.setattr(backends_module, "supports_video_extend", lambda: False)
 
-    assert unsupported_video_request(_config(), "ltx", image=False, extend=True, review=False) == "LTX distilled model can't extend a clip. Pick another video model."
+    assert unsupported_video_request(_config(monkeypatch, tmp_path), "ltx", image=False, extend=True, review=False) == "LTX distilled model can't extend a clip. Pick another video model."
 
 
 def _h3_request(**overrides):
@@ -82,19 +77,19 @@ def test_h3_on_cuda_and_ltx_on_macos_can_upscale(monkeypatch):
     assert unsupported_video_request(load_config(), "ltx", **_h3_request(upscale=True)) is None
 
 
-def test_a_track_on_a_family_without_the_capability_is_refused():
-    config = _config(audio_track=False)
+def test_a_track_on_a_family_without_the_capability_is_refused(monkeypatch, tmp_path):
+    config = _config(monkeypatch, tmp_path, audio_track=False)
 
     assert "can't follow an audio track" in unsupported_video_request(config, "ltx", **_h3_request(audio_track=True))
     assert unsupported_video_request(config, "ltx", **_h3_request()) is None
 
 
-def test_a_track_on_a_family_with_the_capability_is_not_refused():
-    assert unsupported_video_request(_config(), "ltx", **_h3_request(audio_track=True)) is None
+def test_a_track_on_a_family_with_the_capability_is_not_refused(monkeypatch, tmp_path):
+    assert unsupported_video_request(_config(monkeypatch, tmp_path), "ltx", **_h3_request(audio_track=True)) is None
 
 
-def test_an_upscale_with_a_track_is_refused_when_the_family_cannot_upscale_one():
-    config = _config(audio_track_upscale=False)
+def test_an_upscale_with_a_track_is_refused_when_the_family_cannot_upscale_one(monkeypatch, tmp_path):
+    config = _config(monkeypatch, tmp_path, audio_track_upscale=False)
 
     assert "can't upscale a clip made from your track" in unsupported_video_request(config, "ltx", **_h3_request(upscale=True, audio_track=True))
     assert unsupported_video_request(config, "ltx", **_h3_request(upscale=True)) is None

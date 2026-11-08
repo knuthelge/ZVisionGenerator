@@ -14,7 +14,8 @@ from zvisiongenerator.audio_preflight import run_audio_preflight
 from zvisiongenerator.audio_runner import QUIT_MESSAGE, run_audio_batch
 from zvisiongenerator.backends import accelerator_memory_budget_or_none, audio_platform_key
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, SpeechDelivery, VoiceRef
-from zvisiongenerator.downloads import DETACHED, STOPPED, CliDownloadReporter, DownloadFlights, audio_plan, describe_refusal, ensure_downloaded, require_checked
+from zvisiongenerator.downloads import DETACHED, STOPPED, CliDownloadReporter, DownloadFlights, describe_refusal, ensure_downloaded, require_checked
+from zvisiongenerator.downloads.plans import audio_plan
 from zvisiongenerator.enhance_cli import add_enhance_arguments, parse_enhance_args
 from zvisiongenerator.job_controls import seed_range
 from zvisiongenerator.licence_cli import print_licence_notice

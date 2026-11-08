@@ -105,6 +105,11 @@ def split_huggingface_revision(value: str) -> tuple[str, str | None]:
     return reference.repo_id, reference.revision
 
 
+def join_huggingface_revision(repo_id: str, revision: str | None) -> str:
+    """Return ``owner/repo@revision`` for a pinned repo, or *repo_id* alone without a revision (the inverse of :func:`split_huggingface_revision`)."""
+    return f"{repo_id}@{revision}" if revision else repo_id
+
+
 def is_huggingface_repo_id(value: str) -> bool:
     """Return whether value matches the conservative HuggingFace repo contract."""
 
@@ -256,9 +261,14 @@ def canonical_model_name(
     return matches[0] if len(matches) == 1 else name
 
 
+def is_folder_name(name: str) -> bool:
+    """Return whether *name* can name a folder directly inside the models folder: no separators, home prefix or repo-id shape."""
+    return name not in {".", ".."} and not any(char in name for char in "/\\:~")
+
+
 def _is_bare_name(value: str) -> bool:
-    """Return whether *value* is a plain folder name: no separators, home prefix or repo-id shape."""
-    return bool(value) and value not in {".", ".."} and not any(char in value for char in "/\\:~")
+    """Return whether *value* is a non-empty plain folder name."""
+    return bool(value) and is_folder_name(value)
 
 
 def resolve_lora_path(name_or_path: str) -> str:

@@ -4,7 +4,7 @@ The folder (``<models dir>/ideo``, named like its alias) is assembled in a hidde
 folder: the base model's text encoder, VAE, tokenizer and scheduler are hard-linked from the Hugging Face cache,
 and the transformer is converted from the single-file BF16 checkpoint, which downloads into a hidden folder next to
 the model (an interrupted download resumes there) and is deleted once the build is complete. A build record written
-last marks the folder finished; a change to the pinned sources in config rebuilds it.
+last marks the folder finished; a change to the pinned sources in the model metadata rebuilds it.
 """
 
 from __future__ import annotations
@@ -16,16 +16,17 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.converters.ideogram4_instant import write_transformer
+from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.image_model_loader import LOADING_PHASE
 from zvisiongenerator.utils.built_model import BUILDING_PHASE, build_in_partial
 from zvisiongenerator.utils.file_links import link_tree
 from zvisiongenerator.utils.ideogram4_instant import (
-    COMPONENT_PATTERNS,
     LICENSE_FILES,
     LINKED_COMPONENTS,
     InstantSource,
     instant_downloads_dir,
     instant_source,
+    instant_targets,
     is_built,
     is_instant_dir,
     write_build_record,
@@ -38,19 +39,17 @@ Downloader = Callable[[InstantSource, Path], Path]
 
 def ensure_instant_model(
     model_path: str,
-    config: dict[str, Any],
     *,
     platform_key: str,
     on_phase: Callable[[str], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> bool:
-    """Build the Ideogram 4 Instant folder at *model_path* unless it is already built from the configured sources.
+    """Build the Ideogram 4 Instant folder at *model_path* unless it is already built from the pinned sources.
 
     Any other *model_path* is left alone.
 
     Args:
         model_path: The resolved model path.
-        config: The app config, whose ``ideogram4_instant`` block pins the sources.
         platform_key: Picks the platform's components repo and transformer format.
         on_phase: Receives :data:`BUILDING_PHASE` when a build starts, then :data:`LOADING_PHASE` once it is done.
         cancelled: Checked during the conversion; a true result stops the build.
@@ -63,13 +62,14 @@ def ensure_instant_model(
     """
     if not is_instant_dir(model_path):
         return True
-    source = instant_source(config, platform_key)
+    source = instant_source(platform_key)
     target = Path(model_path)
     if is_built(target, source):
         return True
     if on_phase is not None:
         on_phase(BUILDING_PHASE)
-    built = build_instant_model(source, target, cancelled=cancelled)
+    components, _transformer = instant_targets(platform_key)
+    built = build_instant_model(source, target, cancelled=cancelled, download_components=_components_downloader(components))
     if built and on_phase is not None:
         on_phase(LOADING_PHASE)
     return built
@@ -79,8 +79,8 @@ def build_instant_model(
     source: InstantSource,
     target: Path,
     *,
+    download_components: Downloader,
     cancelled: Callable[[], bool] | None = None,
-    download_components: Downloader | None = None,
     download_transformer: Downloader | None = None,
 ) -> bool:
     """Build the Ideogram 4 Instant folder at *target* from *source*, replacing any older build.
@@ -88,14 +88,13 @@ def build_instant_model(
     Args:
         source: The pinned transformer file, components repo and transformer format.
         target: The model folder to create.
+        download_components: Returns the local folder of the components repo.
         cancelled: Checked before each converted tensor; a true result discards the partial folder.
-        download_components: Returns the local folder of the components repo (default: the Hugging Face cache).
         download_transformer: Downloads the transformer file into the given folder and returns its path.
 
     Returns:
         Whether the folder is in place (``False`` when *cancelled* stopped the build).
     """
-    download_components = download_components or _download_components
     download_transformer = download_transformer or _download_transformer
     downloads = instant_downloads_dir(target)
 
@@ -131,11 +130,15 @@ def _link_components(components: Path, target: Path) -> None:
     (target / "model_index.json").write_text(json.dumps(instant_model_index(base_index), indent=2) + "\n", encoding="utf-8")
 
 
-def _download_components(source: InstantSource, _downloads: Path) -> Path:
-    """Return the components repo's snapshot in the Hugging Face cache, downloading the reused parts."""
-    from huggingface_hub import snapshot_download
+def _components_downloader(components: DownloadTarget) -> Downloader:
+    """Return the downloader of the components repo: its snapshot in the Hugging Face cache, with the files the *components* target declares."""
 
-    return Path(snapshot_download(source.components_repo, revision=source.components_revision, allow_patterns=list(COMPONENT_PATTERNS)))
+    def download(source: InstantSource, _downloads: Path) -> Path:
+        from huggingface_hub import snapshot_download
+
+        return Path(snapshot_download(source.components_repo, revision=source.components_revision, allow_patterns=list(components.allow_patterns)))
+
+    return download
 
 
 def _download_transformer(source: InstantSource, downloads: Path) -> Path:

@@ -11,7 +11,7 @@ import pytest
 from PIL import Image
 
 from tests._factories import load_packaged_config
-from tests._factories import make_extend_source
+from tests._factories import make_extend_source, metadata_copy, use_model_metadata
 
 import zvisiongenerator.backends as backends_module
 from zvisiongenerator.utils.config import load_config
@@ -572,9 +572,11 @@ class TestAudioTrack:
 
         assert submitted == []
 
-    def test_a_family_without_the_capability_refuses_a_track(self, tmp_path, submitted, track):
+    def test_a_family_without_the_capability_refuses_a_track(self, tmp_path, submitted, track, monkeypatch):
         config = _web_config(tmp_path)
-        config.app_config["video_model_presets"]["ltx"]["capabilities"]["audio_track"] = False
+        data = metadata_copy()
+        data["video_families"]["ltx"]["capabilities"]["audio_track"] = False
+        use_model_metadata(monkeypatch, tmp_path, data)
 
         with pytest.raises(ValueError, match="can't follow an audio track"):
             _submit(tmp_path, config, model="ltx-8", audio_track_path=track)

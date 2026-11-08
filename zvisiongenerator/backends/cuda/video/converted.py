@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -44,7 +45,7 @@ _STORAGE = {4: "nf4", 8: "fp8-e4m3"}
 Report = Callable[[str, int, int], None]
 
 
-def convert(checkpoint: LtxCheckpoint, target: Path, bits: int, *, config: dict[str, Any], version: str | None, models_dir: Path, lora: Path | None, report: Report) -> None:
+def convert(checkpoint: LtxCheckpoint, target: Path, bits: int, *, version: str | None, models_dir: Path, lora: Path | None, report: Report) -> None:
     """Write the converted folder of *checkpoint* at *bits* into *target* on this machine's GPU, with the components of LTX version *version*'s diffusers repo.
 
     Raises:
@@ -54,11 +55,11 @@ def convert(checkpoint: LtxCheckpoint, target: Path, bits: int, *, config: dict[
 
     from zvisiongenerator.backends.cuda.driver import require_cuda
     from zvisiongenerator.backends.cuda.video.backend import _repo_dir
-    from zvisiongenerator.utils.config import ltx_diffusers_repo, ltx_repo_ignore
+    from zvisiongenerator.utils.ltx_facts import ltx_converter_base, ltx_converter_repo_ignore
 
     require_cuda(torch, "Converting an LTX checkpoint on Windows and Linux")
     report("download", 0, 1)
-    repo_dir = _repo_dir(ltx_diffusers_repo(config, version), with_transformer=False, extra_ignore=ltx_repo_ignore(config, version))
+    repo_dir = _repo_dir(ltx_converter_base(bits, version, sys.platform), ignore=ltx_converter_repo_ignore(bits, version, sys.platform))
     write_converted(checkpoint, target, bits, repo_dir=repo_dir, models_dir=models_dir, lora=lora, device=torch.device("cuda"), report=report)
 
 

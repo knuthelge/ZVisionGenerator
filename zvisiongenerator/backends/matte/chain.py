@@ -13,7 +13,7 @@ from zvisiongenerator.backends.matte.birefnet import load_birefnet
 from zvisiongenerator.backends.matte.vitmatte import load_vitmatte
 from zvisiongenerator.processing import MASK_SIZE, TRIMAP_RADIUS, VITMATTE_MAX, estimate_foreground, merge_alpha, to_rgba, trimap, working_size
 from zvisiongenerator.utils.hf_snapshot import snapshot_with
-from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
+from zvisiongenerator.utils.matte import matte_pins
 
 if TYPE_CHECKING:
     import torch
@@ -86,8 +86,9 @@ class TorchMatteChain:
             return
         import torch
 
-        birefnet = load_birefnet(snapshot_with(BIREFNET, self._download), self._device, torch.float16)
-        self._vitmatte = load_vitmatte(snapshot_with(VITMATTE, self._download), self._device)
+        birefnet_pin, vitmatte_pin = matte_pins()
+        birefnet = load_birefnet(snapshot_with(birefnet_pin, self._download), self._device, torch.float16)
+        self._vitmatte = load_vitmatte(snapshot_with(vitmatte_pin, self._download), self._device)
         self._birefnet = birefnet
 
     def _mask(self, rgb_image: Image.Image) -> np.ndarray:

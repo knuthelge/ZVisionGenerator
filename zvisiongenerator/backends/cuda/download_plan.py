@@ -15,22 +15,18 @@ from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, split_huggingface_revision
 
 if TYPE_CHECKING:
-    from zvisiongenerator.utils.h3_preset import H3Preset, HubFiles
+    from zvisiongenerator.downloads.target import HubFiles
+    from zvisiongenerator.utils.h3_preset import H3Preset
 
 __all__ = [
     "DIFFUSERS_IGNORE",
     "DIFFUSERS_ROOT_FILES",
-    "SEPARATE_TRANSFORMER_IGNORE",
     "TRANSFORMERS_ALLOW_PATTERNS",
     "enhancer_download_plan",
     "h3_download_plan",
     "image_download_plan",
     "video_download_plan",
-    "video_repo_ignore",
 ]
-
-# An LTX diffusers repo is downloaded without its own transformer weights when a single-file transformer replaces them.
-SEPARATE_TRANSFORMER_IGNORE: tuple[str, ...] = ("transformer/*.safetensors", "transformer/*.safetensors.index.json")
 
 # Root files ``DiffusionPipeline.download`` keeps (diffusers 0.42 ``pipeline_utils.py``: the scheduler, config and model
 # index names plus ``TRANSFORMERS_COMPONENT_AUX_FILES``).
@@ -112,17 +108,6 @@ def image_download_plan(
     return (DownloadTarget(reference.repo_id, reference.revision, allow, DIFFUSERS_IGNORE),)
 
 
-def video_repo_ignore(*, separate_transformer: bool, extra: Sequence[str] = ()) -> tuple[str, ...] | None:
-    """Return the patterns an LTX diffusers repo is downloaded without, or ``None`` when it is downloaded whole.
-
-    Args:
-        separate_transformer: Whether a single-file transformer replaces the repo's own transformer weights.
-        extra: Further patterns to skip, such as the root single-file checkpoints of a model version.
-    """
-    patterns = (*(SEPARATE_TRANSFORMER_IGNORE if separate_transformer else ()), *extra)
-    return patterns or None
-
-
 def video_download_plan(
     model_ref: str,
     *,
@@ -137,8 +122,8 @@ def video_download_plan(
 ) -> tuple[DownloadTarget, ...]:
     """Return the downloads of the LTX diffusers model *model_ref*: the repo, the single-file transformer and the latent upsampler.
 
-    The repo keeps the revision of *model_ref* and skips its own transformer weights when *transformer_source*
-    replaces them, plus the *repo_ignore* patterns (the same patterns the backend downloads with). The latent
+    The repo keeps the revision of *model_ref* and is downloaded without the *repo_ignore* patterns, the finished list the
+    backend downloads with. The latent
     upsampler is part of the plan only for the two-stage *upscale*, and not when it lives in the model's own repo
     at the same revision. A local folder needs nothing.
 
@@ -148,7 +133,7 @@ def video_download_plan(
         transformer_source: ``(repo_id[@revision], filename)`` of the single-file transformer, or ``None``.
         latent_upsampler: ``(repo_id[@revision], filename)`` of the latent upsampler weights, or ``None``.
         upscale: Whether the run uses the two-stage upscale.
-        repo_ignore: Extra patterns the repo download skips.
+        repo_ignore: The patterns the repo download skips (``ltx_load_options`` gives the finished list); none downloads the whole repo.
         text_encoder_bundled: Ignored (the macOS planner uses it to leave Gemma 3 out).
         mlx_packs: Ignored (macOS only).
         mlx_text_encoder: Ignored (macOS only).
@@ -159,7 +144,7 @@ def video_download_plan(
     reference = parse_huggingface_repo_reference(model_ref)
     if reference is None:
         return ()
-    repo_target = DownloadTarget(reference.repo_id, reference.revision, ignore_patterns=video_repo_ignore(separate_transformer=bool(transformer_source), extra=repo_ignore))
+    repo_target = DownloadTarget(reference.repo_id, reference.revision, ignore_patterns=tuple(repo_ignore) or None)
     targets = [repo_target]
     if transformer_source:
         repo_id, revision = split_huggingface_revision(transformer_source[0])

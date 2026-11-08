@@ -349,7 +349,7 @@ class TestLength:
         assert plan.target == 180 and plan.hi == 180 and plan.lo < plan.hi
 
     def test_resolve_ceiling_per_family(self):
-        config = {"model_presets": {"flux1": {"enhance_max_words": 180}, "zimage": {}}, "prompt_enhancer": {"length": {"max_words": 250}}}
+        config = {"prompt_enhancer": {"length": {"max_words": 250}}}
         assert resolve_enhance_ceiling(config, family="flux1", mode="image") == 180
         assert resolve_enhance_ceiling(config, family="zimage", mode="image") == 250
         assert resolve_enhance_ceiling({}, family=None, mode="video") == 300
@@ -694,6 +694,15 @@ class TestReviewFixes:
         options = enhance_options({"prompt_enhancer": {"temperature": 0, "length": {"max_words": 250, "percent": {"longer": 150}}}})
         assert options["temperature"] == 0
         assert options["length"]["max_words"] == 250 and options["length"]["percent"]["longer"] == 150
+
+    def test_every_enhancer_setting_of_the_user_config_is_used(self):
+        from zvisiongenerator.utils.prompt_enhance import enhance_options
+
+        section = {"temperature": 0.2, "max_new_tokens": 321, "idle_release_seconds": 45, "length": {"floor_words": {"same": 7}}}
+        options = enhance_options({"prompt_enhancer": section})
+
+        assert (options["temperature"], options["max_new_tokens"], options["idle_release_seconds"]) == (0.2, 321, 45)
+        assert options["length"]["floor_words"]["same"] == 7
 
 
 # ── Video prompts as scene and action ───────────────────────────────────────

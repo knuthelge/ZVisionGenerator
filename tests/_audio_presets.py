@@ -1,11 +1,20 @@
-"""The audio presets as the config writes them, with their pinned sources, shared by tests in more than one area.
+"""The audio presets as the config shipped them (facts and settings in one block), shared by tests in more than one area.
 
 Import them with ``from tests._audio_presets import ...``. Each builder returns a fresh dict, so a test may change it freely.
+
+The facts of an audio model (name, kinds, limits, voices, measured memory, pinned files) are packaged metadata and its settings
+are config. :func:`audio_config` gives the settings of a preset as the config holds them, and :func:`use_audio_models` serves
+the facts of a preset through the metadata, for a test that needs facts other than the packaged ones.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+import pytest
+
+from tests._factories import metadata_copy, use_model_metadata
+from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
 
 YUE2_REPO = "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
 YUE2_VAE_REPO = "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
@@ -126,6 +135,77 @@ def sa3_two_kind_preset() -> dict[str, Any]:
     return {**sa3_preset(), "kinds": ["sound", "music"]}
 
 
+def _settings_block(preset: dict[str, Any]) -> dict[str, Any]:
+    """Return what the config holds of *preset*: its ``settings`` and the ``settings`` it overrides per platform."""
+    block: dict[str, Any] = {"settings": preset.get("settings", {})}
+    platforms = {key: {"settings": value["settings"]} for key, value in preset.get("platforms", {}).items() if "settings" in value}
+    if platforms:
+        block["platforms"] = platforms
+    return block
+
+
 def audio_config(**presets: dict[str, Any]) -> dict[str, Any]:
-    """Return a config with the three presets (``yue2``, ``qwen3_tts``, ``sa3``), or with only the *presets* given by keyword."""
-    return {"audio_model_presets": presets or {"yue2": yue2_preset(), "qwen3_tts": qwen3_tts_preset(), "sa3": sa3_preset()}}
+    """Return a config with the settings of the three audio models (``yue2``, ``qwen3_tts``, ``sa3``); a preset given by keyword replaces its model's settings.
+
+    Only the settings of a preset are config. A test that needs other facts than the packaged ones serves them with :func:`use_audio_models`.
+    """
+    shipped = {"yue2": yue2_preset(), "qwen3_tts": qwen3_tts_preset(), "sa3": sa3_two_kind_preset()}
+    shipped.update(presets)
+    return {"audio_model_presets": {model_id: _settings_block(preset) for model_id, preset in shipped.items()}}
+
+
+def audio_entry(preset: dict[str, Any], *, licences: list[str] | None = None) -> dict[str, Any]:
+    """Return the metadata ``models`` entry that declares the facts of the config-shaped *preset*."""
+    entry: dict[str, Any] = {
+        "kind": "audio",
+        "family": preset["family"],
+        "name": preset["label"],
+        "kinds": list(preset["kinds"]),
+        "limits": dict(preset["limits"]),
+        "licences": list(licences or []),
+        "downloads": [{"ref": item["repo"], "files": list(item["files"])} for item in preset["files"]]
+        + [{"ref": item["repo"], "files": list(item["files"]), "role": "voice"} for item in preset.get("voice_files", ())],
+    }
+    if preset.get("lyrics"):
+        entry["lyrics"] = True
+    if "voices" in preset:
+        entry["voices"] = [dict(voice) for voice in preset["voices"]]
+    platforms = {key: {name: value[name] for name in ("memory_gb", "family") if name in value} for key, value in preset.get("platforms", {}).items()}
+    if any(platforms.values()):
+        entry["platforms"] = {key: value for key, value in platforms.items() if value}
+    return entry
+
+
+def audio_entries(**presets: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return the metadata entries (by model id) of the config-shaped *presets*; without any, of the three fixture presets (``sa3`` making sound only)."""
+    presets = presets or {"yue2": yue2_preset(), "qwen3_tts": qwen3_tts_preset(), "sa3": sa3_preset()}
+    return {model_id: audio_entry(preset) for model_id, preset in presets.items()}
+
+
+def no_audio_models(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Serve metadata without any audio model; the other models stay as they are."""
+    data = metadata_copy()
+    data["models"] = {model_id: entry for model_id, entry in data["models"].items() if entry["kind"] != "audio"}
+    use_model_metadata(monkeypatch, tmp_path, data)
+
+
+def use_audio_models(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, **presets: dict[str, Any]) -> None:
+    """Serve metadata whose audio models are the config-shaped *presets* (by model id), and no other audio model; the other models stay as packaged.
+
+    Without *presets* the models are the three fixture presets (``yue2``, ``qwen3_tts`` and ``sa3`` making sound only). Each
+    preset keeps the licences of the model of the same id. It edits the metadata a test already serves, so it stacks with the
+    other ``use_*`` helpers.
+    """
+    presets = presets or {"yue2": yue2_preset(), "qwen3_tts": qwen3_tts_preset(), "sa3": sa3_preset()}
+    data = metadata_copy()
+    packaged = data["models"]
+    data["models"] = {
+        **{model_id: entry for model_id, entry in packaged.items() if entry["kind"] != "audio"},
+        **{model_id: audio_entry(preset, licences=packaged.get(model_id, {}).get("licences")) for model_id, preset in presets.items()},
+    }
+    use_model_metadata(monkeypatch, tmp_path, data)
+
+
+def audio_preset(model_id: str, config: dict[str, Any] | None = None) -> AudioPreset:
+    """Return the parsed preset of the audio model *model_id*, with the settings of *config* (:func:`audio_config` by default)."""
+    return next(preset for preset in parse_audio_presets(audio_config() if config is None else config) if preset.id == model_id)

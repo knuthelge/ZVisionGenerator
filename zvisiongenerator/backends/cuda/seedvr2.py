@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import math
 import os
+import sys
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -13,7 +14,7 @@ from PIL import Image
 
 from zvisiongenerator.backends.cuda.driver import require_cuda
 from zvisiongenerator.backends.cuda.memory import configure_allocator
-from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, SEEDVR2_MODELS
+from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, seedvr2_files, seedvr2_tiers
 from zvisiongenerator.utils.upscale import seedvr2_input_image
 
 if TYPE_CHECKING:
@@ -64,14 +65,15 @@ class TorchSeedVR2Upscaler:
             ValueError: If *model* is not a known SeedVR2 variant or *quantize* is set.
             RuntimeError: If CUDA is not available, checked before anything is downloaded.
         """
-        if model not in SEEDVR2_MODELS:
-            raise ValueError(f"Unknown SeedVR2 model '{model}'. Supported: {', '.join(SEEDVR2_MODELS)}")
+        models = tuple(tier.model for tier in seedvr2_tiers(sys.platform))
+        if model not in models:
+            raise ValueError(f"Unknown SeedVR2 model '{model}'. Supported: {', '.join(models)}")
         if quantize is not None:
             raise ValueError("SeedVR2 on CUDA reads FP8 weights and does not quantize while loading.")
         _require_cuda()
         from huggingface_hub import hf_hub_download
 
-        (dit_repo, dit_file), (vae_repo, vae_file) = self.weights.files[model]
+        (dit_repo, dit_file), (vae_repo, vae_file) = seedvr2_files(model, sys.platform)
         for repo, name in ((dit_repo, dit_file), (vae_repo, vae_file)):
             if not os.path.isfile(os.path.join(model_path, name)):
                 hf_hub_download(repo, name, local_dir=model_path)

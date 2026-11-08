@@ -7,6 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests._factories import video_config
+
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
@@ -60,6 +62,7 @@ def patch_video_cli_for_preflight(monkeypatch: pytest.MonkeyPatch, order: list[s
         lambda: {
             "video_generation": {"default_ratio": "16:9", "default_size": "m"},
             "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
+            **video_config(),
             "prompt_enhancer": {"model": {"darwin": "a/b", "win32": "a/b", "linux": "a/b"}},
         },
     )

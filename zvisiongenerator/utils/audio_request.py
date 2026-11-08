@@ -47,7 +47,7 @@ def check_seed(seed: int | None) -> None:
 
 
 def find_audio_preset(config: Mapping[str, Any], model: str | None, *, missing: str) -> AudioPreset:
-    """Return the preset *model* names among the configured audio models.
+    """Return the preset *model* names among the audio models.
 
     Args:
         config: The loaded config.
@@ -55,11 +55,9 @@ def find_audio_preset(config: Mapping[str, Any], model: str | None, *, missing: 
         missing: What to say when no model was given, such as ``"--model is required"``; the ids are added after it.
 
     Raises:
-        ValueError: If no audio models are configured, if *model* is ``None``, or if it names no preset. The message lists the ids.
+        ValueError: If *model* is ``None`` or names no preset. The message lists the ids.
     """
     presets = parse_audio_presets(config)
-    if not presets:
-        raise ValueError("No audio models are configured. Add presets under audio_model_presets in your config to use ziv audio.")
     ids = ", ".join(preset.id for preset in presets)
     if model is None:
         raise ValueError(f"{missing}. Choose one of: {ids}.")

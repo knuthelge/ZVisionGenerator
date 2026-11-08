@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests._factories import _patch_image_main_dependencies
+from tests.image._helpers import moss_sft_files, pin_moss
 
 import zvisiongenerator.image_cli as image_cli
 from zvisiongenerator import moss_builder
@@ -24,26 +25,26 @@ from zvisiongenerator.utils import built_model
 from zvisiongenerator.utils.built_model import BUILD_RECORD_NAME, BUILDING_PHASE
 from zvisiongenerator.utils.moss_build import (
     LINKED_COMPONENTS,
-    SFT_IGNORE,
-    SFT_PATTERNS,
     TURBO_LORA_NAME,
     MossSource,
     build_record,
     is_built,
     moss_source,
+    moss_targets,
 )
 from zvisiongenerator.web import web_runner as web_runner_module
 
 _SFT = "owner/sft@" + "a" * 40
-_CONFIG = {"moss_image": {"sft": _SFT, "turbo_lora": {"repo": "owner/lora", "revision": "b" * 40, "filename": "lora.safetensors"}}}
+_SFT_FILES, _SFT_IGNORE = moss_sft_files()
 
 
 def _source(sft: str = _SFT, lora_revision: str = "b" * 40) -> MossSource:
     return MossSource(sft, "owner/lora", lora_revision, "lora.safetensors")
 
 
-def _config(sft: str = _SFT, lora_revision: str = "b" * 40) -> dict:
-    return {"moss_image": {"sft": sft, "turbo_lora": {"repo": "owner/lora", "revision": lora_revision, "filename": "lora.safetensors"}}}
+@pytest.fixture(autouse=True)
+def _pinned(monkeypatch, tmp_path):
+    pin_moss(monkeypatch, tmp_path)
 
 
 @pytest.fixture
@@ -131,10 +132,10 @@ class TestBuildMossModel:
         single = MagicMock(return_value=str(tmp_path / "lora.safetensors"))
         monkeypatch.setattr(huggingface_hub, "snapshot_download", snapshot)
         monkeypatch.setattr(huggingface_hub, "hf_hub_download", single)
-        assert moss_builder._download_sft(_source()) == tmp_path / "snap"
-        assert moss_builder._download_lora(_source()) == tmp_path / "lora.safetensors"
+        assert moss_builder._sft_downloader(moss_targets("linux")[0])(moss_source("linux")) == tmp_path / "snap"
+        assert moss_builder._download_lora(moss_source("linux")) == tmp_path / "lora.safetensors"
 
-        snapshot.assert_called_once_with("owner/sft", revision="a" * 40, allow_patterns=list(SFT_PATTERNS), ignore_patterns=list(SFT_IGNORE))
+        snapshot.assert_called_once_with("owner/sft", revision="a" * 40, allow_patterns=list(_SFT_FILES), ignore_patterns=list(_SFT_IGNORE))
         single.assert_called_once_with("owner/lora", "lora.safetensors", revision="b" * 40)
 
     def test_a_failed_build_discards_the_partial_folder(self, models, tmp_path):
@@ -166,20 +167,20 @@ class TestEnsureMossModel:
         monkeypatch.setattr("zvisiongenerator.moss_builder.build_moss_model", lambda *a, **k: pytest.fail("built"))
         phases: list[str] = []
 
-        ensure_moss_model(str(models / "zit"), _CONFIG, on_phase=phases.append)
-        ensure_moss_model("owner/MOSS-Image-SFT", _CONFIG, on_phase=phases.append)
+        ensure_moss_model(str(models / "zit"), platform_key="linux", on_phase=phases.append)
+        ensure_moss_model("owner/MOSS-Image-SFT", platform_key="linux", on_phase=phases.append)
 
         assert phases == []
 
     def test_a_missing_folder_is_built_and_reports_its_phases(self, models, monkeypatch):
         built: list[tuple[MossSource, Path, bool]] = []
-        monkeypatch.setattr("zvisiongenerator.moss_builder.build_moss_model", lambda source, target, *, turbo, cancelled=None: built.append((source, target, turbo)) or True)
+        monkeypatch.setattr("zvisiongenerator.moss_builder.build_moss_model", lambda source, target, *, turbo, download_sft, cancelled=None: built.append((source, target, turbo)) or True)
         phases: list[str] = []
 
-        ensure_moss_model(str(models / "moss"), _CONFIG, on_phase=phases.append)
-        ensure_moss_model(str(models / "moss-sft"), _CONFIG, on_phase=phases.append)
+        ensure_moss_model(str(models / "moss"), platform_key="linux", on_phase=phases.append)
+        ensure_moss_model(str(models / "moss-sft"), platform_key="linux", on_phase=phases.append)
 
-        assert built == [(moss_source(_CONFIG), models / "moss", True), (moss_source(_CONFIG), models / "moss-sft", False)]
+        assert built == [(moss_source("linux"), models / "moss", True), (moss_source("linux"), models / "moss-sft", False)]
         assert phases == [BUILDING_PHASE, LOADING_PHASE, BUILDING_PHASE, LOADING_PHASE]
 
     def test_a_current_build_is_reused(self, models, monkeypatch, tmp_path):
@@ -187,7 +188,7 @@ class TestEnsureMossModel:
         monkeypatch.setattr("zvisiongenerator.moss_builder.build_moss_model", lambda *a, **k: pytest.fail("rebuilt"))
         phases: list[str] = []
 
-        ensure_moss_model(str(models / "moss"), _CONFIG, on_phase=phases.append)
+        ensure_moss_model(str(models / "moss"), platform_key="linux", on_phase=phases.append)
 
         assert phases == []
 
@@ -195,46 +196,41 @@ class TestEnsureMossModel:
         build_moss_model(_source(), models / "moss", turbo=True, **_downloaders(tmp_path))
         build_moss_model(_source(), models / "moss-sft", turbo=False, **_downloaders(tmp_path))
         built: list[str] = []
-        monkeypatch.setattr("zvisiongenerator.moss_builder.build_moss_model", lambda source, target, *, turbo, cancelled=None: built.append(target.name) or True)
+        monkeypatch.setattr("zvisiongenerator.moss_builder.build_moss_model", lambda source, target, *, turbo, download_sft, cancelled=None: built.append(target.name) or True)
 
-        lora_changed = _config(lora_revision="c" * 40)
-        ensure_moss_model(str(models / "moss"), lora_changed)
-        ensure_moss_model(str(models / "moss-sft"), lora_changed)
+        pin_moss(monkeypatch, tmp_path, lora_revision="c" * 40)
+        ensure_moss_model(str(models / "moss"), platform_key="linux")
+        ensure_moss_model(str(models / "moss-sft"), platform_key="linux")
         assert built == ["moss"]
 
-        sft_changed = _config(sft="owner/sft@" + "d" * 40)
-        ensure_moss_model(str(models / "moss-sft"), sft_changed)
+        pin_moss(monkeypatch, tmp_path, sft="owner/sft@" + "d" * 40)
+        ensure_moss_model(str(models / "moss-sft"), platform_key="linux")
         assert built == ["moss", "moss-sft"]
-
-    def test_an_invalid_block_raises_for_a_moss_folder_only(self, models):
-        ensure_moss_model(str(models / "zit"), {})
-        with pytest.raises(ValueError, match="moss_image"):
-            ensure_moss_model(str(models / "moss"), {})
 
 
 class TestMossPlan:
     def test_other_models_have_no_moss_plan(self, models):
-        assert built_model_plan(str(models / "zit"), config=_CONFIG, platform_key=sys.platform) is None
-        assert built_model_plan("owner/MOSS-Image-SFT", config=_CONFIG, platform_key=sys.platform) is None
+        assert built_model_plan(str(models / "zit"), platform_key=sys.platform) is None
+        assert built_model_plan("owner/MOSS-Image-SFT", platform_key=sys.platform) is None
 
     def test_the_turbo_folder_plans_the_sft_files_and_the_lora(self, models):
-        assert built_model_plan(str(models / "moss"), config=_CONFIG, platform_key=sys.platform) == (
-            DownloadTarget("owner/sft", "a" * 40, SFT_PATTERNS, SFT_IGNORE),
+        assert built_model_plan(str(models / "moss"), platform_key=sys.platform) == (
+            DownloadTarget("owner/sft", "a" * 40, _SFT_FILES, _SFT_IGNORE),
             DownloadTarget("owner/lora", "b" * 40, ("lora.safetensors",)),
         )
 
     def test_the_sft_folder_plans_only_the_sft_files(self, models):
-        assert built_model_plan(str(models / "moss-sft"), config=_CONFIG, platform_key=sys.platform) == (DownloadTarget("owner/sft", "a" * 40, SFT_PATTERNS, SFT_IGNORE),)
+        assert built_model_plan(str(models / "moss-sft"), platform_key=sys.platform) == (DownloadTarget("owner/sft", "a" * 40, _SFT_FILES, _SFT_IGNORE),)
 
     def test_a_built_folder_needs_nothing(self, models, tmp_path):
         build_moss_model(_source(), models / "moss", turbo=True, **_downloaders(tmp_path))
 
-        assert built_model_plan(str(models / "moss"), config=_CONFIG, platform_key=sys.platform) == ()
+        assert built_model_plan(str(models / "moss"), platform_key=sys.platform) == ()
 
     def test_image_plan_plans_a_moss_folder_from_the_config_and_never_a_raw_repo(self, models):
-        targets = image_plan(str(models / "moss-sft"), family="moss", config=_CONFIG, platform_key=sys.platform)
+        targets = image_plan(str(models / "moss-sft"), family="moss", platform_key=sys.platform)
 
-        assert targets == (DownloadTarget("owner/sft", "a" * 40, SFT_PATTERNS, SFT_IGNORE),)
+        assert targets == (DownloadTarget("owner/sft", "a" * 40, _SFT_FILES, _SFT_IGNORE),)
         assert image_download_plan("OpenMOSS-Team/MOSS-Image-SFT", family="moss") == ()
 
 
@@ -256,7 +252,7 @@ class TestForeignFolder:
         other.mkdir(parents=True)
         (other / "weights.safetensors").write_bytes(b"x")
 
-        assert built_model_plan(str(other), config=_CONFIG, platform_key=sys.platform) == ()
+        assert built_model_plan(str(other), platform_key=sys.platform) == ()
 
     def test_an_empty_folder_is_built_in(self, models, tmp_path):
         (models / "moss-sft").mkdir(parents=True)
@@ -287,31 +283,31 @@ class TestCancelled:
         monkeypatch.setattr("zvisiongenerator.moss_builder.build_moss_model", lambda *a, **k: False)
         phases: list[str] = []
 
-        assert ensure_moss_model(str(models / "moss"), _CONFIG, on_phase=phases.append, cancelled=lambda: True) is False
+        assert ensure_moss_model(str(models / "moss"), platform_key="linux", on_phase=phases.append, cancelled=lambda: True) is False
         assert phases == [BUILDING_PHASE]
 
 
 class TestEnsureBuiltModel:
     def test_a_moss_folder_goes_to_the_moss_builder_with_the_cancel_check(self, models, monkeypatch):
         seen: list[tuple] = []
-        monkeypatch.setattr("zvisiongenerator.moss_builder.build_moss_model", lambda source, target, *, turbo, cancelled=None: seen.append((target.name, turbo, cancelled)) or True)
+        monkeypatch.setattr("zvisiongenerator.moss_builder.build_moss_model", lambda source, target, *, turbo, download_sft, cancelled=None: seen.append((target.name, turbo, cancelled)) or True)
         stop = lambda: False  # noqa: E731
 
-        assert ensure_built_model(str(models / "moss"), _CONFIG, platform_key="linux", cancelled=stop) is True
+        assert ensure_built_model(str(models / "moss"), platform_key="linux", cancelled=stop) is True
 
         assert seen == [("moss", True, stop)]
 
     def test_another_model_is_left_alone(self, models):
-        assert ensure_built_model(str(models / "zit"), {}, platform_key="linux") is True
-        assert ensure_built_model("owner/MOSS-Image-SFT", {}, platform_key="linux") is True
+        assert ensure_built_model(str(models / "zit"), platform_key="linux") is True
+        assert ensure_built_model("owner/MOSS-Image-SFT", platform_key="linux") is True
 
 
 class TestCallSites:
     def test_the_cli_prepares_the_model_after_preflight_and_reports_the_building_phase(self, monkeypatch, capsys):
         _patch_image_main_dependencies(monkeypatch)
-        ensure = MagicMock(side_effect=lambda model, config, *, platform_key, on_phase, cancelled: (on_phase(BUILDING_PHASE), on_phase(LOADING_PHASE), True)[2])
+        ensure = MagicMock(side_effect=lambda model, *, platform_key, on_phase, cancelled: (on_phase(BUILDING_PHASE), on_phase(LOADING_PHASE), True)[2])
         monkeypatch.setattr(image_cli, "ensure_built_model", ensure)
-        monkeypatch.setattr(image_cli, "model_display_name", lambda config, name: "Pretty Label")
+        monkeypatch.setattr(image_cli, "model_display_name", lambda name: "Pretty Label")
         monkeypatch.setattr(sys, "argv", ["ziv-image", "-m", "owner/model", "--prompt", "a cat"])
 
         image_cli.main()
@@ -322,7 +318,7 @@ class TestCallSites:
     def test_a_cli_build_error_ends_with_a_usage_error(self, monkeypatch, capsys):
         backend = _patch_image_main_dependencies(monkeypatch)
         monkeypatch.setattr(image_cli, "ensure_built_model", MagicMock(side_effect=OSError("disk full")))
-        monkeypatch.setattr(image_cli, "model_display_name", lambda config, name: "Pretty Label")
+        monkeypatch.setattr(image_cli, "model_display_name", lambda name: "Pretty Label")
         monkeypatch.setattr(sys, "argv", ["ziv-image", "-m", "owner/model", "--prompt", "a cat"])
 
         with pytest.raises(SystemExit) as exc_info:
@@ -338,7 +334,7 @@ class TestCallSites:
         order: list[str] = []
         monkeypatch.setattr(web_runner_module, "get_backend", lambda: MagicMock())
 
-        def ensure(model_ref, config, *, platform_key, on_phase, cancelled):
+        def ensure(model_ref, *, platform_key, on_phase, cancelled):
             order.append("ensure")
             on_phase(BUILDING_PHASE)
             return True
@@ -347,7 +343,18 @@ class TestCallSites:
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *a, **k: order.append("load") or (MagicMock(), MagicMock()))
         request = MagicMock(model_name="moss", lora_paths=None, lora_weights=None)
 
-        web_runner_module._load_image_model_with_progress(request, "/models/moss", None, events.append, MagicMock(), config=_CONFIG)
+        web_runner_module._load_image_model_with_progress(request, "/models/moss", None, events.append, MagicMock())
 
         assert order == ["ensure", "load"]
         assert {"type": "model_loading", "mode": "image", "model": "moss", "phase": BUILDING_PHASE} in events
+
+
+class TestMossPlanOnEveryPlatform:
+    @pytest.mark.parametrize("platform_key", ["darwin", "win32", "linux"])
+    def test_the_turbo_folder_plans_the_same_targets(self, models, platform_key):
+        plan = built_model_plan(str(models / "moss"), platform_key=platform_key)
+
+        assert plan == (
+            DownloadTarget("owner/sft", "a" * 40, _SFT_FILES, _SFT_IGNORE),
+            DownloadTarget("owner/lora", "b" * 40, ("lora.safetensors",)),
+        )

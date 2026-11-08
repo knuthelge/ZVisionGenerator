@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, supports_video_audio, supports_video_extend, video_family_on_platform
 from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, settle_video_steps
 from zvisiongenerator.core.video_types import ExtendSource
+from zvisiongenerator.utils.model_metadata import alias_map
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.model_memory import clip_memory_fit
@@ -127,7 +128,7 @@ def _resolve_video_model(model: str | None, app_config: dict[str, Any]) -> tuple
     if model is None:
         return None
     try:
-        resolved = resolve_model_path(model, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
+        resolved = resolve_model_path(model, aliases=alias_map(app_config), platform_key=sys.platform)
     except KeyError, ValueError:
         return None
     return resolved, detect_video_model(resolved).family
@@ -237,7 +238,6 @@ def _extend_memory_fit(
         low_memory=low_memory,
         budget=budget,
         model_name=model,
-        app_config=web_config.app_config,
         family=family,
         mode="extend",
         forwards=settle_video_steps(steps, upscale=False, family=description, default_upscale_steps=UNDESCRIBED_UPSCALE_STEPS).steps or 8,

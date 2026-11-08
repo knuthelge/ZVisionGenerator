@@ -11,11 +11,13 @@ import huggingface_hub.constants
 import pytest
 from fastapi.testclient import TestClient
 
+from tests._factories import use_built_model_pins, use_enhancer_models
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.built_model import write_record
-from zvisiongenerator.utils.config import enhancer_tier_models
-from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
+from zvisiongenerator.utils.config import configured_enhancer_models
+from zvisiongenerator.utils.enhancer_models import enhancer_tier_models
+from zvisiongenerator.utils.matte import matte_pins
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
@@ -24,6 +26,7 @@ from zvisiongenerator.web.model_delete import (
     delete_model,
     delete_scope,
     enhancer_delete_target,
+    freed_repo_ids,
     installed_models_linking_to,
     matte_delete_target,
     model_delete_target,
@@ -32,7 +35,9 @@ from zvisiongenerator.web.model_delete import (
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 
 
+BIREFNET, VITMATTE = matte_pins()
 _SCOPE = {"models_dir": Path("/nonexistent/models"), "platform_key": "linux"}
+_DIFFUSERS_REPO = "diffusers/LTX-2.3-Distilled-Diffusers@432e0d3c2d1769aaa4d295f9243f7062bf6b47ee"
 
 
 def _touch(path: Path) -> Path:
@@ -177,20 +182,23 @@ def test_deleting_a_huggingface_download_removes_the_alias_stored_quants(layout)
 
 
 class TestSharedDownload:
-    """ltx-4 and ltx-8 on Windows/Linux load from one download plus a separate transformer checkpoint repo."""
+    """ltx-4 and ltx-8 on Windows/Linux load from one download plus a separate transformer checkpoint repo (the model metadata's)."""
 
-    _CONFIG = {"video_model_presets": {"ltx": {"diffusers": {"default_repo": "org/base", "transformer": {"repo": "org/ckpt", "filename": "t.safetensors"}}}}}
-    _INVENTORY = (_ltx_entry("ltx-4", "alias", "org/base"), _ltx_entry("ltx-8", "alias", "org/base"))
+    @pytest.fixture(autouse=True)
+    def _ltx_download(self, layout):
+        _touch(layout.hub / "models--diffusers--LTX-2.3-Distilled-Diffusers" / "snapshots" / "abc" / "model_index.json")
+
+    _INVENTORY = (_ltx_entry("ltx-4", "alias", _DIFFUSERS_REPO), _ltx_entry("ltx-8", "alias", _DIFFUSERS_REPO))
 
     def _target(self, layout, name):
         entry = next(entry for entry in self._INVENTORY if entry.name == name)
-        return model_delete_target(entry, layout.models_dir, **delete_scope(entry, self._INVENTORY, self._CONFIG, **_SCOPE))
+        return model_delete_target(entry, layout.models_dir, **delete_scope(entry, self._INVENTORY, **_SCOPE))
 
     def test_only_a_video_family_with_companions_lists_them(self):
         ltx, other = self._INVENTORY[0], _image_entry("other", "alias", "org/base")
 
-        assert delete_scope(ltx, self._INVENTORY, self._CONFIG, **_SCOPE)["companion_repos"] == ("org/ckpt",)
-        assert delete_scope(other, self._INVENTORY, self._CONFIG, **_SCOPE)["companion_repos"] == ()
+        assert delete_scope(ltx, self._INVENTORY, **_SCOPE)["freed_repos"] == ("Lightricks/LTX-2.3",)
+        assert delete_scope(other, self._INVENTORY, **_SCOPE)["freed_repos"] == ()
 
     def test_while_the_other_alias_has_its_copy_only_this_aliases_copy_goes(self, layout):
         _touch(layout.models_dir / "ltx-4@q4" / "transformer" / "0.safetensors")
@@ -202,17 +210,17 @@ class TestSharedDownload:
 
         assert not (layout.models_dir / "ltx-4@q4").exists()
         assert (layout.models_dir / "ltx-8@q8").is_dir()
-        assert (layout.hub / "models--org--base").is_dir()
+        assert (layout.hub / "models--diffusers--LTX-2.3-Distilled-Diffusers").is_dir()
 
     def test_the_last_alias_removes_the_download_and_the_checkpoint_repo(self, layout):
         _touch(layout.models_dir / "ltx-8@q8" / "transformer" / "0.safetensors")
-        _touch(layout.hub / "models--org--ckpt" / "snapshots" / "abc" / "t.safetensors")
+        _touch(layout.hub / "models--Lightricks--LTX-2.3" / "snapshots" / "abc" / "t.safetensors")
 
         delete_model(self._target(layout, "ltx-8"))
 
         assert not (layout.models_dir / "ltx-8@q8").exists()
-        assert not (layout.hub / "models--org--base").exists()
-        assert not (layout.hub / "models--org--ckpt").exists()
+        assert not (layout.hub / "models--diffusers--LTX-2.3-Distilled-Diffusers").exists()
+        assert not (layout.hub / "models--Lightricks--LTX-2.3").exists()
         assert (layout.hub / "models--org--other").is_dir()
 
     def test_an_alias_without_a_copy_while_the_other_has_one_is_not_deletable(self, layout):
@@ -337,19 +345,17 @@ class TestMacH3Delete:
 
     @pytest.fixture
     def h3(self, layout, monkeypatch):
-        from zvisiongenerator.utils.config import load_config
-
         monkeypatch.setattr("sys.platform", "darwin")
         for repo in ("MiniMaxAI--MiniMax-H3", "water1234--MiniMax-H3-MLX-Argus-Calibrated-INT8", "lightx2v--Minimax-h3-Turbo"):
             _touch(layout.hub / f"models--{repo}" / "snapshots" / "abc" / "part.json")
         _touch(layout.models_dir / "h3@mlx-te4" / "model-00001-of-00001.safetensors")
         _touch(layout.models_dir / "h3@mlx-te4" / "ziv-quant.json")
         entry = VideoInventoryEntry(name="h3", family="h3", supports_i2v=True, source="alias", resolved_path=self._REF)
-        layout.entry, layout.config = entry, load_config()
+        layout.entry = entry
         return layout
 
     def test_deleting_h3_removes_its_downloads_and_the_text_encoder_copy(self, h3):
-        scope = delete_scope(h3.entry, (h3.entry,), h3.config, models_dir=h3.models_dir, platform_key="darwin")
+        scope = delete_scope(h3.entry, (h3.entry,), models_dir=h3.models_dir, platform_key="darwin")
         target = model_delete_target(h3.entry, h3.models_dir, **scope)
 
         assert target is not None and target.kind == "huggingface"
@@ -368,7 +374,7 @@ class TestMacH3Delete:
     def test_the_models_payload_names_the_copy_among_what_is_removed(self, h3):
         from zvisiongenerator.web.workspace_api import _delete_info_resolver
 
-        delete_info = _delete_info_resolver(h3.models_dir, inventory=(h3.entry,), app_config=h3.config)
+        delete_info = _delete_info_resolver(h3.models_dir, inventory=(h3.entry,))
 
         info = delete_info(h3.entry)
         assert info is not None
@@ -379,13 +385,13 @@ class TestMacH3Delete:
 
         os.truncate(h3.models_dir / "h3@mlx-te4" / "model-00001-of-00001.safetensors", 14_000_000_000)
 
-        assert _disk_size_resolver(h3.models_dir, listed={"h3"}, app_config=h3.config)(h3.entry) == "14.0 GB"
-        assert _disk_size_resolver(h3.models_dir, listed={"h3", "h3@mlx-te4"}, app_config=h3.config)(h3.entry) == "1 KB"
+        assert _disk_size_resolver(h3.models_dir, listed={"h3"})(h3.entry) == "14.0 GB"
+        assert _disk_size_resolver(h3.models_dir, listed={"h3", "h3@mlx-te4"})(h3.entry) == "1 KB"
 
     def test_a_model_never_downloaded_is_not_deletable(self, h3):
         shutil.rmtree(h3.hub / "models--MiniMaxAI--MiniMax-H3")
 
-        assert model_delete_target(h3.entry, h3.models_dir, **delete_scope(h3.entry, (h3.entry,), h3.config, models_dir=h3.models_dir, platform_key="darwin")) is None
+        assert model_delete_target(h3.entry, h3.models_dir, **delete_scope(h3.entry, (h3.entry,), models_dir=h3.models_dir, platform_key="darwin")) is None
 
     def test_an_installed_h3_folder_is_removed_with_its_copy(self, h3):
         _touch(h3.models_dir / "h3-local" / "FL2VA" / "model_index.json")
@@ -406,6 +412,55 @@ class TestMacH3Delete:
         target = model_delete_target(entry, h3.models_dir)
 
         assert target is not None and target.stored_quants == ()
+
+
+class TestMacLtxDelete:
+    """The LTX-2.3 packs on macOS share one Gemma 3 text encoder: the last pack on disk frees it."""
+
+    _Q4, _Q8, _GEMMA = "dgrauet/ltx-2.3-mlx-q4", "dgrauet/ltx-2.3-mlx-q8", "mlx-community/gemma-3-12b-it-4bit"
+    _INVENTORY = (_ltx_entry("ltx-4", "alias", _Q4), _ltx_entry("ltx-8", "alias", _Q8))
+
+    @pytest.fixture
+    def packs(self, layout, monkeypatch):
+        monkeypatch.setattr("sys.platform", "darwin")
+        layout.cache = lambda repo: _touch(layout.hub / f"models--{repo.replace('/', '--')}" / "snapshots" / "abc" / "model.safetensors")
+        layout.scope = {"models_dir": layout.models_dir, "platform_key": "darwin"}
+        layout.target = lambda name: model_delete_target(self._INVENTORY[name], layout.models_dir, **delete_scope(self._INVENTORY[name], self._INVENTORY, **layout.scope))
+        layout.freed = lambda name: freed_repo_ids(self._INVENTORY[name], self._INVENTORY, **layout.scope)
+        return layout
+
+    def test_the_only_pack_on_disk_frees_the_text_encoder(self, packs):
+        packs.cache(self._Q4)
+        packs.cache(self._GEMMA)
+
+        target = packs.target(0)
+
+        assert target is not None and target.repo_ids == (self._Q4, self._GEMMA)
+        delete_model(target)
+        assert not (packs.hub / "models--mlx-community--gemma-3-12b-it-4bit").exists()
+
+    def test_a_pack_keeps_the_text_encoder_while_the_other_pack_is_on_disk(self, packs):
+        for repo in (self._Q4, self._Q8, self._GEMMA):
+            packs.cache(repo)
+
+        target = packs.target(0)
+
+        assert target is not None and target.repo_ids == (self._Q4,)
+        delete_model(target)
+        assert (packs.hub / "models--mlx-community--gemma-3-12b-it-4bit").is_dir()
+        assert (packs.hub / "models--dgrauet--ltx-2.3-mlx-q8").is_dir()
+        assert packs.freed(1) == (self._GEMMA,)
+
+    def test_the_disk_size_counts_the_text_encoder_exactly_when_a_delete_frees_it(self, packs):
+        from zvisiongenerator.web.workspace_api import _disk_size_resolver
+
+        os.truncate(packs.cache(self._GEMMA), 3_000_000_000)
+        packs.cache(self._Q4)
+        size = _disk_size_resolver(packs.models_dir, listed={"ltx-4", "ltx-8"}, inventory=self._INVENTORY)
+
+        assert size(self._INVENTORY[0]) == "3.0 GB"
+        packs.cache(self._Q8)
+        assert size(self._INVENTORY[0]) == "1 KB"
 
 
 class TestSeedvr2DeleteTarget:
@@ -569,14 +624,14 @@ def test_disk_size_counts_own_files_and_unlisted_stored_quants(layout):
     # Sparse files: the sizes count, without writing gigabytes.
     os.truncate(_touch(layout.models_dir / "base@q8" / "weights"), 2_000_000_000)
     os.truncate(layout.models_dir / "custom" / "transformer" / "model.safetensors", 1_000_000_000)
-    disk_size = _disk_size_resolver(layout.models_dir, listed={"custom", "base"}, app_config={})
+    disk_size = _disk_size_resolver(layout.models_dir, listed={"custom", "base"})
 
     # The converted model counts its own folder, not the base files it links to.
     assert disk_size(_image_entry("custom", "installed", "")) == "1.0 GB"
     # The alias counts its download and its stored quant, which has no row of its own here...
     assert disk_size(_image_entry("base", "alias", "org/base")) == "2.0 GB"
     # ...but not one listed as its own row.
-    assert _disk_size_resolver(layout.models_dir, listed={"base", "base@q8"}, app_config={})(_image_entry("base", "alias", "org/base")) == "1 KB"
+    assert _disk_size_resolver(layout.models_dir, listed={"base", "base@q8"})(_image_entry("base", "alias", "org/base")) == "1 KB"
     assert disk_size(_image_entry("missing", "alias", "org/missing")) is None
 
 
@@ -600,20 +655,24 @@ class TestSharedBlobDelete:
         assert (layout.hub / "models--org--mirror" / "snapshots" / ("a" * 40) / "model.safetensors").is_file()
 
 
-_ENHANCER_CONFIG = {
-    "prompt_enhancer": {
-        "model": "org/fast",
-        "download_size_label": dict.fromkeys(("darwin", "win32", "linux"), "9 GB"),
-        "smart": {"model": "org/smart", "download_size_label": dict.fromkeys(("darwin", "win32", "linux"), "19 GB"), "min_memory_gb": 9},
-    }
-}
+_ENHANCER_CONFIG: dict = {}
 
 
-def test_enhancer_tier_models_lists_fast_smart_and_custom():
-    assert enhancer_tier_models(_ENHANCER_CONFIG, platform_key="linux") == {"fast": ("org/fast", None), "smart": ("org/smart", None)}
-    custom = {"prompt_enhancer": {**_ENHANCER_CONFIG["prompt_enhancer"], "user_model": "org/custom@abc123"}}
-    assert enhancer_tier_models(custom, platform_key="linux")["custom"] == ("org/custom", "abc123")
-    assert enhancer_tier_models({}, platform_key="linux") == {}
+@pytest.fixture
+def enhancer_models(monkeypatch, tmp_path):
+    """Declare the Fast enhancer as ``org/fast`` and the Smart one as ``org/smart`` (9 GiB needed) on every platform."""
+    use_enhancer_models(monkeypatch, tmp_path, fast="org/fast", smart="org/smart", smart_memory_gb=9, fast_size="9 GB", smart_size="19 GB")
+
+
+def test_enhancer_tier_models_lists_fast_and_smart(enhancer_models):
+    assert enhancer_tier_models(platform_key="linux") == {"fast": ("org/fast", None), "smart": ("org/smart", None)}
+
+
+def test_configured_enhancer_models_adds_the_custom_model(enhancer_models):
+    custom = {"prompt_enhancer": {"user_model": "org/custom@abc123"}}
+
+    assert configured_enhancer_models(custom, platform_key="linux")["custom"] == ("org/custom", "abc123")
+    assert list(configured_enhancer_models({}, platform_key="linux")) == ["fast", "smart"]
 
 
 def test_enhancer_delete_target_needs_a_cached_hub_repo(layout, tmp_path):
@@ -656,7 +715,7 @@ def test_matte_delete_target_stays_deletable_when_only_the_companion_is_cached(l
     assert not (layout.hub / "models--hustvl--vitmatte-small-composition-1k").exists()
 
 
-def test_models_payload_lists_enhancer_tiers(layout):
+def test_models_payload_lists_enhancer_tiers(layout, enhancer_models):
     from zvisiongenerator.web.workspace_api import _enhancer_model_rows
 
     _touch(layout.hub / "models--org--fast" / "blobs" / "weights")
@@ -676,7 +735,7 @@ class TestEnhancerDeleteRoute:
         return PromptEnhancerSession(lambda repo, revision: None, scheduler=lambda delay, callback: None, downloaded=lambda repo, revision: True)
 
     @pytest.fixture
-    def client(self, layout, monkeypatch, session):
+    def client(self, layout, monkeypatch, session, enhancer_models):
         _touch(layout.hub / "models--org--fast" / "snapshots" / "abc" / "model.safetensors")
         monkeypatch.setattr(web_server, "load_web_config", lambda: SimpleNamespace(app_config=_ENHANCER_CONFIG))
         monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: session)
@@ -763,14 +822,9 @@ class TestMatteDeleteRoute:
 class TestBuiltModelDelete:
     """MOSS-Image and Ideogram 4 Instant folders hard-link their cache sources: deleting a row frees the sources nothing else needs."""
 
-    _CONFIG = {
-        "moss_image": {"sft": "org/moss-sft@" + "d" * 40, "turbo_lora": {"repo": "org/moss-turbo", "revision": "e" * 40, "filename": "turbo.safetensors"}},
-        "ideogram4_instant": {
-            "transformer": {"repo": "org/instant-transformer", "revision": "a" * 40, "filename": "t.safetensors"},
-            "components": {"linux": "org/ideo-nf4@" + "c" * 40},
-            "transformer_format": {"linux": "bf16"},
-        },
-    }
+    @pytest.fixture(autouse=True)
+    def _pinned(self, monkeypatch, tmp_path):
+        use_built_model_pins(monkeypatch, tmp_path)
 
     @pytest.fixture
     def built(self, layout):
@@ -793,7 +847,7 @@ class TestBuiltModelDelete:
 
     def _target(self, built, entry):
         inventory = tuple(built.inventory.values())
-        scope = delete_scope(entry, inventory, self._CONFIG, models_dir=built.models_dir, platform_key="linux")
+        scope = delete_scope(entry, inventory, models_dir=built.models_dir, platform_key="linux")
         return model_delete_target(entry, built.models_dir, **scope)
 
     def _cached(self, built) -> set[str]:
@@ -881,8 +935,8 @@ class TestBuiltModelDelete:
         moss, sft = built.row("moss", built=True), built.row("moss-sft", built=False)
         inventory = (moss, sft)
 
-        delete_info = _delete_info_resolver(built.models_dir, inventory=inventory, app_config=self._CONFIG)
-        disk_size = _disk_size_resolver(built.models_dir, listed={"moss", "moss-sft"}, app_config=self._CONFIG, inventory=inventory)
+        delete_info = _delete_info_resolver(built.models_dir, inventory=inventory)
+        disk_size = _disk_size_resolver(built.models_dir, listed={"moss", "moss-sft"}, inventory=inventory)
 
         # The unbuilt moss-sft row does not pin the SFT repo, so deleting the built moss frees both.
         assert delete_info(moss)["source_repos"] == ["org/moss-sft", "org/moss-turbo"]
@@ -917,7 +971,7 @@ class TestBuiltModelDelete:
         shutil.rmtree(built.hub / "models--org--ideo-nf4")
         self._hidden_download(built)
         ideo = built.row("ideo", built=False)
-        size = _disk_size_resolver(built.models_dir, listed={"ideo"}, app_config=self._CONFIG, inventory=(ideo,))
+        size = _disk_size_resolver(built.models_dir, listed={"ideo"}, inventory=(ideo,))
 
         assert size(ideo) == "1 KB"
 
@@ -925,13 +979,13 @@ class TestBuiltModelDelete:
     def client(self, built, web_client, monkeypatch):
         moss = built.row("moss", built=True)
         monkeypatch.setattr("sys.platform", "linux")
-        return web_client(SimpleNamespace(data_dir=str(built.data_dir), models_dir=str(built.models_dir), seedvr2=None, app_config=self._CONFIG, image_inventory=(moss,), video_inventory=()))
+        return web_client(SimpleNamespace(data_dir=str(built.data_dir), models_dir=str(built.models_dir), seedvr2=None, app_config={}, image_inventory=(moss,), video_inventory=()))
 
     def test_an_unbuilt_row_shows_the_disk_its_deletable_sources_use(self, built):
         from zvisiongenerator.web.workspace_api import _disk_size_resolver
 
         moss = built.row("moss", built=False)
-        size = _disk_size_resolver(built.models_dir, listed={"moss"}, app_config=self._CONFIG, inventory=(moss,))
+        size = _disk_size_resolver(built.models_dir, listed={"moss"}, inventory=(moss,))
 
         assert size(moss) == "1 KB"
         shutil.rmtree(built.hub / "models--org--moss-sft")
@@ -947,7 +1001,7 @@ class TestBuiltModelDelete:
     def test_the_route_refuses_while_the_transformer_downloads(self, client, built, downloading, monkeypatch):
         hidden = self._hidden_download(built)
         ideo = built.row("ideo", built=False)
-        web_config = SimpleNamespace(data_dir=str(built.data_dir), models_dir=str(built.models_dir), seedvr2=None, app_config=self._CONFIG, image_inventory=(ideo,), video_inventory=())
+        web_config = SimpleNamespace(data_dir=str(built.data_dir), models_dir=str(built.models_dir), seedvr2=None, app_config={}, image_inventory=(ideo,), video_inventory=())
         monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
         downloading(DownloadTarget("org/instant-transformer", allow_patterns=("t.safetensors",), local_dir=str(hidden)))
 

@@ -208,7 +208,7 @@ def _planned_request(tmp_path, source_path, factor=2):
     setup = SeedVR2Setup(
         settings=SeedVR2Settings(model="auto", softness=0.5, video_softness=0.0, reference_megapixels=16, tiers=(tier,)), tier=tier, budget_bytes=None, downloaded=True, weights=MLX_WEIGHTS
     )
-    request = plan_seedvr2_upscale(read_upscale_source(source_path), factor, setup=setup).request
+    request = plan_seedvr2_upscale(read_upscale_source(source_path), factor, setup=setup, platform_key="darwin").request
     backend = MagicMock()
     backend.upscale_image.side_effect = lambda model, path, *, width, height, **_kw: Image.new("RGB", (width, height))
     return backend, ImageGenerationRequest(**{**request.__dict__, "backend": backend, "model": MagicMock()})

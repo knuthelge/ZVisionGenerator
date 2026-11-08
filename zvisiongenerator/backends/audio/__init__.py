@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from zvisiongenerator.utils.h3_preset import HubFiles
+from zvisiongenerator.downloads.target import HubFiles
 from zvisiongenerator.utils.hf_snapshot import cached_snapshot
 
 if TYPE_CHECKING:

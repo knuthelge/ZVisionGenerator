@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from zvisiongenerator.utils.config import EULER_ANCESTRAL, LTX_SAMPLERS
+from zvisiongenerator.utils.ltx_facts import EULER_ANCESTRAL, LTX_SAMPLERS
 
 __all__ = [
     "EULER_ANCESTRAL",

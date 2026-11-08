@@ -14,7 +14,7 @@ from ruamel.yaml.error import CommentMark, YAMLError
 from ruamel.yaml.tokens import CommentToken
 
 from zvisiongenerator.utils.atomic_write import write_text_atomic
-from zvisiongenerator.utils.config import model_reference
+from zvisiongenerator.utils.paths import join_huggingface_revision
 from zvisiongenerator.utils.paths import get_ziv_data_dir, is_huggingface_repo_id
 from zvisiongenerator.utils.yaml_round_trip import attach_following, delete_key, round_trip_yaml, set_key, yaml11_safe
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults
@@ -110,7 +110,7 @@ WRITABLE_CONFIG_FIELDS: tuple[WritableConfigField, ...] = (
         validation_rules=("When set, value must be a Hugging Face repo id (owner/name, optionally @revision) or an existing local directory.",),
         persisted_value_shape="string repo id (optionally @revision) or absolute directory, or null when the platform default is used",
         effective_value_shape="string repo id or directory, or null when no enhancer is configured",
-        default_source="prompt_enhancer.model for this platform",
+        default_source="the built-in Fast enhancer model for this platform",
         owning_consumer="Workspace prompt enhancement, auto-enhance jobs, and CLI --enhance",
     ),
 )
@@ -275,12 +275,7 @@ def write_user_config_override(document: CommentedMap) -> None:
 
     Readers (config loads on other request threads) see either the old or the new file, never a truncated one;
     a symlinked config.yaml and its permissions are preserved.
-
-    Raises:
-        TypeError: When *document* is not a :class:`CommentedMap` from :func:`_load_user_config_document`.
     """
-    if not isinstance(document, CommentedMap):
-        raise TypeError("The user config override must be written from a round-trip document (CommentedMap).")
     config_path = get_ziv_data_dir() / "config.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     buffer = io.StringIO()
@@ -347,7 +342,7 @@ def _effective_field_value(web_config: Any, key: str) -> ConfigValue:
         return web_config.output_dir
     if key == "prompt_enhancer.user_model":
         model = getattr(web_config, "enhancer_model", None)
-        return model_reference(model, getattr(web_config, "enhancer_revision", None)) if model else None
+        return join_huggingface_revision(model, getattr(web_config, "enhancer_revision", None)) if model else None
     raise ValueError(f"Unknown writable config field: {key}")
 
 

@@ -10,6 +10,7 @@ gets it at run time.
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -45,7 +46,7 @@ def convert(checkpoint: H3Checkpoint, target: Path, *, turbo: bool, config: dict
 
     require_cuda(torch, "Converting a MiniMax H3 checkpoint on Windows and Linux")
     configure_torch_runtime(torch)  # as the backend runs stock's copy build, so the tables match
-    preset = h3_preset(config)
+    preset = h3_preset(config, sys.platform)
     report("download", 0, 1)
     files = resolve_base_files(preset, lora=not turbo)
     time_embedder = stock_time_embedder(preset.repo, preset.revision) if checkpoint.curve_rank is not None else None

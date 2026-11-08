@@ -23,7 +23,7 @@ import pytest
 
 from tests._factories import _make_args
 from tests._factories import _make_plan
-from tests._factories import _make_video_args, make_extend_source
+from tests._factories import _make_video_args, make_extend_source, video_config
 from tests.web._helpers import sse_payload, stub_request_job, wait_for_status
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
@@ -300,10 +300,11 @@ class TestWebRunner:
 
     @pytest.mark.parametrize(("upscale", "expect_source"), [(2, True), (None, False)])
     def test_video_job_passes_latent_upsampler_only_when_upscaling(self, monkeypatch, upscale, expect_source):
-        """Video jobs hand the configured upsampler source to load_model only for upscale jobs."""
+        """Video jobs hand the declared upsampler source to load_model only for upscale jobs."""
         monkeypatch.setattr(web_runner_module, "run_video_batch", lambda **_kw: None)
+        monkeypatch.setattr(web_runner_module.sys, "platform", "linux")
         backend = stub_request_job(monkeypatch)
-        config = {"video_model_presets": {"ltx": {"diffusers": {"latent_upsampler": {"repo": "your-org/upsampler", "filename": "up.safetensors"}}}}}
+        config = video_config()
         request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", upscale=upscale)
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
@@ -315,7 +316,7 @@ class TestWebRunner:
 
         kwargs = backend.load_model.call_args.kwargs
         if expect_source:
-            assert kwargs["latent_upsampler"] == ("your-org/upsampler", "up.safetensors")
+            assert kwargs["latent_upsampler"] == ("Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9", "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
         else:
             assert "latent_upsampler" not in kwargs
 
@@ -449,7 +450,7 @@ class TestWebRunner:
         load_calls: list = []
         runs: list = []
 
-        def _fake_load(engine, name, *, models_dir, on_phase):
+        def _fake_load(engine, name, *, models_dir, platform_key, on_phase):
             load_calls.append((engine, name, models_dir))
             for phase in ("downloading", "saving_quant"):
                 on_phase(phase)
@@ -511,7 +512,7 @@ class TestWebRunner:
         events: list = []
         workflow = MagicMock(name="workflow")
 
-        def _quitting_load(engine, name, *, models_dir, on_phase):
+        def _quitting_load(engine, name, *, models_dir, platform_key, on_phase):
             control.queue_action("quit")
             return MagicMock(name="seedvr2_model")
 
@@ -547,7 +548,7 @@ class TestWebRunner:
         downloads: list = []
         runs: list = []
 
-        def _fake_load(engine, name, *, models_dir, on_phase):
+        def _fake_load(engine, name, *, models_dir, platform_key, on_phase):
             on_phase("loading")
             return model
 
@@ -648,7 +649,7 @@ class TestWebRunner:
         monkeypatch.setattr(job_downloads_module, "video_plan", lambda ref, **kwargs: plans.append((ref, kwargs)) or ("targets",))
         monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", _fake_ensure)
         monkeypatch.setattr(web_runner_module, "get_video_backend", lambda family: backend if family == "ltx" else pytest.fail(family))
-        monkeypatch.setattr(web_runner_module, "video_load_options", lambda family, cfg, name, *, upscale, quiet: {"upscale": upscale, "mlx_packs": {}})
+        monkeypatch.setattr(web_runner_module, "video_load_options", lambda family, cfg, name, *, platform_key, upscale, quiet: {"upscale": upscale, "mlx_packs": {}})
         monkeypatch.setattr(web_runner_module, "run_ltx_video_upscale", _fake_run)
         request = self._ltx_request(tmp_path)
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
@@ -661,8 +662,8 @@ class TestWebRunner:
             runner.shutdown()
 
         assert (snapshot["job_type"], snapshot["supported_controls"], snapshot["media_type"], snapshot["upscale_method"]) == ("upscale", ["quit"], "video", "ltx")
-        assert plans == [("dgrauet/ltx-2.3-mlx-q4@a", {"family": "ltx", "config": config, "model_name": "ltx-4", "upscale": True})]
-        assert downloads == [(("targets",), "video", "model", "ltx-4")]
+        assert plans == [("dgrauet/ltx-2.3-mlx-q4@a", {"family": "ltx", "config": config, "model_name": "ltx-4", "platform_key": sys.platform, "upscale": True})]
+        assert downloads == [(("targets",), "video", "model", "LTX-2.3 4-bit")]
         backend.load_model.assert_called_once_with("dgrauet/ltx-2.3-mlx-q4@a", low_memory=True, loras=None, upscale=True, mlx_packs={})
         assert [(event["mode"], event["model"]) for event in loading] == [("video", "ltx-4")]
         assert runs == [(backend, "handle", request)]
@@ -673,7 +674,7 @@ class TestWebRunner:
         monkeypatch.setattr(job_downloads_module, "video_plan", lambda ref, **kwargs: ())
         monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", lambda self, planned, **kwargs: True)
         monkeypatch.setattr(web_runner_module, "get_video_backend", lambda family: backend)
-        monkeypatch.setattr(web_runner_module, "video_load_options", lambda family, cfg, name, *, upscale, quiet: {})
+        monkeypatch.setattr(web_runner_module, "video_load_options", lambda family, cfg, name, *, platform_key, upscale, quiet: {})
         monkeypatch.setattr(web_runner_module, "run_ltx_video_upscale", lambda *args, **kwargs: None)
         request = replace(self._ltx_request(tmp_path), loras=(("/loras/style.safetensors", 0.8),))
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)

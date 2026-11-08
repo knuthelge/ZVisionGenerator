@@ -19,6 +19,7 @@ from zvisiongenerator.converters.convert_checkpoint import H3_MODEL_TYPE, LTX_MO
 from zvisiongenerator.converters.convert_target import PROGRESS_PREFIX
 from zvisiongenerator.converters.h3_convert import inspect_h3_for_conversion
 from zvisiongenerator.converters.ltx_convert import distill_advice, inspect_ltx
+from zvisiongenerator.utils.model_metadata import alias_map
 from zvisiongenerator.utils.quantized_weights import precision_label
 from zvisiongenerator.utils.subprocess_env import utf8_child_env
 
@@ -122,8 +123,8 @@ def recommended_ltx_quantize(config: dict[str, Any]) -> int:
     if budget is None or not budget.system_bytes:
         return 4
     try:
-        resolved = resolve_model_path(_REFERENCE_ALIAS, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
-        system = ltx_cuda_system_memory(resolved, _REFERENCE_ALIAS, config)
+        resolved = resolve_model_path(_REFERENCE_ALIAS, aliases=alias_map(config), platform_key=sys.platform)
+        system = ltx_cuda_system_memory(resolved, _REFERENCE_ALIAS)
     except Exception:  # noqa: BLE001 - an estimate that fails only means no recommendation beyond q4
         return 4
     return 8 if system is not None and system.taking_turns <= budget.system_bytes * _SYSTEM_FITS_RATIO else 4

@@ -161,7 +161,6 @@ def _run(prompts, args, *, backend, model, chain, reload_model=None, free=1 * _G
         "sizes": {"2:3": {"m": {"width": 512, "height": 512}}},
         "generation": {"seed_min": 1, "seed_max": 100},
         "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-        "model_presets": {"zimage": {"supports_negative_prompt": True, "max_references": 0}},
     }
     plan = _make_plan(prompts, args, config=config)
     workflow = GenerationWorkflow(name="t", stages=[stage])
@@ -247,7 +246,6 @@ class TestRunBatchTransparent:
             "sizes": {"2:3": {"m": {"width": 512, "height": 512}}},
             "generation": {"seed_min": 1, "seed_max": 100},
             "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-            "model_presets": {"zimage": {"supports_negative_prompt": True}},
         }
         args = _make_args()
         prompts = {"s": [("a cat", None)]}

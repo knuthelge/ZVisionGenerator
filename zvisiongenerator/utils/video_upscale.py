@@ -63,7 +63,7 @@ def ltx_upscale_steps(config: dict[str, Any]) -> int:
     return steps
 
 
-def ltx_video_option(width: int, height: int, frame_count: int | None, *, model_ref: str, model_name: str, app_config: dict[str, Any], budget: MemoryBudget | None) -> UpscaleOption:
+def ltx_video_option(width: int, height: int, frame_count: int | None, *, model_ref: str, model_name: str, budget: MemoryBudget | None) -> UpscaleOption:
     """Return the one 2× option of an LTX video upscale, warned when the clip may not fit this computer's memory.
 
     The warning comes from ``clip_memory_fit`` for a two-stage render at the output size, which covers the upscale's
@@ -75,7 +75,7 @@ def ltx_video_option(width: int, height: int, frame_count: int | None, *, model_
     option = UpscaleOption(factor=VIDEO_UPSCALE_FACTOR, width=out_width, height=out_height, allowed=True)
     if frame_count is None or budget is None:
         return option
-    fit = clip_memory_fit(model_ref, width=out_width, height=out_height, frames=frame_count, low_memory=True, upscale=True, budget=budget, model_name=model_name, app_config=app_config)
+    fit = clip_memory_fit(model_ref, width=out_width, height=out_height, frames=frame_count, low_memory=True, upscale=True, budget=budget, model_name=model_name)
     if fit is not None and fit.get("status") in ("tight", "too_large"):
         return replace(option, warning=SEEDVR2_MEMORY_WARNING, warning_code=WARNING_MEMORY)
     return option

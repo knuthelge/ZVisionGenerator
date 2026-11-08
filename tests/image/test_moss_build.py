@@ -9,7 +9,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from zvisiongenerator.utils.built_model import BUILD_RECORD_NAME, read_build_record
+from tests.image._helpers import pin_moss
 from zvisiongenerator.utils.image_model_detect import detect_image_model
+from zvisiongenerator.utils.model_metadata import model_entry
 from zvisiongenerator.utils.moss_build import (
     TURBO_DIR_NAME,
     TURBO_LORA_NAME,
@@ -21,6 +23,7 @@ from zvisiongenerator.utils.moss_build import (
     is_turbo_dir,
     moss_base_dir,
     moss_source,
+    moss_targets,
     shared_quant_source,
     turbo_lora_file,
     turbo_lora_for,
@@ -30,7 +33,6 @@ from zvisiongenerator.utils.moss_build import (
 from zvisiongenerator.utils.stored_quant import build_manifest, write_manifest
 
 _SFT = "owner/sft@" + "a" * 40
-_CONFIG = {"moss_image": {"sft": _SFT, "turbo_lora": {"repo": "owner/lora", "revision": "b" * 40, "filename": "lora.safetensors"}}}
 
 
 def _source(sft: str = _SFT, lora_revision: str = "b" * 40) -> MossSource:
@@ -63,29 +65,23 @@ def _stored_copy(models: Path, base: Path, bits: int = 4, fmt: str = "nf4") -> P
 
 
 class TestMossSource:
-    def test_reads_the_block_and_splits_the_sft_pin(self):
-        source = moss_source(_CONFIG)
+    def test_reads_the_sft_and_turbo_lora_targets_of_the_moss_entry(self):
+        targets = {target["role"]: target for target in model_entry("moss")["downloads"]}
 
-        assert source == _source()
-        assert source.sft_repo == "owner/sft"
-        assert source.sft_revision == "a" * 40
+        source = moss_source("linux")
 
-    @pytest.mark.parametrize(
-        ("block", "key"),
-        [
-            (None, "moss_image"),
-            ({"sft": "", "turbo_lora": _CONFIG["moss_image"]["turbo_lora"]}, "moss_image.sft"),
-            ({"sft": "owner/sft", "turbo_lora": _CONFIG["moss_image"]["turbo_lora"]}, "moss_image.sft"),
-            ({"sft": _SFT}, "moss_image.turbo_lora"),
-            ({"sft": _SFT, "turbo_lora": {"repo": "o/l", "revision": "", "filename": "f"}}, "moss_image.turbo_lora"),
-            ({"sft": _SFT, "turbo_lora": {"repo": "o/l", "revision": "r"}}, "moss_image.turbo_lora"),
-        ],
-    )
-    def test_a_bad_block_names_the_key(self, block, key):
-        config = {} if block is None else {"moss_image": block}
+        assert source.sft == targets["sft"]["ref"]
+        assert (f"{source.turbo_repo}@{source.turbo_revision}", (source.turbo_file,)) == (targets["turbo_lora"]["ref"], tuple(targets["turbo_lora"]["files"]))
+        sft, _turbo = moss_targets("linux")
+        assert (sft.allow_patterns, sft.ignore_patterns) == (tuple(targets["sft"]["files"]), tuple(targets["sft"]["ignore"]))
 
-        with pytest.raises(ValueError, match=key):
-            moss_source(config)
+    def test_the_sft_pin_splits_into_repo_and_revision(self, monkeypatch, tmp_path):
+        pin_moss(monkeypatch, tmp_path)
+
+        source = moss_source("linux")
+
+        assert (source.sft_repo, source.sft_revision) == ("owner/sft", "a" * 40)
+        assert (source.turbo_repo, source.turbo_revision, source.turbo_file) == ("owner/lora", "b" * 40, "lora.safetensors")
 
 
 class TestMossDir:

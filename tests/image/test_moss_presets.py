@@ -9,14 +9,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests._factories import _make_args, _make_plan
+from tests._factories import _make_args, _make_plan, metadata_copy, use_model_metadata
 from tests._paths import REPO_ROOT
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.image_runner import run_batch
-from zvisiongenerator.utils.config import get_variant_key, load_config, model_capabilities, resolve_defaults
+from zvisiongenerator.utils.config import get_variant_key, load_config, resolve_defaults
+from zvisiongenerator.utils.model_metadata import model_capabilities
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.model_metadata import alias_map, image_model_family, model_download_size_label
 from zvisiongenerator.utils.moss_build import moss_source
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.web import workspace_api as workspace_api_module
@@ -32,19 +34,19 @@ def config() -> dict:
     return load_config()
 
 
-def test_packaged_source_parses_and_matches_the_vendored_revision(config):
-    source = moss_source(config)
+def test_packaged_source_parses_and_matches_the_vendored_revision():
+    source = moss_source("linux")
     makefile_revision = re.search(r"^MOSS_REVISION\s*\?=\s*(\w+)", _MAKEFILE.read_text(encoding="utf-8"), re.MULTILINE)
 
     assert makefile_revision is not None
     assert source.sft_revision == makefile_revision.group(1)
 
 
-def test_aliases_name_their_folder_on_every_platform_and_are_not_declared_families(config):
+def test_aliases_name_their_folder_on_every_platform_and_are_not_declared_families():
     for alias in ("moss", "moss-sft"):
-        assert config["model_aliases"][alias] == alias
-        assert alias not in config["model_alias_families"]
-        assert set(config["model_labels"][alias]["download_size_label"]) == {"darwin", "win32", "linux"}
+        assert alias_map({})[alias] == alias
+        assert image_model_family(alias) is None
+        assert all(model_download_size_label(alias, platform_key) for platform_key in ("darwin", "win32", "linux"))
 
 
 @pytest.mark.parametrize(("info", "variant"), [(_TURBO, "turbo"), (_SFT, "sft")])
@@ -79,13 +81,15 @@ def test_cli_flags_still_win_over_the_variant(config):
     assert defaults["steps"] == 8
 
 
-def test_variant_capability_overrides_only_the_flags_it_sets():
-    config = {"model_presets": {"fam": {"supports_negative_prompt": True, "supports_upscale": False, "variants": {"v": {"supports_negative_prompt": False}}}}}
+def test_variant_capability_overrides_only_the_flags_it_sets(monkeypatch, tmp_path):
+    data = metadata_copy()
+    data["image_families"]["fam"] = {"supports_negative_prompt": True, "supports_upscale": False, "variants": {"v": {"supports_negative_prompt": False}}}
+    use_model_metadata(monkeypatch, tmp_path, data)
 
-    assert model_capabilities(config, "fam", "v")["supports_negative_prompt"] is False
-    assert model_capabilities(config, "fam", "v")["supports_upscale"] is False
-    assert model_capabilities(config, "fam")["supports_negative_prompt"] is True
-    assert model_capabilities(config, "fam", "missing")["supports_negative_prompt"] is True
+    assert model_capabilities("fam", "v")["supports_negative_prompt"] is False
+    assert model_capabilities("fam", "v")["supports_upscale"] is False
+    assert model_capabilities("fam")["supports_negative_prompt"] is True
+    assert model_capabilities("fam", "missing")["supports_negative_prompt"] is True
 
 
 def _web_config(app_config: dict) -> SimpleNamespace:
@@ -154,30 +158,34 @@ def test_a_turbo_run_drops_the_negative_and_warns_with_the_presets_hint_and_no_p
     messages = [str(w.message) for w in caught if issubclass(w.category, UserWarning)]
     assert len(messages) == 1
     assert request.negative_prompt is None
-    hint = model_capabilities(config, "moss", "turbo")["negative_prompt_hint"]
+    hint = model_capabilities("moss", "turbo")["negative_prompt_hint"]
     assert hint and hint in messages[0]
-    assert "moss-sft" in hint and "moss-sft" in config["model_aliases"]
-    assert model_capabilities(config, "moss", "sft")["negative_prompt_hint"] is None
+    assert "moss-sft" in hint and "moss-sft" in alias_map(config)
+    assert model_capabilities("moss", "sft")["negative_prompt_hint"] is None
     assert "/" not in messages[0] and "\\" not in messages[0] and str(tmp_path) not in messages[0]
 
 
 def test_a_family_without_variants_warns_without_a_hint(config):
     from zvisiongenerator.image_runner import _negative_prompt_warning
 
-    message = _negative_prompt_warning(config, _make_args(model="zit"), ImageModelInfo(family="zimage", is_distilled=False, size=None))
+    message = _negative_prompt_warning(_make_args(model="zit"), ImageModelInfo(family="zimage", is_distilled=False, size=None))
 
     assert "zimage" in message
-    assert model_capabilities(config, "zimage")["negative_prompt_hint"] is None
+    assert model_capabilities("zimage")["negative_prompt_hint"] is None
 
 
-def test_the_runner_adds_whatever_hint_the_preset_sets_and_nothing_else():
+def test_the_runner_adds_whatever_hint_the_preset_sets_and_nothing_else(monkeypatch, tmp_path):
     from zvisiongenerator.image_runner import _negative_prompt_warning
 
-    config = {"model_presets": {"flux2_klein": {"supports_negative_prompt": True, "variants": {"distilled": {"supports_negative_prompt": False, "negative_prompt_hint": "HINT"}}}}}
+    data = metadata_copy()
+    data["image_families"]["flux2_klein"]["supports_negative_prompt"] = True
+    data["image_families"]["flux2_klein"]["variants"] = {"distilled": {"supports_negative_prompt": False, "negative_prompt_hint": "HINT"}}
     info = ImageModelInfo(family="flux2_klein", is_distilled=True, size=None)
     args = _make_args(model="flux2-klein-4b")
-    with_hint = _negative_prompt_warning(config, args, info)
-    config["model_presets"]["flux2_klein"]["variants"]["distilled"].pop("negative_prompt_hint")
+    use_model_metadata(monkeypatch, tmp_path, data)
+    with_hint = _negative_prompt_warning(args, info)
+    del data["image_families"]["flux2_klein"]["variants"]["distilled"]["negative_prompt_hint"]
+    use_model_metadata(monkeypatch, tmp_path, data)
 
     assert with_hint.endswith("HINT")
-    assert not _negative_prompt_warning(config, args, info).endswith("HINT")
+    assert not _negative_prompt_warning(args, info).endswith("HINT")

@@ -1,5 +1,9 @@
-# Facts about the built-in models: the terms each comes with. Read by utils/model_metadata.py (and utils/licences.py through
-# it); never merged with the user's config.yaml, so a user file cannot change it.
+# Facts about the built-in models: what each is, the terms it comes with and the files it downloads. Read by
+# utils/model_metadata.py (and, through it, utils/licences.py and downloads/declaration.py); never merged with the user's
+# config.yaml, so a user file cannot change it. Changing a pin rebuilds what is built from it (MOSS-Image, Ideogram 4 Instant,
+# stored copies).
+#
+# The sections: licences, image_families, video_families and models. Settings (defaults, steps, guidance) live in config.yaml.
 #
 # licences: one record per licence, keyed by record id, in the order they are listed. Required: name, supplier, summary
 # (short, plain language) and url. Optional: url_label (default "Licence") and attribution (a credit line the licence
@@ -7,12 +11,26 @@
 # mirror the app downloads from. A gated repository, or one that ships no licence file, links its model page (url_label
 # "Model page"); any other links its licence file, pinned to a commit. A contract test refuses any other URL.
 #
-# models: one entry per model, keyed by model id: an image or video alias, an audio preset, enhancer-fast or
-# enhancer-smart (the prompt enhancer tiers), seedvr2-7b or seedvr2-3b (the SeedVR2 upscale tiers, every weights format), or
-# matte (the background removal models). kind is image, video, audio, enhancer, upscaler or matte. licences lists the record
-# ids that cover the model, in display order, so a record several models share is written once. Every model the app
-# downloads has an entry with at least one record, free licences included; a contract test refuses an entry that names an
-# unknown record and a record no entry uses.
+# models: one entry per model, keyed by model id: an image or video alias, an audio model, enhancer-fast or enhancer-smart
+# (the prompt enhancer tiers), seedvr2-7b or seedvr2-3b (the SeedVR2 upscale tiers, every weights format), or matte (the
+# background removal models). The order of the entries is the order the Web UI lists them. Keys:
+#   kind          image, video, audio, enhancer, upscaler or matte; image and video entries are aliases.
+#   name          how the model reads in the Web UI.
+#   licences      the record ids that cover the model, in display order, so a record several models share is written once.
+#                 Every model the app downloads has an entry with at least one record, free licences included; a contract
+#                 test refuses an entry that names an unknown record and a record no entry uses.
+#   downloads     a list of targets, or one list per platform (darwin, win32, linux). A target has a ref (owner/repo@revision;
+#                 unpinned only where the app does not pin the repo yet), files (allow patterns; none = the whole repo minus its
+#                 ignore patterns, as for the Windows/Linux LTX diffusers repos; a macOS LTX pack, a SeedVR2 or matte target and a
+#                 single-file companion must list their files, which the loaders read by name or position),
+#                 ignore (patterns to skip; for an LTX diffusers repo, the one list the plan and the download skip),
+#                 files_from: loader (the loader's planner lists the files; no code reads the marker) and a role (default model).
+#                 Order is load-bearing: a model's own targets, then its family's companions.
+#   download_size the one-time download, shown in the first-run dialog; a plain value, or one per platform.
+#   family, version, quantize, build, transformer_format, kinds, lyrics, voices, limits, platforms, memory, memory_gb: see the
+#   entries; a plain value applies to every platform and a mapping keyed by darwin, win32 and linux gives one value per platform.
+#   Required beyond kind, name, licences and downloads: a video entry needs family (and quantize, 4 or 8, for ltx); an audio
+#   entry needs family, kinds and limits; the seedvr2 entries need memory per platform.
 # Gemma 3 is the text encoder of ltx-4 and ltx-8 on every platform; ltx25-4 uses Gemma 4, which is Apache-2.0, as are the
 # text encoder and latent upscaler of h3, so these three carry no extra record.
 licences:
@@ -106,23 +124,468 @@ licences:
     url_label: "Dataset terms"
     url: "https://github.com/xuebinqin/DIS/blob/e6455bae3892b3a7d8cf59ca91011a220d1ed606/DIS5K-Dataset-Terms-of-Use.pdf"
 
+# image_families: what each image model family can do, keyed by family; the family's values apply to every variant, and a key
+# set under variants.<variant> overrides them. Keys left out take model_capabilities' permissive defaults. Defaults (steps,
+# guidance, scheduler, upscale) are settings and live in config.yaml under model_presets.
+image_families:
+  zimage:
+    supports_negative_prompt: true
+
+  flux2_klein:
+    supports_negative_prompt: false
+    max_reference_images: 4  # BFL documents up to 4; neither library enforces a count
+
+  flux2:
+    supports_negative_prompt: false
+
+  flux1:
+    supports_negative_prompt: false
+    enhance_max_words: 180  # FLUX.1-schnell reads only 256 T5 tokens
+
+  ideogram4:
+    supports_negative_prompt: false
+    supports_scheduler: false  # Instant runs its own noise schedule
+    supports_img2img: false
+    supports_upscale: false
+    supports_json_prompt: true
+    supports_first_sigma: true
+    dimension_min: 256
+    dimension_max: 2048
+    dimension_step: 16
+
+  krea2:
+    # Guidance is the standard CFG scale on both backends (1.0 = off); the diffusers
+    # backend converts it to Krea 2's own scale, where 0.0 = off.
+    supports_negative_prompt: false
+
+  moss:
+    # Turbo and SFT are variants of one family, picked from the model folder. A variant may also set capability flags.
+    supports_negative_prompt: true
+    supports_scheduler: false  # MOSS samples with its own schedule (Euler, shift 5)
+    variants:
+      turbo:
+        supports_negative_prompt: false
+        negative_prompt_hint: Use -m moss-sft for negative prompts.
+
+  unknown:
+    supports_negative_prompt: false
+
+# video_families: what each video family can do, keyed by family. versions.<id> is overlaid on the family block for the models
+# that name it as their version (dicts merge, every other value, an empty list included, replaces). companions are the
+# downloads every model of the family shares, per platform; a model's own downloads come first. A converter_base names the
+# model whose MLX pack a converted checkpoint takes its VAEs, vocoder, upsampler and configs from, per quantize level.
+# The step defaults, the upscale steps and ffn_chunk_tokens are settings and live in config.yaml under video_model_presets.
+video_families:
+  ltx:
+    label: "LTX distilled model"
+    max_steps: 8
+    # Valid frame counts are alignment * k + offset (8k+1: 9, 17, ... 121); another count moves to the nearest one.
+    frame_rule: { alignment: 8, offset: 1, round: nearest }
+    # An extension adds frames in multiples of this.
+    extend_frame_step: 8
+    # The frames of the source's end an extension carries into its window (4 latent frames); the window is these plus the new frames.
+    carry_frames: 25
+    capabilities: { i2v: true, end_frame: true, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: true, audio_track: true, audio_track_upscale: true }
+    # Lightricks' distilled LoRA: `ziv model model --model-type ltx-2.3 --distill` merges it into a plain-dev
+    # checkpoint, which otherwise renders broken at the 8 steps the app runs LTX at.
+    distilled_lora:
+      ref: "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9"
+      file: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
+      licence: ltx-2-community  # the licence record (above) named before the download
+    # macOS: the model whose pinned MLX pack a converted checkpoint takes its VAEs, vocoder, upsampler and configs from, per quantize level.
+    converter_base: { q4: ltx-4, q8: ltx-8 }
+    companions:
+      # macOS: the Gemma 3 text encoder the LTX-2.3 packs encode prompts with, pinned; LTX-2.5 packs bundle their own.
+      darwin:
+        - { ref: "mlx-community/gemma-3-12b-it-4bit@86cc6a8dedbc456dd0e4af01a9d09f396f77e558", files_from: loader, role: text_encoder }
+      # Windows/Linux: the distilled transformer, one single-file LTX-2 checkpoint in a Hugging Face repo (1.1 matches macOS), and
+      # the 2x spatial latent upsampler for --upscale 2. Every LTX-2.3 source is pinned: Lightricks deletes and moves files in its repo.
+      win32: &ltx23_cuda_companions
+        - { ref: "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9", files: [ltx-2.3-22b-distilled-1.1.safetensors], role: transformer }
+        - { ref: "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9", files: [ltx-2.3-spatial-upscaler-x2-1.1.safetensors], role: latent_upsampler }
+      linux: *ltx23_cuda_companions
+    # Per-version overlays: a version's block is merged over this family block for the models that name it
+    # (CLI flags > version > family > global). The family block above is LTX-2.3.
+    versions:
+      ltx25:
+        # `ziv model model --model-type ltx-2.5` converts into this version.
+        model_type: ltx-2.5
+        # Lightricks' LTX-2.5 distilled LoRA for --distill: an ungated copy whose size and SHA-256
+        # (86370bbf79a9eb4edaa158907e2b48a5188fe4c5dc8ce30c7eb8f2f131a9bbf5, 8,899,889,568 bytes) equal the gated
+        # original's, Lightricks/LTX-2.5 loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors; pinned.
+        distilled_lora:
+          ref: "lxxxy6/LTX-2.5@3506f52caf688795fc35edbf0d1b197bc30f3df1"
+          file: "ltx-2.5-22b-distilled-lora-450-bf16.safetensors"
+          licence: ltx-2x-community
+        # macOS: the ltx25-4 pack has only q4, and its quantize_config.json is linked at both levels: the MLX loader reads the
+        # bits from the weights' shapes.
+        converter_base: { q4: ltx25-4, q8: ltx25-4 }
+        image_crf: 18 # i2v conditioning image, re-compressed before the fit
+        sampler: euler_ancestral # upstream distilled sampler; step noise from seed + 10000 / + 20000
+        companions:
+          darwin: [] # the packs bundle their Gemma 4 encoder
+          # The repo's own transformer folder is used; only the latent upsampler lives in a file of its own.
+          win32: &ltx25_cuda_companions
+            - { ref: "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2", files: [latent_upsampler/diffusion_pytorch_model.safetensors], role: latent_upsampler }
+          linux: *ltx25_cuda_companions
+
+  # MiniMax H3: 17-frame blocks, distilled to 4 or 8 steps by the turbo LoRA below. Valid frame counts are 17k+5 (22, 39,
+  # ... 124 is 5 s); a count between two moves up to the next one, and there is no length cap.
+  h3:
+    label: "MiniMax H3"
+    max_steps: 8
+    step_options: [4, 8] # both run from the one stored copy (it holds the fold tables of both schedules)
+    frame_rule: { alignment: 17, offset: 5, round: up }
+    extend_frame_step: 17
+    extend_fps: 24 # an Extend source must run at 24 fps
+    carry_frames: 22 # 17 * 1 + 5, the smallest valid clip
+    platform_carry_frames: { darwin: 1 } # macOS renders an image-to-video clip from the source's last frame, so one frame is carried
+    capabilities: { i2v: true, end_frame: true, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: false, audio_track: true, audio_track_upscale: false }
+    platform_capabilities:
+      darwin: { upscale: false, upscale_review: false }
+    schedules: # Windows/Linux
+      8: { forwards: 8, video_shift: 6.0, audio_shift: 3.0 }
+      4: { forwards: 4, video_shift: 6.0, audio_shift: 3.0 }
+    text_encoder_layers: 50 # the 50 layers of the Qwen3-VL text encoder the model reads
+    lora_scale: 0.0625 # the turbo LoRA's scale replaces alpha/rank and is never multiplied by it
+    # macOS: the text encoder is converted once to this 4-bit form and kept next to the model as <name>@mlx-te4.
+    mlx_text_encoder: { bits: 4, group_size: 64, layers: 50 }
+    companions:
+      darwin:
+        # The 8-step turbo LoRA; the INT8 transformer applies it unfused at run time.
+        - &h3_lora { ref: "lightx2v/Minimax-h3-Turbo@30f485ed874aa44c8183348ad361c5eabad318da", files: [minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors], role: lora }
+      # Windows/Linux, in this order: the text encoder, the turbo LoRA (merged into the stored copy) and the latent upscaler.
+      win32: &h3_cuda_companions
+        # Qwen3-VL 32B Instruct, NF4: the first four of five weight shards hold the 50 layers the model reads.
+        - { ref: "unsloth/Qwen3-VL-32B-Instruct-bnb-4bit@48cfc6496841742a77892646c15a7f3e8da44348", files: [config.json, model.safetensors.index.json, model-00001-of-00005.safetensors, model-00002-of-00005.safetensors, model-00003-of-00005.safetensors, model-00004-of-00005.safetensors], role: text_encoder }
+        - *h3_lora
+        # The 3D latent upscaler of the H3 upscale: a 2x enlargement of the stage-1 latents before a short full-size refinement.
+        # sha256 043e5a48e161610ef6c3ea974645220354d06fa618abca15f76d084812eb55c2, 690,592,672 bytes, Apache-2.0, ungated.
+        # Run in fp16. There is no runtime hash check: the revision pin fixes the file and the strict load rejects a wrong one.
+        # The file is in a subfolder of the repository.
+        - { ref: "LBH-123-AI/Minimax_h3_latent_Upscaler@3f941d5d182014dd5c0a5e16330420ee2d4aa0c6", files: [minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors], role: latent_upsampler }
+      linux: *h3_cuda_companions
+
 models:
-  ltx-8: {kind: video, licences: [ltx-2-community, gemma]}
-  ltx-4: {kind: video, licences: [ltx-2-community, gemma]}
-  ltx25-4: {kind: video, licences: [ltx-2x-community]}
-  h3: {kind: video, licences: [minimax-h3-community]}
-  zit: {kind: image, licences: [zimage-apache]}
-  klein9b: {kind: image, licences: [flux-nc]}
-  klein4b: {kind: image, licences: [flux-klein-apache]}
-  krea2: {kind: image, licences: [krea-2-community]}
-  ideo: {kind: image, licences: [ideogram-4-nc]}
-  moss: {kind: image, licences: [moss-apache]}
-  moss-sft: {kind: image, licences: [moss-apache]}
-  yue2: {kind: audio, licences: [yue2-creator-nc]}
-  qwen3_tts: {kind: audio, licences: [qwen3-tts-apache]}
-  sa3: {kind: audio, licences: [stability-community, gemma]}
-  enhancer-fast: {kind: enhancer, licences: [qwen-apache]}
-  enhancer-smart: {kind: enhancer, licences: [qwen-apache]}
-  seedvr2-7b: {kind: upscaler, licences: [seedvr2-apache]}
-  seedvr2-3b: {kind: upscaler, licences: [seedvr2-apache]}
-  matte: {kind: matte, licences: [matte]}
+  # On Windows/Linux both LTX aliases load the diffusers repo, at the quantize level of their own entry; the stored copy of each
+  # is ~/.ziv/models/<alias>@q<bits>.
+  # On macOS the LTX aliases load the pinned MLX packs, so an alias, the download plan and the Models page read one revision and
+  # one file list. A pack is downloaded as exactly its listed files, at its pinned revision. After changing a pin, list the files
+  # of the new revision that the vendored loader reads: the pack repos hold files the app never loads (other transformers,
+  # LoRAs, other upsamplers).
+  ltx-8:
+    kind: video
+    family: ltx
+    name: "LTX-2.3 8-bit"
+    quantize: 8 # 8 = FP8 transformer; with an FP8 text encoder and connectors
+    licences: [ltx-2-community, gemma]
+    downloads:
+      darwin:
+        - { ref: "dgrauet/ltx-2.3-mlx-q8@6671a7572a530862d1d60ce393b5d93491e3f76b", files: &ltx23_mlx_files [transformer-distilled-1.1.safetensors, connector.safetensors, vae_encoder.safetensors, vae_decoder.safetensors, audio_vae.safetensors, vocoder.safetensors, spatial_upscaler_x2_v1_1.safetensors, spatial_upscaler_x2_v1_1_config.json, embedded_config.json, config.json] }
+      # Distilled LTX 2.3 in diffusers format (8 steps, guidance 1.0), pinned. Distilled checkpoints only. Its text encoder,
+      # connectors, VAEs and vocoder are used; the transformer comes from the family's single-file companion.
+      win32: &ltx23_cuda
+        - { ref: "diffusers/LTX-2.3-Distilled-Diffusers@432e0d3c2d1769aaa4d295f9243f7062bf6b47ee", ignore: ["transformer/*.safetensors", "transformer/*.safetensors.index.json"] }
+      linux: *ltx23_cuda
+  ltx-4:
+    kind: video
+    family: ltx
+    name: "LTX-2.3 4-bit"
+    quantize: 4 # 4 = NF4 transformer; with an FP8 text encoder and connectors
+    licences: [ltx-2-community, gemma]
+    downloads:
+      darwin:
+        - { ref: "dgrauet/ltx-2.3-mlx-q4@56a5866d638ecfe37c54d348e88938235185c2d4", files: *ltx23_mlx_files }
+      win32: *ltx23_cuda
+      linux: *ltx23_cuda
+  # LTX-2.5 (video_families.ltx.versions.ltx25). Windows/Linux load the diffusers repo (an ungated, byte-identical copy of
+  # Lightricks/LTX-2.5-Diffusers, bf16 despite its name, pinned); macOS loads the MLX distilled files from
+  # MarceloFSO/ltx-2.5-mlx-q4-fast, an ungated mirror of dgrauet/ltx-2.5-mlx-q4, distilled files only, sha256-identical; pinned.
+  ltx25-4:
+    kind: video
+    family: ltx
+    version: ltx25
+    name: "LTX-2.5 4-bit"
+    quantize: 4
+    licences: [ltx-2x-community]
+    downloads:
+      darwin:
+        - { ref: "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5", files: [transformer-distilled.safetensors, text_encoder.safetensors, text_encoder_config.json, tokenizer.json, tokenizer_config.json, chat_template.jinja, connector.safetensors, vae_decoder_conv.safetensors, vae_encoder_conv.safetensors, audio_vae.safetensors, vocoder.safetensors, spatial_upscaler_x2_v1_0.safetensors, spatial_upscaler_x2_v1_0_config.json, duration_head.safetensors, embedded_config.json, quantize_config.json] }
+      win32: &ltx25_cuda
+        - { ref: "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2", ignore: ["LTX-2.5-*.safetensors", "samples/*"] } # the root single-file checkpoints (69 GB) and samples
+      linux: *ltx25_cuda
+  # MiniMax H3: the same pinned repository on every platform. Windows/Linux stream it from a stored 4-bit copy; macOS runs the
+  # MLX port from the INT8 transformer.
+  h3:
+    kind: video
+    family: h3
+    name: "MiniMax H3"
+    licences: [minimax-h3-community]
+    downloads:
+      # macOS lists every file, so a download is checked file by file. In this order: the INT8 transformer (Argus-calibrated),
+      # then the FL2VA parts of the repo the pipeline loads (tokenizer, processor, both VAEs and shards 1-11 and 14 of the text
+      # encoder), then the family's LoRA companion.
+      darwin:
+        - ref: "water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8@70505b09c80e298e684d798d8e0f946937dcfad4"
+          files: [config.json, quant_config.json, model.safetensors.index.json, model-00001-of-00008.safetensors, model-00002-of-00008.safetensors, model-00003-of-00008.safetensors, model-00004-of-00008.safetensors, model-00005-of-00008.safetensors, model-00006-of-00008.safetensors, model-00007-of-00008.safetensors, model-00008-of-00008.safetensors]
+          role: transformer
+        - ref: "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
+          files:
+          - "FL2VA/model_index.json"
+          - "FL2VA/tokenizer/merges.txt"
+          - "FL2VA/tokenizer/tokenizer.json"
+          - "FL2VA/tokenizer/tokenizer_config.json"
+          - "FL2VA/tokenizer/vocab.json"
+          - "FL2VA/processor/chat_template.json"
+          - "FL2VA/processor/merges.txt"
+          - "FL2VA/processor/preprocessor_config.json"
+          - "FL2VA/processor/tokenizer.json"
+          - "FL2VA/processor/tokenizer_config.json"
+          - "FL2VA/processor/video_preprocessor_config.json"
+          - "FL2VA/processor/vocab.json"
+          - "FL2VA/video_vae/config.json"
+          - "FL2VA/video_vae/source/config.json"
+          - "FL2VA/video_vae/source/model.safetensors"
+          - "FL2VA/audio_vae/config.json"
+          - "FL2VA/audio_vae/config.yaml"
+          - "FL2VA/audio_vae/metadata.json"
+          - "FL2VA/audio_vae/model.safetensors"
+          - "FL2VA/text_encoder/config.json"
+          - "FL2VA/text_encoder/model.safetensors.index.json"
+          - "FL2VA/text_encoder/model-00001-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00002-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00003-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00004-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00005-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00006-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00007-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00008-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00009-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00010-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00011-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00014-of-00014.safetensors"
+      # The main repository is downloaded without the parts the app never loads (it encodes prompts with the separate text
+      # encoder of the family's companions).
+      win32: &h3_cuda
+        - ref: "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
+          files: ["model_index.json", "LICENSE", "scheduler/*", "audio_scheduler/*", "transformer/*", "vae/*", "audio_vae/*", "tokenizer/*", "processor/*"]
+          ignore: ["text_encoder/*", "transformer_ref/*", "FL2VA/*", "Ref2VA/*", "assets/*", "docs/*", "scripts/*"]
+      linux: *h3_cuda
+  zit:
+    kind: image
+    name: "Z-Image Turbo"
+    download_size: 33 GB
+    licences: [zimage-apache]
+    downloads: [{ ref: "Tongyi-MAI/Z-Image-Turbo", files_from: loader }]
+  # klein9b: ungated mirror of black-forest-labs/FLUX.2-klein-9B, weights checked by sha256.
+  klein9b:
+    kind: image
+    name: "FLUX.2 Klein 9B"
+    download_size: 35 GB
+    licences: [flux-nc]
+    downloads: [{ ref: "unsloth/FLUX.2-klein-9B", files_from: loader }]
+  klein4b:
+    kind: image
+    name: "FLUX.2 Klein 4B"
+    download_size: 16 GB
+    licences: [flux-klein-apache]
+    downloads: [{ ref: "black-forest-labs/FLUX.2-klein-4B", files_from: loader }]
+  krea2:
+    kind: image
+    family: krea2 # lets the Web UI surface the alias offline (no network round-trip through detect_image_model)
+    name: "Krea 2 Turbo"
+    download_size: 36 GB
+    licences: [krea-2-community]
+    downloads: [{ ref: "unsloth/Krea-2-Turbo", files_from: loader }]
+  # Ideogram 4 Instant, fal's 8-step distilled Ideogram 4 (one transformer, guidance built in), under Ideogram's
+  # non-commercial license. fal's own repo (fal/ideogram-v4-instant) is gated, so the transformer comes from an ungated
+  # single-file repackage whose tensors were checked against fal's; the text encoder, VAE, tokenizer and scheduler come
+  # from Unsloth's ungated mirrors of the base model, checked byte for byte against the official repos. Every source is
+  # pinned to the checked revision; changing a pin rebuilds the folder. The models-folder entry of the same name is built on
+  # first use from these targets.
+  ideo:
+    kind: image
+    family: ideogram4 # lets the Web UI surface the alias offline (no network round-trip through detect_image_model)
+    build: ideogram4_instant
+    name: "Ideogram 4 Instant"
+    download_size: { darwin: 28 GB, win32: 24 GB, linux: 24 GB }
+    # fp8: the base FP8 repo's layout, which mflux loads. bf16: diffusers' layout, quantized by the stored-quant flow.
+    transformer_format: { darwin: fp8, win32: bf16, linux: bf16 }
+    licences: [ideogram-4-nc]
+    downloads:
+      # The components are the files of the base repo the build downloads (the transformer comes from the single-file checkpoint).
+      darwin:
+        - { ref: "unsloth/ideogram-4-fp8@518e05e745736960acb56d8726138ffbc174f0a9", files: &ideo_components_files [model_index.json, transformer/config.json, LICENSE.md, NOTICE, "scheduler/*", "text_encoder/*", "tokenizer/*", "vae/*"], role: components }
+        - &ideo_transformer { ref: "Hippotes/Ideogram4-Fal-ComfyUI@9fcb42ce3f82267f61123755d4b65227c2e53a69", files: [Ideogram4-instant_bf16.safetensors], role: transformer }
+      win32: &ideo_cuda
+        - { ref: "unsloth/ideogram-4-nf4-diffusers@cb5b5dda5e0406c04160f3555c48256ec0cfc899", files: *ideo_components_files, role: components }
+        - *ideo_transformer
+      linux: *ideo_cuda
+  # MOSS-Image (OpenMOSS-Team), a text-to-image model with a 5B transformer and a Qwen3.5-based text encoder of about
+  # 8B. The SFT checkpoint and a community 4-step Turbo LoRA are downloaded once and linked into the moss and moss-sft
+  # model folders. Every source is pinned; changing a pin rebuilds the affected folder. The sft target must name the same
+  # revision as MOSS_REVISION in the Makefile (the vendored pipeline's revision). A new Turbo LoRA also means a new
+  # variants.turbo.default_steps under model_presets.moss in config.yaml.
+  # moss is Turbo (the SFT model with a 4-step LoRA); moss-sft is the SFT model as released. The SFT repo's pipeline script
+  # is never fetched or run.
+  moss:
+    kind: image
+    build: moss
+    name: "MOSS-Image Turbo"
+    download_size: 28 GB
+    licences: [moss-apache]
+    downloads:
+      - &moss_sft { ref: "OpenMOSS-Team/MOSS-Image-SFT@f972bd4b4b9e3852133cc5da954d87bc32cd8fb9", files: [model_index.json, LICENSE, "transformer/*", "text_encoder/*", "tokenizer/*", "scheduler/*", "vae/*"], ignore: ["*.py"], role: sft }
+      - { ref: "akhaliq/MOSS-Image-SFT-4-steps@2ded95c37a029360245926fe72e475e30039bbfb", files: [moss_image_sft_4step_v2.0.safetensors], role: turbo_lora }
+  moss-sft:
+    kind: image
+    build: moss
+    name: "MOSS-Image SFT"
+    download_size: 27 GB
+    licences: [moss-apache]
+    downloads: [*moss_sft]
+
+  # --- Audio models ---
+  # Audio models (music, speech, sound), keyed by model id. Each has a name, its kinds (a list of music | speech | sound, the
+  # first the default), the backend family, the pinned files to download (the order of the targets is load-bearing: the audio
+  # loaders unpack them by position), limits and settings (settings live in config.yaml under audio_model_presets). A model
+  # that sings sets lyrics: true; a speech model may list built-in voices, and the role: voice targets that following a recording
+  # needs on top of its other targets. A platforms entry (cuda | mps) may name its own family and records the GPU memory peak
+  # measured on it (memory_gb; leave it out while unmeasured).
+  yue2:
+    kind: audio
+    family: yue2
+    name: "YuE2 3B"
+    kinds: [music]
+    lyrics: true
+    limits: { max_seconds: 360 }
+    platforms:
+      cuda: { memory_gb: 6.7 }
+      mps: { memory_gb: 10.5 }
+    licences: [yue2-creator-nc]
+    downloads:
+      - { ref: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1", files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json] }
+      - { ref: "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126", files: [config.json, model.safetensors, modeling_vae.py, weights_manifest.json] }
+  qwen3_tts:
+    kind: audio
+    family: qwen3_tts
+    name: "Qwen3-TTS 1.7B"
+    kinds: [speech]
+    # The built-in voices, the first one the default; the label and the native language are the model card's.
+    voices:
+      - { id: ryan, label: Ryan, language: English }
+      - { id: aiden, label: Aiden, language: English }
+      - { id: vivian, label: Vivian, language: Chinese }
+      - { id: serena, label: Serena, language: Chinese }
+      - { id: uncle_fu, label: Uncle Fu, language: Chinese }
+      - { id: dylan, label: Dylan, language: Beijing Chinese }
+      - { id: eric, label: Eric, language: Sichuan Chinese }
+      - { id: ono_anna, label: Ono Anna, language: Japanese }
+      - { id: sohee, label: Sohee, language: Korean }
+    limits: { max_new_tokens: 1200, part_chars: 500, max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }
+    platforms:
+      cuda: { memory_gb: 6.0 }
+      # On macOS mlx-audio runs the same official checkpoints (it converts the PyTorch convolution layouts while loading), so the
+      # targets below are used as they are.
+      mps: { family: qwen3_tts_mlx, memory_gb: 12.0 }
+    licences: [qwen3-tts-apache]
+    downloads:
+      # CustomVoice: the built-in voices. It downloads with the model.
+      - { ref: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice@0c0e3051f131929182e2c023b9537f8b1c68adfe", files: &qwen3_files [config.json, generation_config.json, merges.txt, model.safetensors, preprocessor_config.json, tokenizer_config.json, vocab.json, speech_tokenizer/config.json, speech_tokenizer/configuration.json, speech_tokenizer/model.safetensors, speech_tokenizer/preprocessor_config.json] }
+      # Base: cloning a voice recording. It downloads the first time a take follows a recording.
+      - { ref: "Qwen/Qwen3-TTS-12Hz-1.7B-Base@fd4b254389122332181a7c3db7f27e918eec64e3", files: *qwen3_files, role: voice }
+  sa3:
+    kind: audio
+    family: stable_audio_3
+    name: "Stable Audio 3 Medium"
+    kinds: [sound, music]
+    limits: { max_seconds: 380 }
+    platforms:
+      cuda: { memory_gb: 6.1 }
+      mps: { memory_gb: 6.1 }
+    licences: [stability-community, gemma]
+    downloads:
+      - { ref: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9", files: [checkpoints/stable_audio_3_medium.safetensors] }
+      - { ref: "cocktailpeanut/stable-audio-3-medium@a30034d70bd58f6e6f967ef28ecaa6c52c185d6c", files: [model_config.json] }
+      - { ref: "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870", files: [t5gemma-b-b-ul2/config.json, t5gemma-b-b-ul2/generation_config.json, t5gemma-b-b-ul2/model.safetensors, t5gemma-b-b-ul2/special_tokens_map.json, t5gemma-b-b-ul2/tokenizer.json, t5gemma-b-b-ul2/tokenizer_config.json] }
+
+  # --- Prompt enhancer (local LLM) ---
+  # Public Hugging Face repos, pinned. enhancer-fast is the default Fast choice; enhancer-smart is the larger one behind the
+  # Smart choice (--enhance-model smart). Override both with prompt_enhancer.user_model (REPO[@REVISION] or a folder)
+  # (Config page) or --enhance-model REPO[@REVISION]. The loader lists the files of each repo. memory_gb is the accelerator
+  # memory Smart needs in GiB (VRAM on Windows/Linux, the GPU working set on macOS); with less, Smart is unavailable.
+  enhancer-fast:
+    kind: enhancer
+    name: "Fast enhancer model"
+    download_size: { darwin: 2.4 GB, win32: 9 GB, linux: 9 GB }
+    licences: [qwen-apache]
+    downloads:
+      darwin: [{ ref: "McG-221/Qwen3.5-4B-heretic-mlx-4Bit@7a6b22e4cd458ba20a8c2737634a932f2b572ef2", files_from: loader }]
+      win32: &fast_cuda [{ ref: "coder3101/Qwen3.5-4B-heretic@dc69b95668662490d2f84db1cf0bb61f8743f806", files_from: loader }]
+      linux: *fast_cuda
+  enhancer-smart:
+    kind: enhancer
+    name: "Smart enhancer model"
+    download_size: { darwin: 16 GB, win32: 19 GB, linux: 19 GB }
+    memory_gb: { darwin: 20, win32: 9, linux: 9 }
+    licences: [qwen-apache]
+    downloads:
+      darwin: [{ ref: "TheCluster/Qwen3.5-27B-Heretic-MLX-4bit@31502f7f1babc6b6b7c201cdd79a8dbd30bb93a8", files_from: loader }]
+      win32: &smart_cuda [{ ref: "coder3101/Qwen3.5-9B-heretic@554c40af4aef30991d9de3f2e692457f49c28691", files_from: loader }]
+      linux: *smart_cuda
+
+  # --- SeedVR2 upscale tiers (quality order; the order of the entries is the order of the tiers) ---
+  # download_size is the one-time download of the weights of a platform, in decimal gigabytes (from the repository's file tree).
+  # memory: estimate = weights_gb + max(activation_floor_gb, activation_base_gb + activation_gb_per_mp * MP).
+  # macOS: 8-bit; the first tier within this Mac's memory budget at reference_megapixels is used. The 16-bit files are
+  # downloaded and quantized to a stored 8-bit copy while loading.
+  # Windows/Linux: FP8 streamed from system memory; the first tier whose system_gb fits this machine is used. weights_gb is the
+  # CUDA context, the parts kept on the GPU and ~0.7 GB other apps use; system_gb is the peak system memory plus 3 GB for
+  # everything else. The 7B file is numz's companion AInVFX build whose last block stays in FP16, which avoids the plain FP8
+  # file's streaks in flat areas. The files are positional: the transformer, then the VAE. Unpinned, as ever.
+  seedvr2-7b:
+    kind: upscaler
+    name: "SeedVR2 7B"
+    download_size: { darwin: 17.0 GB, win32: 9.0 GB, linux: 9.0 GB }
+    licences: [seedvr2-apache]
+    memory:
+      darwin: { weights_gb: 9.26, activation_floor_gb: 10.79, activation_base_gb: 1.88, activation_gb_per_mp: 0.83 }
+      win32: &seedvr2_7b_cuda_memory { weights_gb: 1.6, activation_floor_gb: 5.0, activation_base_gb: 0.21, activation_gb_per_mp: 0.556, system_gb: 22 }
+      linux: *seedvr2_7b_cuda_memory
+    downloads:
+      darwin:
+        - { ref: "numz/SeedVR2_comfyUI", files: [seedvr2_ema_7b_fp16.safetensors, ema_vae_fp16.safetensors] }
+      win32: &seedvr2_7b_cuda
+        - { ref: "AInVFX/SeedVR2_comfyUI", files: [seedvr2_ema_7b_fp8_e4m3fn_mixed_block35_fp16.safetensors] }
+        - { ref: "numz/SeedVR2_comfyUI", files: [ema_vae_fp16.safetensors] }
+      linux: *seedvr2_7b_cuda
+  seedvr2-3b:
+    kind: upscaler
+    name: "SeedVR2 3B"
+    download_size: { darwin: 7.3 GB, win32: 3.9 GB, linux: 3.9 GB }
+    licences: [seedvr2-apache]
+    memory:
+      darwin: { weights_gb: 4.72, activation_floor_gb: 10.79, activation_base_gb: 1.10, activation_gb_per_mp: 0.89 }
+      win32: &seedvr2_3b_cuda_memory { weights_gb: 1.6, activation_floor_gb: 5.0, activation_base_gb: 0.25, activation_gb_per_mp: 0.6, system_gb: 12.5 }
+      linux: *seedvr2_3b_cuda_memory
+    downloads:
+      darwin:
+        - { ref: "numz/SeedVR2_comfyUI", files: [seedvr2_ema_3b_fp16.safetensors, ema_vae_fp16.safetensors] }
+      win32: &seedvr2_3b_cuda
+        - { ref: "numz/SeedVR2_comfyUI", files: [seedvr2_ema_3b_fp8_e4m3fn.safetensors] }
+        - { ref: "numz/SeedVR2_comfyUI", files: [ema_vae_fp16.safetensors] }
+      linux: *seedvr2_3b_cuda
+
+  # --- Background removal ---
+  # The two Hub repositories the background removal chain loads: BiRefNet for the mask and ViTMatte for the edge. The BiRefNet
+  # revision is also the revision of the vendored model code in packages/birefnet (BIREFNET_REVISION in the Makefile), so the
+  # weights are the ones the code was written for. The ViTMatte revision is pinned on its own. download_size is the one-time
+  # download of both repos, read from a dry-run plan against an empty cache (444.5 MB + 103.3 MB).
+  matte:
+    kind: matte
+    name: "Background removal"
+    download_size: 548 MB
+    licences: [matte]
+    downloads:
+      - { ref: "ZhengPeng7/BiRefNet@e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4", files: [model.safetensors], role: birefnet }
+      - { ref: "hustvl/vitmatte-small-composition-1k@6a58ad7646403c1df626fbd746900aec7361ea1d", files: [config.json, model.safetensors, preprocessor_config.json], role: vitmatte }

@@ -29,7 +29,6 @@ _CONFIG = {
     "sizes": {"2:3": {"m": {"width": 512, "height": 512}}},
     "generation": {"seed_min": 1, "seed_max": 100},
     "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-    "model_presets": {"zimage": {"supports_negative_prompt": True}},
 }
 
 
@@ -136,7 +135,6 @@ _DRIFT_CONFIG = {
     "sizes": {"2:3": {"m": {"width": 1440, "height": 768}, "a": {"width": 1024, "height": 768}}},
     "generation": {"seed_min": 1, "seed_max": 100},
     "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-    "model_presets": {"zimage": {"supports_negative_prompt": True}},
 }
 
 

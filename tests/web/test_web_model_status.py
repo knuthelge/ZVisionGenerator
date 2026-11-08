@@ -10,6 +10,7 @@ import pytest
 
 from tests._factories import load_packaged_config
 
+from zvisiongenerator.utils.model_metadata import builtin_aliases
 from zvisiongenerator.utils.model_memory import CudaMemoryEstimate, LtxCudaMemoryEstimate, MemoryBudget
 from zvisiongenerator.web import model_status
 from zvisiongenerator.web.model_status import VIDEO_ESTIMATE_NOTE, describe_model_status
@@ -54,7 +55,7 @@ def darwin(monkeypatch):
 def _ltx_status(name, pack, *, gemma=None, present=None, budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), **extra):
     """Describe the macOS alias *name* whose pinned pack is the folder *pack*; *gemma* is the Gemma 3 folder when it is on disk."""
     config = load_packaged_config()
-    ref = config["model_aliases"][name]["darwin"]
+    ref = builtin_aliases()[name]["darwin"]
     folders = {ref: pack, **({_GEMMA_REPO: gemma} if gemma is not None else {})}
     present = present or (lambda target: target.repo_id != _GEMMA_REPO or gemma is not None)
     return describe_model_status(ref, kind="video", budget=budget, find_local_dir=_finder(folders), model_name=name, app_config=config, target_present=present, **extra)
@@ -91,7 +92,7 @@ class TestDescribeMlxVideoStatus:
     def test_a_custom_name_for_the_bundled_pack_is_downloaded_with_no_gemma_3_cached(self, tmp_path, unpinned):
         pack = _make_mlx_pack(tmp_path, bundled=True)
         config = load_packaged_config()
-        ref = config["model_aliases"]["ltx25-4"]["darwin"]
+        ref = builtin_aliases()["ltx25-4"]["darwin"]
         ref = ref.split("@")[0] if unpinned else ref
         seen = []
 
@@ -143,7 +144,7 @@ class TestDescribeMlxVideoStatus:
 
     def test_a_pack_that_is_not_on_disk_is_not_downloaded(self):
         config = load_packaged_config()
-        ref = config["model_aliases"]["ltx-8"]["darwin"]
+        ref = builtin_aliases()["ltx-8"]["darwin"]
 
         status = describe_model_status(
             ref, kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({}), model_name="ltx-8", app_config=config, target_present=lambda target: False
@@ -180,11 +181,10 @@ class TestTrimmedPackOnDisk:
     def pack(self, tmp_path, monkeypatch):
         import huggingface_hub.constants
 
-        from zvisiongenerator.utils.config import ltx_mlx_packs
+        from zvisiongenerator.utils.ltx_facts import ltx_load_options
 
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(tmp_path / "cache"))
-        config = load_packaged_config()
-        files = ltx_mlx_packs(config)[config["model_aliases"]["ltx-4"]["darwin"]]
+        files = ltx_load_options("ltx-4", "darwin", upscale=False)["mlx_packs"][builtin_aliases()["ltx-4"]["darwin"]]
         snapshot = tmp_path / "cache" / f"models--{files.repo_id.replace('/', '--')}" / "snapshots" / files.revision
         for name in files.files:
             (snapshot / name).parent.mkdir(parents=True, exist_ok=True)
@@ -196,7 +196,7 @@ class TestTrimmedPackOnDisk:
         from zvisiongenerator.downloads.presence import target_present_offline
 
         config = load_packaged_config()
-        ref = config["model_aliases"]["ltx-4"]["darwin"]
+        ref = builtin_aliases()["ltx-4"]["darwin"]
         gemma = tmp_path / "gemma"
         gemma.mkdir(exist_ok=True)
         return describe_model_status(
@@ -312,7 +312,7 @@ class TestH3Status:
 
         def resolves() -> bool:
             try:
-                resolve_mlx_files(ref, h3_mlx_preset(config), lora=h3_turbo_lora(config)[0], snapshot_download=no_network)
+                resolve_mlx_files(ref, h3_mlx_preset(), lora=h3_turbo_lora("darwin")[0], snapshot_download=no_network)
             except AssertionError:
                 return False
             return True
@@ -321,7 +321,7 @@ class TestH3Status:
             return describe_model_status(ref, kind="video", budget=self._UNIFIED, find_local_dir=lambda reference: None, model_name="h3", app_config=config, family="h3")["downloaded"]
 
         assert (status(), resolves()) == (False, False)
-        plan = video_plan(ref, family="h3", config=config, model_name="h3", upscale=False)
+        plan = video_plan(ref, family="h3", config=config, model_name="h3", platform_key="darwin", upscale=False)
         for target in plan:
             for name in target.allow_patterns:
                 path = cache / f"models--{target.repo_id.replace('/', '--')}" / "snapshots" / target.revision / name
@@ -414,7 +414,7 @@ class TestDescribeCudaModelStatus:
     def _video_status(tmp_path, *, present=lambda target: True, name="ltx-4", budget=MemoryBudget(10 * _GIB, 30 * _GIB)):
         """Describe the Windows/Linux LTX alias *name*, whose repo folder is on disk, with the plan targets *present* says are there."""
         config = load_packaged_config()
-        ref = config["model_aliases"][name]["linux"]
+        ref = builtin_aliases()[name]["linux"]
         return describe_model_status(ref, kind="video", budget=budget, find_local_dir=_finder({ref: tmp_path}), model_name=name, app_config=config, target_present=present)
 
     @pytest.mark.usefixtures("linux")
@@ -453,7 +453,7 @@ class TestDescribeCudaModelStatus:
     @pytest.mark.usefixtures("linux")
     def test_cuda_video_with_no_local_folder_is_not_downloaded_even_when_its_plan_is_present(self):
         config = load_packaged_config()
-        ref = config["model_aliases"]["ltx-4"]["linux"]
+        ref = builtin_aliases()["ltx-4"]["linux"]
 
         status = describe_model_status(
             ref, kind="video", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=_finder({}), model_name="ltx-4", app_config=config, target_present=lambda target: True
@@ -464,7 +464,7 @@ class TestDescribeCudaModelStatus:
     @pytest.mark.usefixtures("linux")
     def test_cuda_video_is_estimated_at_the_models_level(self, tmp_path, monkeypatch):
         system = LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
-        monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda resolved, name, config, finder: system if name == "ltx-4" else None)
+        monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda resolved, name, finder: system if name == "ltx-4" else None)
 
         status = self._video_status(tmp_path)
 

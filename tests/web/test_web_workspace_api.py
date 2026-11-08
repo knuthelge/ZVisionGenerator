@@ -16,12 +16,6 @@ from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.model_memory import MemoryBudget
 
 
-@pytest.fixture(autouse=True)
-def _gemma_repo(monkeypatch):
-    """Give the minimal test configs the macOS LTX text encoder reference the Models page reads."""
-    monkeypatch.setattr(workspace_api_module, "ltx_mlx_text_encoder_repo_id", lambda config: "owner/gemma")
-
-
 @pytest.mark.parametrize(("family", "alignment"), [("ltx", 8), ("unknown", 1)])
 def test_video_bootstrap_defaults_include_frame_rule(monkeypatch, family, alignment):
     """Video bootstrap defaults expose the model's frame rule, and only that, so the UI can snap frame counts."""
@@ -93,7 +87,6 @@ def test_workspace_bootstrap_defaults_include_ideogram_capability_flags(monkeypa
         "ideo": "ideogram-ai/ideogram-4-fp8",
         "zit": "Tongyi-MAI/Z-Image-Turbo",
     }
-    web_config.app_config["model_alias_families"] = {"ideo": "ideogram4"}
     web_config.image_model_options = ("ideo", "zit")
 
     detect_calls: list[str] = []
@@ -194,7 +187,6 @@ def test_workspace_bootstrap_defaults_fall_back_to_supported_ideogram_preset(mon
     web_config.app_config["model_aliases"] = {
         "ideo": "ideogram-ai/ideogram-4-fp8",
     }
-    web_config.app_config["model_alias_families"] = {"ideo": "ideogram4"}
 
     monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: web_config.app_config["model_aliases"].get(model, model))
     monkeypatch.setattr(workspace_api_module, "get_backend_name", lambda: "mflux")
@@ -214,7 +206,6 @@ def test_workspace_bootstrap_defaults_disable_quantize_when_globally_unavailable
         "ideo": "ideogram-ai/ideogram-4-fp8",
         "zit": "Tongyi-MAI/Z-Image-Turbo",
     }
-    web_config.app_config["model_alias_families"] = {"ideo": "ideogram4"}
     web_config.image_model_options = ("ideo", "zit")
     web_config.quantize_options = ()
 
@@ -247,7 +238,6 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
         ImageInventoryEntry(name="local-image", family="ideogram4", size=None, source="installed", resolved_path=str(tmp_path / "local-image")),
     )
     web_config.video_inventory = (VideoInventoryEntry(name="ltx-8", family="ltx", supports_i2v=True, source="alias", resolved_path="owner/ltx"),)
-    web_config.app_config["model_presets"] = {"ideogram4": {"supports_quantize": False}}
     web_config.app_config["video_model_presets"] = {"ltx": {"mlx_text_encoder": "owner/gemma"}}
     calls: list[tuple[str, str, tuple[int, ...]]] = []
     video_names: list[tuple[str | None, bool]] = []
@@ -293,10 +283,9 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     assert video_names and set(video_names) == {("ltx-8", True)}  # a video model's level comes from its name and the config
 
 
-def test_workspace_options_carry_the_configured_name_as_their_label(monkeypatch):
-    """AC4.3: a named alias is labelled by its name, an unnamed model by its id; the id never changes."""
+def test_workspace_options_carry_the_metadata_name_as_their_label(monkeypatch):
+    """A built-in model is labelled by its name, any other model by its id; the id never changes."""
     web_config = make_web_config()
-    web_config.app_config["model_labels"] = {"zit": {"name": "Z-Image Turbo"}, "ltx-8": {"name": "LTX-2.3 8-bit"}}
     monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
 
     workspace = workspace_api_module.build_workspace_response(
@@ -317,13 +306,9 @@ def test_workspace_options_carry_the_configured_name_as_their_label(monkeypatch)
 def test_workspace_carries_the_first_run_state_and_the_platform_size_labels(monkeypatch):
     """AC5.3: image options carry this platform's download size, and ``first_run`` the skip flag and the recommendation."""
     web_config = make_web_config()
-    web_config.image_model_options = ("klein9b", "klein4b", "local-image")
+    web_config.image_model_options = ("klein9b", "klein4b", "ideo", "local-image")
     web_config.app_config["first_run"] = {"large_model": "klein9b", "small_model": "klein4b", "min_memory_gb": 32}
     web_config.app_config["ui"] = {"first_run_skipped": True}
-    web_config.app_config["model_labels"] = {
-        "klein9b": {"name": "FLUX.2 Klein 9B", "download_size_label": {"darwin": "35 GB", "win32": "36 GB", "linux": "37 GB"}},
-        "klein4b": {"name": "FLUX.2 Klein 4B", "download_size_label": {"darwin": "16 GB"}},
-    }
     monkeypatch.setattr(workspace_api_module.sys, "platform", "linux")
     monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: MemoryBudget(gpu_bytes=32607 * 1024**2, system_bytes=64 * 1024**3))
 
@@ -338,7 +323,7 @@ def test_workspace_carries_the_first_run_state_and_the_platform_size_labels(monk
         build_bootstrap_view=lambda _cfg: make_workspace_bootstrap_view(),
     )
 
-    assert {entry["id"]: entry["download_size_label"] for entry in workspace["image_models"]} == {"klein9b": "37 GB", "klein4b": None, "local-image": None}
+    assert {entry["id"]: entry["download_size_label"] for entry in workspace["image_models"]} == {"klein9b": "35 GB", "klein4b": "16 GB", "ideo": "24 GB", "local-image": None}
     assert workspace["first_run"] == {"skipped": True, "recommended_model": "klein9b"}
 
 

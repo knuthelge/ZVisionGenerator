@@ -327,7 +327,7 @@ def _converted_copy(folder: Path, manifest: dict[str, Any], preset: H3Preset, up
 
     Raises:
         RuntimeError: When the folder was converted on macOS, or its copy is not what this machine would write (the same
-            check as stock's copy, without the sources): other schedules or turbo strength in the config, or another NF4
+            check as stock's copy, without the sources): other schedules or turbo strength in the model metadata, or another NF4
             serialization after a bitsandbytes update. Its copy keeps no AdaLN weights to rebuild the tables from.
     """
     if manifest.get("storage") != converted_h3.STORAGE:
@@ -751,7 +751,7 @@ class H3VideoBackend:
             raise ValueError("MiniMax H3 needs its preset to load (preset=).")
         upscale = bool(kwargs.get("upscale"))
         if upscale and H3_REFINE_SCHEDULE not in preset.schedules:
-            raise ValueError(f"The MiniMax H3 upscale refines with the {H3_REFINE_SCHEDULE}-step schedule; add video_model_presets.h3.diffusers.schedules.{H3_REFINE_SCHEDULE}.")
+            raise ValueError(f"The MiniMax H3 upscale refines with the {H3_REFINE_SCHEDULE}-step schedule; the H3 preset has no schedule for it.")
         loras = tuple((Path(path), float(weight)) for path, weight in kwargs.get("loras") or ())
         for path, _weight in loras:
             if not path.exists():

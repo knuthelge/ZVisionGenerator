@@ -15,6 +15,7 @@ from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_vid
 from zvisiongenerator.core.video_family import ANY_FRAMES, UNDESCRIBED_UPSCALE_STEPS, settle_video_steps
 from zvisiongenerator.core.video_types import AudioTrack
 from zvisiongenerator.preflight import run_preflight
+from zvisiongenerator.utils.model_metadata import alias_map
 from zvisiongenerator.utils.alignment import aligned_video_dims
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.audio_track import continue_track, require_readable_track
@@ -24,7 +25,8 @@ from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
 from zvisiongenerator.utils.h3_memory import h3_lora_bytes
 from zvisiongenerator.utils.model_memory import clip_memory_fit
-from zvisiongenerator.downloads import describe_refusal, video_model_downloaded, video_plan
+from zvisiongenerator.downloads import describe_refusal
+from zvisiongenerator.downloads.plans import video_model_downloaded, video_plan
 from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.paths import canonical_model_name, resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
@@ -184,12 +186,12 @@ def _load_extend_source(parser: argparse.ArgumentParser, path: str) -> ExtendSou
 
 def _model_available_locally(model: str, config: dict[str, Any]) -> bool:
     """Return whether every download the model's plan needs on this platform is on disk."""
-    aliases = config.get("model_aliases", {})
+    aliases = alias_map(config)
     name = canonical_model_name(model, aliases=aliases, platform_key=sys.platform)
     try:
         resolved = resolve_model_path(name, aliases=aliases, platform_key=sys.platform)
         family = detect_video_model(resolved).family
-        return family != "unknown" and video_model_downloaded(resolved, family=family, config=config, model_name=name)
+        return family != "unknown" and video_model_downloaded(resolved, family=family, config=config, model_name=name, platform_key=sys.platform)
     except ValueError:
         return False
 
@@ -259,7 +261,7 @@ def _fit_frames(args: argparse.Namespace) -> int:
     return args.num_frames
 
 
-def _clip_fit(args: argparse.Namespace, config: dict[str, Any], *, upscale: bool) -> dict[str, Any] | None:
+def _clip_fit(args: argparse.Namespace, *, upscale: bool) -> dict[str, Any] | None:
     """Return how the run's clip fits this machine's memory (``status``, ``required_gb``, ``budget_gb``, and an estimated ``expected_seconds`` for H3), or ``None`` when unknown."""
     return clip_memory_fit(
         args.model,
@@ -270,7 +272,6 @@ def _clip_fit(args: argparse.Namespace, config: dict[str, Any], *, upscale: bool
         upscale=upscale,
         budget=accelerator_memory_budget_or_none(),
         model_name=getattr(args, "model_name", None),
-        app_config=config,
         family=getattr(args, "model_family", "ltx"),
         mode=_fit_mode(args),
         forwards=getattr(args, "steps", None) or 8,
@@ -287,9 +288,9 @@ def _print_estimated_time(args: argparse.Namespace, fit: dict[str, Any]) -> None
     print(f"MiniMax H3 at {args.width}x{args.height}, {_fit_frames(args)} frames: estimated {max(1, round(seconds / 60))} min (excludes the one-time weight preparation).")
 
 
-def _warn_if_too_large(args: argparse.Namespace, config: dict[str, Any], *, extending: bool) -> None:
+def _warn_if_too_large(args: argparse.Namespace, *, extending: bool) -> None:
     """Print an H3 run's estimated time, and warn when the clip, or the window of an extension, may not fit in memory; the run continues either way."""
-    fit = _clip_fit(args, config, upscale=bool(args.upscale))
+    fit = _clip_fit(args, upscale=bool(args.upscale))
     if fit is None:
         return
     _print_estimated_time(args, fit)
@@ -420,10 +421,10 @@ def main(*, prog: str = "ziv-video") -> None:
     # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...); the picked name chooses the quantize level
     # and is what the video records, as the Web UI does: on Windows/Linux ltx-4 and ltx-8 resolve to the same repo.
     # A typed repo id that is an alias's repo runs as that alias, with its pin, version and recorded name.
-    model_name = canonical_model_name(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    model_name = canonical_model_name(args.model, aliases=alias_map(config), platform_key=sys.platform)
     args.model_name = model_name
     try:
-        args.model = resolve_model_path(model_name, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+        args.model = resolve_model_path(model_name, aliases=alias_map(config), platform_key=sys.platform)
     except ValueError as e:
         parser.error(str(e))
 
@@ -573,7 +574,7 @@ def main(*, prog: str = "ziv-video") -> None:
     except RuntimeError as e:
         parser.error(str(e))
 
-    _warn_if_too_large(args, config, extending=source is not None)
+    _warn_if_too_large(args, extending=source is not None)
 
     # Determine mode hint
     mode = "extend" if source is not None else "i2v" if args.image_path else "t2v"
@@ -597,7 +598,7 @@ def main(*, prog: str = "ziv-video") -> None:
         enhance_by_set = inspection.enhance_by_set
     # The terms of a model that has them are named before anything downloads, the preflight's enhancer included.
     try:
-        print_licence_notice(model_name, lambda: video_plan(args.model, family=model_info.family, config=config, model_name=model_name, upscale=bool(args.upscale)))
+        print_licence_notice(model_name, lambda: video_plan(args.model, family=model_info.family, config=config, model_name=model_name, platform_key=sys.platform, upscale=bool(args.upscale)))
     except ValueError as e:
         parser.error(str(e))
     # The key listener starts after ensure_ffmpeg, whose input() prompt it would compete with, and covers the preflight and
@@ -634,7 +635,7 @@ def main(*, prog: str = "ziv-video") -> None:
                 end_image=args.end_image_path is not None,
                 low_memory=args.low_memory,
                 loras=loras,
-                **video_load_options(model_info.family, config, model_name, upscale=bool(args.upscale)),
+                **video_load_options(model_info.family, config, model_name, platform_key=sys.platform, upscale=bool(args.upscale)),
             )
         except (RuntimeError, ValueError, OSError, ImportError) as e:
             logger.exception("Failed to load video model %s", args.model)

@@ -28,8 +28,8 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.converters.ltx_checkpoint import CHECKPOINT_PREFIX, checkpoint_config, connector_tensors, connectors_status, file_order, transformer_tensors
 from zvisiongenerator.utils.file_links import link_or_copy
-from zvisiongenerator.utils.h3_preset import HubFiles
-from zvisiongenerator.utils.hf_snapshot import pack_for_reference, snapshot_download, snapshot_with
+from zvisiongenerator.downloads.target import HubFiles
+from zvisiongenerator.utils.hf_snapshot import snapshot_download, snapshot_with
 from zvisiongenerator.utils.ltx_converted import write_converted_ltx
 from zvisiongenerator.utils.safetensors_stream import SingleFileWriter, TensorFile
 
@@ -65,7 +65,7 @@ Report = Callable[[str, int, int], None]
 Quantize = Callable[["torch.Tensor", int], tuple["np.ndarray", "np.ndarray", "np.ndarray"]]
 
 
-def convert(checkpoint: LtxCheckpoint, target: Path, bits: int, *, config: dict[str, Any], version: str | None, models_dir: Path, lora: Path | None, report: Report) -> None:
+def convert(checkpoint: LtxCheckpoint, target: Path, bits: int, *, version: str | None, models_dir: Path, lora: Path | None, report: Report) -> None:
     """Write the MLX folder of *checkpoint* at *bits* into *target*, with the other components of LTX version *version*'s MLX folder.
 
     Connectors that differ from stock's, or are quantized and can't be compared, are written from the checkpoint (with
@@ -74,19 +74,16 @@ def convert(checkpoint: LtxCheckpoint, target: Path, bits: int, *, config: dict[
     *models_dir* is unused: an MLX folder shares no component with other models' folders.
 
     Raises:
-        ValueError: When the level's ``mlx_base`` names no pinned pack (its repo, with or without the revision, is pinned nowhere in the config).
+        ValueError: When the version declares no pinned MLX pack to convert a checkpoint of that level from.
         RuntimeError: When the MLX folder can't be downloaded.
     """
     import torch
 
     from zvisiongenerator.backends.mac.memory import mlx_cache_limit
-    from zvisiongenerator.utils.config import ltx_mlx_base_repo, ltx_mlx_packs
+    from zvisiongenerator.utils.ltx_facts import ltx_mlx_base_pack
 
     del models_dir
-    base_ref = ltx_mlx_base_repo(config, bits, version)
-    pack = pack_for_reference(ltx_mlx_packs(config), base_ref)
-    if pack is None:
-        raise ValueError(f"video_model_presets.ltx mlx_base '{base_ref}' must be pinned (owner/repo@revision) to convert a checkpoint from it.")
+    pack = ltx_mlx_base_pack(bits, version)
     report("connectors", 0, 1)
     # Connectors that differ from stock's, or are quantized and can't be compared, are kept: a fine-tune may have trained them.
     own_connectors = connectors_status(checkpoint) in ("changed", "unknown")

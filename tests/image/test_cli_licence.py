@@ -8,27 +8,31 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests._factories import _patch_image_main_dependencies
-from tests._licences import use_licences
+from tests._factories import metadata_copy, use_model_metadata
 from zvisiongenerator import image_cli
 from zvisiongenerator.downloads import DownloadTarget
 from zvisiongenerator.utils.licences import NOTICE_HEADER
+from zvisiongenerator.utils.paths import resolve_model_path
 
-_TARGET = DownloadTarget("owner/klein9b", None, None)
+_KLEIN_REPO = "unsloth/FLUX.2-klein-9B"
+_TARGET = DownloadTarget(_KLEIN_REPO, None, None)
 _CONFIG = {
     "generation": {"default_ratio": "2:3", "default_size": "m"},
     "sizes": {"2:3": {"m": {"width": 832, "height": 1216}}},
-    "schedulers": {},
-    "model_aliases": {"klein9b": "owner/klein9b", "zit": "owner/zit"},
 }
 _LICENCES = {
-    "flux-nc": {"name": "Test Licence", "supplier": "Test Lab", "summary": "Non-commercial", "url": f"https://example.com/{'a' * 40}/LICENSE", "models": ["klein9b"]},
-    "matte": {"name": "Matte Licence", "supplier": "Matte Lab", "summary": "Research only", "url": f"https://example.com/{'b' * 40}/README.md", "models": ["matte"]},
+    "flux-nc": {"name": "Test Licence", "supplier": "Test Lab", "summary": "Non-commercial", "url": f"https://example.com/{'a' * 40}/LICENSE"},
+    "matte": {"name": "Matte Licence", "supplier": "Matte Lab", "summary": "Research only", "url": f"https://example.com/{'b' * 40}/README.md"},
 }
 
 
 @pytest.fixture(autouse=True)
 def _licence_records(monkeypatch, tmp_path):
-    use_licences(monkeypatch, tmp_path, _LICENCES)
+    data = metadata_copy()
+    for record_id, record in _LICENCES.items():
+        data["licences"][record_id] = record
+    data["models"]["zit"]["licences"] = []  # a model without a record
+    use_model_metadata(monkeypatch, tmp_path, data)
 
 
 @pytest.fixture
@@ -49,7 +53,7 @@ def run(monkeypatch, capsys):
         _patch_image_main_dependencies(monkeypatch)
         start.batch = image_cli.run_batch
         monkeypatch.setattr(image_cli, "load_config", lambda: _CONFIG)
-        monkeypatch.setattr(image_cli, "resolve_model_path", lambda model, **kwargs: _CONFIG["model_aliases"].get(model, model))
+        monkeypatch.setattr(image_cli, "resolve_model_path", resolve_model_path)
         monkeypatch.setattr(image_cli, "image_plan", plans)
         monkeypatch.setattr(image_cli, "matte_plan", matte_plans)
         monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: present)
@@ -75,13 +79,13 @@ class TestImageCliLicenceNotice:
     def test_the_model_is_looked_up_by_the_alias_that_was_picked_and_planned_by_its_resolved_path(self, run):
         steps = run(["-m", "klein9b"])
 
-        assert run.plans.call_args.args == ("owner/klein9b",)
+        assert run.plans.call_args.args == (_KLEIN_REPO,)
         assert NOTICE_HEADER in steps[0][1]
 
     def test_a_repo_id_that_an_alias_resolves_to_gets_that_alias_s_notice(self, run):
-        steps = run(["-m", "owner/klein9b"])
+        steps = run(["-m", _KLEIN_REPO])
 
-        assert run.plans.call_args.args == ("owner/klein9b",)
+        assert run.plans.call_args.args == (_KLEIN_REPO,)
         assert NOTICE_HEADER in steps[0][1]
 
     def test_a_repo_id_that_no_alias_resolves_to_gets_no_notice(self, run):
@@ -122,10 +126,10 @@ class TestImageCliLicenceNotice:
 
 
 class TestImageCliRecordedModelName:
-    @pytest.mark.parametrize("model", ["klein9b", "owner/klein9b"])
+    @pytest.mark.parametrize("model", ["klein9b", _KLEIN_REPO])
     def test_a_model_is_recorded_under_its_alias_whether_picked_by_alias_or_repo_id(self, run, model):
         run(["-m", model])
 
         args = run.batch.call_args.args[4]
         assert args.model_name == "klein9b"
-        assert args.model == "owner/klein9b"
+        assert args.model == _KLEIN_REPO

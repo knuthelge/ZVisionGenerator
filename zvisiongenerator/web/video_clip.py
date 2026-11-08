@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from zvisiongenerator.core.video_family import ANY_FRAMES
+from zvisiongenerator.utils.model_metadata import alias_map
 from zvisiongenerator.utils.alignment import aligned_video_dims
 from zvisiongenerator.utils.config import resolve_video_defaults, validate_video_size_choice, video_family
 from zvisiongenerator.utils.paths import resolve_model_path
@@ -48,7 +49,7 @@ def resolve_video_model(app_config: dict[str, Any], model_name: str) -> tuple[st
     Raises:
         ValueError: If the model's family is not supported.
     """
-    resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
+    resolved_model = resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform)
     model_info = detect_video_model(resolved_model)
     if model_info.family == "unknown":
         raise ValueError(f"Could not detect a supported video model for '{model_name}'.")

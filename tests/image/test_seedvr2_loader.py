@@ -23,11 +23,11 @@ from zvisiongenerator.seedvr2_loader import (
     seedvr2_downloaded,
 )
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SEEDVR2_REPO
+from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, seedvr2_files
 from zvisiongenerator.utils.stored_quant import MANIFEST_NAME, write_manifest
 
-(_, TRANSFORMER_7B), (_, VAE) = MLX_WEIGHTS.files["seedvr2-7b"]
-(_, TRANSFORMER_3B), _ = MLX_WEIGHTS.files["seedvr2-3b"]
+(SEEDVR2_REPO, TRANSFORMER_7B), (_, VAE) = seedvr2_files("seedvr2-7b", "darwin")
+(_, TRANSFORMER_3B), _ = seedvr2_files("seedvr2-3b", "darwin")
 
 
 class _Parent:
@@ -53,6 +53,11 @@ class _Parent:
         (Path(path) / "model.safetensors").write_bytes(b"q")
 
 
+def _platform_of(weights) -> str:
+    """Return the platform whose engine keeps *weights*: macOS stores a copy, Windows and Linux do not."""
+    return "darwin" if weights.stores_copy else "linux"
+
+
 @pytest.fixture
 def models_dir(tmp_path):
     path = tmp_path / "models"
@@ -73,6 +78,7 @@ def _load(parent: _Parent, models_dir: Path, model: str = "seedvr2-7b", *, cache
         parent.upscaler,
         model,
         models_dir=models_dir,
+        platform_key=_platform_of(parent.upscaler.weights),
         on_phase=parent.on_phase,
         delete_cached_file=parent.delete,
         files_cached=lambda _repo, name: f"/cache/{name}" if cached else None,
@@ -84,15 +90,15 @@ class TestCopyLocation:
         assert seedvr2_weights_dir("seedvr2-3b", models_dir, MLX_WEIGHTS) == models_dir / ".seedvr2" / "seedvr2-3b@q8"
 
     def test_downloaded_needs_a_matching_manifest(self, models_dir):
-        assert not seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
+        assert not seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin")
         copy = seedvr2_weights_dir("seedvr2-7b", models_dir, MLX_WEIGHTS)
         copy.mkdir(parents=True)
-        assert not seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)  # weights without a manifest are incomplete
+        assert not seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin")  # weights without a manifest are incomplete
 
         write_manifest(copy, {"bits": 8, "backend_format": SEEDVR2_STORED_FORMAT, "model": "seedvr2-7b"})
 
-        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
-        assert not seedvr2_downloaded("seedvr2-3b", models_dir, MLX_WEIGHTS)
+        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin")
+        assert not seedvr2_downloaded("seedvr2-3b", models_dir, MLX_WEIGHTS, platform_key="darwin")
 
     @pytest.mark.parametrize(
         "manifest",
@@ -105,7 +111,7 @@ class TestCopyLocation:
     def test_a_copy_made_another_way_is_not_current(self, models_dir, manifest):
         _make_copy(models_dir, manifest=manifest)
 
-        assert not seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
+        assert not seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin")
 
     def test_listings_skip_the_copy_folder_without_probing_it(self, tmp_path, models_dir):
         _make_copy(models_dir)
@@ -131,7 +137,7 @@ class TestFirstLoad:
         assert parent.upscaler.save_model.call_args.args[0] is parent.model
         assert saved_to.parent == copy.parent and saved_to != copy  # written to a hidden partial, then promoted
         assert (copy / "model.safetensors").is_file()
-        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
+        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin")
 
     def test_the_manifest_records_the_model_bits_and_format(self, models_dir):
         _load(_Parent(), models_dir)
@@ -155,7 +161,7 @@ class TestFirstLoad:
 
         assert loaded is parent.model
         parent.delete.assert_not_called()
-        assert not seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
+        assert not seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin")
         assert list((models_dir / ".seedvr2").iterdir()) == []
 
     def test_a_failed_delete_warns_and_still_returns_the_model(self, models_dir):
@@ -165,7 +171,7 @@ class TestFirstLoad:
             loaded = _load(parent, models_dir)
 
         assert loaded is parent.model
-        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
+        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin")
         assert len(warned) == 2  # each file is tried even after the first fails
         assert parent.delete.call_count == 2
 
@@ -183,7 +189,7 @@ class TestFirstLoad:
     def test_files_are_deleted_only_once_the_copy_is_current(self, models_dir):
         parent = _Parent()
         current_at_delete: list[bool] = []
-        parent.delete.side_effect = lambda *_: current_at_delete.append(seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS))
+        parent.delete.side_effect = lambda *_: current_at_delete.append(seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin"))
 
         _load(parent, models_dir)
 
@@ -210,7 +216,7 @@ class TestFirstLoad:
         _load(_Parent(), models_dir)
 
         assert not stale.exists()
-        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
+        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin")
 
     def test_files_already_in_the_cache_report_loading_instead_of_downloading(self, models_dir):
         """After the ensure step fetched the files, the first load only reads and quantizes them."""
@@ -220,7 +226,7 @@ class TestFirstLoad:
 
         assert parent.on_phase.call_args_list == [call(LOADING_PHASE), call(SAVING_QUANT_PHASE)]
         parent.upscaler.load_model.assert_called_once_with("seedvr2-7b", quantize=8, model_path=SEEDVR2_REPO)
-        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
+        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin")
 
     def test_one_missing_cached_file_still_reports_downloading(self, models_dir):
         parent = _Parent()
@@ -230,6 +236,7 @@ class TestFirstLoad:
             parent.upscaler,
             "seedvr2-7b",
             models_dir=models_dir,
+            platform_key="darwin",
             on_phase=parent.on_phase,
             delete_cached_file=parent.delete,
             files_cached=lambda _repo, name: f"/cache/{name}" if name in present else None,
@@ -258,7 +265,7 @@ class TestLaterLoads:
         _load(parent, models_dir)
 
         assert parent.on_phase.call_args_list == [call(DOWNLOADING_PHASE), call(SAVING_QUANT_PHASE)]
-        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
+        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin")
 
 
 class TestDownloadedFp8Files:
@@ -275,20 +282,20 @@ class TestDownloadedFp8Files:
         assert seedvr2_weights_dir("seedvr2-7b", models_dir, FP8_WEIGHTS) == models_dir / ".seedvr2" / "seedvr2-7b@fp8"
 
     def test_downloaded_needs_both_of_the_tiers_files_in_its_folder(self, models_dir):
-        (_, transformer), (_, vae) = FP8_WEIGHTS.files["seedvr2-7b"]
+        (_, transformer), (_, vae) = seedvr2_files("seedvr2-7b", "linux")
         self._put(models_dir, "seedvr2-7b", [vae])
 
-        assert not seedvr2_downloaded("seedvr2-7b", models_dir, FP8_WEIGHTS)
+        assert not seedvr2_downloaded("seedvr2-7b", models_dir, FP8_WEIGHTS, platform_key="linux")
 
         self._put(models_dir, "seedvr2-7b", [transformer])
 
-        assert seedvr2_downloaded("seedvr2-7b", models_dir, FP8_WEIGHTS)
-        assert not seedvr2_downloaded("seedvr2-3b", models_dir, FP8_WEIGHTS)
+        assert seedvr2_downloaded("seedvr2-7b", models_dir, FP8_WEIGHTS, platform_key="linux")
+        assert not seedvr2_downloaded("seedvr2-3b", models_dir, FP8_WEIGHTS, platform_key="linux")
 
     def test_a_stored_copy_does_not_count(self, models_dir):
         _make_copy(models_dir)
 
-        assert not seedvr2_downloaded("seedvr2-7b", models_dir, FP8_WEIGHTS)
+        assert not seedvr2_downloaded("seedvr2-7b", models_dir, FP8_WEIGHTS, platform_key="linux")
 
     def test_cached_hub_files_do_not_count_for_an_engine_that_reads_its_folder(self, models_dir):
         """Only the tier folder's files are what this engine reads, so cached copies elsewhere still mean a download."""
@@ -312,7 +319,7 @@ class TestDownloadedFp8Files:
         parent.delete.assert_not_called()
 
     def test_downloaded_files_report_loading(self, models_dir):
-        folder = self._put(models_dir, "seedvr2-3b", [name for _repo, name in FP8_WEIGHTS.files["seedvr2-3b"]])
+        folder = self._put(models_dir, "seedvr2-3b", [name for _repo, name in seedvr2_files("seedvr2-3b", "linux")])
         parent = _Parent(weights=FP8_WEIGHTS)
 
         _load(parent, models_dir, "seedvr2-3b")
@@ -369,15 +376,11 @@ class TestBuildSetup:
                 "softness": 0.75,
                 "video_softness": 0.0,
                 "reference_megapixels": 16,
-                "tiers": [
-                    {"model": "seedvr2-7b", "weights_gb": 9.26, "activation_floor_gb": 10.79, "activation_base_gb": 1.88, "activation_gb_per_mp": 0.83},
-                    {"model": "seedvr2-3b", "weights_gb": 4.72, "activation_floor_gb": 10.79, "activation_base_gb": 1.10, "activation_gb_per_mp": 0.89},
-                ],
             }
         }
 
     def test_picks_the_tier_and_reports_whether_its_copy_exists(self, models_dir):
-        setup = build_seedvr2_setup(self._config(), weights=MLX_WEIGHTS, system_bytes=None, budget_bytes=40_000_000_000, models_dir=models_dir)
+        setup = build_seedvr2_setup(self._config(), platform_key="darwin", weights=MLX_WEIGHTS, system_bytes=None, budget_bytes=40_000_000_000, models_dir=models_dir)
 
         assert setup.tier.model == "seedvr2-7b"
         assert setup.budget_bytes == 40_000_000_000
@@ -385,25 +388,21 @@ class TestBuildSetup:
 
         _make_copy(models_dir, "seedvr2-7b")
 
-        assert build_seedvr2_setup(self._config(), weights=MLX_WEIGHTS, system_bytes=None, budget_bytes=40_000_000_000, models_dir=models_dir).downloaded is True
+        assert build_seedvr2_setup(self._config(), platform_key="darwin", weights=MLX_WEIGHTS, system_bytes=None, budget_bytes=40_000_000_000, models_dir=models_dir).downloaded is True
 
     def test_downloaded_follows_the_picked_tier(self, models_dir):
         _make_copy(models_dir, "seedvr2-7b")
 
-        setup = build_seedvr2_setup(self._config(), weights=MLX_WEIGHTS, system_bytes=None, budget_bytes=10_000_000_000, models_dir=models_dir)
+        setup = build_seedvr2_setup(self._config(), platform_key="darwin", weights=MLX_WEIGHTS, system_bytes=None, budget_bytes=10_000_000_000, models_dir=models_dir)
 
         assert setup.tier.model == "seedvr2-3b"
         assert setup.downloaded is False
 
     def test_fp8_weights_pick_from_the_discrete_tiers_by_system_memory(self, models_dir):
         config = self._config()
-        config["seedvr2"]["discrete_tiers"] = [
-            {"model": "seedvr2-7b", "weights_gb": 0.4, "activation_floor_gb": 5, "activation_base_gb": 0.6, "activation_gb_per_mp": 0.55, "system_gb": 22},
-            {"model": "seedvr2-3b", "weights_gb": 0.3, "activation_floor_gb": 5, "activation_base_gb": 0.6, "activation_gb_per_mp": 0.6, "system_gb": 12.5},
-        ]
 
-        roomy = build_seedvr2_setup(config, weights=FP8_WEIGHTS, budget_bytes=10_000_000_000, system_bytes=32_000_000_000, models_dir=models_dir)
-        small = build_seedvr2_setup(config, weights=FP8_WEIGHTS, budget_bytes=10_000_000_000, system_bytes=16_000_000_000, models_dir=models_dir)
+        roomy = build_seedvr2_setup(config, platform_key="linux", weights=FP8_WEIGHTS, budget_bytes=10_000_000_000, system_bytes=32_000_000_000, models_dir=models_dir)
+        small = build_seedvr2_setup(config, platform_key="linux", weights=FP8_WEIGHTS, budget_bytes=10_000_000_000, system_bytes=16_000_000_000, models_dir=models_dir)
 
         assert roomy.tier.model == "seedvr2-7b"
         assert small.tier.model == "seedvr2-3b"
@@ -411,4 +410,4 @@ class TestBuildSetup:
 
     def test_an_invalid_block_raises(self, models_dir):
         with pytest.raises(ValueError, match="seedvr2"):
-            build_seedvr2_setup({}, weights=MLX_WEIGHTS, system_bytes=None, budget_bytes=None, models_dir=models_dir)
+            build_seedvr2_setup({}, platform_key="darwin", weights=MLX_WEIGHTS, system_bytes=None, budget_bytes=None, models_dir=models_dir)

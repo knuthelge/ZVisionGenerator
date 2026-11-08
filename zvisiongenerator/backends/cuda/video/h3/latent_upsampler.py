@@ -22,7 +22,6 @@ from torch import nn
 
 __all__ = ["LatentResizer3D", "load_latent_upsampler", "upscale_latents"]
 
-_CONFIG_KEY = "video_model_presets.h3.diffusers.latent_upsampler"
 _GROUPS = 32  # groups of every GroupNorm
 
 
@@ -151,7 +150,7 @@ def load_latent_upsampler(path: Path, device: torch.device | str, *, build: Call
     try:
         net.load_state_dict(state, strict=True, assign=True)
     except RuntimeError as exc:
-        raise RuntimeError(f"{path} does not match the H3 latent upscaler; check {_CONFIG_KEY}: {exc}") from exc
+        raise RuntimeError(f"{path} does not match the H3 latent upscaler: {exc}") from exc
     return net.to(device=device, dtype=torch.float16).eval().requires_grad_(False)
 
 

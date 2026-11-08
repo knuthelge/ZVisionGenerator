@@ -23,15 +23,6 @@ _BASE_CONFIG = {
 }
 
 
-def _config_with_preset(family, supports_negative):
-    """Return config with a model_presets entry for the given family."""
-    cfg = dict(_BASE_CONFIG)
-    cfg["model_presets"] = {
-        family: {"supports_negative_prompt": supports_negative},
-    }
-    return cfg
-
-
 def _success_workflow():
     from zvisiongenerator.core.workflow import GenerationWorkflow
 
@@ -39,12 +30,12 @@ def _success_workflow():
     return GenerationWorkflow(name="test", stages=[stage])
 
 
-def _run(family, supports_negative, prompts, size=None):
+def _run(family, prompts, size=None):
     """Run a batch whose single stage records its requests; return those requests and the negative-prompt warnings."""
     from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
     wf = _success_workflow()
-    config = _config_with_preset(family, supports_negative)
+    config = dict(_BASE_CONFIG)
     info = ImageModelInfo(family=family, is_distilled=False, size=size)
 
     with patch("zvisiongenerator.image_runner.build_workflow", return_value=wf):
@@ -58,7 +49,7 @@ def _run(family, supports_negative, prompts, size=None):
 
 
 def test_a_negative_prompt_reaches_a_model_that_supports_it():
-    requests, negative_warnings = _run("zimage", True, {"set1": [("a cat", "ugly, blurry")]})
+    requests, negative_warnings = _run("zimage", {"set1": [("a cat", "ugly, blurry")]})
 
     assert [request.negative_prompt for request in requests] == ["ugly, blurry"]
     assert negative_warnings == []
@@ -70,7 +61,7 @@ def test_unsupported_negative_prompts_are_dropped_with_a_single_warning():
         "set2": [("a harbor at dawn", "low contrast")],
     }
 
-    requests, negative_warnings = _run("ideogram4", False, prompts)
+    requests, negative_warnings = _run("ideogram4", prompts)
 
     assert len(negative_warnings) == 1
     assert [request.negative_prompt for request in requests] == [None, None, None]
@@ -78,7 +69,7 @@ def test_unsupported_negative_prompts_are_dropped_with_a_single_warning():
 
 def test_no_warning_when_no_negatives():
     """No warning if no negative prompts are provided for unsupported models."""
-    requests, negative_warnings = _run("flux2_klein", False, {"set1": [("a cat", None)]}, size="4b")
+    requests, negative_warnings = _run("flux2_klein", {"set1": [("a cat", None)]}, size="4b")
 
     assert len(requests) == 1
     assert negative_warnings == []

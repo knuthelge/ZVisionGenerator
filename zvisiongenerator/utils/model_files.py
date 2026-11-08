@@ -27,7 +27,7 @@ _WEIGHTLESS_CLASS_HINTS = ("Tokenizer", "Scheduler", "Processor", "FeatureExtrac
 _TRANSFORMER_COMPONENT = "transformer"
 # The diffusers pipeline classes of LTX-2 repos. Those with a Gemma 3 text encoder (LTX-2.3) are downloaded without their
 # transformer weights on Windows/Linux, which load the transformer from a single-file checkpoint
-# (video_model_presets.ltx.diffusers.transformer).
+# (the ``transformer`` companion of the LTX family in the model metadata).
 _LTX2_PIPELINES = ("LTX2Pipeline", "LTX2ImageToVideoPipeline")
 # Text-encoder class prefix of the LTX-2.5 layout, whose repos carry their own transformer weights.
 _GEMMA4_PREFIX = "Gemma4"

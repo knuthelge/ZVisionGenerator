@@ -125,7 +125,7 @@ def test_a_new_nf4_serialization_asks_for_a_new_conversion(monkeypatch, tmp_path
 
 def test_a_converted_folder_plans_stocks_components_and_no_turbo_lora(tmp_path):
     from zvisiongenerator.backends.cuda.download_plan import h3_download_plan
-    from zvisiongenerator.utils.h3_preset import HubFiles
+    from zvisiongenerator.downloads.target import HubFiles
 
     folder = tmp_path / "myh3"
     folder.mkdir()

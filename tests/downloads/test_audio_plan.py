@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_preset, yue2_preset
 
-from zvisiongenerator.downloads import audio_plan
+from zvisiongenerator.downloads.plans import audio_plan
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
 

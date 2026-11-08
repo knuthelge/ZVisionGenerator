@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **The prompt enhancer writes about 3× faster on Windows and Linux** with an NVIDIA GPU, with the same models and nothing new to install.
 - **One header for every prompt box** (Image, Video and the Audio boxes). Marks on the **Enhanced** tab replace the status line, **✕** scratches the Enhanced text, and **Enhance again** keeps up to five versions to step through. **Use mine** and the word counts are gone
 - **The image tools row is shorter.** JSON is the **{ }** icon, and Triggers is a tag with the number of trigger words not yet in the prompt, so the whole row fits on a phone
+- **The Hugging Face cache view marks only the repos this platform's models load as used**
 - **The Gallery and the Workspace strip load small thumbnails** instead of the full images and videos, so they open faster
 - **The Web UI asks before a job downloads a model**, listing what will download with its size, the free space and its terms
 - **Extend Video is now a kind in the Video tab.** The top bar is Image, Video and Audio, and **Kind** in Video switches between **New** and **Extend**
@@ -33,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Saving on the Config page, skipping the first-run dialog and the Discover Hugging Face switch keep the comments in your `config.yaml`**, instead of rewriting the file without them
 - **A Windows/Linux LTX model with a file missing no longer shows as downloaded** on the Models page; a row reads downloaded only when everything it needs is on disk
 - **The two Ideogram 4 LoRAs in Discover are marked Non-commercial**, as the model they build on is
+- **Deleting the last LTX-2.3 model on a Mac removes its Gemma 3 text encoder too**, so it no longer stays in the cache
 - `ziv-image -m <owner/repo>` with a built-in model's repo records the model under its short name, as `ziv-video` does
 
 ## [0.14.0b4] - 2026-11-02

@@ -21,7 +21,8 @@ from zvisiongenerator.backends import accelerator_memory_budget_or_none, audio_p
 from zvisiongenerator.core.audio_backend import AudioBackend, AudioCancelled
 from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_generation_finished, emit_progress
-from zvisiongenerator.downloads import audio_plan, target_present_offline
+from zvisiongenerator.downloads import target_present_offline
+from zvisiongenerator.downloads.plans import audio_plan
 from zvisiongenerator.job_controls import announce_repeat, pause_until_resumed, seed_range
 from zvisiongenerator.utils.audio_console import ConsoleProgress
 from zvisiongenerator.utils.audio_level import limit_peak, peak_of

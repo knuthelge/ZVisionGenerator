@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.utils.h3_preset import HubFiles
+from zvisiongenerator.downloads.target import HubFiles
 from zvisiongenerator.utils.model_files import cached_snapshot_dirs
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 

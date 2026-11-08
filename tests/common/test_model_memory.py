@@ -28,8 +28,7 @@ from zvisiongenerator.utils.model_memory import (
 from zvisiongenerator.utils.model_memory import WeightTotals
 
 _GIB = 1024**3
-# The config the clip estimates read the Gemma 3 text encoder from; nothing else is needed.
-_CONFIG = {"video_model_presets": {"ltx": {"mlx_text_encoder": "example/gemma@" + "a" * 40}}}
+_GEMMA = "mlx-community/gemma-3-12b-it-4bit"  # the Gemma 3 repo the model metadata declares for the macOS LTX-2.3 packs
 _IMAGE_MARGIN = model_memory._IMAGE_WORKING_BYTES
 
 
@@ -362,7 +361,7 @@ class TestClipMemoryFit:
     _CLIP = {"width": 704, "height": 448, "frames": 121, "low_memory": True}
 
     def _finder(self, model_dir: Path | None, text_encoder_dir: Path | None):
-        return lambda reference: {"example/model": model_dir, "example/gemma": text_encoder_dir}.get(reference)
+        return lambda reference: {"example/model": model_dir, _GEMMA: text_encoder_dir}.get(reference)
 
     def _required(self, model_dir: Path, text_encoder_dir: Path) -> int:
         required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, env={}, **self._CLIP)
@@ -374,8 +373,8 @@ class TestClipMemoryFit:
         required = self._required(model_dir, text_encoder_dir)
         finder = self._finder(model_dir, text_encoder_dir)
 
-        fits = clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(required), find_local_dir=finder, env={}, **self._CLIP)
-        too_large = clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(required // 2), find_local_dir=finder, env={}, **self._CLIP)
+        fits = clip_memory_fit("example/model", budget=MemoryBudget(required), find_local_dir=finder, env={}, **self._CLIP)
+        too_large = clip_memory_fit("example/model", budget=MemoryBudget(required // 2), find_local_dir=finder, env={}, **self._CLIP)
 
         assert fits == {"status": "fits", "required_gb": round(required / _GIB, 1), "budget_gb": round(required / _GIB, 1)}
         assert too_large is not None and too_large["status"] == "too_large"
@@ -384,7 +383,7 @@ class TestClipMemoryFit:
         model_dir, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
         required = self._required(model_dir, text_encoder_dir)
 
-        result = clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(int(required / 1.3)), find_local_dir=self._finder(model_dir, text_encoder_dir), env={}, **self._CLIP)
+        result = clip_memory_fit("example/model", budget=MemoryBudget(int(required / 1.3)), find_local_dir=self._finder(model_dir, text_encoder_dir), env={}, **self._CLIP)
 
         assert result is not None and result["status"] == "tight"
 
@@ -393,8 +392,8 @@ class TestClipMemoryFit:
         clip = {"width": 1280, "height": 704, "frames": 241, "low_memory": True, "env": {}}
         finder = self._finder(model_dir, text_encoder_dir)
 
-        capped = clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(20 * _GIB, unified_bytes=24 * _GIB), find_local_dir=finder, **clip)
-        unknown = clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(20 * _GIB), find_local_dir=finder, **clip)
+        capped = clip_memory_fit("example/model", budget=MemoryBudget(20 * _GIB, unified_bytes=24 * _GIB), find_local_dir=finder, **clip)
+        unknown = clip_memory_fit("example/model", budget=MemoryBudget(20 * _GIB), find_local_dir=finder, **clip)
 
         assert capped is not None and capped["required_gb"] == round(12 + _DECODER_GIB, 1)
         assert unknown is not None and unknown["required_gb"] > 16
@@ -403,15 +402,15 @@ class TestClipMemoryFit:
     def test_no_memory_budget_means_no_estimate_and_no_filesystem_lookup(self, budget):
         finder = MagicMock(return_value=None)
 
-        assert clip_memory_fit("example/model", app_config=_CONFIG, budget=budget, find_local_dir=finder, **self._CLIP) is None
+        assert clip_memory_fit("example/model", budget=budget, find_local_dir=finder, **self._CLIP) is None
         finder.assert_not_called()
 
     def test_upscale_is_passed_to_the_estimate(self, tmp_path):
         model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=1, connector=1, transformer=1, upsampler=20)
         finder = self._finder(model_dir, text_encoder_dir)
 
-        plain = clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(40 * _GIB), find_local_dir=finder, env={}, **self._CLIP)
-        upscaled = clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(40 * _GIB), find_local_dir=finder, upscale=True, env={}, **self._CLIP)
+        plain = clip_memory_fit("example/model", budget=MemoryBudget(40 * _GIB), find_local_dir=finder, env={}, **self._CLIP)
+        upscaled = clip_memory_fit("example/model", budget=MemoryBudget(40 * _GIB), find_local_dir=finder, upscale=True, env={}, **self._CLIP)
 
         assert plain is not None and upscaled is not None
         assert upscaled["required_gb"] > plain["required_gb"]
@@ -424,23 +423,14 @@ class TestClipMemoryFit:
             seen.append(reference)
             return self._finder(model_dir, text_encoder_dir)(reference)
 
-        clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(_GIB), find_local_dir=finder, env={}, **self._CLIP)
+        clip_memory_fit("example/model", budget=MemoryBudget(_GIB), find_local_dir=finder, env={}, **self._CLIP)
 
-        assert seen == ["example/model", "example/gemma"]
-
-    def test_the_text_encoder_is_the_repo_of_the_configured_reference(self, tmp_path):
-        model_dir, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
-        config = {"video_model_presets": {"ltx": {"mlx_text_encoder": "other/gemma@" + "b" * 40}}}
-        finder = MagicMock(side_effect=self._finder(model_dir, text_encoder_dir))
-
-        clip_memory_fit("example/model", budget=MemoryBudget(24 * _GIB), find_local_dir=finder, env={}, app_config=config, **self._CLIP)
-
-        assert [call.args[0] for call in finder.call_args_list] == ["example/model", "other/gemma"]
+        assert seen == ["example/model", _GEMMA]
 
     def test_a_model_that_is_not_downloaded_gives_none(self, tmp_path):
         _, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
 
-        assert clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(_GIB), find_local_dir=self._finder(None, text_encoder_dir), **self._CLIP) is None
+        assert clip_memory_fit("example/model", budget=MemoryBudget(_GIB), find_local_dir=self._finder(None, text_encoder_dir), **self._CLIP) is None
 
     def test_a_bundled_pack_needs_no_gemma_lookup(self, tmp_path):
         model_dir, _ = _make_ltx_25(tmp_path, encoder=7.477)
@@ -450,7 +440,7 @@ class TestClipMemoryFit:
             seen.append(reference)
             return self._finder(model_dir, None)(reference)
 
-        result = clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(40 * _GIB), find_local_dir=finder, env={}, **self._CLIP)
+        result = clip_memory_fit("example/model", budget=MemoryBudget(40 * _GIB), find_local_dir=finder, env={}, **self._CLIP)
 
         assert result is not None and result["status"] == "fits"
         assert seen == ["example/model"]
@@ -458,12 +448,12 @@ class TestClipMemoryFit:
     def test_a_missing_text_encoder_gives_none(self, tmp_path):
         model_dir, _ = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
 
-        assert clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(_GIB), find_local_dir=self._finder(model_dir, None), **self._CLIP) is None
+        assert clip_memory_fit("example/model", budget=MemoryBudget(_GIB), find_local_dir=self._finder(model_dir, None), **self._CLIP) is None
 
     def test_a_model_without_the_ltx_layout_gives_none(self, tmp_path):
         _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"w": ("BF16", [10, 10])})
 
-        assert clip_memory_fit("example/model", app_config=_CONFIG, budget=MemoryBudget(_GIB), find_local_dir=self._finder(tmp_path, tmp_path), **self._CLIP) is None
+        assert clip_memory_fit("example/model", budget=MemoryBudget(_GIB), find_local_dir=self._finder(tmp_path, tmp_path), **self._CLIP) is None
 
 
 class TestLtxClipMemoryFitGolden:
@@ -479,7 +469,7 @@ class TestLtxClipMemoryFitGolden:
     def test_a_family_without_an_estimate_gives_none_without_a_filesystem_lookup(self):
         finder = MagicMock(return_value=None)
 
-        result = clip_memory_fit("example/model", app_config=_CONFIG, budget=self._BUDGET, find_local_dir=finder, env={}, family="wan", **self._CLIPS[0][0])
+        result = clip_memory_fit("example/model", budget=self._BUDGET, find_local_dir=finder, env={}, family="wan", **self._CLIPS[0][0])
 
         assert result is None
         finder.assert_not_called()
@@ -489,7 +479,7 @@ class TestLtxClipMemoryFitGolden:
         finder = MagicMock(return_value=None)
         budget = MemoryBudget(10 * _GIB, system_bytes=30 * _GIB)
 
-        assert clip_memory_fit("example/model", app_config=_CONFIG, budget=budget, find_local_dir=finder, env={}, family=family, **self._CLIPS[0][0]) is None
+        assert clip_memory_fit("example/model", budget=budget, find_local_dir=finder, env={}, family=family, **self._CLIPS[0][0]) is None
         finder.assert_not_called()
 
 
@@ -736,26 +726,17 @@ class TestEstimateLtxCudaSystemMemory:
 
 
 class TestLtxCudaSystemMemory:
-    _CONFIG = {
-        "video_model_presets": {
-            "ltx": {
-                "diffusers": {"quantize": {"ltx-4": 4, "ltx-8": 8}},
-                "versions": {"ltx25": {"aliases": ["ltx25-4"], "diffusers": {"quantize": {"ltx25-4": 4}}}},
-            }
-        }
-    }
-
-    @pytest.mark.parametrize(("model_name", "quantize"), [("ltx25-4", 4)])
+    @pytest.mark.parametrize(("model_name", "quantize"), [("ltx-4", 4), ("ltx-8", 8), ("ltx25-4", 4)])
     def test_the_model_name_and_its_level_reach_the_estimate(self, monkeypatch, model_name, quantize):
         import zvisiongenerator.backends as backends
 
         calls: list[tuple] = []
         monkeypatch.setattr(backends, "estimate_ltx_system_memory", lambda *args, **kwargs: calls.append((args, kwargs)) or "estimate")
 
-        assert model_memory.ltx_cuda_system_memory("owner/ltx", model_name, self._CONFIG, lambda reference: None) == "estimate"
+        assert model_memory.ltx_cuda_system_memory("owner/ltx", model_name, lambda reference: None) == "estimate"
 
         ((args, kwargs),) = calls
-        assert args[1:] == ("owner/ltx", quantize)
+        assert args == ("owner/ltx", quantize)
         assert kwargs["model_name"] == model_name
 
 
@@ -822,7 +803,7 @@ class TestClipMemoryFitOnCuda:
     def weights(self, monkeypatch):
         calls: list[tuple] = []
 
-        def _system(resolved_model, model_name, app_config, find_local_dir):
+        def _system(resolved_model, model_name, find_local_dir):
             calls.append((resolved_model, model_name))
             return self._SYSTEM
 
@@ -830,7 +811,7 @@ class TestClipMemoryFitOnCuda:
         return calls
 
     def test_reports_the_gpu_when_it_is_the_tighter_memory(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(7 * _GIB, 64 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(7 * _GIB, 64 * _GIB), model_name="ltx-4", **self._CLIP)
 
         assert result is not None
         assert (result["kind"], result["resource"], result["budget_gb"]) == ("discrete", "gpu", 7.0)
@@ -838,43 +819,43 @@ class TestClipMemoryFitOnCuda:
         assert weights == [("repo/ltx", "ltx-4")]
 
     def test_reports_system_memory_when_that_is_the_tighter_memory(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 24 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 24 * _GIB), model_name="ltx-4", **self._CLIP)
 
         assert result is not None
         assert (result["resource"], result["budget_gb"]) == ("system", 24.0)
         assert result["status"] == "tight"  # the weights' peak is over 80% of 24
 
     def test_a_gpu_smaller_than_the_clip_needs_is_too_large(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(4 * _GIB, 64 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(4 * _GIB, 64 * _GIB), model_name="ltx-4", **self._CLIP)
 
         assert result is not None and result["status"] == "too_large"
 
     def test_weights_beyond_system_memory_are_too_large_since_the_load_is_refused(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 16 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 16 * _GIB), model_name="ltx-4", **self._CLIP)
 
         assert result is not None
         assert (result["status"], result["resource"]) == ("too_large", "system")
 
     def test_a_clip_out_of_gpu_memory_names_the_gpu_even_when_system_memory_is_fuller(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(4 * _GIB, 16 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(4 * _GIB, 16 * _GIB), model_name="ltx-4", **self._CLIP)
 
         assert result is not None
         assert (result["status"], result["resource"], result["budget_gb"]) == ("too_large", "gpu", 4.0)
 
     def test_a_clip_that_fits_says_so(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 64 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 64 * _GIB), model_name="ltx-4", **self._CLIP)
 
         assert result is not None and result["status"] == "fits"
 
     def test_an_unknown_model_has_no_estimate(self, monkeypatch):
         monkeypatch.setattr(model_memory, "ltx_cuda_system_memory", lambda *args: None)
 
-        assert clip_memory_fit("repo/ltx", budget=MemoryBudget(10 * _GIB, 30 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP) is None
+        assert clip_memory_fit("repo/ltx", budget=MemoryBudget(10 * _GIB, 30 * _GIB), model_name="ltx-4", **self._CLIP) is None
 
     def test_a_model_without_a_quantize_level_has_no_estimate_and_no_filesystem_lookup(self):
         finder = MagicMock(return_value=None)
 
-        assert clip_memory_fit("repo/ltx", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=finder, model_name="not-ltx", app_config={}, **self._CLIP) is None
+        assert clip_memory_fit("repo/ltx", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=finder, model_name="not-ltx", **self._CLIP) is None
         finder.assert_not_called()
 
 
@@ -887,13 +868,13 @@ class TestH3ClipMemoryFit:
     def test_the_reference_clip_is_estimated_without_looking_for_files(self):
         finder = MagicMock(return_value=None)
 
-        fit = clip_memory_fit("example/h3", app_config=_CONFIG, budget=self._BUDGET, find_local_dir=finder, family="h3", **self._CLIP)
+        fit = clip_memory_fit("example/h3", budget=self._BUDGET, find_local_dir=finder, family="h3", **self._CLIP)
 
         assert fit == {"status": "fits", "required_gb": 15.0, "budget_gb": 24.0, "expected_seconds": 23 * 60}
         finder.assert_not_called()
 
     def test_the_forwards_set_the_time(self):
-        four = clip_memory_fit("example/h3", app_config=_CONFIG, budget=self._BUDGET, family="h3", forwards=4, **self._CLIP)
+        four = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", forwards=4, **self._CLIP)
 
         assert four is not None and four["expected_seconds"] < 23 * 60
 
@@ -901,17 +882,17 @@ class TestH3ClipMemoryFit:
         clip = {**self._CLIP, "width": 576, "height": 320, "frames": 73}
         budget = MemoryBudget(int(12.8 * _GIB), unified_bytes=24 * _GIB)
 
-        text = clip_memory_fit("example/h3", app_config=_CONFIG, budget=budget, family="h3", **clip)
-        image = clip_memory_fit("example/h3", app_config=_CONFIG, budget=budget, family="h3", mode="i2v", **clip)
+        text = clip_memory_fit("example/h3", budget=budget, family="h3", **clip)
+        image = clip_memory_fit("example/h3", budget=budget, family="h3", mode="i2v", **clip)
 
         assert text is not None and image is not None
         assert (text["status"], image["status"], image["required_gb"]) == ("fits", "tight", 14.2)
 
     def test_a_length_h3_cannot_take_has_no_estimate(self):
-        assert clip_memory_fit("example/h3", app_config=_CONFIG, budget=self._BUDGET, family="h3", **{**self._CLIP, "frames": 121}) is None
+        assert clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", **{**self._CLIP, "frames": 121}) is None
 
     def test_no_budget_has_no_estimate(self):
-        assert clip_memory_fit("example/h3", app_config=_CONFIG, budget=None, family="h3", **self._CLIP) is None
+        assert clip_memory_fit("example/h3", budget=None, family="h3", **self._CLIP) is None
 
 
 class TestH3CudaClipMemoryFit:
@@ -923,7 +904,7 @@ class TestH3CudaClipMemoryFit:
     def test_the_clip_is_estimated_without_looking_for_files(self):
         finder = MagicMock(return_value=None)
 
-        fit = clip_memory_fit("example/h3", app_config=_CONFIG, budget=self._BUDGET, find_local_dir=finder, family="h3", **self._CLIP)
+        fit = clip_memory_fit("example/h3", budget=self._BUDGET, find_local_dir=finder, family="h3", **self._CLIP)
 
         assert fit is not None
         assert (fit["status"], fit["kind"], fit["resource"], fit["family"]) == ("fits", "discrete", "gpu", "h3")
@@ -931,21 +912,21 @@ class TestH3CudaClipMemoryFit:
         finder.assert_not_called()
 
     def test_the_mode_forwards_and_loras_reach_the_estimate(self):
-        plain = clip_memory_fit("example/h3", app_config=_CONFIG, budget=self._BUDGET, family="h3", **self._CLIP)
-        tuned = clip_memory_fit("example/h3", app_config=_CONFIG, budget=self._BUDGET, family="h3", mode="i2v", forwards=4, loras_bytes=_GIB, **self._CLIP)
+        plain = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", **self._CLIP)
+        tuned = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", mode="i2v", forwards=4, loras_bytes=_GIB, **self._CLIP)
 
         assert plain is not None and tuned is not None
         assert tuned["expected_seconds"] < plain["expected_seconds"]
         assert tuned["required_gb"] >= plain["required_gb"]
 
     def test_an_upscale_is_estimated_and_takes_longer_than_its_half_size_render_alone(self):
-        fit = clip_memory_fit("example/h3", app_config=_CONFIG, budget=self._BUDGET, family="h3", upscale=True, **{**self._CLIP, "width": 1280, "height": 704})
-        half = clip_memory_fit("example/h3", app_config=_CONFIG, budget=self._BUDGET, family="h3", **{**self._CLIP, "width": 640, "height": 352})
+        fit = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, **{**self._CLIP, "width": 1280, "height": 704})
+        half = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", **{**self._CLIP, "width": 640, "height": 352})
 
         assert fit is not None and fit["status"] == "fits"
         assert fit["expected_seconds"] > half["expected_seconds"]
 
     def test_an_upscale_does_not_read_the_config(self):
-        fit = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, app_config={"seedvr2": {}}, **{**self._CLIP, "width": 1280, "height": 704})
+        fit = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, **{**self._CLIP, "width": 1280, "height": 704})
 
         assert fit is not None

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_preset
-from tests._factories import _make_args, _make_video_args, make_extend_source
+from tests._factories import _make_args, _make_video_args, make_extend_source, use_enhancer_models, video_config
 from tests.web._helpers import stub_request_job, wait_for_status
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
@@ -20,7 +20,6 @@ from zvisiongenerator.downloads import READY, DownloadTarget
 from zvisiongenerator.preflight import run_preflight as real_run_preflight
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
 from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL
-from zvisiongenerator.utils.matte_models import MATTE_LABEL
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS
 from zvisiongenerator.web import web_runner as web_runner_module
@@ -28,7 +27,8 @@ from zvisiongenerator.web import job_downloads as job_downloads_module
 from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_model_part, enhancer_part, is_committed, job_download_parts, missing_targets, planned_targets
 
 _PROMPTS = {"default": [("prompt", None)]}
-_CONFIG = {"generation": {}, "prompt_enhancer": {"model": {"darwin": "a/enhancer", "win32": "a/enhancer", "linux": "a/enhancer"}}}
+_CONFIG = {"generation": {}, **video_config()}
+MATTE_LABEL = "Background removal"
 _PLATFORM = sys.platform
 
 
@@ -39,10 +39,10 @@ def _image_target(model_ref: str, family: str) -> tuple[DownloadTarget, ...]:
 def _fake_planners(tmp_path) -> SimpleNamespace:
     """Return planners whose targets name the inputs they were given, so a part built from other inputs differs."""
     return SimpleNamespace(
-        image=lambda model_ref, *, family, config, platform_key: _image_target(model_ref, f"{family}:{platform_key}"),
-        video=lambda model_ref, *, family, config, model_name, upscale: (DownloadTarget(f"video/{model_ref}", allow_patterns=(f"{family}:{model_name}:{upscale}",)),),
+        image=lambda model_ref, *, family, platform_key: _image_target(model_ref, f"{family}:{platform_key}"),
+        video=lambda model_ref, *, family, config, model_name, platform_key, upscale: (DownloadTarget(f"video/{model_ref}", allow_patterns=(f"{family}:{model_name}:{upscale}",)),),
         matte=lambda: (DownloadTarget("matte/pinned"),),
-        seedvr2=lambda model, *, models_dir, weights: (DownloadTarget("seedvr2/tier", allow_patterns=(model, str(models_dir)), local_dir=models_dir),),
+        seedvr2=lambda model, *, platform_key, models_dir, weights: (DownloadTarget("seedvr2/tier", allow_patterns=(model, str(models_dir)), local_dir=models_dir),),
         enhancer=lambda repo, revision: (DownloadTarget(repo, revision),),
         seedvr2_upscaler=lambda: SimpleNamespace(weights=FP8_WEIGHTS),
         data_dir=lambda: tmp_path,
@@ -254,24 +254,32 @@ class TestAudioParts:
 
 
 class TestPartLabels:
-    def test_model_parts_are_labelled_with_the_configured_display_name_and_keep_the_alias_as_their_id(self, runner_planners):
-        config = {**_CONFIG, "model_labels": {"atlas": {"name": "Atlas Turbo"}, "ltx-8": {"name": "LTX 8-bit"}}}
-        image = job_download_parts(_image_request(), config, platform_key=_PLATFORM, model_ref="owner/atlas", args=_make_args())
+    def test_model_parts_are_labelled_with_the_metadata_display_name_and_keep_the_alias_as_their_id(self, runner_planners):
+        config = _CONFIG
+        image_request = ImageGenerationRequest(backend=None, model=None, prompt="prompt", model_family="zimage", model_name="zit")
+        image = job_download_parts(image_request, config, platform_key=_PLATFORM, model_ref="owner/zit", args=_make_args())
         video_request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", model_name="ltx-8")
         video = job_download_parts(video_request, config, platform_key=_PLATFORM, model_ref="owner/ltx", args=_make_args(no_enhance=True))
 
-        assert [(part.label, part.model_id) for part in (*image, *video)] == [("Atlas Turbo", "atlas"), ("LTX 8-bit", "ltx-8")]
+        assert [(part.label, part.model_id) for part in (*image, *video)] == [("Z-Image Turbo", "zit"), ("LTX-2.3 8-bit", "ltx-8")]
 
-    def test_an_enhancer_part_is_labelled_by_its_tier_or_else_by_its_reference(self, monkeypatch, runner_planners):
-        config = {"prompt_enhancer": {"model": "a/fast", "smart": {"model": "a/smart", "revision": "r1"}, "user_model": "a/mine"}}
+    def test_a_model_without_an_entry_is_labelled_by_its_name(self, runner_planners):
+        image = job_download_parts(_image_request(), _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas", args=_make_args())
+
+        assert [(part.label, part.model_id) for part in image] == [("atlas", "atlas")]
+
+    def test_an_enhancer_part_is_labelled_by_its_tier_or_else_by_its_reference(self, monkeypatch, tmp_path, runner_planners):
+        use_enhancer_models(monkeypatch, tmp_path, fast="a/fast", smart="a/smart@r1")
+        config = {"prompt_enhancer": {"user_model": "a/mine"}}
         monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.ensure_available", lambda repo, revision: True)
 
         labels = [enhancer_part(repo, revision, config, platform_key=_PLATFORM).label for repo, revision in (("a/fast", None), ("a/smart", "r1"), ("a/mine", None), ("a/other", None))]
 
         assert labels == ["Fast enhancer model", "Smart enhancer model", "Custom enhancer model", "a/other"]
 
-    def test_an_enhancer_part_looks_up_its_licence_by_tier_and_a_custom_or_unnamed_model_by_its_reference(self, monkeypatch, runner_planners):
-        config = {"prompt_enhancer": {"model": "a/fast", "smart": {"model": "a/smart", "revision": "r1"}, "user_model": "a/mine"}}
+    def test_an_enhancer_part_looks_up_its_licence_by_tier_and_a_custom_or_unnamed_model_by_its_reference(self, monkeypatch, tmp_path, runner_planners):
+        use_enhancer_models(monkeypatch, tmp_path, fast="a/fast", smart="a/smart@r1")
+        config = {"prompt_enhancer": {"user_model": "a/mine"}}
         monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.ensure_available", lambda repo, revision: True)
 
         ids = [enhancer_part(repo, revision, config, platform_key=_PLATFORM).model_id for repo, revision in (("a/fast", None), ("a/smart", "r1"), ("a/mine", None), ("a/other", None))]

@@ -884,7 +884,7 @@ class WebRunner:
         if plan.cancelled:
             return
         if not self._ensure_downloads(
-            model_part or image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=sys.platform),
+            model_part or image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, platform_key=sys.platform),
             mode="image",
             total_iterations=len(plan.iterations),
             progress_callback=progress_callback,
@@ -893,7 +893,7 @@ class WebRunner:
             return
         if not self._ensure_matte_downloads(request, total_iterations=len(plan.iterations), progress_callback=progress_callback, control_signal=control_signal):
             return
-        backend, model, model_info = _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal, config=config)
+        backend, model, model_info = _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal)
         run_batch(
             backend,
             model,
@@ -904,7 +904,7 @@ class WebRunner:
             plan=plan,
             progress_callback=progress_callback,
             skip_signal=control_signal,
-            reload_model=lambda: _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal, config=config)[1],
+            reload_model=lambda: _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal)[1],
         )
 
     def _run_upscale_request(
@@ -926,7 +926,7 @@ class WebRunner:
             progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
             return
         if not self._ensure_downloads(
-            model_part or upscale_model_part(request, model_ref, config, platform_key=sys.platform),
+            model_part or upscale_model_part(request, model_ref, platform_key=sys.platform),
             mode="image",
             total_iterations=1,
             progress_callback=progress_callback,
@@ -938,7 +938,7 @@ class WebRunner:
         if request.upscale_method == UPSCALE_METHOD_SEEDVR2:
             backend, model = _load_seedvr2_with_progress(request.upscale_model, progress_callback, mode="image")
         else:
-            backend, model, _model_info = _load_image_model_with_progress(request, model_ref, request.quantize, progress_callback, control_signal, config=config)
+            backend, model, _model_info = _load_image_model_with_progress(request, model_ref, request.quantize, progress_callback, control_signal)
             if model is not None:
                 backend.prepare_prompts(model, upscale_prompts(request), width=request.width, height=request.height, cancelled=lambda: control_signal.pending() == "quit")
         run_upscale(backend, model, request, workflow, progress_callback=progress_callback, skip_signal=control_signal)
@@ -955,7 +955,7 @@ class WebRunner:
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
             return
         if not self._ensure_downloads(
-            seedvr2_part(request.upscale_model),
+            seedvr2_part(request.upscale_model, platform_key=sys.platform),
             mode="video",
             total_iterations=1,
             progress_callback=progress_callback,
@@ -982,7 +982,7 @@ class WebRunner:
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
             return
         if not self._ensure_downloads(
-            model_part or ltx_video_upscale_part(request, config),
+            model_part or ltx_video_upscale_part(request, config, platform_key=sys.platform),
             mode="video",
             total_iterations=1,
             progress_callback=progress_callback,
@@ -995,7 +995,7 @@ class WebRunner:
             request.model_ref,
             low_memory=True,
             loras=list(request.loras) or None,
-            **video_load_options("ltx", config, request.model_name, upscale=True, quiet=True),
+            **video_load_options("ltx", config, request.model_name, platform_key=sys.platform, upscale=True, quiet=True),
         )
         run_ltx_video_upscale(backend, model, request, progress_callback=progress_callback, skip_signal=control_signal)
 
@@ -1073,7 +1073,7 @@ class WebRunner:
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": len(plan.iterations)})
             return
         if not self._ensure_downloads(
-            model_part or video_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, upscale=bool(request.upscale)),
+            model_part or video_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=sys.platform, upscale=bool(request.upscale)),
             mode="video",
             total_iterations=len(plan.iterations),
             progress_callback=progress_callback,
@@ -1092,7 +1092,7 @@ class WebRunner:
             end_image=getattr(args, "end_image_path", None) is not None,
             low_memory=getattr(args, "low_memory", True),
             loras=loras,
-            **video_load_options(request.model_family, config, request.model_name or model_ref, upscale=bool(request.upscale), quiet=True),
+            **video_load_options(request.model_family, config, request.model_name or model_ref, platform_key=sys.platform, upscale=bool(request.upscale), quiet=True),
         )
         run_video_batch(
             backend=backend,
@@ -1420,12 +1420,10 @@ def _load_image_model_with_progress(
     quantize: int | None,
     progress_callback: Callable[[EventPayload], None],
     control_signal: SkipSignal,
-    *,
-    config: dict[str, Any] | None = None,
 ) -> tuple[Any, Any, Any]:
     """Load the request's image model (stored quants, LoRAs) and report ``model_loading`` events.
 
-    With *config*, a model built on first use (Ideogram 4 Instant, MOSS-Image) is built first when it is missing (the ``building`` phase).
+    A model built on first use (Ideogram 4 Instant, MOSS-Image) is built first when it is missing (the ``building`` phase).
 
     Returns:
         ``(backend, model, model_info)``; the model is ``None`` when the user quit during the build.
@@ -1433,9 +1431,8 @@ def _load_image_model_with_progress(
     model_label = request.model_name or model_ref
     progress_callback({"type": "model_loading", "mode": "image", "model": model_label})
     backend = get_backend()
-    if config is not None and not ensure_built_model(
+    if not ensure_built_model(
         model_ref,
-        config,
         platform_key=sys.platform,
         on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "phase": phase}),
         cancelled=lambda: control_signal.pending() == "quit",
@@ -1478,6 +1475,7 @@ def _load_seedvr2_with_progress(model_name: str, progress_callback: Callable[[Ev
         upscaler,
         model_name,
         models_dir=get_ziv_data_dir() / "models",
+        platform_key=sys.platform,
         on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": mode, "model": model_label, "phase": phase, "quantize": SEEDVR2_BITS, "replaces_download": replaces_download}),
     )
     return upscaler, model

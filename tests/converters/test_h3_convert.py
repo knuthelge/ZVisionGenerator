@@ -25,7 +25,7 @@ def h3_cli(monkeypatch, tmp_path):
     monkeypatch.setattr(h3_checkpoint, "STOCK_CONFIG", _TINY)
     data_dir = tmp_path / "data"
     monkeypatch.setattr("zvisiongenerator.converters.convert_checkpoint.get_ziv_data_dir", lambda: data_dir)
-    monkeypatch.setattr("zvisiongenerator.utils.config.load_config", lambda: {"model_aliases": {"h3": "x"}})
+    monkeypatch.setattr("zvisiongenerator.utils.config.load_config", lambda: {})
     calls: list[dict] = []
 
     def _convert(checkpoint, target, **kwargs):

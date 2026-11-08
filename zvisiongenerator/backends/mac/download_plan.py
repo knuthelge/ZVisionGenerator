@@ -16,7 +16,8 @@ from zvisiongenerator.utils.model_files import is_ltx_mlx_layout, ltx_mlx_bundle
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
 if TYPE_CHECKING:
-    from zvisiongenerator.utils.h3_preset import H3MlxPreset, HubFiles
+    from zvisiongenerator.downloads.target import HubFiles
+    from zvisiongenerator.utils.h3_preset import H3MlxPreset
 
 __all__ = ["MLX_LM_ALLOW_PATTERNS", "enhancer_download_plan", "h3_mlx_download_plan", "image_download_plan", "video_download_plan"]
 

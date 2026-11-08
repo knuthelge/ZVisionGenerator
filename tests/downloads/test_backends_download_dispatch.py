@@ -10,7 +10,8 @@ import zvisiongenerator.backends as backends
 from zvisiongenerator.backends.cuda import download_plan as cuda_plan
 from zvisiongenerator.backends.mac import download_plan as mac_plan
 from zvisiongenerator.downloads.target import DownloadTarget
-from zvisiongenerator.utils.h3_preset import HubFiles
+from zvisiongenerator.downloads.target import HubFiles
+from zvisiongenerator.utils.ltx_facts import SEPARATE_TRANSFORMER_IGNORE
 
 
 @pytest.mark.parametrize("platform", ["linux", "win32"])
@@ -19,11 +20,11 @@ def test_cuda_platforms_dispatch_to_the_cuda_planner(monkeypatch: pytest.MonkeyP
     index = {"vae": ["diffusers", "AutoencoderKL"]}
 
     (image,) = backends.image_download_plan("owner/repo", family="zimage", read_index=lambda repo, revision: index)
-    video = backends.video_download_plan("owner/ltx", family="ltx", transformer_source=("a/b", "t.safetensors"), upscale=False)
+    video = backends.video_download_plan("owner/ltx", family="ltx", transformer_source=("a/b", "t.safetensors"), upscale=False, repo_ignore=SEPARATE_TRANSFORMER_IGNORE)
     enhancer = backends.enhancer_download_plan("owner/llm", "rev")
 
     assert image.ignore_patterns == cuda_plan.DIFFUSERS_IGNORE
-    assert video == (DownloadTarget("owner/ltx", ignore_patterns=cuda_plan.SEPARATE_TRANSFORMER_IGNORE), DownloadTarget("a/b", allow_patterns=("t.safetensors",)))
+    assert video == (DownloadTarget("owner/ltx", ignore_patterns=SEPARATE_TRANSFORMER_IGNORE), DownloadTarget("a/b", allow_patterns=("t.safetensors",)))
     assert enhancer == (DownloadTarget("owner/llm", "rev", cuda_plan.TRANSFORMERS_ALLOW_PATTERNS),)
 
 

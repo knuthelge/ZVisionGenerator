@@ -70,7 +70,7 @@ def test_steps_outside_one_to_three_are_refused(steps):
 def _option(monkeypatch, fit, *, frame_count=121, budget="budget"):
     calls = []
     monkeypatch.setattr("zvisiongenerator.utils.model_memory.clip_memory_fit", lambda *args, **kwargs: calls.append((args, kwargs)) or fit)
-    option = ltx_video_option(768, 448, frame_count, model_ref="o/ltx@a", model_name="ltx-4", app_config={}, budget=budget)
+    option = ltx_video_option(768, 448, frame_count, model_ref="o/ltx@a", model_name="ltx-4", budget=budget)
     return option, calls
 
 

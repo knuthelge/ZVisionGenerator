@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from zvisiongenerator.utils.h3_preset import HubFiles
+from zvisiongenerator.downloads.target import HubFiles
 from zvisiongenerator.utils import hf_snapshot
 from zvisiongenerator.utils.hf_snapshot import cached_snapshot, pack_for_reference, snapshot_with
 

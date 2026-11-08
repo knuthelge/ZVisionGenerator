@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests._factories import make_extend_source
+from tests._factories import make_extend_source, use_enhancer_models
 from tests._licences import use_licences
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
@@ -123,8 +123,6 @@ class TestPlanIterations:
 
 _CONFIG = {
     "generation": {"seed_min": 1, "seed_max": 100},
-    "prompt_enhancer": {"model": {"darwin": "a/b", "win32": "a/b", "linux": "a/b"}},
-    "model_presets": {"flux1": {"enhance_max_words": 180}},
 }
 
 
@@ -174,8 +172,9 @@ def _args(**overrides):
 
 
 @pytest.fixture(autouse=True)
-def _available(monkeypatch):
+def _available(monkeypatch, tmp_path):
     monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.ensure_available", lambda repo, revision: True)
+    use_enhancer_models(monkeypatch, tmp_path, fast="a/b")
 
 
 def _run(prompts=None, *, enhancer=None, order=None, args=None, control=None, family="zimage", mode="image", session=None, **kwargs):
@@ -336,7 +335,7 @@ class TestRunPreflight:
         session = MagicMock()
         release = MagicMock()
         with pytest.raises(ValueError, match="enhancer"):
-            run_preflight({"a": [("x", None)]}, {}, _args(), mode="image", model_family=None, session=session, release_memory=release)
+            run_preflight({"a": [("x", None)]}, {}, _args(enhance_model="a/b@"), mode="image", model_family=None, session=session, release_memory=release)
         session.acquire.assert_not_called()
         session.release.assert_not_called()
         release.assert_not_called()
@@ -809,7 +808,9 @@ class TestEnhancerLicenceNotice:
 
     @pytest.fixture(autouse=True)
     def _records(self, monkeypatch, tmp_path):
-        use_licences(monkeypatch, tmp_path, self._RECORD)
+        fast = {"kind": "enhancer", "downloads": dict.fromkeys(("darwin", "win32", "linux"), [{"ref": "a/b", "files_from": "loader"}])}
+        smart = {"kind": "enhancer", "memory_gb": 9, "downloads": dict.fromkeys(("darwin", "win32", "linux"), [{"ref": "a/smart", "files_from": "loader"}])}
+        use_licences(monkeypatch, tmp_path, self._RECORD, models={"enhancer-fast": fast, "enhancer-smart": smart})
 
     def _notice(self, monkeypatch, capsys, *, present, **kwargs):
         monkeypatch.setattr("zvisiongenerator.preflight.enhancer_plan", lambda repo, revision: (self._TARGET,))

@@ -15,7 +15,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final
 
-from zvisiongenerator.backends.cuda.download_plan import video_repo_ignore
 from zvisiongenerator.backends.cuda.driver import require_cuda
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
 from zvisiongenerator.backends.cuda.video import sampler as _sampler
@@ -376,11 +375,10 @@ def _absent_optional_components(repo_dir: Path) -> dict[str, None]:
     return {name: None for name in sorted(LTX2_UNLOADED_COMPONENTS - {"diffusion_decoder"}) if name in index}
 
 
-def _repo_dir(model_path: str, *, with_transformer: bool, extra_ignore: Sequence[str] = ()) -> Path:
+def _repo_dir(model_path: str, *, ignore: Sequence[str]) -> Path:
     """Return the local folder of the diffusers repo *model_path*, downloading what is missing for a repo id.
 
-    A ``repo@revision`` reference downloads that revision. Without *with_transformer* the repo's own transformer
-    weights are not downloaded (only its config); *extra_ignore* names further patterns to skip.
+    A ``repo@revision`` reference downloads that revision, without the files that match the *ignore* patterns.
     """
 
     local = Path(model_path).expanduser()
@@ -389,9 +387,8 @@ def _repo_dir(model_path: str, *, with_transformer: bool, extra_ignore: Sequence
     from huggingface_hub import snapshot_download
 
     repo_id, revision = split_huggingface_revision(model_path)
-    ignore = video_repo_ignore(separate_transformer=not with_transformer, extra=extra_ignore)
     try:
-        return Path(snapshot_download(repo_id, ignore_patterns=None if ignore is None else list(ignore), **({"revision": revision} if revision else {})))
+        return Path(snapshot_download(repo_id, ignore_patterns=list(ignore) or None, **({"revision": revision} if revision else {})))
     except Exception as exc:
         raise RuntimeError(f"Failed to download the LTX model '{model_path}': {exc}") from exc
 
@@ -417,16 +414,16 @@ def _resolve_upsampler_weights(repo_id: str, filename: str) -> str:
     return str(_download_hub_file(repo_id, filename, "LTX latent upsampler"))
 
 
-def _stock_weights(model_path: str, model_name: str | None, transformer_source: tuple[str, str] | None, quantize: int, device: Any, repo_ignore: Sequence[str] = ()) -> tuple[Path, Path, Path, bool]:
+def _stock_weights(model_path: str, model_name: str | None, transformer_source: tuple[str, str] | None, quantize: int, device: Any, repo_ignore: Sequence[str]) -> tuple[Path, Path, Path, bool]:
     """Return the repo folder, the prepared transformer and text encoder at *quantize*, and whether they fit together, for a stock model.
 
-    The repo is downloaded without the *repo_ignore* patterns.
+    The repo is downloaded without the *repo_ignore* patterns, the finished list :func:`~zvisiongenerator.utils.ltx_facts.ltx_load_options` gives.
     """
 
     from zvisiongenerator.backends.cuda.video.memory_estimate import ltx_system_estimate
 
     checkpoint = _download_hub_file(*transformer_source, "LTX transformer") if transformer_source else None
-    repo_dir = _repo_dir(model_path, with_transformer=checkpoint is None, **({"extra_ignore": repo_ignore} if repo_ignore else {}))
+    repo_dir = _repo_dir(model_path, ignore=repo_ignore)
     transformer_input = checkpoint or repo_dir / "transformer"
     fits_together = _check_system_memory(ltx_system_estimate(repo_dir, transformer_input, quantize), quantize, converted=False)
     prepared_transformer, prepared_text_encoder = _prepared_weights(model_name, model_path, repo_dir, transformer_input, quantize, device)
@@ -596,7 +593,7 @@ def _load_latent_upsampler(model_class: type[Any], state_dict: Mapping[str, Any]
     try:
         model.load_state_dict(dict(state_dict), strict=True)
     except RuntimeError as exc:
-        raise RuntimeError(f"The latent upsampler weights do not match the LTX-2.3 x2 spatial upsampler layout (check video_model_presets.ltx.diffusers.latent_upsampler): {exc}") from exc
+        raise RuntimeError(f"The latent upsampler weights do not match the LTX-2.3 x2 spatial upsampler layout (check the latent upsampler declared for LTX in the model metadata): {exc}") from exc
     if low_memory:
         model.to(dtype=torch_dtype)
     else:
@@ -1274,7 +1271,7 @@ class DiffusersVideoBackend:
             quantize: 4 (NF4 transformer) or 8 (FP8 transformer); both levels use an FP8 text encoder and connectors.
             transformer_source: ``(repo_id, filename)`` of a single-file transformer checkpoint that replaces the repo's own.
             model_name: The name the model was picked by (``ltx-4``); its prepared copy is ``<models>/<name>@q<bits>``.
-            repo_ignore: Patterns the repo is downloaded without (a model version's root single-file checkpoints).
+            repo_ignore: The finished list of patterns the repo is downloaded without (``ltx_load_options`` makes it); the whole repo when empty or left out.
             sampler: ``euler_ancestral`` runs each t2v or i2v denoising pass on an Euler-ancestral scheduler; ``None`` keeps
                 the pipeline's own. An Extend pass always keeps the pipeline's own.
             image_crf: The H.264 CRF an i2v image is re-compressed at before it is fitted; ``None`` leaves the image to
@@ -1306,7 +1303,7 @@ class DiffusersVideoBackend:
 
         latent_upsampler = kwargs.get("latent_upsampler")
         if upscale and latent_upsampler is None:
-            raise ValueError("--upscale 2 needs video_model_presets.ltx.diffusers.latent_upsampler (repo and filename) in the config.")
+            raise ValueError("--upscale 2 needs the latent upsampler (repo and filename) the model metadata declares for this LTX model.")
 
         runtime = _load_runtime_dependencies()
         _validate_cuda(runtime)
@@ -1333,7 +1330,7 @@ class DiffusersVideoBackend:
             loras=loras,
             model_name=kwargs.get("model_name"),
             converted=converted,
-            repo_ignore=tuple(kwargs.get("repo_ignore") or ()),
+            repo_ignore=kwargs.get("repo_ignore", ()),
         )
 
         upsample_pipeline = None

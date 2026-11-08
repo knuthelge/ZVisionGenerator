@@ -18,19 +18,18 @@ from tests._paths import FIXTURES
 from zvisiongenerator.backends.cuda.download_plan import (
     DIFFUSERS_IGNORE,
     DIFFUSERS_ROOT_FILES,
-    SEPARATE_TRANSFORMER_IGNORE,
     TRANSFORMERS_ALLOW_PATTERNS,
     enhancer_download_plan,
     h3_download_plan,
     image_download_plan,
     video_download_plan,
-    video_repo_ignore,
 )
 from zvisiongenerator.backends.cuda.video.h3 import sources as h3_sources
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils import hf_snapshot
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.h3_preset import h3_preset
+from zvisiongenerator.utils.ltx_facts import SEPARATE_TRANSFORMER_IGNORE
 
 _LISTINGS = json.loads((FIXTURES / "diffusers_repo_listings.json").read_text(encoding="utf-8"))
 KLEIN = "black-forest-labs/FLUX.2-klein-9B"
@@ -226,7 +225,7 @@ def test_video_plan_repo_only_downloads_everything() -> None:
 
 
 def test_video_plan_with_transformer_source_has_two_parts() -> None:
-    plan = video_download_plan(LTX_REPO, family="ltx", transformer_source=TRANSFORMER, latent_upsampler=UPSAMPLER, upscale=False)
+    plan = video_download_plan(LTX_REPO, family="ltx", transformer_source=TRANSFORMER, latent_upsampler=UPSAMPLER, upscale=False, repo_ignore=SEPARATE_TRANSFORMER_IGNORE)
 
     assert plan == (
         DownloadTarget(LTX_REPO, ignore_patterns=SEPARATE_TRANSFORMER_IGNORE),
@@ -246,20 +245,9 @@ def test_video_plan_upscale_without_configured_upsampler_skips_it() -> None:
     assert plan == (DownloadTarget(LTX_REPO),)
 
 
-@pytest.mark.parametrize(
-    ("separate", "extra", "expected"),
-    [
-        (False, ("a/*",), ("a/*",)),
-        (True, ["a/*", "b"], (*SEPARATE_TRANSFORMER_IGNORE, "a/*", "b")),
-    ],
-)
-def test_video_repo_ignore(separate: bool, extra: tuple[str, ...], expected: tuple[str, ...] | None) -> None:
-    assert video_repo_ignore(separate_transformer=separate, extra=extra) == expected
-
-
 def test_2_3_video_plans_are_pinned_without_a_revision() -> None:
-    """2.3 guard: the plans of ``ltx-4`` and ``ltx-8`` keep their exact targets, with revision ``None`` and no extra ignore."""
-    plan = video_download_plan(LTX_REPO, family="ltx", transformer_source=TRANSFORMER, latent_upsampler=UPSAMPLER, upscale=True, repo_ignore=())
+    """2.3 guard: the plans of ``ltx-4`` and ``ltx-8`` keep their exact targets, with revision ``None`` and the ignore list they declare."""
+    plan = video_download_plan(LTX_REPO, family="ltx", transformer_source=TRANSFORMER, latent_upsampler=UPSAMPLER, upscale=True, repo_ignore=SEPARATE_TRANSFORMER_IGNORE)
 
     assert plan == (
         DownloadTarget("diffusers/LTX-2.3-Distilled-Diffusers", None, None, ("transformer/*.safetensors", "transformer/*.safetensors.index.json"), None),
@@ -281,10 +269,12 @@ def test_video_plan_ltx25_is_one_pinned_target_with_the_repo_ignore(upscale: boo
     assert plan == (DownloadTarget(LTX25_REPO, LTX25_PIN, None, LTX25_IGNORE),)
 
 
-def test_video_plan_repo_ignore_follows_the_separate_transformer_patterns() -> None:
-    plan = video_download_plan(LTX_REPO, family="ltx", transformer_source=TRANSFORMER, repo_ignore=("x/*",))
+def test_video_plan_takes_the_repo_ignore_list_as_given() -> None:
+    given = video_download_plan(LTX_REPO, family="ltx", transformer_source=TRANSFORMER, repo_ignore=("x/*",))
+    none = video_download_plan(LTX_REPO, family="ltx", transformer_source=TRANSFORMER)
 
-    assert plan[0].ignore_patterns == (*SEPARATE_TRANSFORMER_IGNORE, "x/*")
+    assert given[0].ignore_patterns == ("x/*",)
+    assert none[0].ignore_patterns is None
 
 
 def test_video_plan_keeps_the_revision_of_the_reference() -> None:
@@ -320,7 +310,7 @@ def test_video_plan_local_folder_is_empty(tmp_path: Path) -> None:
 
 
 H3_REF = "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
-H3_PRESET = h3_preset(load_config())
+H3_PRESET = h3_preset(load_config(), "linux")
 
 
 def test_h3_plan_is_the_repository_the_text_encoder_and_the_lora() -> None:

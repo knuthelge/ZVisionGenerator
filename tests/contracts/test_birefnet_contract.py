@@ -13,7 +13,7 @@ import inspect
 import re
 
 from tests._paths import REPO_ROOT
-from zvisiongenerator.utils.matte_models import BIREFNET
+from zvisiongenerator.utils.matte import matte_pins
 
 ROOT = REPO_ROOT
 PACKAGE = ROOT / "packages" / "birefnet"
@@ -21,6 +21,7 @@ MAKEFILE = ROOT / "Makefile"
 MODEL = PACKAGE / "birefnet.py"
 CONFIG = PACKAGE / "BiRefNet_config.py"
 
+BIREFNET = matte_pins()[0]
 CLASSES = ("BiRefNet", "DeformableConv2d", "Decoder")
 
 

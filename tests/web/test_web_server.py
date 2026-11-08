@@ -23,6 +23,8 @@ from PIL.PngImagePlugin import PngInfo
 import pytest
 
 
+from tests._audio_presets import audio_config
+from tests._factories import metadata_copy, use_enhancer_models, use_model_metadata
 from tests.web._helpers import post_video, stub_video_submission, make_resolved_image_defaults, make_web_config, make_workspace_bootstrap_view, patch_image_submit_dependencies, write_png
 
 from zvisiongenerator.downloads.space import SpaceNeed
@@ -47,15 +49,8 @@ from zvisiongenerator.utils.ltx_converted import write_converted_ltx
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.yaml_round_trip import load_round_trip
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
-from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.utils.provenance import embed_png_config
-
-
-@pytest.fixture(autouse=True)
-def _gemma_repo(monkeypatch):
-    """Give the minimal test configs the macOS LTX text encoder reference the Models page reads."""
-    monkeypatch.setattr(workspace_api_module, "ltx_mlx_text_encoder_repo_id", lambda config: "owner/gemma")
 
 
 def _write_png_with_config(path: Path, payload: dict[str, object]) -> None:
@@ -372,7 +367,7 @@ def test_submit_image_job_queues_a_plain_job_with_its_public_context(monkeypatch
     context = job["context"]
     assert response["job_id"] == "job-123"
     assert context == response["context"]
-    assert (context["prompt"], context["model"], context["model_label"], context["workflow"]) == ("hello", "zit", "zit", "txt2img")
+    assert (context["prompt"], context["model"], context["model_label"], context["workflow"]) == ("hello", "zit", "Z-Image Turbo", "txt2img")
     assert "steps" in context["meta"]
     assert context["output_dir"] == str(tmp_path)
     assert context["settings"] == form
@@ -647,7 +642,7 @@ def test_image_submission_ignores_the_scene_field(monkeypatch, tmp_path):
     monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
     monkeypatch.setattr(web_server, "detect_image_model", lambda _model: ImageModelInfo(family="zimage", is_distilled=False, size="xl"))
     monkeypatch.setattr(web_server, "get_backend_name", lambda: "registry-owned")
-    monkeypatch.setattr(web_server, "validate_scheduler", lambda _scheduler, _config: None)
+    monkeypatch.setattr(web_server, "validate_scheduler", lambda _scheduler: None)
     monkeypatch.setattr(web_server, "resolve_defaults", lambda *_args: {"steps": 11, "guidance": 4.0, "scheduler": None, "supports_negative_prompt": True})
     monkeypatch.setattr(web_server.web_runner, "submit_image_request_job", lambda **kwargs: submitted.append(kwargs) or "job-123")
 
@@ -814,7 +809,6 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
         "alias-image": str(tmp_path / "models" / "alias-image"),
         "alias-video": str(tmp_path / "models" / "alias-video"),
     }
-    web_config.app_config["model_labels"] = {"alias-image": {"name": "Alias Image"}, "alias-video": {"name": "Alias Video"}}
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
     monkeypatch.setattr(
         model_inventory_module,
@@ -866,9 +860,9 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
     video_models = {entry["name"]: entry for entry in payload["video_models"]}
 
     assert image_models["local-image"]["source"] == "installed"
-    assert image_models["alias-image"]["label"] == "Alias Image"
+    assert image_models["alias-image"]["label"] == "alias-image"
     assert image_models["local-image"]["label"] == "local-image"
-    assert video_models["alias-video"]["label"] == "Alias Video"
+    assert video_models["alias-video"]["label"] == "alias-video"
     assert image_models["alias-image"]["family"] == "zimage"
     assert image_models["alias-image"]["source"] == "alias"
     assert image_models["local-image"]["size_label"] == "m"
@@ -892,7 +886,8 @@ _SEEDVR2_7B = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.
 
 
 def _models_route_with_seedvr2(monkeypatch, tmp_path, *, copy_files: dict[str, int] | None):
-    """Serve ``GET /api/models`` with SeedVR2 on, its 7B copy holding sparse *copy_files* of the given sizes (or absent when ``None``)."""
+    """Serve ``GET /api/models`` on a Mac with SeedVR2 on, its 7B copy holding sparse *copy_files* of the given sizes (or absent when ``None``)."""
+    monkeypatch.setattr("sys.platform", "darwin")  # the size label is keyed by platform
     copy = seedvr2_weights_dir("seedvr2-7b", tmp_path / "models", MLX_WEIGHTS)
     if copy_files is not None:
         for name, size in copy_files.items():
@@ -949,6 +944,7 @@ def test_models_route_lists_the_fp8_tier_with_its_folder_disk_use(monkeypatch, t
     folder.mkdir(parents=True)
     (folder / "ema_vae_fp16.safetensors").touch()
     os.truncate(folder / "ema_vae_fp16.safetensors", 1_500_000_000)
+    monkeypatch.setattr("sys.platform", "linux")
     web_config.seedvr2 = replace(web_config.seedvr2, downloaded=True, weights=FP8_WEIGHTS)
 
     with TestClient(web_server.app) as client:
@@ -973,6 +969,7 @@ def test_models_route_reads_not_downloaded_after_the_copy_is_deleted(monkeypatch
     from zvisiongenerator.seedvr2_loader import SEEDVR2_STORED_FORMAT, seedvr2_downloaded
     from zvisiongenerator.utils.stored_quant import write_manifest
 
+    monkeypatch.setattr("sys.platform", "darwin")  # the size label is keyed by platform
     models_dir = tmp_path / "models"
     copy = seedvr2_weights_dir("seedvr2-7b", models_dir, MLX_WEIGHTS)
     (copy / "w.safetensors").parent.mkdir(parents=True)
@@ -984,7 +981,9 @@ def test_models_route_reads_not_downloaded_after_the_copy_is_deleted(monkeypatch
     settings = SeedVR2Settings(model="auto", softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(_SEEDVR2_7B,))
 
     def load() -> SimpleNamespace:
-        web_config.seedvr2 = SeedVR2Setup(settings=settings, tier=_SEEDVR2_7B, budget_bytes=None, downloaded=seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS), weights=MLX_WEIGHTS)
+        web_config.seedvr2 = SeedVR2Setup(
+            settings=settings, tier=_SEEDVR2_7B, budget_bytes=None, downloaded=seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS, platform_key="darwin"), weights=MLX_WEIGHTS
+        )
         return web_config
 
     monkeypatch.setattr(web_server, "load_web_config", load)
@@ -996,7 +995,7 @@ def test_models_route_reads_not_downloaded_after_the_copy_is_deleted(monkeypatch
         assert client.delete("/api/models/seedvr2-7b@q8").status_code == 200
         (after,) = client.get("/api/models").json()["image_models"]
 
-    assert (before["downloaded"], before["delete"] is not None, before["disk_size_label"]) == (True, True, "0.0 GB")
+    assert (before["downloaded"], before["delete"] is not None, before["disk_size_label"]) == (True, True, "1 KB")
     assert (after["downloaded"], after["delete"], after["disk_size_label"], after["download_size_label"]) == (False, None, None, "17.0 GB")
     assert not copy.exists()
 
@@ -1017,7 +1016,6 @@ def test_submit_video_job_surfaces_platform_alias_mismatch(monkeypatch):
     web_config.app_config = {
         "model_aliases": {
             "ltx-2.3": {
-                "darwin": {"message": "Alias 'ltx-2.3' is available on Windows and Linux only. On macOS, use 'ltx-4' or 'ltx-8'."},
                 "win32": "dg845/LTX-2.3-Diffusers",
                 "linux": "dg845/LTX-2.3-Diffusers",
             }
@@ -1031,7 +1029,7 @@ def test_submit_video_job_surfaces_platform_alias_mismatch(monkeypatch):
 
     monkeypatch.setattr(web_server.sys, "platform", "darwin")
 
-    with pytest.raises(ValueError, match="available on Windows and Linux only"):
+    with pytest.raises(ValueError, match="not available for darwin"):
         web_server._submit_video_job({"model": "ltx-2.3", "prompt": "a lake"}, web_config)
 
 
@@ -1336,8 +1334,9 @@ def test_submit_video_job_refuses_what_the_model_family_cannot_do(monkeypatch, t
     """A family that lacks a capability refuses the workflow that needs it, whatever the platform supports, and queues nothing."""
     web_config = make_web_config()
     web_config.output_dir = str(tmp_path)
-    ltx = load_config()["video_model_presets"]["ltx"]
-    web_config.app_config["video_model_presets"] = {"ltx": {**ltx, "capabilities": {**ltx["capabilities"], capability: False}}}
+    data = metadata_copy()
+    data["video_families"]["ltx"]["capabilities"][capability] = False
+    use_model_metadata(monkeypatch, tmp_path, data)
     submitted: list[dict[str, object]] = []
     _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
     monkeypatch.setattr(web_server, "_resolve_reference_image", lambda _form, _output_dir, path_key="image_path": form.get(path_key))
@@ -1351,7 +1350,7 @@ def test_submit_video_job_refuses_what_the_model_family_cannot_do(monkeypatch, t
 @pytest.mark.parametrize("supported", [True, False])
 def test_workspace_contract_hides_the_video_review_control_where_unsupported(monkeypatch, supported):
     monkeypatch.setattr(web_server, "supports_video_upscale_review", lambda: supported)
-    definitions = web_server._build_workflow_contract()["definitions"]
+    definitions = web_server._build_workflow_contract(audio_config())["definitions"]
 
     for workflow in ("txt2vid", "img2vid"):
         assert ("video_upscale_review" in definitions[workflow]["visible_controls"]) is supported
@@ -1677,15 +1676,9 @@ def test_submitted_settings_keep_a_typed_last_frame_path_when_nothing_was_upload
     assert settings == {"image_path": "/in/a.png", "end_image_path": "/in/b.png"}
 
 
-def _h3_like_config(web_config) -> None:
-    ltx = load_config()["video_model_presets"]["ltx"]
-    web_config.app_config["video_model_presets"] = {"ltx": {**ltx, "capabilities": {**ltx["capabilities"], "end_frame": True}}}
-
-
 def test_submit_video_job_takes_a_typed_last_frame_path(monkeypatch, tmp_path):
     web_config = make_web_config()
     web_config.output_dir = str(tmp_path / "out")
-    _h3_like_config(web_config)
     first, last = tmp_path / "first.png", tmp_path / "last.png"
     write_png(first)
     write_png(last)
@@ -1705,7 +1698,6 @@ def test_submit_video_job_saves_an_uploaded_last_frame_and_records_it_in_the_job
 
     web_config = make_web_config()
     web_config.output_dir = str(tmp_path / "out")
-    _h3_like_config(web_config)
     first = tmp_path / "first.png"
     write_png(first)
     submitted: list[dict[str, object]] = []
@@ -1725,7 +1717,6 @@ def test_submit_video_job_saves_an_uploaded_last_frame_and_records_it_in_the_job
 def test_submit_video_job_refuses_a_last_frame_without_a_first_frame(monkeypatch, tmp_path):
     web_config = make_web_config()
     web_config.output_dir = str(tmp_path)
-    _h3_like_config(web_config)
     last = tmp_path / "last.png"
     write_png(last)
     _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=[])
@@ -1777,7 +1768,6 @@ def test_image_to_image_without_a_start_image_is_still_refused(monkeypatch, tmp_
 def test_a_video_job_is_recorded_from_its_first_frame_whatever_workflow_was_posted(monkeypatch, tmp_path, posted, with_image, recorded):
     web_config = make_web_config()
     web_config.output_dir = str(tmp_path / "out")
-    _h3_like_config(web_config)
     submitted: list[dict[str, object]] = []
     _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
     form = {"model": "ltx-8", "prompt": "a lake"}
@@ -1798,7 +1788,6 @@ def test_a_video_job_is_recorded_from_its_first_frame_whatever_workflow_was_post
 def test_image_to_video_without_a_first_frame_is_still_refused(monkeypatch, tmp_path):
     web_config = make_web_config()
     web_config.output_dir = str(tmp_path)
-    _h3_like_config(web_config)
     submitted: list[dict[str, object]] = []
     _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
 
@@ -2003,7 +1992,7 @@ class TestModelDownloadPlanRoute:
         web_config = make_web_config()
         web_config.data_dir = str(tmp_path)
         web_config.image_inventory = (ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="owner/zit"),)
-        web_config.app_config["prompt_enhancer"] = {"model": "owner/enhancer"}
+        use_enhancer_models(monkeypatch, tmp_path, fast="owner/enhancer")
         monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
         monkeypatch.setattr(job_downloads_module, "image_plan", lambda *a, **k: (DownloadTarget("owner/zit"), DownloadTarget("owner/vae")))
         monkeypatch.setattr(job_downloads_module, "enhancer_plan", lambda *a, **k: (DownloadTarget("owner/enhancer"),))
@@ -2036,8 +2025,8 @@ class TestModelDownloadPlanRoute:
         payload = response.json()
         assert [(entry["model"], entry["supplier"]) for entry in payload.pop("licences")] == [("zit", "Tongyi-MAI")]
         assert payload == {
-            "label": "zit",
-            "parts": [{"label": "zit", "model": "zit", "bytes": 3_500}],
+            "label": "Z-Image Turbo",
+            "parts": [{"label": "Z-Image Turbo", "model": "zit", "bytes": 3_500}],
             "total_bytes": 3_500,
             "space": {"path": str(tmp_path / "hub"), "needed_bytes": 3_500, "free_bytes": 1_000, "enough": False},
             "unchecked": False,
@@ -2050,7 +2039,7 @@ class TestModelDownloadPlanRoute:
 
     def test_unknown_row_is_404(self, client):
         assert client.get("/api/models/download/plan", params={"kind": "model", "name": "nope"}).status_code == 404
-        assert client.get("/api/models/download/plan", params={"kind": "enhancer", "name": "smart"}).status_code == 404
+        assert client.get("/api/models/download/plan", params={"kind": "enhancer", "name": "custom"}).status_code == 404
         assert client.get("/api/models/download/plan", params={"kind": "bogus", "name": "zit"}).status_code == 404
 
     def test_a_missing_query_field_is_422(self, client):

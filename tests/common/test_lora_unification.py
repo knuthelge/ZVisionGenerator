@@ -28,7 +28,6 @@ def _patch_video_main_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock
             "video_generation": {"default_ratio": "16:9", "default_size": "m"},
             "video_sizes": {"16:9": {"m": {"width": 768, "height": 432}}},
             "video_model_presets": {"ltx": {**load_packaged_config()["video_model_presets"]["ltx"], "upscale": {}}},
-            "model_aliases": {},
         },
     )
     monkeypatch.setattr(video_cli, "select_ratio_size_defaults", lambda *args, **kwargs: ("16:9", "m"))

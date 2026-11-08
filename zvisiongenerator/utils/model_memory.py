@@ -408,7 +408,6 @@ def clip_memory_fit(
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
     env: Mapping[str, str] | None = None,
     model_name: str | None = None,
-    app_config: dict[str, Any],
     family: str = "ltx",
     mode: str = "t2v",
     forwards: int = 8,
@@ -428,7 +427,6 @@ def clip_memory_fit(
         find_local_dir: Locates a downloaded model directory.
         env: The environment to read the decode budget from; the process environment when omitted.
         model_name: The name the model was picked by (``ltx-4``), which sets the quantize level on a discrete GPU.
-        app_config: The loaded config: it names the Gemma 3 text encoder (LTX on macOS), and sets the quantize level and names the single-file transformer (LTX on a discrete GPU).
         family: The model's video family; LTX and H3 have an estimate.
         mode: H3 only: ``"t2v"``, ``"i2v"`` or ``"extend"``; the image modes cost more memory and time (a keyframe, or an extension's tail).
         forwards: H3 only: the transformer forwards of the run, which set the estimated time.
@@ -457,16 +455,15 @@ def clip_memory_fit(
             budget=budget,
             find_local_dir=find_local_dir,
             model_name=model_name,
-            app_config=app_config,
         )
     model_dir = find_local_dir(resolved_model)
     if model_dir is None or not is_ltx_mlx_layout(model_dir):
         return None
     text_encoder_dir = None
     if ltx_mlx_bundled_text_encoder(model_dir) is None:
-        from zvisiongenerator.utils.config import ltx_mlx_text_encoder_repo_id
+        from zvisiongenerator.utils.ltx_facts import ltx_gemma_repo_id
 
-        text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo_id(app_config))
+        text_encoder_dir = find_local_dir(ltx_gemma_repo_id())
         if text_encoder_dir is None:
             return None
     required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=low_memory, upscale=upscale, unified_bytes=budget.unified_bytes, env=env)
@@ -490,27 +487,25 @@ def _h3_clip_fit(width: int, height: int, frames: int, budget: MemoryBudget, *, 
 def ltx_cuda_system_memory(
     resolved_model: str,
     model_name: str | None,
-    app_config: dict[str, Any] | None,
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
 ) -> LtxCudaMemoryEstimate | None:
     """Return the system memory of the LTX model picked as *model_name* on a CUDA machine, or ``None`` when its level or files are unknown.
 
-    The level comes from the config (``ltx-4`` is 4), or from a converted folder's manifest. Nothing is downloaded:
+    The level comes from the model's metadata entry (``ltx-4`` is 4), or from a converted folder's manifest. Nothing is downloaded:
     the files must already be on disk.
     """
     from zvisiongenerator.backends import estimate_ltx_system_memory
-    from zvisiongenerator.utils.config import ltx_diffusers_quantize
+    from zvisiongenerator.utils.ltx_facts import ltx_diffusers_quantize
     from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 
-    config = app_config or {}
-    quantize = ltx_diffusers_quantize(config, model_name)
+    quantize = ltx_diffusers_quantize(model_name)
     if quantize is None:
         # A converted folder (always a local folder) carries its own level.
         converted = read_converted_ltx(Path(resolved_model).expanduser())
         if converted is None:
             return None
         quantize = converted["bits"]
-    return estimate_ltx_system_memory(config, resolved_model, quantize, find_local_dir=find_local_dir, model_name=model_name)
+    return estimate_ltx_system_memory(resolved_model, quantize, find_local_dir=find_local_dir, model_name=model_name)
 
 
 def _cuda_clip_fit(
@@ -524,10 +519,9 @@ def _cuda_clip_fit(
     budget: MemoryBudget,
     find_local_dir: Callable[[str], Path | None],
     model_name: str | None,
-    app_config: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     """Check an LTX clip against a discrete GPU's budget, or return ``None`` when the model's files or level are unknown."""
-    system = ltx_cuda_system_memory(resolved_model, model_name, app_config, find_local_dir)
+    system = ltx_cuda_system_memory(resolved_model, model_name, find_local_dir)
     if system is None:
         return None
     estimate = estimate_ltx_cuda_clip_memory(system, width=width, height=height, frames=frames, low_memory=low_memory, upscale=upscale)

@@ -9,6 +9,7 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+import yaml
 
 from tests._factories import shared_packaged_config, load_packaged_config
 
@@ -205,6 +206,20 @@ def _isolated_app_db(monkeypatch, tmp_path_factory):
 def packaged_config_shared() -> dict[str, Any]:
     """Return the packaged config with no user override, shared by the whole session; read-only (use ``packaged_config`` to change it)."""
     return shared_packaged_config()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _model_metadata_cache_unchanged():
+    """Fail the run if anything wrote into the shared, cached parse of the packaged model metadata.
+
+    At teardown the cached parse must equal a fresh parse of the packaged file. Tests edit ``metadata_copy()`` and serve it
+    through ``use_model_metadata``; app code copies at the merge. Neither may touch what ``load_model_metadata()`` returns.
+    """
+    yield
+    from zvisiongenerator.utils.model_metadata import METADATA_FILE, YAML_LOADER, load_model_metadata
+
+    fresh = yaml.load(METADATA_FILE.read_text(encoding="utf-8"), Loader=YAML_LOADER)
+    assert load_model_metadata() == fresh, "The cached model metadata was written into; edit metadata_copy() instead."
 
 
 @pytest.fixture

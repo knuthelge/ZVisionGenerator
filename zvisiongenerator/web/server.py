@@ -53,17 +53,16 @@ from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, Settle
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
+from zvisiongenerator.utils.model_metadata import alias_map, model_display_name
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.audio_request import check_seed
 from zvisiongenerator.utils.audio_track import probe_track_seconds, require_readable_track
 from zvisiongenerator.utils.atomic_write import write_bytes_atomic
+from zvisiongenerator.utils.enhancer_models import ENHANCER_TIERS
 from zvisiongenerator.utils.config import (
-    ENHANCER_TIERS,
-    enhancer_tier_models,
+    configured_enhancer_models,
     load_config,
-    model_display_name,
-    model_reference,
     resolve_defaults,
     resolve_enhancer_model,
     resolve_upscale_steps,
@@ -71,6 +70,7 @@ from zvisiongenerator.utils.config import (
     validate_sharpen_amount,
     video_family,
 )
+from zvisiongenerator.utils.paths import join_huggingface_revision
 from zvisiongenerator.utils.enhance_record import parse_enhance_record
 from zvisiongenerator.utils.lora_trigger import clean_trigger
 from zvisiongenerator.utils.curated_loras import curated_by_id
@@ -779,7 +779,7 @@ def _run_enhancement(job: dict[str, Any], frames: queue.Queue[dict[str, Any]], c
             with session.acquire(job["repo"], job["revision"], idle_seconds=job["idle_seconds"], on_phase=lambda phase: frames.put({"type": "status", "phase": phase})) as enhancer:
                 frames.put({"type": "status", "phase": "generating_cpu" if runs_on_cpu(enhancer) else "generating"})
                 result = _enhance_for_job(job, enhancer, frames, cancelled)
-        frames.put(_enhance_done_frame(job["mode"], result, model=model_reference(job["repo"], job["revision"]), task=job.get("task")))
+        frames.put(_enhance_done_frame(job["mode"], result, model=join_huggingface_revision(job["repo"], job["revision"]), task=job.get("task")))
     except NoChangeError as exc:
         # A writer that left the text as it was: the Web UI shows it as a note, not an error.
         frames.put({"type": "error", "detail": str(exc), "no_change": True})
@@ -1204,7 +1204,7 @@ def _parse_upscale_body(body: Any) -> ParsedUpscale:
     try:
         source = read_upscale_source(source_path)
         if use_seedvr2:
-            plan = plan_seedvr2_upscale(source, factor, setup=setup)
+            plan = plan_seedvr2_upscale(source, factor, setup=setup, platform_key=sys.platform)
         else:
             plan = plan_upscale(source, factor, web_config, backend_name=get_backend_name())
     except FileNotFoundError as exc:
@@ -1219,7 +1219,7 @@ def _parse_upscale_body(body: Any) -> ParsedUpscale:
         "job_type": "Upscale",
         "prompt": generation_prompt(plan.request.prompt, plan.request.resolved_prompt),
         "model": upscale_model,
-        "model_label": model_display_name(web_config.app_config, upscale_model),
+        "model_label": model_display_name(upscale_model),
         "runs": 1,
         "meta": upscale_size_label(plan),
         "width": plan.option.width,
@@ -1267,7 +1267,7 @@ def _parse_video_upscale(source_path: Path, factor: int, method: str) -> ParsedU
         "upscale_method": UPSCALE_METHOD_SEEDVR2,
         "prompt": source.prompt or "",
         "model": upscale_model,
-        "model_label": model_display_name(web_config.app_config, upscale_model),
+        "model_label": model_display_name(upscale_model),
         "runs": 1,
         "meta": video_upscale_size_label(plan),
         "width": plan.request.width,
@@ -1296,7 +1296,7 @@ def _parse_ltx_video_upscale(source: ExtendSource, recorded_config: dict[str, An
         "upscale_method": UPSCALE_METHOD_LTX,
         "prompt": request.prompt,
         "model": request.model_name,
-        "model_label": model_display_name(web_config.app_config, request.model_name),
+        "model_label": model_display_name(request.model_name),
         "runs": 1,
         "meta": video_upscale_size_label(plan),
         "width": request.width,
@@ -1435,9 +1435,9 @@ def _workflow_from_form(value: str | None, *, fallback: str) -> str:
     return workflow
 
 
-def _build_workflow_contract(app_config: dict[str, Any] | None = None) -> dict[str, Any]:
+def _build_workflow_contract(app_config: dict[str, Any]) -> dict[str, Any]:
     """Build the workflow contract; the audio workflows are listed for the kinds of the models in *app_config* that run on this machine."""
-    audio_models = runnable_audio_models(app_config or {})
+    audio_models = runnable_audio_models(app_config)
     return build_workflow_contract(
         video_audio=supports_video_audio(),
         video_upscale_review=supports_video_upscale_review(),
@@ -1525,7 +1525,7 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         raise ValueError("Image to image requires a start image.")
     _validate_image_args(args, quantize_options=web_config.quantize_options)
 
-    resolved_model = resolve_model_path(args.model, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
+    resolved_model = resolve_model_path(args.model, aliases=alias_map(app_config), platform_key=sys.platform)
     model_info = detect_image_model(resolved_model)
     defaults = resolve_defaults(
         model_info,
@@ -1579,7 +1579,7 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
     args.guidance = defaults["guidance"]
     # A model with its own sampler ignores a scheduler carried over from another model, as with negative prompts.
     args.scheduler = defaults["scheduler"] if defaults.get("supports_scheduler", True) else None
-    validate_scheduler(args.scheduler, app_config)
+    validate_scheduler(args.scheduler)
     if args.upscale and args.upscale_steps is None:
         args.upscale_steps = resolve_upscale_steps(defaults, args.steps)
     if args.upscale_sharpen is None:
@@ -1641,7 +1641,7 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         job_type="Image to Image" if args.image_path else "Text to Image",
         workflow="img2img" if args.image_path else "txt2img",
         model=model_name,
-        model_label=model_display_name(app_config, model_name),
+        model_label=model_display_name(model_name),
         prompt=prompt,
         runs=args.runs,
         # A custom size has no ratio or size preset of its own; the ratio fields hold the form's defaults.
@@ -1832,7 +1832,7 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         job_type=job_type,
         workflow="extend" if source is not None else ("img2vid" if image_path else "txt2vid"),
         model=model_name,
-        model_label=model_display_name(app_config, model_name),
+        model_label=model_display_name(model_name),
         prompt=prompt or scene or "",
         runs=args.runs,
         meta=meta,
@@ -2250,7 +2250,6 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
         upscale=bool(upscale),
         budget=memory_budget(),
         model_name=model_name,
-        app_config=app_config,
         family=model_info.family,
         mode="i2v" if image else "t2v",
         forwards=forwards or 8,
@@ -2952,7 +2951,7 @@ def api_delete_model(name: str) -> dict[str, Any]:
     entry = next((entry for entry in (*web_config.image_inventory, *web_config.video_inventory) if entry.name == name), None)
     inventory = (*web_config.image_inventory, *web_config.video_inventory)
     models_dir = Path(web_config.data_dir) / "models"
-    target = model_delete_target(entry, models_dir, **delete_scope(entry, inventory, web_config.app_config, models_dir=models_dir, platform_key=sys.platform)) if entry is not None else None
+    target = model_delete_target(entry, models_dir, **delete_scope(entry, inventory, models_dir=models_dir, platform_key=sys.platform)) if entry is not None else None
     if entry is None and web_config.seedvr2 is not None:
         target = _seedvr2_copy_target(name, web_config.seedvr2, Path(web_config.models_dir))
     if target is None:
@@ -2971,7 +2970,7 @@ def api_delete_model(name: str) -> dict[str, Any]:
 
 @app.delete("/api/audio-models/{name}")
 def api_delete_audio_model(name: str) -> dict[str, Any]:
-    """Delete the downloads of the audio model *name*; its preset stays in config."""
+    """Delete the downloads of the audio model *name*; its preset stays."""
     _ensure_no_active_job()
     web_config = load_web_config()
     not_downloaded = HTTPException(status_code=404, detail=f"No downloaded audio model named '{name}'.")
@@ -2979,7 +2978,7 @@ def api_delete_audio_model(name: str) -> dict[str, Any]:
         preset = find_audio_model(web_config.app_config, name)
     except ValueError as exc:
         raise not_downloaded from exc
-    target = audio_delete_target(preset)
+    target = audio_delete_target(preset, platform_key=sys.platform)
     if target is None or not target.on_disk:
         raise not_downloaded
     # Every repository of the plan counts, also one the running download has not created in the cache yet.
@@ -2996,7 +2995,7 @@ def api_delete_audio_model(name: str) -> dict[str, Any]:
 @app.delete("/api/enhancer-models/{tier}")
 def api_delete_enhancer_model(tier: str) -> dict[str, Any]:
     """Delete the HuggingFace download of the prompt-enhancer model configured for *tier* (``fast``, ``smart``, ``custom``)."""
-    model = enhancer_tier_models(load_web_config().app_config, platform_key=sys.platform).get(tier)
+    model = configured_enhancer_models(load_web_config().app_config, platform_key=sys.platform).get(tier)
     target = enhancer_delete_target(model[0]) if model is not None else None
     if target is None:
         raise HTTPException(status_code=404, detail=f"No downloaded enhancer model for '{tier}'.")

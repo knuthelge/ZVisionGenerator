@@ -8,7 +8,8 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.utils.config import model_reference, resolve_enhancer_model
+from zvisiongenerator.utils.paths import join_huggingface_revision
+from zvisiongenerator.utils.config import resolve_enhancer_model
 from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhancement_requested
 
@@ -22,7 +23,7 @@ type PhaseCallback = Callable[[str], None]
 
 def is_model_downloaded(repo: str, revision: str | None) -> bool:
     """Return whether the enhancer weights are a local directory or fully in the Hugging Face cache."""
-    return find_local_model_dir(model_reference(repo, revision)) is not None
+    return find_local_model_dir(join_huggingface_revision(repo, revision)) is not None
 
 
 def runs_on_cpu(enhancer: PromptEnhancer) -> bool:
@@ -45,7 +46,7 @@ def ensure_available(repo: str, revision: str | None, *, downloaded: Callable[[s
     if downloaded(repo, revision):
         return True
     if offline():
-        raise RuntimeError(f"Enhancer model {model_reference(repo, revision)} is not downloaded and Hugging Face is offline.")
+        raise RuntimeError(f"Enhancer model {join_huggingface_revision(repo, revision)} is not downloaded and Hugging Face is offline.")
     return False
 
 

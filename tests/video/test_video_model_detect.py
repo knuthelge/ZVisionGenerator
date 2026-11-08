@@ -123,27 +123,6 @@ class TestDetectVideoModel:
         assert info.family == expected_family
         assert info.supports_i2v == expected_i2v
 
-    def test_detects_configured_default_repo(self, monkeypatch):
-        monkeypatch.setattr(
-            "zvisiongenerator.utils.video_model_detect._configured_diffusers_ltx_repo",
-            lambda: "custom/LTX-2.3",
-        )
-
-        info = detect_video_model("custom/LTX-2.3")
-
-        assert info.family == "ltx"
-        assert info.backend == "ltx"
-
-    def test_configured_default_repo_is_read_fresh(self, monkeypatch):
-        repos = iter(["custom/old-ltx", "custom/new-ltx"])
-        monkeypatch.setattr(
-            "zvisiongenerator.utils.config.load_config",
-            lambda: {"video_model_presets": {"ltx": {"diffusers": {"default_repo": next(repos)}}}},
-        )
-
-        assert detect_video_model("custom/old-ltx").family == "ltx"
-        assert detect_video_model("custom/new-ltx").family == "ltx"
-
     def test_arbitrary_huggingface_ltx_repo_stays_unknown(self):
         info = detect_video_model("your-org/ltx-custom-diffusers")
 

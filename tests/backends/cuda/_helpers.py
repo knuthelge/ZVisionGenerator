@@ -400,8 +400,8 @@ def install_fake_weights(monkeypatch):
         calls.prepared_names.append(model_name)
         return Path("/fake/cache/transformer"), Path("/fake/cache/text-encoder")
 
-    def _repo_dir(model_path, *, with_transformer):
-        calls.repo_dirs.append(with_transformer)
+    def _repo_dir(model_path, *, ignore):
+        calls.repo_dirs.append(tuple(ignore))
         return Path("/fake/repo")
 
     def _check_memory(estimate, quantize, *, converted):

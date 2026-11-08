@@ -7,6 +7,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from zvisiongenerator.utils.config import load_config
+from zvisiongenerator.utils.model_metadata import alias_map, model_download_size_label
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 from zvisiongenerator.web import config_contract as config_contract_module
 from zvisiongenerator.web import server as web_server
@@ -81,17 +82,16 @@ class TestPackagedFirstRunConfig:
         return load_config()
 
     @pytest.mark.parametrize("alias", ["zit", "klein9b", "klein4b", "krea2", "ideo"])
-    def test_an_image_alias_has_a_size_label_for_every_platform(self, config, alias):
-        sizes = config["model_labels"][alias]["download_size_label"]
+    def test_an_image_alias_has_a_size_label_for_every_platform(self, alias):
+        sizes = {platform_key: model_download_size_label(alias, platform_key) for platform_key in ("darwin", "win32", "linux")}
 
-        assert set(sizes) == {"darwin", "win32", "linux"}
         assert all(isinstance(label, str) and label.endswith(" GB") for label in sizes.values())
 
     def test_the_first_run_models_are_aliases(self, config):
         section = config["first_run"]
 
-        assert section["large_model"] in config["model_aliases"]
-        assert section["small_model"] in config["model_aliases"]
+        assert section["large_model"] in alias_map(config)
+        assert section["small_model"] in alias_map(config)
         assert section["min_memory_gb"] > 0
 
     def test_the_dialog_starts_unskipped(self, config):

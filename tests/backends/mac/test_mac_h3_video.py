@@ -39,7 +39,8 @@ from zvisiongenerator.core.video_backend import VideoBackend  # noqa: E402
 from zvisiongenerator.core.video_family import FrameRule  # noqa: E402
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment  # noqa: E402
 from zvisiongenerator.utils import hf_snapshot  # noqa: E402
-from zvisiongenerator.utils.h3_preset import H3MlxFiles, H3MlxPreset, H3Schedule, HubFiles  # noqa: E402
+from zvisiongenerator.downloads.target import HubFiles  # noqa: E402
+from zvisiongenerator.utils.h3_preset import H3MlxFiles, H3MlxPreset, H3Schedule  # noqa: E402
 
 HIDDEN = 8
 FF = 6
@@ -1074,10 +1075,9 @@ SHIPPED_LOAD_ARGUMENTS = {"sigma_shift_video": 6.0, "sigma_shift_audio": 3.0, "t
 
 
 def _shipped_schedules() -> dict[int, H3Schedule]:
-    from zvisiongenerator.utils.config import load_config
     from zvisiongenerator.utils.h3_preset import h3_mlx_load_options
 
-    return h3_mlx_load_options(load_config(), "h3")["preset"].schedules
+    return h3_mlx_load_options("h3")["preset"].schedules
 
 
 SHIPPED_SCHEDULES = _shipped_schedules()
@@ -1085,10 +1085,9 @@ SHIPPED_SCHEDULES = _shipped_schedules()
 
 def _shipped_load(env: SimpleNamespace, mode: str) -> Any:
     """Load the model from the options the packaged config produces on macOS, as a real run does."""
-    from zvisiongenerator.utils.config import load_config
     from zvisiongenerator.utils.h3_preset import h3_mlx_load_options
 
-    options = h3_mlx_load_options(load_config(), "h3")
+    options = h3_mlx_load_options("h3")
     model, _ = H3MlxVideoBackend().load_model(MODEL_REF, mode=mode, models_dir=env.tmp / "models", **options)
     return model
 

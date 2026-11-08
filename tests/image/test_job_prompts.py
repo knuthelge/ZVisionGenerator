@@ -24,12 +24,11 @@ from zvisiongenerator.workflows.generation_prompt import BACKGROUND_SUFFIX
 _MODEL_INFO = ImageModelInfo(family="zimage", is_distilled=False, size=None)
 
 
-def _config(*, supports_negative: bool = True, max_references: int = 0) -> dict:
+def _config() -> dict:
     return {
         "sizes": {"2:3": {"m": {"width": 512, "height": 512}}},
         "generation": {"seed_min": 1, "seed_max": 100},
         "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-        "model_presets": {"zimage": {"supports_negative_prompt": supports_negative, "max_reference_images": max_references}},
     }
 
 
@@ -111,12 +110,12 @@ class TestJobPrompts:
         assert backend.prepare_prompts.call_args.args[1] == (JobPrompt(f"a cat{BACKGROUND_SUFFIX}", None),)
 
 
-def _run(backend, model, prompts, args, *, plan=None, skip_signal=None, config=None, workflow=None):
+def _run(backend, model, prompts, args, *, plan=None, skip_signal=None, config=None, workflow=None, model_info=_MODEL_INFO):
     cfg = config or _config()
     plan = plan or _make_plan(prompts, args, config=cfg)
     patcher = patch("zvisiongenerator.image_runner.build_workflow", return_value=workflow) if workflow is not None else patch("zvisiongenerator.image_runner.build_workflow", wraps=build_workflow)
     with patcher:
-        run_batch(backend, model, prompts, cfg, args, model_info=_MODEL_INFO, plan=plan, skip_signal=skip_signal)
+        run_batch(backend, model, prompts, cfg, args, model_info=model_info, plan=plan, skip_signal=skip_signal)
 
 
 def _noop_workflow() -> GenerationWorkflow:
@@ -217,7 +216,10 @@ def _prompts_sent(backend) -> list[tuple[str, str | None]]:
     ],
 )
 def test_every_prompt_and_generation_size_a_generation_sends_was_prepared(tmp_path, scenario, supports_negative, args_overrides, retry):
-    config = _config(supports_negative=supports_negative, max_references=4 if scenario.startswith("references") else 0)
+    config = _config()
+    # The family decides what the model takes: FLUX.2 Klein takes references, FLUX.2 ignores negatives, Z-Image takes them.
+    family = "flux2_klein" if scenario.startswith("references") else "zimage" if supports_negative else "flux2"
+    model_info = ImageModelInfo(family=family, is_distilled=False, size=None)
     prompts = {"s": [("a {red|blue|green|black} cat", "blurry"), ("a dog", None)], "t": [("a {x|y|z} bird", "")]}
     args = _make_args(output=str(tmp_path / "out"), sharpen=False, seed=None, **args_overrides)
     if scenario == "img2img":
@@ -239,7 +241,7 @@ def test_every_prompt_and_generation_size_a_generation_sends_was_prepared(tmp_pa
     backend = _recording_backend()
     workflow = _with_one_retry(args) if retry else build_workflow(args, enhance=True)
 
-    _run(backend, MagicMock(spec=[]), prompts, args, plan=plan, config=config, workflow=workflow, skip_signal=skip_signal)
+    _run(backend, MagicMock(spec=[]), prompts, args, plan=plan, config=config, workflow=workflow, skip_signal=skip_signal, model_info=model_info)
 
     prepared = backend.prepare_prompts.call_args.args[1]
     assert backend.prepare_prompts.call_count == 1

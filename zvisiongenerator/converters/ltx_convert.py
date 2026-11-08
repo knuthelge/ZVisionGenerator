@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.converters.ltx_checkpoint import LtxCheckpoint, check_lora, distillation, inspect_checkpoint, require_version
-from zvisiongenerator.utils.config import ltx_distilled_lora_licence, ltx_distilled_lora_source, ltx_version_for_type
+from zvisiongenerator.utils.ltx_facts import ltx_distilled_lora_licence, ltx_distilled_lora_source, ltx_version_for_type
 from zvisiongenerator.converters.convert_target import Progress, checked_target, write_into
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.licence_cli import print_record_notice
@@ -95,31 +95,26 @@ def convert_ltx(input_path: Path, models_dir: Path, name: str, bits: int, *, dis
     print(inspection.advice if not (distill and inspection.distillation == "dev") else f"This is plain LTX-{checkpoint.version} dev: merging Lightricks' distilled LoRA.")
     if distill and inspection.distillation == "distilled":
         print("Warning: --distill merges Lightricks' distilled LoRA into a checkpoint that already carries its distillation.")
-    version = ltx_version_for_type(config, model_type)
-    lora = _distilled_lora(config, version, checkpoint.version) if distill else None
+    version = ltx_version_for_type(model_type)
+    lora = _distilled_lora(version, checkpoint.version) if distill else None
     if lora is not None:
         check_lora(checkpoint, lora)
     from zvisiongenerator.backends import convert_ltx_checkpoint
 
-    return write_into(target, lambda partial: convert_ltx_checkpoint(checkpoint, partial, bits, config=config, version=version, models_dir=models_dir, lora=lora, report=Progress()))
+    return write_into(target, lambda partial: convert_ltx_checkpoint(checkpoint, partial, bits, version=version, models_dir=models_dir, lora=lora, report=Progress()))
 
 
-def _distilled_lora(config: dict[str, Any], version: str | None, label: str) -> Path:
-    """Return the local path of Lightricks' distilled LoRA of LTX version block *version* (LTX-*label*), downloading it once into the Hugging Face cache.
+def _distilled_lora(version: str | None, label: str) -> Path:
+    """Return the local path of Lightricks' distilled LoRA of LTX version *version* (LTX-*label*), downloading it once into the Hugging Face cache.
 
     Raises:
-        RuntimeError: When it isn't configured or can't be downloaded.
+        RuntimeError: When it can't be downloaded.
     """
-    source = ltx_distilled_lora_source(config, version)
-    if source is None:
-        raise RuntimeError(f"--distill needs Lightricks' LTX-{label} distilled LoRA (distilled_lora: repo and filename) in the config.")
     from huggingface_hub import hf_hub_download
 
-    reference, filename = source
+    reference, filename = ltx_distilled_lora_source(version)
     repo, revision = split_huggingface_revision(reference)
-    record = ltx_distilled_lora_licence(config, version)
-    if record is not None:
-        print_record_notice(record, lambda: (DownloadTarget(repo, revision, allow_patterns=(filename,)),))
+    print_record_notice(ltx_distilled_lora_licence(version), lambda: (DownloadTarget(repo, revision, allow_patterns=(filename,)),))
     print(f"Getting Lightricks' LTX-{label} distilled LoRA ({filename}, 8 to 9 GB the first time)...", flush=True)
     try:
         return Path(hf_hub_download(repo_id=repo, filename=filename, revision=revision))

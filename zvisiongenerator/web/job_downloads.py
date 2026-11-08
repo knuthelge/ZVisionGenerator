@@ -13,11 +13,14 @@ from zvisiongenerator.backends import get_seedvr2_upscaler
 from zvisiongenerator.backends import prompt_enhancer_session
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
-from zvisiongenerator.downloads import DownloadTarget, audio_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, target_present_offline, video_plan
+from zvisiongenerator.downloads import DownloadTarget, target_present_offline
+from zvisiongenerator.downloads.plans import audio_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_plan
+from zvisiongenerator.utils.model_metadata import model_display_name
 from zvisiongenerator.utils.audio_preset import AudioPreset
-from zvisiongenerator.utils.config import enhancer_tier_models, model_display_name, model_reference, resolve_enhancer_model
-from zvisiongenerator.utils.licences import ENHANCER_LICENCE_TIERS, MATTE_LICENCE_MODEL, enhancer_licence_model
-from zvisiongenerator.utils.matte_models import MATTE_LABEL
+from zvisiongenerator.utils.config import configured_enhancer_models, resolve_enhancer_model
+from zvisiongenerator.utils.paths import join_huggingface_revision
+from zvisiongenerator.utils.enhancer_models import ENHANCER_TIERS, enhancer_model_id
+from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
@@ -74,29 +77,29 @@ class JobDownloadPart:
     targets: Targets
 
 
-def image_model_part(name: str, model_ref: str, *, family: str, config: dict[str, Any], platform_key: str) -> JobDownloadPart:
+def image_model_part(name: str, model_ref: str, *, family: str, platform_key: str) -> JobDownloadPart:
     """Return the part for the image model *name* (an alias or a path) that loads from *model_ref*, labelled as the Web UI names it."""
-    label = model_display_name(config, name)
-    return JobDownloadPart(label, name, ROLE_MODEL, image_plan(model_ref, family=family, config=config, platform_key=platform_key))
+    label = model_display_name(name)
+    return JobDownloadPart(label, name, ROLE_MODEL, image_plan(model_ref, family=family, platform_key=platform_key))
 
 
-def video_model_part(name: str, model_ref: str, *, family: str, config: dict[str, Any], upscale: bool) -> JobDownloadPart:
-    """Return the part for the video model *name* that loads from *model_ref* (with the upscale's files when it *upscale*s).
-
-    Raises:
-        ValueError: If the ``video_model_presets`` config entries of the family are malformed.
-    """
-    label = model_display_name(config, name)
-    return JobDownloadPart(label, name, ROLE_MODEL, video_plan(model_ref, family=family, config=config, model_name=name, upscale=upscale))
-
-
-def ltx_video_upscale_part(request: LtxVideoUpscaleRequest, config: dict[str, Any]) -> JobDownloadPart:
-    """Return the part for the LTX model that refines an upscale of a video file, with the upscale's files.
+def video_model_part(name: str, model_ref: str, *, family: str, config: dict[str, Any], platform_key: str, upscale: bool) -> JobDownloadPart:
+    """Return the part for the video model *name* that loads from *model_ref* on *platform_key* (with the upscale's files when it *upscale*s).
 
     Raises:
-        ValueError: If the ``video_model_presets`` config entries of the family are malformed.
+        ValueError: If a video setting of the family in *config* is malformed.
     """
-    return video_model_part(request.model_name, request.model_ref, family="ltx", config=config, upscale=True)
+    label = model_display_name(name)
+    return JobDownloadPart(label, name, ROLE_MODEL, video_plan(model_ref, family=family, config=config, model_name=name, platform_key=platform_key, upscale=upscale))
+
+
+def ltx_video_upscale_part(request: LtxVideoUpscaleRequest, config: dict[str, Any], *, platform_key: str) -> JobDownloadPart:
+    """Return the part for the LTX model that refines an upscale of a video file on *platform_key*, with the upscale's files.
+
+    Raises:
+        ValueError: If a video setting of the family in *config* is malformed.
+    """
+    return video_model_part(request.model_name, request.model_ref, family="ltx", config=config, platform_key=platform_key, upscale=True)
 
 
 def audio_model_part(preset: AudioPreset, *, voice: bool = False) -> JobDownloadPart:
@@ -106,29 +109,29 @@ def audio_model_part(preset: AudioPreset, *, voice: bool = False) -> JobDownload
 
 def matte_part() -> JobDownloadPart:
     """Return the part for the background removal models of a transparent job."""
-    return JobDownloadPart(MATTE_LABEL, MATTE_LICENCE_MODEL, ROLE_MATTE, matte_plan())
+    return JobDownloadPart(model_display_name(MATTE_LICENCE_MODEL), MATTE_LICENCE_MODEL, ROLE_MATTE, matte_plan())
 
 
-def seedvr2_tier_part(model_name: str, weights: SeedVR2Weights, models_dir: Path) -> JobDownloadPart:
-    """Return the part for SeedVR2 tier *model_name* as *weights* run it, with its files under *models_dir*."""
+def seedvr2_tier_part(model_name: str, weights: SeedVR2Weights, models_dir: Path, *, platform_key: str) -> JobDownloadPart:
+    """Return the part for SeedVR2 tier *model_name* as *weights* run it on *platform_key*, with its files under *models_dir*."""
     label = seedvr2_tier_label(model_name, weights)
-    return JobDownloadPart(label, model_name, ROLE_MODEL, seedvr2_plan(model_name, models_dir=models_dir, weights=weights))
+    return JobDownloadPart(label, model_name, ROLE_MODEL, seedvr2_plan(model_name, platform_key=platform_key, models_dir=models_dir, weights=weights))
 
 
-def seedvr2_part(model_name: str | None) -> JobDownloadPart:
+def seedvr2_part(model_name: str | None, *, platform_key: str) -> JobDownloadPart:
     """Return the part for SeedVR2 tier *model_name*; its targets are ``None`` when this platform has no SeedVR2 engine."""
     upscaler = get_seedvr2_upscaler()
     if upscaler is None:
         # The load reports that this platform has no SeedVR2 engine.
         return JobDownloadPart(str(model_name), str(model_name), ROLE_MODEL, None)
-    return seedvr2_tier_part(str(model_name), upscaler.weights, get_ziv_data_dir() / "models")
+    return seedvr2_tier_part(str(model_name), upscaler.weights, get_ziv_data_dir() / "models", platform_key=platform_key)
 
 
-def upscale_model_part(request: ImageGenerationRequest, model_ref: str, config: dict[str, Any], *, platform_key: str) -> JobDownloadPart:
+def upscale_model_part(request: ImageGenerationRequest, model_ref: str, *, platform_key: str) -> JobDownloadPart:
     """Return the part for the model an image upscale loads: the SeedVR2 tier or the creative refinement model."""
     if request.upscale_method == UPSCALE_METHOD_SEEDVR2:
-        return seedvr2_part(request.upscale_model)
-    return image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=platform_key)
+        return seedvr2_part(request.upscale_model, platform_key=platform_key)
+    return image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, platform_key=platform_key)
 
 
 def enhancer_part(repo: str, revision: str | None, config: dict[str, Any], *, platform_key: str, tier: str | None = None) -> JobDownloadPart:
@@ -158,20 +161,20 @@ def job_download_parts(
         ValueError: If *model_ref* is missing for a job that needs it, no enhancer is configured, or a video preset is malformed.
     """
     if isinstance(request, VideoFileUpscaleRequest):
-        return (seedvr2_part(request.upscale_model),)
+        return (seedvr2_part(request.upscale_model, platform_key=platform_key),)
     if isinstance(request, LtxVideoUpscaleRequest):
-        return (ltx_video_upscale_part(request, config),)
+        return (ltx_video_upscale_part(request, config, platform_key=platform_key),)
     if model_ref is None:
         raise ValueError("model_ref is required to plan an image or video job.")
     if isinstance(request, VideoGenerationRequest):
         return (
             *_enhancer_parts(args, enhance_by_set, config, platform_key),
-            video_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, upscale=bool(request.upscale)),
+            video_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=platform_key, upscale=bool(request.upscale)),
         )
     matte = (matte_part(),) if request.transparent else ()
     if request.upscale_source is not None:
-        return (upscale_model_part(request, model_ref, config, platform_key=platform_key), *matte)
-    image = image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=platform_key)
+        return (upscale_model_part(request, model_ref, platform_key=platform_key), *matte)
+    image = image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, platform_key=platform_key)
     return (*_enhancer_parts(args, enhance_by_set, config, platform_key), image, *matte)
 
 
@@ -245,12 +248,12 @@ def _unchecked_enhancer(config: dict[str, Any], platform_key: str, cli_model: st
 
 def _enhancer_part(repo: str, revision: str | None, tier: str | None, targets: Targets) -> JobDownloadPart:
     """Return an enhancer part labelled "Smart enhancer model" for its *tier*, or by its reference when it has none."""
-    reference = model_reference(repo, revision)
+    reference = join_huggingface_revision(repo, revision)
     label = f"{tier.capitalize()} enhancer model" if tier else reference
-    model_id = enhancer_licence_model(tier) if tier in ENHANCER_LICENCE_TIERS else reference
+    model_id = enhancer_model_id(tier) if tier in ENHANCER_TIERS else reference
     return JobDownloadPart(label, model_id, ROLE_ENHANCER, targets)
 
 
 def _enhancer_tier(config: dict[str, Any], platform_key: str, repo: str, revision: str | None) -> str | None:
     """Return the configured enhancer tier whose model is ``(repo, revision)``, or ``None`` for a model no tier names."""
-    return next((tier for tier, model in enhancer_tier_models(config, platform_key=platform_key).items() if model == (repo, revision)), None)
+    return next((tier for tier, model in configured_enhancer_models(config, platform_key=platform_key).items() if model == (repo, revision)), None)

@@ -49,7 +49,7 @@ class AudioGenerationRequest:
     """One take of audio.
 
     Attributes:
-        preset: The audio model id (the key in ``audio_model_presets``).
+        preset: The audio model id (the key of its ``models`` entry in the model metadata).
         kind: ``music``, ``speech`` or ``sound``.
         prompt: The style of a song, the text of speech, or the description of a sound.
         lyrics: The lyrics of a song; empty for an instrumental or any other kind.

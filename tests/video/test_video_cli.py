@@ -10,7 +10,7 @@ from huggingface_hub.utils import httpx
 import pytest
 from huggingface_hub.errors import GatedRepoError
 
-from tests._factories import make_extend_source
+from tests._factories import make_extend_source, metadata_copy, packaged_metadata_copy, use_model_metadata, video_config
 from tests.video._helpers import make_ltx_info, patch_video_cli_for_preflight
 
 from zvisiongenerator import video_cli
@@ -19,11 +19,7 @@ from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser
 
-_LTX_FAMILY = {
-    key: value
-    for key, value in load_config()["video_model_presets"]["ltx"].items()
-    if key in ("label", "default_steps", "max_steps", "frame_rule", "extend_frame_step", "carry_frames", "capabilities")
-}
+_LTX_SETTINGS = video_config()["video_model_presets"]["ltx"]
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +78,7 @@ class TestVideoCliExecution:
     def test_main_reports_unknown_model_guidance_with_the_ltx_aliases(self, monkeypatch, capsys):
         import zvisiongenerator.video_cli as video_cli
 
-        monkeypatch.setattr(video_cli, "load_config", lambda: {"model_aliases": {}})
+        monkeypatch.setattr(video_cli, "load_config", lambda: {})
         monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
         monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
         monkeypatch.setattr(
@@ -117,8 +113,7 @@ class TestVideoCliExecution:
             lambda: {
                 "video_generation": {"default_ratio": "16:9", "default_size": "m"},
                 "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
-                "video_model_presets": {"ltx": {**_LTX_FAMILY, "upscale": {}}},
-                "model_aliases": {},
+                "video_model_presets": {"ltx": {**_LTX_SETTINGS, "upscale": {}}},
             },
         )
         monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
@@ -140,24 +135,13 @@ class TestVideoCliExecution:
         assert "org/lora" in err
         backend.load_model.assert_not_called()
 
-    def test_main_reports_platform_alias_mismatch_via_parser_error(self, monkeypatch):
+    def test_main_reports_platform_alias_mismatch_via_parser_error(self, monkeypatch, tmp_path):
         import zvisiongenerator.video_cli as video_cli
 
-        monkeypatch.setattr(
-            video_cli,
-            "load_config",
-            lambda: {
-                "model_aliases": {
-                    "ltx-4": {
-                        "darwin": "dgrauet/ltx-2.3-mlx-q4",
-                        "win32": {"message": "Alias 'ltx-4' is macOS-only. On Windows, use 'ltx-2.3' for the CUDA diffusers backend."},
-                    }
-                }
-            },
-        )
+        monkeypatch.setattr(video_cli, "load_config", lambda: {"model_aliases": {"mac-only": {"darwin": "dgrauet/ltx-2.3-mlx-q4"}}})
         monkeypatch.setattr(video_cli.sys, "platform", "win32")
 
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog"]):
+        with patch("sys.argv", ["ziv-video", "-m", "mac-only", "--prompt", "a dog"]):
             with pytest.raises(SystemExit, match="2"):
                 video_cli.main()
 
@@ -214,14 +198,13 @@ class TestVideoCliExecution:
         assert model.turbo_lora_alpha == 0.0625 * 4
 
     @staticmethod
-    def _run_main_for_load_kwargs(monkeypatch, tmp_path, *, preset_extra, extra_argv):
+    def _run_main_for_load_kwargs(monkeypatch, tmp_path, *, extra_argv):
         """Run ``main`` with a stubbed backend and return that backend's mock."""
         import zvisiongenerator.video_cli as video_cli
 
         model_info = make_ltx_info()
         backend = MagicMock()
         backend.load_model.return_value = (MagicMock(), model_info)
-        ltx_preset = {**_LTX_FAMILY, "upscale": {"default_upscale_steps": 8}, **preset_extra}
 
         monkeypatch.setattr(
             video_cli,
@@ -229,7 +212,7 @@ class TestVideoCliExecution:
             lambda: {
                 "video_generation": {"default_ratio": "16:9", "default_size": "m"},
                 "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
-                "video_model_presets": {"ltx": ltx_preset},
+                **video_config(),
             },
         )
         monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
@@ -249,32 +232,19 @@ class TestVideoCliExecution:
             video_cli.main()
         return backend
 
-    def test_main_passes_latent_upsampler_source_when_upscaling(self, monkeypatch, tmp_path):
-        upsampler = {"repo": "your-org/upsampler", "filename": "up.safetensors"}
+    def test_main_passes_the_declared_latent_upsampler_source_when_upscaling(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("sys.platform", "linux")
 
-        backend = self._run_main_for_load_kwargs(monkeypatch, tmp_path, preset_extra={"diffusers": {"latent_upsampler": upsampler}}, extra_argv=["--upscale", "2"])
+        backend = self._run_main_for_load_kwargs(monkeypatch, tmp_path, extra_argv=["--upscale", "2"])
 
         kwargs = backend.load_model.call_args.kwargs
         assert kwargs["upscale"] is True
-        assert kwargs["latent_upsampler"] == ("your-org/upsampler", "up.safetensors")
+        assert kwargs["latent_upsampler"] == ("Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9", "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
 
     def test_main_omits_latent_upsampler_without_upscale(self, monkeypatch, tmp_path):
-        upsampler = {"repo": "your-org/upsampler", "filename": "up.safetensors"}
-
-        backend = self._run_main_for_load_kwargs(monkeypatch, tmp_path, preset_extra={"diffusers": {"latent_upsampler": upsampler}}, extra_argv=[])
+        backend = self._run_main_for_load_kwargs(monkeypatch, tmp_path, extra_argv=[])
 
         assert "latent_upsampler" not in backend.load_model.call_args.kwargs
-
-    def test_main_passes_none_when_upsampler_not_configured(self, monkeypatch, tmp_path):
-        backend = self._run_main_for_load_kwargs(monkeypatch, tmp_path, preset_extra={}, extra_argv=["--upscale", "2"])
-
-        assert backend.load_model.call_args.kwargs["latent_upsampler"] is None
-
-    def test_main_reports_malformed_upsampler_config_via_parser_error(self, monkeypatch, tmp_path):
-        bad = {"diffusers": {"latent_upsampler": {"repo": " ", "filename": "up.safetensors"}}}
-
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main_for_load_kwargs(monkeypatch, tmp_path, preset_extra=bad, extra_argv=["--upscale", "2"])
 
 
 class TestVideoCliPreflight:
@@ -343,7 +313,7 @@ def _run_cli(
     backend.load_model.return_value = (MagicMock(), model_info)
     memory = MagicMock(return_value=fit)
     monkeypatch.chdir(tmp_path)
-    app_config = {"ui": {"default_models": {"video": "ltx-8"}}} if config is None else config
+    app_config = {"ui": {"default_models": {"video": "ltx-8"}}, **video_config()} if config is None else config
     monkeypatch.setattr(video_cli, "load_config", lambda: app_config)
     monkeypatch.setattr(video_cli, "resolve_model_path", resolve or (lambda model, **_: model))
     if local_models is not None:
@@ -360,8 +330,8 @@ def _run_cli(
     fits: list = []
     real_clip_fit = video_cli._clip_fit
 
-    def _spy_clip_fit(args, config, *, upscale):
-        fits.append(real_clip_fit(args, config, upscale=upscale))
+    def _spy_clip_fit(args, *, upscale):
+        fits.append(real_clip_fit(args, upscale=upscale))
         return fits[-1]
 
     monkeypatch.setattr(video_cli, "_clip_fit", _spy_clip_fit)
@@ -534,8 +504,10 @@ class TestVideoCliExtend:
         self.backend.load_model.assert_not_called()
 
     def test_a_family_that_cannot_extend_refuses_the_extension_before_the_model_loads(self, monkeypatch, tmp_path):
-        ltx = load_config()["video_model_presets"]["ltx"]
-        config = {"ui": {"default_models": {"video": "ltx-8"}}, "video_model_presets": {"ltx": {**ltx, "capabilities": {**ltx["capabilities"], "extend": False}}}}
+        data = metadata_copy()
+        data["video_families"]["ltx"]["capabilities"]["extend"] = False
+        use_model_metadata(monkeypatch, tmp_path, data)
+        config = {"ui": {"default_models": {"video": "ltx-8"}}, **video_config()}
 
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], config=config)
@@ -773,7 +745,10 @@ class TestVideoCliExtend:
         assert any("(h3)" in message and "not available locally" in message for message in captured["warnings"])
 
     def test_a_typed_repo_id_of_an_alias_runs_as_that_alias(self, monkeypatch, tmp_path):
-        config = {"model_aliases": {"ltx-4": "org/ltx-mlx-q4"}, "ui": {"default_models": {"video": "ltx-8"}}}
+        data = packaged_metadata_copy()
+        data["models"]["ltx-4"]["downloads"] = [{"ref": "org/ltx-mlx-q4"}]
+        use_model_metadata(monkeypatch, tmp_path, data)
+        config = {"ui": {"default_models": {"video": "ltx-8"}}, **video_config()}
         captured = _run_cli(monkeypatch, tmp_path, ["-m", "org/ltx-mlx-q4", "--prompt", "a dog"], backend=MagicMock(), config=config)
         assert captured["args"].model_name == "ltx-4"
 
@@ -947,7 +922,7 @@ def test_a_clip_limited_by_system_memory_points_at_the_model_not_the_clip(monkey
     args = argparse.Namespace(upscale=None, model_name="ltx-4", width=704, height=448, num_frames=121, low_memory=True)
 
     with pytest.warns(UserWarning) as caught:
-        video_cli._warn_if_too_large(args, {}, extending=False)
+        video_cli._warn_if_too_large(args, extending=False)
 
     assert len(caught) == 1
     assert "--frames" not in str(caught[0].message)
@@ -1001,7 +976,9 @@ class TestVideoCliH3:
         first, last = self._images(tmp_path)
 
         config = load_config()
-        config["video_model_presets"]["ltx"]["capabilities"]["end_frame"] = False
+        data = metadata_copy()
+        data["video_families"]["ltx"]["capabilities"]["end_frame"] = False
+        use_model_metadata(monkeypatch, tmp_path, data)
 
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--image", first, "--end-image", last], family="ltx", config=config)
@@ -1197,7 +1174,9 @@ class TestVideoCliAudioTrack:
     def test_a_family_without_the_capability_refuses_a_track(self, monkeypatch, tmp_path, capsys):
         track = self._track(tmp_path, monkeypatch=monkeypatch)
         config = load_config()
-        config["video_model_presets"]["ltx"]["capabilities"]["audio_track"] = False
+        data = metadata_copy()
+        data["video_families"]["ltx"]["capabilities"]["audio_track"] = False
+        use_model_metadata(monkeypatch, tmp_path, data)
         backend = MagicMock()
 
         with pytest.raises(SystemExit, match="2"):
@@ -1284,7 +1263,7 @@ class TestEstimatedTimeLine:
 
     def _run(self, monkeypatch, budget, args):
         monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: budget)
-        video_cli._warn_if_too_large(args, load_config(), extending=args.extend_source is not None)
+        video_cli._warn_if_too_large(args, extending=args.extend_source is not None)
 
     def test_the_line_names_the_size_the_frames_and_the_estimated_minutes(self, monkeypatch, capsys):
         self._run(monkeypatch, self._DISCRETE, self._args())
@@ -1308,9 +1287,9 @@ class TestEstimatedTimeLine:
         monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: self._DISCRETE)
         monkeypatch.setattr(video_cli, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
 
-        video_cli._clip_fit(self._args(steps=4, image_path="a.png"), {}, upscale=False)
-        video_cli._clip_fit(self._args(extend_source=make_extend_source(), extend_frames=34, num_frames=56), {}, upscale=False)
-        video_cli._clip_fit(self._args(model_family="ltx", steps=8), {}, upscale=False)
+        video_cli._clip_fit(self._args(steps=4, image_path="a.png"), upscale=False)
+        video_cli._clip_fit(self._args(extend_source=make_extend_source(), extend_frames=34, num_frames=56), upscale=False)
+        video_cli._clip_fit(self._args(model_family="ltx", steps=8), upscale=False)
 
         assert [(call["mode"], call["forwards"], call["frames"]) for call in calls] == [("i2v", 4, 124), ("extend", 8, 56), ("t2v", 8, 124)]
 
@@ -1319,9 +1298,9 @@ class TestEstimatedTimeLine:
         monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: self._DISCRETE)
         monkeypatch.setattr(video_cli, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
 
-        video_cli._clip_fit(self._args(review=True), {}, upscale=True)
-        video_cli._clip_fit(self._args(review=False), {}, upscale=True)
-        video_cli._clip_fit(self._args(), {}, upscale=True)
+        video_cli._clip_fit(self._args(review=True), upscale=True)
+        video_cli._clip_fit(self._args(review=False), upscale=True)
+        video_cli._clip_fit(self._args(), upscale=True)
 
         assert [call["review"] for call in calls] == [True, False, False]
 

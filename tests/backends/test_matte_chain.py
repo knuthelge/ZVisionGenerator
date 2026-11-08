@@ -15,7 +15,9 @@ from PIL import Image
 from zvisiongenerator.backends.matte import birefnet as birefnet_loader
 from zvisiongenerator.backends.matte import chain as chain_module
 from zvisiongenerator.backends.matte.chain import TorchMatteChain
-from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
+from zvisiongenerator.utils.matte import matte_pins
+
+BIREFNET, VITMATTE = matte_pins()
 
 
 class _FakeBirefnet:

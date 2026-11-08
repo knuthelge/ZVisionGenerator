@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from tests._factories import load_packaged_config
+from zvisiongenerator.utils.model_metadata import load_model_metadata
 from zvisiongenerator.utils.curated_loras import (
     LICENCES,
     LTX_VERSIONS,
@@ -63,9 +63,9 @@ class TestIdentity:
 
 
 class TestFamily:
-    def test_every_family_is_a_model_family_of_the_packaged_config(self):
-        config = load_packaged_config()
-        known = (set(config["model_presets"]) | set(config["video_model_presets"])) - {"unknown"}
+    def test_every_family_is_a_model_family_of_the_packaged_metadata(self):
+        metadata = load_model_metadata()
+        known = (set(metadata["image_families"]) | set(metadata["video_families"])) - {"unknown"}
         assert set(CURATED_FAMILIES) <= known
 
     @pytest.mark.parametrize("entry", _ENTRIES, ids=_ids(_ENTRIES))

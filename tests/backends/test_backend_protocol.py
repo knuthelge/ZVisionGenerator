@@ -19,22 +19,22 @@ class TestBackendRegistryLookup:
         import zvisiongenerator.backends.cuda.video.memory_estimate as memory_estimate
 
         estimate = object()
-        monkeypatch.setattr(memory_estimate, "cached_ltx_system_estimate", lambda config, model, quantize, *, find_local_dir: estimate)
+        monkeypatch.setattr(memory_estimate, "cached_ltx_system_estimate", lambda model, quantize, *, find_local_dir: estimate)
         monkeypatch.setattr(backends.sys, "platform", "linux")
-        assert backends.estimate_ltx_system_memory({}, "owner/ltx", 4, find_local_dir=lambda reference: None) is estimate
+        assert backends.estimate_ltx_system_memory("owner/ltx", 4, find_local_dir=lambda reference: None) is estimate
         monkeypatch.setattr(backends.sys, "platform", "darwin")
-        assert backends.estimate_ltx_system_memory({}, "owner/ltx", 4, find_local_dir=lambda reference: None) is None
+        assert backends.estimate_ltx_system_memory("owner/ltx", 4, find_local_dir=lambda reference: None) is None
 
     def test_ltx_system_memory_forwards_the_model_name_only_when_given(self, monkeypatch):
         import zvisiongenerator.backends as backends
         import zvisiongenerator.backends.cuda.video.memory_estimate as memory_estimate
 
         calls: list[dict] = []
-        monkeypatch.setattr(memory_estimate, "cached_ltx_system_estimate", lambda config, model, quantize, **kwargs: calls.append(kwargs))
+        monkeypatch.setattr(memory_estimate, "cached_ltx_system_estimate", lambda model, quantize, **kwargs: calls.append(kwargs))
         monkeypatch.setattr(backends.sys, "platform", "linux")
 
-        backends.estimate_ltx_system_memory({}, "owner/ltx", 4, find_local_dir=lambda reference: None)
-        backends.estimate_ltx_system_memory({}, "owner/ltx", 4, find_local_dir=lambda reference: None, model_name="ltx25-4")
+        backends.estimate_ltx_system_memory("owner/ltx", 4, find_local_dir=lambda reference: None)
+        backends.estimate_ltx_system_memory("owner/ltx", 4, find_local_dir=lambda reference: None, model_name="ltx25-4")
 
         assert [sorted(kwargs) for kwargs in calls] == [["find_local_dir"], ["find_local_dir", "model_name"]]
         assert calls[1]["model_name"] == "ltx25-4"

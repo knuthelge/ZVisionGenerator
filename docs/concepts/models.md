@@ -63,7 +63,7 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
     - **macOS:** at 1024×1024, unquantized and `q8` peak at about 33 GB and `q4` at about 25 GB, mostly briefly while the image is decoded at the end. On an M5 all three take about 15 s per step at that size; `q4` is faster at smaller sizes.
     - **Windows and Linux:** the transformer streams to the GPU block by block. On a 10 GB GPU with 32 GB of system memory, `q4` and `q8` both take about 3.5 s per step at 1024×1024, about a minute per image (`q8` peaks at about 17 GB of system memory, `q4` at 14 GB). Unquantized it takes about 15 s per step and peaks at about 26 GB, so pick `q4` or `q8`.
 
-    Every source is pinned to a checked revision in the `ideogram4_instant` section of the [configuration](configuration.md), and the folder is rebuilt when a pin changes. The model is under the Ideogram Non-Commercial Model Agreement, which applies as soon as you download or use it: see `LICENSE.md` in the folder.
+    Every source is pinned to a checked revision, and the folder is rebuilt when a pin changes. The model is under the Ideogram Non-Commercial Model Agreement, which applies as soon as you download or use it: see `LICENSE.md` in the folder.
 
 ### MOSS-Image
 
@@ -93,7 +93,7 @@ Start with `moss`. Pick `moss-sft` when you want a negative prompt or the model 
 - **Start image, upscale, LoRAs and live previews** work. LoRAs must be MOSS-Image LoRAs: see [LoRAs](loras.md). The Turbo LoRA stays on, and a LoRA of your own is added on top.
 - **No JSON captions.** MOSS-Image takes plain prompts, so `--json-prompt` and the enhancer's JSON format don't apply.
 
-**The first job builds the model** in `~/.ziv/models/moss` or `~/.ziv/models/moss-sft` from the shared download, which takes a moment. The community Turbo LoRA comes from `akhaliq/MOSS-Image-SFT-4-steps`; its pin is in the `moss_image` section of the [configuration](configuration.md).
+**The first job builds the model** in `~/.ziv/models/moss` or `~/.ziv/models/moss-sft` from the shared download, which takes a moment. The community Turbo LoRA comes from `akhaliq/MOSS-Image-SFT-4-steps`, pinned to a checked revision.
 
 ## Video models
 
@@ -209,7 +209,7 @@ LTX-2.3 and Stable Audio 3 Medium come with Gemma's terms as well as their own, 
 - **Convert a checkpoint.** A `.safetensors` fine-tune of Z-Image, FLUX.2 Klein, Krea 2, LTX-2.3, LTX-2.5 or MiniMax H3 becomes a model in `~/.ziv/models/`. See [Manage models](../cli/models.md#convert-a-checkpoint) or the [Models page](../web-ui/models.md#convert-a-checkpoint).
 - **Copy a model folder.** A model in diffusers format can go straight into `~/.ziv/models/<name>/`.
 - **Use a Hugging Face repo.** `-m Tongyi-MAI/Z-Image-Turbo` downloads it on first use.
-- **Add an alias.** Give a repo a short name in your [configuration](configuration.md):
+- **Add an alias.** Give a repo a short name in your [configuration](configuration.md); a name the app already uses is taken:
 
     ```yaml title="~/.ziv/config.yaml"
     model_aliases:
@@ -231,4 +231,4 @@ For video, a name is accepted when it is `ltx-4`, `ltx-8`, `ltx25-4` or `h3`, a 
 
 ## Names in the Web UI
 
-The Web UI shows a model by its name, such as FLUX.2 Klein 9B, and the Models page lists the alias under it. The alias is what you use with `-m`, in prompt files and in the configuration.
+The Web UI shows a built-in model by its name, such as FLUX.2 Klein 9B, and the Models page lists the alias under it. The alias is what you use with `-m`, in prompt files and in the configuration. An alias of your own shows as its alias.

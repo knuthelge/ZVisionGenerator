@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_preset, sa3_two_kind_preset
-from tests._factories import load_packaged_config
+from tests._audio_presets import audio_config, audio_entry, qwen3_tts_preset, sa3_preset, sa3_two_kind_preset, use_audio_models, yue2_preset
+from tests._factories import load_packaged_config, use_enhancer_models
 from tests._fake_audio import fake_read_config as read_config
 from tests._licences import use_licences
 from tests._paths import REPO_ROOT
@@ -51,6 +51,7 @@ def env(monkeypatch, tmp_path):
     patched = patch_runner(monkeypatch, backend)
     patched.ensure = MagicMock(return_value="ready")
     monkeypatch.setattr(audio_cli, "ensure_downloaded", patched.ensure)
+    use_audio_models(monkeypatch, tmp_path)
     monkeypatch.setattr(audio_cli, "load_config", lambda: audio_config())
     monkeypatch.setattr(audio_cli, "ensure_ffmpeg", lambda: None)
     patched.backend = backend
@@ -166,9 +167,9 @@ class TestFlags:
         assert request.delivery is None
 
     @pytest.fixture
-    def music_first(self, env, monkeypatch):
+    def music_first(self, env, monkeypatch, tmp_path):
         """Make ``sa3`` a model of two kinds with music first: music without lyrics, whose length is chosen."""
-        monkeypatch.setattr(audio_cli, "load_config", lambda: audio_config(sa3={**sa3_preset(), "kinds": ["music", "sound"]}))
+        use_audio_models(monkeypatch, tmp_path, yue2=yue2_preset(), qwen3_tts=qwen3_tts_preset(), sa3={**sa3_preset(), "kinds": ["music", "sound"]})
 
     def test_a_model_is_made_as_its_first_kind_and_that_kind_decides_the_flags(self, env, monkeypatch, music_first):
         (request,) = make(env, "-m", "sa3", "--prompt", "calm piano", monkeypatch=monkeypatch)
@@ -359,9 +360,9 @@ class TestSteeringFlags:
     """``--kind``, ``--tempo``, ``--key``, the delivery flags and ``--sound-type``: each builds the request of the form and each is refused where it does not apply."""
 
     @pytest.fixture
-    def multi(self, env, monkeypatch):
+    def multi(self, env, monkeypatch, tmp_path):
         """Make ``sa3`` a model of two kinds (sound first, then music without lyrics) next to the speech and song models."""
-        monkeypatch.setattr(audio_cli, "load_config", lambda: audio_config(yue2=audio_config()["audio_model_presets"]["yue2"], qwen3_tts=qwen3_tts_preset(), sa3=sa3_two_kind_preset()))
+        use_audio_models(monkeypatch, tmp_path, yue2=yue2_preset(), qwen3_tts=qwen3_tts_preset(), sa3=sa3_two_kind_preset())
         return env
 
     def test_a_song_takes_a_tempo_and_a_key(self, env, monkeypatch):
@@ -555,11 +556,11 @@ class TestSteeringFlags:
         assert "a description of the sound" in refuses(monkeypatch, capsys, "-m", "sa3")
         assert "the style of the song" in refuses(monkeypatch, capsys, "-m", "sa3", "--kind", "music")
 
-    def test_the_speaker_of_a_non_speech_kind_is_refused(self, multi, monkeypatch, capsys):
+    def test_the_speaker_of_a_non_speech_kind_is_refused(self, multi, monkeypatch, capsys, tmp_path):
         # a model with voices that makes more than one kind: speech and sound
         speech_and_sound = qwen3_tts_preset()
         multi_voices = {**speech_and_sound, "kinds": ["speech", "sound"], "limits": {**speech_and_sound["limits"], "max_seconds": 60}}
-        monkeypatch.setattr(audio_cli, "load_config", lambda: audio_config(qwen3_tts=multi_voices))
+        use_audio_models(monkeypatch, tmp_path, yue2=yue2_preset(), qwen3_tts=multi_voices, sa3=sa3_preset())
 
         assert "has no voice for sound; drop --speaker" in refuses(monkeypatch, capsys, "-m", "qwen3_tts", "--prompt", "x", "--kind", "sound", "--speaker", "ryan")
 
@@ -596,8 +597,9 @@ class TestLicenceNotice:
     }
 
     @pytest.fixture(autouse=True)
-    def _licence_records(self, monkeypatch, tmp_path):
-        use_licences(monkeypatch, tmp_path, self.LICENCE)
+    def _licence_records(self, env, monkeypatch, tmp_path):
+        models = {model_id: audio_entry(preset) for model_id, preset in (("yue2", yue2_preset()), ("qwen3_tts", qwen3_tts_preset()), ("sa3", sa3_preset()))}
+        use_licences(monkeypatch, tmp_path, self.LICENCE, models=models)
 
     def test_the_terms_are_printed_before_a_missing_model_downloads(self, env, monkeypatch, capsys):
         monkeypatch.setattr(audio_cli, "load_config", audio_config)
@@ -770,11 +772,13 @@ class TestEnhance:
     """``--enhance`` on a sound and on a song's style: the rewrite is what is made, and the take records both texts like a Web UI take."""
 
     @pytest.fixture
-    def enhancer(self, env, monkeypatch):
+    def enhancer(self, env, monkeypatch, tmp_path):
         """Run with a config that has an enhancer and a fake one in its place, and note in the backend's events when the memory is given back."""
         fake = _Enhancer(env.backend.events, _REPLY)
         session = PromptEnhancerSession(lambda repo, revision: fake.loaded.append((repo, revision)) or fake, scheduler=lambda delay, callback: None, downloaded=lambda repo, revision: True)
-        config = {**audio_config(), "prompt_enhancer": {"model": {"darwin": _FAST, "win32": _FAST, "linux": _FAST}}}
+        use_audio_models(monkeypatch, tmp_path)
+        use_enhancer_models(monkeypatch, tmp_path, fast=_FAST)
+        config = audio_config()
         monkeypatch.setattr(audio_cli, "load_config", lambda: config)
         monkeypatch.setattr(prompt_enhancer_session, "get_prompt_enhancer_session", lambda: session)
         monkeypatch.setattr(prompt_enhancer_session, "ensure_available", lambda repo, revision: True)

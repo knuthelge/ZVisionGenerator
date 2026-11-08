@@ -19,12 +19,10 @@ if TYPE_CHECKING:
     from zvisiongenerator.downloads.target import DownloadTarget
 
 __all__ = [
-    "ENHANCER_LICENCE_TIERS",
     "MATTE_LICENCE_MODEL",
     "NOTICE_FOOTER",
     "NOTICE_HEADER",
     "LicenceRecord",
-    "enhancer_licence_model",
     "licence_notice",
     "licence_payload",
     "record_notice",
@@ -35,9 +33,6 @@ __all__ = [
 
 MATTE_LICENCE_MODEL: Final = "matte"
 """The model id of the background removal models, which are no alias but have a licence record."""
-
-ENHANCER_LICENCE_TIERS: Final = ("fast", "smart")
-"""The prompt enhancer tiers that have a licence record; a custom model has none."""
 
 NOTICE_HEADER: Final = "By downloading you agree to these terms:"
 """The first line of a licence notice."""
@@ -57,11 +52,6 @@ class LicenceRecord:
     url: str
     url_label: str = "Licence"
     attribution: str | None = None
-
-
-def enhancer_licence_model(tier: str) -> str:
-    """Return the model id under which a record covers the prompt enhancer *tier* (``enhancer-fast``, ``enhancer-smart``)."""
-    return f"enhancer-{tier}"
 
 
 def load_licences() -> tuple[LicenceRecord, ...]:
@@ -93,7 +83,7 @@ def licences_for(records: Sequence[LicenceRecord], model_id: str) -> tuple[Licen
     if entry is None:
         return ()
     by_id = {record.id: record for record in records}
-    return tuple(by_id[record_id] for record_id in entry["licences"] if record_id in by_id)
+    return tuple(by_id[record_id] for record_id in entry["licences"])
 
 
 def licence_payload(records: Sequence[LicenceRecord], model_id: str) -> list[dict[str, Any]]:

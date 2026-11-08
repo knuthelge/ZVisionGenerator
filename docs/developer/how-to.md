@@ -4,7 +4,7 @@ Recipes for common changes. Each lists where the change goes and what has to mov
 
 ## Add a config key
 
-1. Add the key with its default, and a comment, to the packaged `zvisiongenerator/config.yaml`.
+1. Add the key with its default, and a comment, to the packaged `zvisiongenerator/config.yaml`. It must be a setting a user may change. A fact about a built-in model (a pin, a file list, a name, a size, a limit, a capability) goes in the model metadata instead; see [Add a built-in model](#add-a-built-in-model).
 2. Read it from the config `dict` where it's used, with `.get()` and the same default. Pass the value inward as an argument rather than loading config deep in a helper.
 3. If it's a new top-level section that must be a mapping, add it to the type check in `utils/config.load_config()`.
 4. If users should change it from the Config page, add a `WritableConfigField` to `web/config_contract.py` and its label to `ConfigPage.svelte`.
@@ -40,19 +40,26 @@ def contrast_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtif
 
 No stage loads the prompt enhancer: work that must happen before the model loads belongs in preflight. See [Extending preflight](workflows.md#extending-preflight).
 
-## Add a built-in model alias
+## Add a built-in model
 
-1. Add the alias to `model_aliases` in `config.yaml`: a repo, or a map per platform. Point at the upstream repo when it is ungated, otherwise at a mirror whose weights match upstream's sha256.
-2. Add `model_labels.<alias>.name`, and for an image model `download_size_label` per platform, read from a dry-run download plan against an empty cache.
-3. For a repo whose family can't be detected offline, add it to `model_alias_families`.
-4. Add an entry for the model under `models:` in `zvisiongenerator/utils/model_metadata.yaml` with its `kind` and the ids of the licence records that cover it (`licences`, in display order). Add a record under `licences:` for a licence that has none yet, free licences included; a record several models share is written once. A URL points to the licensor's original repository: a licence file pinned to a commit, or its model page when the repository is gated or has no licence file. Optional `attribution` holds a credit line the licence requires. `make check` fails on an entry that names a record that does not exist, a record no entry uses, a model that has no record, or a URL that is neither pinned nor a model page.
+A built-in model is one entry under `models:` in `zvisiongenerator/utils/model_metadata.yaml`, keyed by its id. The alias, its name, its downloads, its sizes and its licences all read from it, and the only other file that names a video model is the prefix list in step 1. The header of the file describes the main keys and which keys each kind requires.
+
+1. Add the entry, among the entries of its kind (the order of the entries is the order the Web UI lists them), with its `kind` and `name` (as the Web UI reads it) and its `downloads`: the targets per platform, or one list for all. Pin each to a commit (`owner/repo@revision`). Image aliases are unpinned for now, because image model detection refuses a pinned reference, and so are the SeedVR2 repos; a contract test fails on any other unpinned target. Point at the upstream repo when it is ungated, otherwise at a mirror whose weights match upstream's sha256. The first target with the default role is the alias's source; order is load-bearing (the model's own targets, then the roles its loader asks for, then its video family's companions). A target whose files the loader lists takes `files_from: loader` and no file list. A new video repo must also start with one of the prefixes in `utils/video_model_detect.py`, or the model is not recognised as a video model.
+2. Add the keys its kind needs:
+    - **Image:** `download_size`, read from a dry-run download plan against an empty cache, per platform when they differ; and `family` for a repo whose family can't be detected offline.
+    - **Video:** `family`, which must be a `video_families` entry (`ltx` or `h3`; an LTX model also takes `version` for a `versions` overlay), and for `ltx` the `quantize` level, `4` or `8`. A contract test fails on an LTX entry with any other level, on an LTX pack that does not list its files on macOS and on a family or version that is not defined.
+    - **Audio:** `family`, `kinds` (the first is the default) and `limits`; `lyrics`, `voices` and `platforms.cuda` / `platforms.mps` (`memory_gb`, or its own `family`) are optional. Add the model's settings to `audio_model_presets.<id>.settings` in `config.yaml` (step 4). A test over the packaged entries picks the model up by itself.
+3. Add the ids of the licence records that cover the model to `licences`, in display order. Add a record under `licences:` for a licence that has none yet, free licences included; a record several models share is written once. A URL points to the licensor's original repository: a licence file pinned to a commit, or its model page when the repository is gated or has no licence file. Optional `attribution` holds a credit line the licence requires. `make check` fails on an entry that names a record that does not exist, a record no entry uses, a model that has no record, or a URL that is neither pinned nor a model page.
+4. Put the model's defaults (steps, guidance, scheduler) in `config.yaml` as settings, in the section of its family: `model_presets`, `video_model_presets` or `audio_model_presets.<id>.settings`.
 5. Update the [Models](../concepts/models.md) page (its Licences table lists every record), and `CHANGELOG.md`.
+
+The metadata is parsed once and shared, and is never merged with the user's config. A reader that merges settings into facts copies at the merge, so it never writes into the shared parse: `family_block` and `builtin_aliases` return copies, and any new reader that adds a setting to a fact does the same. A session check in `tests/conftest.py` fails the run when anything wrote into the cached parse, so a miss shows up in `make check`. Tests change facts through `metadata_copy()` and `use_model_metadata` in `tests/_factories.py`.
 
 ## Add a model family
 
 A new family touches every layer, so write a proposal first.
 
-- **Config:** a `model_presets` entry with its defaults and capability flags (`supports_negative_prompt`, `supports_img2img`, `supports_upscale`, `supports_scheduler`, `dimension_min`, …). The Web UI reads capabilities from here, never from the family name.
+- **Metadata and config:** an `image_families` or `video_families` entry in `model_metadata.yaml` with its capability flags (`supports_negative_prompt`, `supports_img2img`, `supports_upscale`, `supports_scheduler`, `dimension_min`, … for an image family; the label, frame rule and capabilities for a video family), and the family's defaults in `model_presets` or `video_model_presets` of `config.yaml`. The Web UI reads capabilities from the metadata, never from the family name. A new scheduler also needs its class in `SCHEDULER_CLASSES` (`schedulers/`).
 - **Detection:** `utils/image_model_detect.py` or `utils/video_model_detect.py`.
 - **Backends:** loading and generation in `backends/mac/` and `backends/cuda/`, behind the existing protocol; on macOS, an entry in `backends/mac/prompt_encoding.py` (without one, the family keeps its text encoder loaded).
 - **Downloads:** the planners in `backends/*/download_plan.py`, which must mirror the files the loader reads. See [Model downloads](downloads.md).

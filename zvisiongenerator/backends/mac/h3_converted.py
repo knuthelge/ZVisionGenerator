@@ -58,7 +58,7 @@ Report = Callable[[str, int, int], None]
 Quantize = Callable[["torch.Tensor"], tuple["torch.Tensor", "torch.Tensor", "torch.Tensor"]]
 
 
-def convert(checkpoint: H3Checkpoint, target: Path, *, turbo: bool, config: dict[str, Any], report: Report) -> None:
+def convert(checkpoint: H3Checkpoint, target: Path, *, turbo: bool, report: Report) -> None:
     """Write the MLX folder of *checkpoint* into *target*, with the stock components.
 
     Raises:
@@ -66,12 +66,12 @@ def convert(checkpoint: H3Checkpoint, target: Path, *, turbo: bool, config: dict
     """
     from zvisiongenerator.backends.mac.memory import mlx_cache_limit
 
-    preset = h3_mlx_preset(config)
+    preset = h3_mlx_preset()
     report("download", 0, 1)
     components = snapshot_with(preset.components, hub_snapshot_download) / _COMPONENTS_DIR
     lora_file, scale = None, 0.0
     if not turbo:
-        lora, scale = h3_turbo_lora(config)
+        lora, scale = h3_turbo_lora("darwin")
         lora_file = snapshot_with(lora, hub_snapshot_download) / lora.files[0]
     # Stock's time embedder is unquantized in the shipped INT8 transformer: its index is fetched, then only its tensors are read by range from the shard holding it.
     time_embedder = stock_time_embedder(preset.transformer.repo_id, preset.transformer.revision, index=_INDEX_NAME, native=True) if checkpoint.curve_rank is not None else None

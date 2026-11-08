@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests._factories import load_packaged_config
+from tests._factories import load_packaged_config, metadata_copy, use_model_metadata, video_config
 
 import zvisiongenerator.backends as backends_module
 from zvisiongenerator.core.video_family import VideoCapabilities
@@ -14,19 +14,14 @@ from zvisiongenerator.core.video_family import VideoCapabilities
 _ALL_ON = {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": True, "audio_track": False, "audio_track_upscale": False}
 
 
-def _config(**platform_capabilities: dict[str, bool]) -> dict:
-    """Return a config describing an ``ltx`` family and an ``h3`` family with the given platform overlays."""
-    ltx = {"label": "LTX", "default_steps": 8, "frame_rule": {"alignment": 8, "offset": 1, "round": "nearest"}, "extend_frame_step": 8, "carry_frames": 25, "capabilities": _ALL_ON}
-    h3 = {
-        "label": "MiniMax H3",
-        "default_steps": 8,
-        "frame_rule": {"alignment": 17, "offset": 5, "round": "up"},
-        "extend_frame_step": 17,
-        "carry_frames": 22,
-        "capabilities": _ALL_ON,
-        "platform_capabilities": platform_capabilities,
-    }
-    return {"video_model_presets": {"ltx": ltx, "h3": h3}}
+def _config(monkeypatch, tmp_path, **platform_capabilities: dict[str, bool]) -> dict:
+    """Serve metadata whose ``ltx`` and ``h3`` families have the same capabilities, with the given platform overlays on ``h3``, and return the config with the video settings."""
+    data = metadata_copy()
+    data["video_families"]["ltx"]["capabilities"] = dict(_ALL_ON)
+    data["video_families"]["h3"]["capabilities"] = dict(_ALL_ON)
+    data["video_families"]["h3"]["platform_capabilities"] = platform_capabilities
+    use_model_metadata(monkeypatch, tmp_path, data)
+    return video_config()
 
 
 @pytest.fixture(autouse=True)
@@ -158,12 +153,11 @@ class TestVideoCapabilities:
             monkeypatch.setattr(backends_module.sys, "platform", platform_key)
             assert backends_module.video_capabilities(config, "ltx") == VideoCapabilities(**{**_ALL_ON, "audio_track": True, "audio_track_upscale": True})
 
-    def test_a_family_the_config_does_not_describe_has_none(self):
-        assert backends_module.video_capabilities({}, "ltx") is None
-        assert backends_module.video_capabilities(_config(), "wan") is None
+    def test_a_family_the_metadata_does_not_describe_has_none(self):
+        assert backends_module.video_capabilities(load_packaged_config(), "wan") is None
 
-    def test_a_platform_overlay_takes_capabilities_away(self, factories, monkeypatch):
-        config = _config(darwin={"upscale": False, "upscale_review": False})
+    def test_a_platform_overlay_takes_capabilities_away(self, factories, monkeypatch, tmp_path):
+        config = _config(monkeypatch, tmp_path, darwin={"upscale": False, "upscale_review": False})
         monkeypatch.setattr(backends_module, "_VIDEO_BACKENDS_MAP", {**factories[0], "darwin": {**factories[0]["darwin"], "h3": MagicMock()}})
 
         on_linux = backends_module.video_capabilities(config, "h3")
@@ -173,17 +167,17 @@ class TestVideoCapabilities:
         assert on_linux == VideoCapabilities(**_ALL_ON)
         assert on_darwin == VideoCapabilities(**{**_ALL_ON, "upscale": False, "upscale_review": False})
 
-    def test_a_family_without_a_backend_on_the_platform_can_do_nothing(self, factories, monkeypatch):
+    def test_a_family_without_a_backend_on_the_platform_can_do_nothing(self, factories, monkeypatch, tmp_path):
         monkeypatch.setattr(backends_module.sys, "platform", "darwin")
 
-        assert backends_module.video_capabilities(_config(), "h3") == VideoCapabilities(**dict.fromkeys(_ALL_ON, False))
+        assert backends_module.video_capabilities(_config(monkeypatch, tmp_path), "h3") == VideoCapabilities(**dict.fromkeys(_ALL_ON, False))
 
-    def test_the_platform_flags_limit_the_family(self, factories, monkeypatch):
+    def test_the_platform_flags_limit_the_family(self, factories, monkeypatch, tmp_path):
         monkeypatch.setattr(backends_module, "supports_video_audio", lambda: False)
         monkeypatch.setattr(backends_module, "supports_video_extend", lambda: False)
         monkeypatch.setattr(backends_module, "supports_video_upscale_review", lambda: False)
 
-        capabilities = backends_module.video_capabilities(_config(), "ltx")
+        capabilities = backends_module.video_capabilities(_config(monkeypatch, tmp_path), "ltx")
 
         assert capabilities == VideoCapabilities(**{**_ALL_ON, "audio": False, "extend": False, "upscale_review": False})
 

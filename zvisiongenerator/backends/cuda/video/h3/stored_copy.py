@@ -28,7 +28,7 @@ from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error,
 from zvisiongenerator.backends.cuda.quant import empty_diffusers_model, fill_weights, nf4_linear_names, nf4_storage_format, pack_nf4, place_nf4, swap_in_linear4bit
 from zvisiongenerator.backends.cuda.video.h3 import lora as h3_lora
 from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, shard_files
-from zvisiongenerator.utils.h3_preset import is_folder_name
+from zvisiongenerator.utils.paths import is_folder_name
 from zvisiongenerator.utils.stored_quant import ensure_stored_copy, file_identities, stored_quant_name
 from zvisiongenerator.utils.quantized_weights import decoded_tensors
 

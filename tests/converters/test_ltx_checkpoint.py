@@ -288,7 +288,7 @@ def ltx_cli(monkeypatch, tmp_path):
     monkeypatch.setattr("zvisiongenerator.converters.convert_checkpoint.get_ziv_data_dir", lambda: data_dir)
     monkeypatch.setattr(
         "zvisiongenerator.utils.config.load_config",
-        lambda: {"model_aliases": {"ltx-4": "x"}, "video_model_presets": {"ltx": {"versions": {"ltx25": {"aliases": ["ltx25-4"], "model_type": "ltx-2.5"}}}}},
+        lambda: {"video_model_presets": {"ltx": {"versions": {"ltx25": {"aliases": ["ltx25-4"], "model_type": "ltx-2.5"}}}}},
     )
     monkeypatch.setattr(ltx_checkpoint, "_pinned", lambda version: {"distillation": {"dev": dict.fromkeys(_DISTILL_NAMES, "0")}, "connectors": {}})
     calls: list[dict] = []

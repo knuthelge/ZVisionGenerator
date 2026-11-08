@@ -75,7 +75,7 @@ class ImageBackend(Protocol):
         families ignore it.
 
         reference_images are images whose content the result reuses, in prompt order, each at its own size.
-        Only families with a reference capability (``max_reference_images`` above 0 in the config) take them; the
+        Only families with a reference capability (``max_reference_images`` above 0 in the model metadata) take them; the
         caller checks the count against it before calling.
         """
         ...

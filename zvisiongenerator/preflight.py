@@ -18,13 +18,13 @@ from typing import TYPE_CHECKING, Any
 from zvisiongenerator.backends import prompt_enhancer_session, release_accelerator_memory, video_family_on_platform
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan, JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_progress
-from zvisiongenerator.downloads import enhancer_plan
+from zvisiongenerator.downloads.plans import enhancer_plan
 from zvisiongenerator.job_controls import pause_until_resumed, seed_range
 from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.prompt_compose import expand_random_choices, is_original_prompt
-from zvisiongenerator.utils.config import model_reference
+from zvisiongenerator.utils.paths import join_huggingface_revision
 from zvisiongenerator.utils.enhance_record import enhancer_tier
-from zvisiongenerator.utils.licences import ENHANCER_LICENCE_TIERS, enhancer_licence_model
+from zvisiongenerator.utils.enhancer_models import ENHANCER_TIERS, enhancer_model_id
 from zvisiongenerator.utils.prompt_enhance import (
     EnhanceContext,
     EnhanceSettings,
@@ -217,7 +217,7 @@ def run_preflight(
         if control is not None:
             print("Commands: [n] skip rewrite  [q] quit  [p] pause\n")
         planned, cancelled = _rewrite_all(enhancer, iterations, positions, rewrite=rewrite, control=control, pause=pause, mode=mode, progress_callback=progress_callback)
-    used = EnhancerUsed(*reference, tier=enhancer_tier(config, platform_key=sys.platform, model=model_reference(*reference)), format="json" if caption else "text")
+    used = EnhancerUsed(*reference, tier=enhancer_tier(config, platform_key=sys.platform, model=join_huggingface_revision(*reference)), format="json" if caption else "text")
     # Reached only on the normal paths (success or quit); on an exception close() already freed the enhancer.
     (release_memory or release_enhancer_memory)()
     if not cancelled:
@@ -231,9 +231,9 @@ def run_preflight(
 
 def print_enhancer_licence(config: dict[str, Any], reference: tuple[str, str | None]) -> None:
     """Print the terms of the enhancer tier *reference* names, before its first download; nothing for a custom model or one on disk."""
-    tier = enhancer_tier(config, platform_key=sys.platform, model=model_reference(*reference))
-    if tier in ENHANCER_LICENCE_TIERS:
-        print_licence_notice(enhancer_licence_model(tier), lambda: enhancer_plan(*reference))
+    tier = enhancer_tier(config, platform_key=sys.platform, model=join_huggingface_revision(*reference))
+    if tier in ENHANCER_TIERS:
+        print_licence_notice(enhancer_model_id(tier), lambda: enhancer_plan(*reference))
 
 
 def _rewrite_all(

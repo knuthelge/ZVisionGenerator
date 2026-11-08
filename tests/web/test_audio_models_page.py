@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,8 +10,20 @@ import huggingface_hub.constants
 import pytest
 from fastapi.testclient import TestClient
 
-from tests._audio_presets import QWEN_BASE_REPO, QWEN_CUSTOM_REPO, YUE2_REPO, audio_config, qwen3_tts_preset, sa3_preset, sa3_two_kind_preset, yue2_preset
-from tests._factories import load_packaged_config
+from tests._audio_presets import (
+    QWEN_BASE_REPO,
+    QWEN_CUSTOM_REPO,
+    YUE2_REPO,
+    audio_config,
+    audio_entries,
+    no_audio_models,
+    qwen3_tts_preset,
+    sa3_preset,
+    sa3_two_kind_preset,
+    use_audio_models,
+    yue2_preset,
+)
+from tests._factories import load_packaged_config, packaged_metadata_copy
 from tests._licences import use_licences
 
 from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
@@ -21,8 +34,8 @@ from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import workspace_api as workspace_api_module
-from zvisiongenerator.web.audio_inventory import audio_inventory_rows, audio_repo_ids
-from zvisiongenerator.web.model_delete import audio_delete_target, delete_model
+from zvisiongenerator.web.audio_inventory import audio_inventory_rows
+from zvisiongenerator.web.model_delete import audio_delete_target, delete_model, used_repo_ids
 from zvisiongenerator.web.model_download_plan import parts_summary, row_plan
 
 _BUDGET = MemoryBudget(10 * GIB, system_bytes=64 * GIB)
@@ -57,7 +70,7 @@ def env(monkeypatch, tmp_path):
     (tmp_path / "models").mkdir()
     monkeypatch.setattr(audio_models_module, "audio_platform_key", lambda: "cuda")
     monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: _BUDGET)
-    use_licences(monkeypatch, tmp_path, _LICENCES)
+    use_licences(monkeypatch, tmp_path, _LICENCES, models={**audio_entries(), **{model_id: packaged_metadata_copy()["models"][model_id] for model_id in ("matte", "enhancer-fast", "enhancer-smart")}})
     return SimpleNamespace(data_dir=tmp_path, models_dir=tmp_path / "models", hub=hub)
 
 
@@ -109,8 +122,9 @@ class TestInventoryRows:
         assert rows["sa3"]["downloaded"] is False and rows["sa3"]["download_needed"] is True
         assert rows["sa3"]["licences"] == []
 
-    def test_a_model_of_two_kinds_is_one_row_that_lists_both(self, env):
-        rows = _rows(env, audio_config(sa3=sa3_two_kind_preset()))
+    def test_a_model_of_two_kinds_is_one_row_that_lists_both(self, env, monkeypatch, tmp_path):
+        use_audio_models(monkeypatch, tmp_path, sa3=sa3_two_kind_preset())
+        rows = _rows(env, audio_config())
 
         assert list(rows) == ["sa3"]
         assert rows["sa3"]["kinds"] == ["sound", "music"]
@@ -137,8 +151,10 @@ class TestInventoryRows:
         assert rows["yue2"]["download_needed"] is False
         assert rows["sa3"]["downloaded"] is True
 
-    def test_a_config_without_presets_has_no_rows_so_the_panel_stays_hidden(self, env):
-        assert audio_inventory_rows({**load_packaged_config(), "audio_model_presets": {}}, _BUDGET) == []
+    def test_metadata_without_audio_models_has_no_rows_so_the_panel_stays_hidden(self, env, monkeypatch, tmp_path):
+        no_audio_models(monkeypatch, tmp_path)
+
+        assert audio_inventory_rows(audio_config(), _BUDGET) == []
 
     def test_the_packaged_config_has_a_row_per_model(self, env):
         rows = audio_inventory_rows(load_packaged_config(), _BUDGET)
@@ -236,16 +252,15 @@ class TestDeleteRoute:
 
 class TestCacheListing:
     def test_the_repositories_of_every_preset_are_used(self, env):
-        used = audio_repo_ids(audio_config())
+        used = used_repo_ids([], {}, platform_key=sys.platform)
 
-        assert {"m-a-p/YuE2-3B", "m-a-p/YuE2-Vae", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Comfy-Org/stable-audio-3"} <= used
+        assert {"m-a-p/yue2-3b", "m-a-p/yue2-vae", "qwen/qwen3-tts-12hz-1.7b-customvoice", "comfy-org/stable-audio-3"} <= used
 
     def test_a_cached_audio_repository_is_not_offered_as_an_unused_download(self, env):
         _cache(env.hub, "m-a-p/YuE2-3B")
         _cache(env.hub, "org/unused")
 
         web_config = _web_config(env)
-        web_config.app_config["video_model_presets"] = {"ltx": {"mlx_text_encoder": "owner/gemma"}}
 
         unused = workspace_api_module.find_other_downloads(web_config, cache_dir=env.hub)
 
@@ -269,10 +284,11 @@ class TestQwenCloningFiles:
 
         assert row["voice_download"] == {"downloaded": True}
 
-    def test_a_speech_model_without_cloning_files_has_a_null_voice_download_and_other_kinds_have_no_key(self, env):
+    def test_a_speech_model_without_cloning_files_has_a_null_voice_download_and_other_kinds_have_no_key(self, env, monkeypatch, tmp_path):
         preset = qwen3_tts_preset()
         del preset["voice_files"]
-        rows = _rows(env, audio_config(qwen3_tts=preset, yue2=yue2_preset(), sa3=sa3_preset()), target_present=lambda _target: True)
+        use_audio_models(monkeypatch, tmp_path, qwen3_tts=preset, yue2=yue2_preset(), sa3=sa3_preset())
+        rows = _rows(env, audio_config(), target_present=lambda _target: True)
 
         assert rows["qwen3_tts"]["voice_download"] is None
         assert "voice_download" not in rows["yue2"] and "voice_download" not in rows["sa3"]
@@ -282,7 +298,7 @@ class TestQwenCloningFiles:
             _cache(env.hub, repo.split("@")[0])
         preset = next(item for item in parse_audio_presets(self._config()) if item.id == "qwen3_tts")
 
-        target = audio_delete_target(preset)
+        target = audio_delete_target(preset, platform_key=sys.platform)
 
         assert target.repo_ids == ("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
         delete_model(target)
@@ -292,7 +308,7 @@ class TestQwenCloningFiles:
         _cache(env.hub, QWEN_BASE_REPO.split("@")[0])
         preset = next(item for item in parse_audio_presets(self._config()) if item.id == "qwen3_tts")
 
-        assert audio_delete_target(preset).repo_ids == ("Qwen/Qwen3-TTS-12Hz-1.7B-Base",)
+        assert audio_delete_target(preset, platform_key=sys.platform).repo_ids == ("Qwen/Qwen3-TTS-12Hz-1.7B-Base",)
 
     def test_the_disk_size_adds_both_checkpoints(self, env):
         for repo in (QWEN_CUSTOM_REPO, QWEN_BASE_REPO):
@@ -303,7 +319,7 @@ class TestQwenCloningFiles:
         assert row["disk_size_label"] == disk_size_label(2)
 
     def test_the_cache_listing_uses_both_repositories(self, env):
-        assert {"Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"} <= audio_repo_ids(self._config())
+        assert {"qwen/qwen3-tts-12hz-1.7b-customvoice", "qwen/qwen3-tts-12hz-1.7b-base"} <= used_repo_ids([], {}, platform_key=sys.platform)
 
     def test_the_models_page_download_plan_stays_on_the_main_files(self, env):
         part = row_plan("audio", "qwen3_tts", _web_config(env, self._config()))

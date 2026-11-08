@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from tests._audio_presets import audio_config, sa3_two_kind_preset
+from tests._audio_presets import audio_preset
 from tests.audio._helpers import preset
 
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, SpeechDelivery, VoiceRef
 from zvisiongenerator.utils import audio_request as audio_request_module
-from zvisiongenerator.utils.audio_preset import parse_audio_presets
 from zvisiongenerator.utils.audio_request import auto_seconds, check_speech_request, resolve_audio_seconds
 from zvisiongenerator.utils.audio_track import TRACK_UNREADABLE
 from zvisiongenerator.web.audio_job import AudioFields, audio_request_from_fields
@@ -128,7 +127,7 @@ class TestResolveAudioSeconds:
 
 
 def _two_kind_preset():
-    return next(item for item in parse_audio_presets(audio_config(sa3=sa3_two_kind_preset())))
+    return audio_preset("sa3")
 
 
 class TestRequestFromFields:

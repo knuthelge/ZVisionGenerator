@@ -25,8 +25,8 @@ from zvisiongenerator.backends.audio import sa3
 from zvisiongenerator.backends.audio.sa3 import StableAudio3Backend
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest
-from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
-from tests._audio_presets import SA3_CHECKPOINT_REPO, SA3_CONFIG_REPO, SA3_TEXT_ENCODER_REPO, audio_config, sa3_preset
+from zvisiongenerator.utils.audio_preset import AudioPreset
+from tests._audio_presets import SA3_CHECKPOINT_REPO, SA3_CONFIG_REPO, SA3_TEXT_ENCODER_REPO, audio_preset
 
 SAMPLE_RATE = 44100
 SAMPLE_SIZE = 16777216
@@ -162,7 +162,7 @@ def snapshots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checkpoint_tensor
 
 @pytest.fixture
 def preset() -> AudioPreset:
-    return parse_audio_presets(audio_config(sa3=sa3_preset()))[0]
+    return audio_preset("sa3")
 
 
 def _loaded(preset: AudioPreset) -> StableAudio3Backend:

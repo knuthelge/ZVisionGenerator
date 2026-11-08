@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests._factories import _make_args, _make_plan, _make_video_args
+from tests._factories import _make_args, _make_plan, _make_video_args, use_enhancer_models
 from tests._fake_process import FakeProcess, Launcher
 from tests.web._helpers import sse_payload, stub_request_job, wait_for_status
 
@@ -268,7 +268,7 @@ class TestJobFlow:
         assert types.index(DOWNLOADING_EVENT) < types.index("model_loading")
         assert first["mode"] == "video"
         assert first["model"] == "ltx-q4"
-        assert calls == [(("owner/ltx",), {"family": "ltx", "config": {"k": 1}, "model_name": "ltx-q4", "upscale": True})]
+        assert calls == [(("owner/ltx",), {"family": "ltx", "config": {"k": 1}, "model_name": "ltx-q4", "platform_key": sys.platform, "upscale": True})]
 
     def test_a_plan_that_cannot_be_made_skips_the_ensure_step(self, monkeypatch):
         """``None`` means the plan is unknown (offline): the ensure step is not called and the model loads as before."""
@@ -302,7 +302,13 @@ class TestJobFlow:
 
 
 _ENHANCER_TARGET = DownloadTarget("a/enhancer", allow_patterns=("*.safetensors",))
-_ENHANCER_CONFIG = {"generation": {}, "prompt_enhancer": {"model": {"darwin": "a/enhancer", "win32": "a/enhancer", "linux": "a/enhancer"}}}
+_ENHANCER_CONFIG = {"generation": {}}
+
+
+@pytest.fixture(autouse=True)
+def _fast_enhancer(monkeypatch, tmp_path):
+    """Declare the Fast enhancer as ``a/enhancer`` on every platform."""
+    use_enhancer_models(monkeypatch, tmp_path, fast="a/enhancer")
 
 
 class _EnhancerHarness:
@@ -617,7 +623,7 @@ class TestEnsureDownloads:
 
 
 class TestPlannerArguments:
-    def test_the_image_job_plans_with_its_family_config_and_platform(self, monkeypatch):
+    def test_the_image_job_plans_with_its_family_and_platform(self, monkeypatch):
         plan = MagicMock(return_value=None)
         monkeypatch.setattr(job_downloads_module, "image_plan", plan)
         runner = _runner()
@@ -627,9 +633,9 @@ class TestPlannerArguments:
         finally:
             runner.shutdown()
 
-        plan.assert_called_once_with("owner/atlas", family="zimage", config={"generation": {}}, platform_key=sys.platform)
+        plan.assert_called_once_with("owner/atlas", family="zimage", platform_key=sys.platform)
 
-    def test_the_creative_upscale_plans_the_image_model_with_the_app_config(self, monkeypatch, tmp_path):
+    def test_the_creative_upscale_plans_the_image_model_with_its_family_and_platform(self, monkeypatch, tmp_path):
         plan = MagicMock(return_value=None)
         monkeypatch.setattr(job_downloads_module, "image_plan", plan)
         stub_request_job(monkeypatch)
@@ -645,14 +651,14 @@ class TestPlannerArguments:
         finally:
             runner.shutdown()
 
-        plan.assert_called_once_with("/models/atlas", family="flux2_klein", config={"generation": {}}, platform_key=sys.platform)
+        plan.assert_called_once_with("/models/atlas", family="flux2_klein", platform_key=sys.platform)
 
     def test_the_creative_upscale_builds_the_model_before_loading_it(self, monkeypatch, tmp_path):
-        """A model built on first use (MOSS-Image, Ideogram 4 Instant) is built from the app config on the upscale path too."""
+        """A model built on first use (MOSS-Image, Ideogram 4 Instant) is built on the upscale path too."""
         calls: list = []
-        config = {"moss_image": {}}
+        config = {"generation": {}}
         monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: None)
-        monkeypatch.setattr(web_runner_module, "ensure_built_model", lambda model_ref, cfg, **_kw: calls.append(("built", model_ref, cfg)) or True)
+        monkeypatch.setattr(web_runner_module, "ensure_built_model", lambda model_ref, **_kw: calls.append(("built", model_ref)) or True)
         stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: calls.append(("load",)) or (MagicMock(), MagicMock()))
         monkeypatch.setattr(
@@ -666,7 +672,7 @@ class TestPlannerArguments:
         finally:
             runner.shutdown()
 
-        assert calls == [("built", "/models/moss", config), ("load",)]
+        assert calls == [("built", "/models/moss"), ("load",)]
 
     def test_the_seedvr2_upscale_plans_its_tier_files_and_labels_the_download_with_the_tier(self, monkeypatch, tmp_path):
         upscaler = SimpleNamespace(weights=FP8_WEIGHTS)
@@ -691,7 +697,7 @@ class TestPlannerArguments:
         finally:
             runner.shutdown()
 
-        plan.assert_called_once_with("seedvr2-7b", models_dir=tmp_path / "models", weights=FP8_WEIGHTS)
+        plan.assert_called_once_with("seedvr2-7b", platform_key=sys.platform, models_dir=tmp_path / "models", weights=FP8_WEIGHTS)
         downloading = next(event for event in events if event["type"] == DOWNLOADING_EVENT)
         assert downloading["model"] == "SeedVR2 7B fp8"
         assert [event["type"] for event in events].index(DOWNLOADING_EVENT) < [event["type"] for event in events].index("model_loading")
@@ -879,7 +885,7 @@ class TestMatteDownloads:
         assert reload_call == first_call
         assert reload_call.args[:3] == (request, "owner/atlas", 8)
         assert (reload_call.args[0].lora_paths, reload_call.args[0].lora_weights) == (["owner/style"], [0.5])
-        assert reload_call.kwargs == {"config": config}
+        assert reload_call.kwargs == {}
 
 
 class TestHistoryReplacement:

@@ -50,11 +50,12 @@ def load_upscale_model(model_name: str, *, low_memory: bool = True) -> LoadedMod
     """Load *model_name* the way the app loads a video model for ``--upscale 2``."""
     from zvisiongenerator.backends.mac.video import LtxVideoBackend
     from zvisiongenerator.utils.config import load_config, video_load_options
+    from zvisiongenerator.utils.model_metadata import alias_map
     from zvisiongenerator.utils.paths import resolve_model_path
 
     config = load_config()
-    model_path = resolve_model_path(model_name, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
-    handle, _info = LtxVideoBackend().load_model(model_path, low_memory=low_memory, **video_load_options("ltx", config, model_name, upscale=True))
+    model_path = resolve_model_path(model_name, aliases=alias_map(config), platform_key=sys.platform)
+    handle, _info = LtxVideoBackend().load_model(model_path, low_memory=low_memory, **video_load_options("ltx", config, model_name, platform_key=sys.platform, upscale=True))
     return LoadedModel(handle=handle, model_name=model_name, model_path=model_path, config=config)
 
 
@@ -72,7 +73,6 @@ def estimate_fit(model: LoadedModel, source: ExtendSource, *, low_memory: bool =
         upscale=True,
         budget=accelerator_memory_budget_or_none(),
         model_name=model.model_name,
-        app_config=model.config,
     )
 
 
@@ -287,7 +287,7 @@ def iclora_upscale(model: LoadedModel, source: ExtendSource, *, lora_path: str, 
     from zvisiongenerator.utils.config import video_load_options
 
     base = model.handle.pipeline
-    options = video_load_options("ltx", model.config, model.model_name, upscale=True)
+    options = video_load_options("ltx", model.config, model.model_name, platform_key=sys.platform, upscale=True)
     model_dir = _resolve_model_dir(model.model_path, packs=options.get("mlx_packs") or {})
     streaming = _use_low_ram_streaming(base.low_memory, memory_size_bytes())
     phases: dict[str, dict[str, float]] = {}

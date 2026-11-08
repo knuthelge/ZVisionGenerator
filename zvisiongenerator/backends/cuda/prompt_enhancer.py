@@ -7,7 +7,7 @@ import warnings
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from zvisiongenerator.utils.config import model_reference
+from zvisiongenerator.utils.paths import join_huggingface_revision
 
 _END_TOKEN = "<|im_end|>"
 # Subtracted once from the logit of every token already generated in this request; stops songs from repeating a verse.
@@ -97,7 +97,7 @@ class TransformersPromptEnhancer:
                 kwargs["device_map"] = "cuda"
             self._model = AutoModelForCausalLM.from_pretrained(repo, **kwargs)
         except Exception as exc:  # noqa: BLE001 - surface any loader failure with the model name
-            raise RuntimeError(f"Could not load prompt enhancer model {model_reference(repo, revision)}: {exc}") from exc
+            raise RuntimeError(f"Could not load prompt enhancer model {join_huggingface_revision(repo, revision)}: {exc}") from exc
         self._model.eval()
         self._graph_decode = self.on_cuda and _uses_graph_decode(self._model.config.model_type, self._model.hf_quantizer.pre_quantized, self._model.generation_config)
         end_id = self._tokenizer.convert_tokens_to_ids(_END_TOKEN)

@@ -7,9 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests._factories import metadata_copy, use_model_metadata
+
 from zvisiongenerator import backends
 from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
 from zvisiongenerator.utils.config import load_config
+from zvisiongenerator.utils.model_metadata import model_download_size_label
 from zvisiongenerator.utils.seedvr2 import (
     FP8_WEIGHTS,
     MLX_WEIGHTS,
@@ -17,17 +20,19 @@ from zvisiongenerator.utils.seedvr2 import (
     SeedVR2Tier,
     estimate_seedvr2_bytes,
     pick_seedvr2_tier,
+    check_seedvr2_numbers,
+    seedvr2_files,
     seedvr2_over_budget,
     seedvr2_row_name,
     seedvr2_settings,
-    seedvr2_size_label,
     seedvr2_tier_label,
+    seedvr2_tiers,
 )
 
 TIER_7B = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
 TIER_3B = SeedVR2Tier("seedvr2-3b", weights_gb=4.72, activation_floor_gb=10.79, activation_base_gb=1.10, activation_gb_per_mp=0.89)
-STREAMED_7B = SeedVR2Tier("seedvr2-7b", weights_gb=0.4, activation_floor_gb=5.0, activation_base_gb=0.6, activation_gb_per_mp=0.55, system_gb=22)
-STREAMED_3B = SeedVR2Tier("seedvr2-3b", weights_gb=0.3, activation_floor_gb=5.0, activation_base_gb=0.6, activation_gb_per_mp=0.6, system_gb=12.5)
+STREAMED_7B = SeedVR2Tier("seedvr2-7b", weights_gb=1.6, activation_floor_gb=5.0, activation_base_gb=0.21, activation_gb_per_mp=0.556, system_gb=22)
+STREAMED_3B = SeedVR2Tier("seedvr2-3b", weights_gb=1.6, activation_floor_gb=5.0, activation_base_gb=0.25, activation_gb_per_mp=0.6, system_gb=12.5)
 
 
 def _settings(model: str = "auto", reference_megapixels: float = 16) -> SeedVR2Settings:
@@ -40,10 +45,6 @@ def _config(**overrides):
         "softness": 0.75,
         "video_softness": 0.0,
         "reference_megapixels": 16,
-        "tiers": [
-            {"model": "seedvr2-7b", "weights_gb": 9.26, "activation_floor_gb": 10.79, "activation_base_gb": 1.88, "activation_gb_per_mp": 0.83},
-            {"model": "seedvr2-3b", "weights_gb": 4.72, "activation_floor_gb": 10.79, "activation_base_gb": 1.10, "activation_gb_per_mp": 0.89},
-        ],
     }
     block.update(overrides)
     return {"seedvr2": block}
@@ -195,7 +196,7 @@ class TestPickTier:
         assert pick_seedvr2_tier(_settings(), budget) is TIER_3B
 
     def test_packaged_config_picks_7b_on_a_32gb_mac_and_3b_below_the_7b_estimate(self):
-        settings = seedvr2_settings(load_config())
+        settings = seedvr2_settings(load_config(), "darwin")
 
         assert pick_seedvr2_tier(settings, int(26.80e9)).model == "seedvr2-7b"
         assert pick_seedvr2_tier(settings, int(24.41e9)).model == "seedvr2-3b"
@@ -233,7 +234,7 @@ class TestPickStreamedTier:
         assert pick_seedvr2_tier(self._settings("seedvr2-7b"), 1, 1) is STREAMED_7B
 
     def test_packaged_config_picks_7b_with_32gb_and_3b_with_16gb(self):
-        settings = seedvr2_settings(load_config(), FP8_WEIGHTS.tiers_key)
+        settings = seedvr2_settings(load_config(), "linux")
 
         assert pick_seedvr2_tier(settings, int(10.7e9), int(33.4e9)).model == "seedvr2-7b"
         assert pick_seedvr2_tier(settings, int(10.7e9), int(16.7e9)).model == "seedvr2-3b"
@@ -249,82 +250,135 @@ class TestLabels:
         assert seedvr2_row_name("seedvr2-7b", MLX_WEIGHTS) == "seedvr2-7b@q8"
         assert seedvr2_row_name("seedvr2-3b", FP8_WEIGHTS) == "seedvr2-3b@fp8"
 
-    def test_size_label(self):
-        assert seedvr2_size_label(16_980_659_238) == "17.0 GB"
-        assert seedvr2_size_label(7_284_343_622) == "7.3 GB"
+    @pytest.mark.parametrize(
+        ("model", "platform", "label"),
+        [("seedvr2-7b", "darwin", "17.0 GB"), ("seedvr2-3b", "darwin", "7.3 GB"), ("seedvr2-7b", "win32", "9.0 GB"), ("seedvr2-3b", "linux", "3.9 GB")],
+    )
+    def test_the_download_size_label_is_the_metadatas(self, model, platform, label):
+        assert model_download_size_label(model, platform) == label
 
 
-# ── Settings validation ─────────────────────────────────────────────────────
+# ── Tiers, files and settings ───────────────────────────────────────────────
+
+
+class TestTiers:
+    def test_macos_prices_its_tiers_in_quality_order(self):
+        assert seedvr2_tiers("darwin") == (TIER_7B, TIER_3B)
+
+    @pytest.mark.parametrize("platform", ["win32", "linux"])
+    def test_windows_and_linux_price_the_streamed_tiers_with_system_memory(self, platform):
+        assert seedvr2_tiers(platform) == (STREAMED_7B, STREAMED_3B)
+
+    def test_the_tiers_follow_the_order_of_the_upscaler_entries(self, monkeypatch, tmp_path):
+        data = metadata_copy()
+        models = data["models"]
+        data["models"] = {"seedvr2-3b": models["seedvr2-3b"], **{model_id: entry for model_id, entry in models.items() if model_id != "seedvr2-3b"}}
+        use_model_metadata(monkeypatch, tmp_path, data)
+
+        assert [tier.model for tier in seedvr2_tiers("darwin")] == ["seedvr2-3b", "seedvr2-7b"]
+
+    def test_reading_the_tiers_changes_nothing_in_the_metadata(self):
+        before = metadata_copy()
+
+        seedvr2_tiers("linux")
+
+        assert metadata_copy() == before
+
+
+class TestFiles:
+    """The files of a tier are positional: the transformer, then the VAE."""
+
+    def test_macos_downloads_both_16_bit_files_from_one_repo(self):
+        assert seedvr2_files("seedvr2-7b", "darwin") == (("numz/SeedVR2_comfyUI", "seedvr2_ema_7b_fp16.safetensors"), ("numz/SeedVR2_comfyUI", "ema_vae_fp16.safetensors"))
+        assert seedvr2_files("seedvr2-3b", "darwin") == (("numz/SeedVR2_comfyUI", "seedvr2_ema_3b_fp16.safetensors"), ("numz/SeedVR2_comfyUI", "ema_vae_fp16.safetensors"))
+
+    @pytest.mark.parametrize("platform", ["win32", "linux"])
+    def test_windows_and_linux_download_the_fp8_files(self, platform):
+        assert seedvr2_files("seedvr2-7b", platform) == (
+            ("AInVFX/SeedVR2_comfyUI", "seedvr2_ema_7b_fp8_e4m3fn_mixed_block35_fp16.safetensors"),
+            ("numz/SeedVR2_comfyUI", "ema_vae_fp16.safetensors"),
+        )
+        assert seedvr2_files("seedvr2-3b", platform) == (("numz/SeedVR2_comfyUI", "seedvr2_ema_3b_fp8_e4m3fn.safetensors"), ("numz/SeedVR2_comfyUI", "ema_vae_fp16.safetensors"))
 
 
 class TestSettings:
     def test_packaged_config_loads(self):
-        settings = seedvr2_settings(load_config())
+        settings = seedvr2_settings(load_config(), "darwin")
 
         assert settings.model == "auto"
         assert settings.softness == 0.75
         assert settings.video_softness == 0.0
         assert settings.reference_megapixels == 16
         assert [tier.model for tier in settings.tiers] == ["seedvr2-7b", "seedvr2-3b"]
+        assert all(tier.system_gb is None for tier in settings.tiers)
 
-    def test_packaged_config_loads_the_discrete_tiers_with_system_memory(self):
-        settings = seedvr2_settings(load_config(), FP8_WEIGHTS.tiers_key)
+    @pytest.mark.parametrize("platform", ["win32", "linux"])
+    def test_packaged_config_loads_the_streamed_tiers_with_system_memory(self, platform):
+        settings = seedvr2_settings(load_config(), platform)
 
         assert [tier.model for tier in settings.tiers] == ["seedvr2-7b", "seedvr2-3b"]
         assert all(tier.system_gb is not None for tier in settings.tiers)
 
-    def test_discrete_tiers_parse_with_system_memory(self):
-        config = _config(discrete_tiers=[{"model": "seedvr2-7b", "weights_gb": 0.4, "activation_floor_gb": 5.0, "activation_base_gb": 0.6, "activation_gb_per_mp": 0.55, "system_gb": 22}])
-
-        assert seedvr2_settings(config, "discrete_tiers").tiers == (STREAMED_7B,)
-
-    def test_system_memory_must_be_a_positive_number(self):
-        config = _config(discrete_tiers=[{"model": "seedvr2-7b", "weights_gb": 0.4, "activation_floor_gb": 5, "activation_base_gb": 0.6, "activation_gb_per_mp": 0.55, "system_gb": 0}])
-
-        with pytest.raises(ValueError, match=r"seedvr2\.discrete_tiers\[0\]\.system_gb"):
-            seedvr2_settings(config, "discrete_tiers")
-
-    def test_a_missing_discrete_list_names_its_key(self):
-        with pytest.raises(ValueError, match=r"seedvr2\.discrete_tiers"):
-            seedvr2_settings(_config(), "discrete_tiers")
-
-    def test_a_valid_block_parses_into_tiers(self):
-        settings = seedvr2_settings(_config())
-
-        assert settings.tiers == (TIER_7B, TIER_3B)
+    def test_a_valid_block_takes_the_platforms_tiers(self):
+        assert seedvr2_settings(_config(), "darwin").tiers == (TIER_7B, TIER_3B)
+        assert seedvr2_settings(_config(), "linux").tiers == (STREAMED_7B, STREAMED_3B)
 
     def test_a_pinned_model_is_accepted(self):
-        assert seedvr2_settings(_config(model="seedvr2-3b")).model == "seedvr2-3b"
+        assert seedvr2_settings(_config(model="seedvr2-3b"), "darwin").model == "seedvr2-3b"
+
+    def test_the_numbers_come_back_as_floats(self):
+        settings = seedvr2_settings(_config(softness=1, video_softness=0), "darwin")
+
+        assert (settings.softness, settings.video_softness, settings.reference_megapixels) == (1.0, 0.0, 16.0)
+        assert all(isinstance(value, float) for value in (settings.softness, settings.video_softness, settings.reference_megapixels))
+
+    def test_a_reference_size_in_the_config_is_used(self):
+        assert seedvr2_settings(_config(reference_megapixels=24), "darwin").reference_megapixels == 24.0
 
     @pytest.mark.parametrize(
         ("overrides", "key"),
         [
-            ({"tiers": None}, "seedvr2.tiers"),
-            ({"tiers": [{"model": "seedvr2-9b", "weights_gb": 1, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].model"),
-            ({"tiers": [{"model": "seedvr2-3b", "weights_gb": 0, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].weights_gb"),
             ({"model": "seedvr2-9b"}, "seedvr2.model"),
+            ({"model": 7}, "seedvr2.model"),
             ({"softness": 1.5}, "seedvr2.softness"),
             ({"video_softness": "0"}, "seedvr2.video_softness"),
+            ({"reference_megapixels": 0}, "seedvr2.reference_megapixels"),
         ],
     )
     def test_invalid_blocks_name_the_key(self, overrides, key):
-        with pytest.raises(ValueError, match=key.replace("[", r"\[").replace("]", r"\]")):
-            seedvr2_settings(_config(**overrides))
+        with pytest.raises(ValueError, match=key):
+            seedvr2_settings(_config(**overrides), "darwin")
 
     def test_required_keys_must_be_present(self):
         config = _config()
         del config["seedvr2"]["softness"]
 
         with pytest.raises(ValueError, match="seedvr2.softness"):
-            seedvr2_settings(config)
+            seedvr2_settings(config, "darwin")
 
     def test_missing_block_raises(self):
         with pytest.raises(ValueError, match="seedvr2"):
-            seedvr2_settings({})
+            seedvr2_settings({}, "darwin")
+
+    def test_the_model_is_checked_where_it_is_used_not_in_the_number_check(self):
+        check_seedvr2_numbers(_config(model="seedvr2-9b"))
+
+        with pytest.raises(ValueError, match="seedvr2.softness"):
+            check_seedvr2_numbers(_config(softness=2))
+
+    def test_settings_do_not_write_into_the_config(self):
+        config = _config()
+        before = {key: value for key, value in config["seedvr2"].items()}
+
+        seedvr2_settings(config, "darwin")
+
+        assert config["seedvr2"] == before
 
 
-def test_model_not_among_the_tiers_is_rejected():
-    config = _config(tiers=[_config()["seedvr2"]["tiers"][1]], model="seedvr2-7b")
+def test_model_not_among_the_tiers_is_rejected(monkeypatch, tmp_path):
+    data = metadata_copy()
+    del data["models"]["seedvr2-7b"]
+    use_model_metadata(monkeypatch, tmp_path, data)
 
     with pytest.raises(ValueError, match="seedvr2.model"):
-        seedvr2_settings(config)
+        seedvr2_settings(_config(model="seedvr2-7b"), "darwin")

@@ -17,6 +17,7 @@ from PIL import Image, UnidentifiedImageError
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none, supports_video_extend, video_file_upscale_method
 from zvisiongenerator.core.ideogram4 import is_json_caption
+from zvisiongenerator.utils.model_metadata import alias_map, model_display_name, model_download_size_label
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.enhance_record import enhance_record_summary, enhance_reuse_param
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX
@@ -36,11 +37,11 @@ from zvisiongenerator.utils.provenance import (
     read_png_config,
     recorded_settings,
 )
-from zvisiongenerator.downloads import video_model_downloaded
+from zvisiongenerator.downloads.plans import video_model_downloaded
 from zvisiongenerator.utils.audio_peaks import read_waveform_peaks
-from zvisiongenerator.utils.config import model_capabilities, model_display_name, model_download_size_label
+from zvisiongenerator.utils.model_metadata import model_capabilities
 from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
-from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label, seedvr2_tier_label
+from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_tier_label
 from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, seedvr2_options, seedvr2_video_option, upscale_options, upscale_output_size
 from zvisiongenerator.utils.video_probe import ffprobe_json, parse_probe
 from zvisiongenerator.utils.video_splice import SPLICE_DIR_PREFIX
@@ -820,7 +821,7 @@ def _asset_upscale_json(asset: GalleryAsset, web_config: WebUiConfig, resolved_m
     else:
         # The inventory's family gives the same capabilities resolve_defaults uses for POST /api/upscale, without detection.
         family = next((entry.family for entry in web_config.image_inventory if entry.name == model), "unknown")
-        options = upscale_options(asset.width, asset.height, model_capabilities(web_config.app_config, family), web_config.app_config)
+        options = upscale_options(asset.width, asset.height, model_capabilities(family), web_config.app_config)
     setup = web_config.seedvr2
     seedvr2_menu = seedvr2_options(asset.width, asset.height, setup.tier, budget_bytes=setup.budget_bytes) if setup is not None else []
     return {"factors": [asdict(option) for option in options], "seedvr2": _seedvr2_upscale_json(seedvr2_menu, setup)}
@@ -835,7 +836,7 @@ def _seedvr2_upscale_json(options: list[UpscaleOption], setup: SeedVR2Setup | No
         "options": [asdict(option) for option in options],
         "model": seedvr2_tier_label(model, setup.weights),
         "downloaded": setup.downloaded,
-        "download_size_label": None if setup.downloaded else seedvr2_size_label(seedvr2_download_bytes(model, setup.weights)),
+        "download_size_label": None if setup.downloaded else model_download_size_label(model, sys.platform),
     }
 
 
@@ -869,14 +870,14 @@ def _ltx_upscale_json(asset: GalleryAsset, web_config: WebUiConfig, recorded_mod
     except ValueError:
         return None
     app_config = web_config.app_config
-    model_ref = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
-    option = ltx_video_option(width, height, frames, model_ref=model_ref, model_name=model_name, app_config=app_config, budget=accelerator_memory_budget_or_none())
-    downloaded = video_model_downloaded(model_ref, family="ltx", config=app_config, model_name=model_name)
+    model_ref = resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform)
+    option = ltx_video_option(width, height, frames, model_ref=model_ref, model_name=model_name, budget=accelerator_memory_budget_or_none())
+    downloaded = video_model_downloaded(model_ref, family="ltx", config=app_config, model_name=model_name, platform_key=sys.platform)
     return {
         "options": [asdict(option)],
-        "model": model_display_name(app_config, model_name),
+        "model": model_display_name(model_name),
         "downloaded": downloaded,
-        "download_size_label": None if downloaded else model_download_size_label(app_config, model_name),
+        "download_size_label": None if downloaded else model_download_size_label(model_name, sys.platform),
     }
 
 

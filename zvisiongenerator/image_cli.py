@@ -15,19 +15,21 @@ from zvisiongenerator.backends import get_backend, release_accelerator_memory
 from zvisiongenerator.built_models import ensure_built_model
 from zvisiongenerator.enhance_cli import add_enhance_arguments, defer_format_to_entries, parse_enhance_args
 from zvisiongenerator.preflight import run_preflight
+from zvisiongenerator.utils.model_metadata import alias_map, model_display_name
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.built_model import BUILDING_PHASE
 from zvisiongenerator.image_model_loader import SAVING_QUANT_PHASE, load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.hf_snapshot import snapshot_download, snapshot_with
-from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
+from zvisiongenerator.utils.matte import matte_pins
 from zvisiongenerator.utils.model_files import cached_snapshot_dirs
-from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, model_display_name, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
+from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL
 from zvisiongenerator.utils.lora import resolve_lora_references
-from zvisiongenerator.downloads import describe_refusal, image_plan, matte_plan
+from zvisiongenerator.downloads import describe_refusal
+from zvisiongenerator.downloads.plans import image_plan, matte_plan
 from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.paths import canonical_model_name, get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompts import inspect_prompts_file
@@ -120,7 +122,7 @@ def _fetch_matte_models() -> None:
     Raises:
         OSError: When the Hub cannot be reached or a download fails.
     """
-    pins = (BIREFNET, VITMATTE)
+    pins = matte_pins()
     missing = any(not any(all((snapshot / name).is_file() for name in pin.files) for snapshot in cached_snapshot_dirs(pin.repo_id, pin.revision)) for pin in pins)
     if missing:
         print("Downloading the background removal models (first use only)...", flush=True)
@@ -224,9 +226,9 @@ def main(*, prog: str = "ziv-image") -> None:
     if args.model is None:
         parser.error("--model is required. Provide a model name, path, or HuggingFace repo ID.")
     # A repo id that is an alias's repo runs as that alias: it gets the alias's licence notice and is recorded under its name.
-    picked_model = canonical_model_name(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    picked_model = canonical_model_name(args.model, aliases=alias_map(config), platform_key=sys.platform)
     args.model_name = picked_model
-    args.model = resolve_model_path(picked_model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    args.model = resolve_model_path(picked_model, aliases=alias_map(config), platform_key=sys.platform)
 
     lora_paths, lora_weights = None, None
     if args.lora is not None:
@@ -294,7 +296,7 @@ def main(*, prog: str = "ziv-image") -> None:
     if "scheduler" in cli_overrides and not defaults.get("supports_scheduler", True):
         parser.error(f"The '{model_info.family}' model family uses its own sampler; drop --scheduler.")
     try:
-        validate_scheduler(args.scheduler, config)
+        validate_scheduler(args.scheduler)
     except ValueError as e:
         parser.error(str(e))
     if args.upscale and args.upscale_steps is None:
@@ -354,12 +356,11 @@ def main(*, prog: str = "ziv-image") -> None:
             parser.error(str(e))
         if plan.cancelled:
             return
-        label = model_display_name(config, picked_model)
+        label = model_display_name(picked_model)
         try:
-            print_licence_notice(picked_model, lambda: image_plan(args.model, family=model_info.family, config=config, platform_key=sys.platform))
+            print_licence_notice(picked_model, lambda: image_plan(args.model, family=model_info.family, platform_key=sys.platform))
             built = ensure_built_model(
                 args.model,
-                config,
                 platform_key=sys.platform,
                 on_phase=lambda phase: print(f"Preparing {label} (first use only)...", flush=True) if phase == BUILDING_PHASE else None,
                 cancelled=lambda: skip.pending() == "quit",

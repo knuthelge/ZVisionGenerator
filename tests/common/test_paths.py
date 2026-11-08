@@ -199,20 +199,6 @@ class TestResolveModelAliasPlatformAware:
 
         assert result == "dg845/LTX-2.3-Diffusers"
 
-    def test_per_platform_message_raises_value_error(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
-
-        aliases = {
-            "ltx-4": {
-                "darwin": "dgrauet/ltx-2.3-mlx-q4",
-                "win32": {"message": "Alias 'ltx-4' is macOS-only. On Windows, use 'ltx-2.3' for the CUDA diffusers backend."},
-            }
-        }
-
-        with pytest.raises(ValueError, match="macOS-only"):
-            resolve_model_path("ltx-4", aliases=aliases, platform_key="win32")
-
     def test_platform_key_none_keeps_dict_alias_unresolved(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         (tmp_path / "models").mkdir(parents=True, exist_ok=True)
@@ -319,13 +305,21 @@ class TestSplitHuggingfaceRevision:
         assert split_huggingface_revision(value) == (value, None)
 
 
+class TestJoinHuggingfaceRevision:
+    @pytest.mark.parametrize(("revision", "expected"), [("abc123", "owner/repo@abc123"), (None, "owner/repo"), ("", "owner/repo")])
+    def test_a_pinned_repo_joins_and_a_missing_revision_leaves_the_repo(self, revision, expected):
+        from zvisiongenerator.utils.paths import join_huggingface_revision
+
+        assert join_huggingface_revision("owner/repo", revision) == expected
+
+
 class TestCanonicalModelName:
     _PIN = "b" * 40
     _ALIASES = {
         "ltx-4": {"darwin": f"dgrauet/ltx-2.3-mlx-q4@{_PIN}", "win32": "org/diffusers", "linux": "org/diffusers"},
         "ltx-8": {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "org/diffusers", "linux": "org/diffusers"},
         "h3": f"org/h3@{_PIN}",
-        "gated": {"darwin": {"message": "not on macOS"}},
+        "gated": {"win32": "org/gated"},
         "folder": "ideo",
     }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -14,16 +15,11 @@ from zvisiongenerator.ideogram4_instant_builder import build_instant_model, ensu
 from zvisiongenerator.image_model_loader import LOADING_PHASE  # noqa: E402
 from zvisiongenerator.built_models import ensure_built_model  # noqa: E402
 from zvisiongenerator.utils.built_model import BUILD_RECORD_NAME, BUILDING_PHASE  # noqa: E402
-from zvisiongenerator.utils.ideogram4_instant import InstantSource, instant_source, is_built, is_instant_dir  # noqa: E402
+from zvisiongenerator.utils.ideogram4_instant import InstantSource, instant_source, instant_targets, is_built, is_instant_dir  # noqa: E402
 from zvisiongenerator.utils.image_model_detect import detect_image_model  # noqa: E402
+from zvisiongenerator.utils.model_metadata import model_entry  # noqa: E402
 
-_CONFIG = {
-    "ideogram4_instant": {
-        "transformer": {"repo": "owner/instant", "revision": "a" * 40, "filename": "instant.safetensors"},
-        "components": {"linux": "owner/base-nf4@" + "b" * 40, "darwin": "owner/base-fp8@" + "c" * 40},
-        "transformer_format": {"linux": "bf16", "darwin": "fp8"},
-    }
-}
+from tests.image._helpers import pin_instant  # noqa: E402
 
 
 def _source(transformer_format: str = "bf16") -> InstantSource:
@@ -31,23 +27,34 @@ def _source(transformer_format: str = "bf16") -> InstantSource:
 
 
 class TestInstantSource:
-    def test_each_platform_gets_its_components_and_format(self):
-        linux, darwin = instant_source(_CONFIG, "linux"), instant_source(_CONFIG, "darwin")
+    @pytest.mark.parametrize("platform_key", ["darwin", "win32", "linux"])
+    def test_each_platform_gets_its_components_format_and_files(self, platform_key):
+        downloads = model_entry("ideo")["downloads"][platform_key]
+        components = next(target for target in downloads if target["role"] == "components")
+        transformer = next(target for target in downloads if target["role"] == "transformer")
 
-        assert (linux.components_repo, linux.components_revision, linux.transformer_format) == ("owner/base-nf4", "b" * 40, "bf16")
-        assert (darwin.components_repo, darwin.transformer_format) == ("owner/base-fp8", "fp8")
-        assert (linux.transformer_repo, linux.transformer_revision, linux.transformer_file) == ("owner/instant", "a" * 40, "instant.safetensors")
+        source = instant_source(platform_key)
 
-    def test_a_platform_without_an_entry_is_refused(self):
-        with pytest.raises(ValueError, match="win32"):
-            instant_source(_CONFIG, "win32")
+        assert source.components == components["ref"]
+        assert instant_targets(platform_key)[0].allow_patterns == tuple(components["files"])
+        assert (f"{source.transformer_repo}@{source.transformer_revision}", (source.transformer_file,)) == (transformer["ref"], tuple(transformer["files"]))
+        assert source.transformer_format == model_entry("ideo")["transformer_format"][platform_key]
 
-    def test_an_unknown_format_is_refused(self):
-        config = json.loads(json.dumps(_CONFIG))
-        config["ideogram4_instant"]["transformer_format"]["linux"] = "int4"
 
-        with pytest.raises(ValueError, match="transformer_format"):
-            instant_source(config, "linux")
+class TestDefaultComponentsDownload:
+    def test_it_requests_the_declared_component_files_of_the_pinned_repo(self, monkeypatch, tmp_path):
+        import huggingface_hub
+
+        from zvisiongenerator import ideogram4_instant_builder
+
+        snapshot = MagicMock(return_value=str(tmp_path / "snap"))
+        monkeypatch.setattr(huggingface_hub, "snapshot_download", snapshot)
+        source = instant_source("linux")
+        components, _transformer = instant_targets("linux")
+
+        assert ideogram4_instant_builder._components_downloader(components)(source, tmp_path) == tmp_path / "snap"
+
+        snapshot.assert_called_once_with(source.components_repo, revision=source.components_revision, allow_patterns=list(components.allow_patterns))
 
 
 class TestInstantDir:
@@ -289,11 +296,11 @@ class TestEnsureBuiltModel:
     def test_an_ideo_folder_goes_to_the_instant_builder_with_the_cancel_check(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         seen: list = []
-        monkeypatch.setattr("zvisiongenerator.ideogram4_instant_builder.build_instant_model", lambda source, target, cancelled=None: seen.append(cancelled) or False)
+        monkeypatch.setattr("zvisiongenerator.ideogram4_instant_builder.build_instant_model", lambda source, target, download_components, cancelled=None: seen.append(cancelled) or False)
         stop = lambda: True  # noqa: E731
         phases: list[str] = []
 
-        assert ensure_built_model(str(tmp_path / "models" / "ideo"), _CONFIG, platform_key="linux", on_phase=phases.append, cancelled=stop) is False
+        assert ensure_built_model(str(tmp_path / "models" / "ideo"), platform_key="linux", on_phase=phases.append, cancelled=stop) is False
 
         assert seen == [stop] and phases == [BUILDING_PHASE]
 
@@ -303,17 +310,17 @@ class TestEnsureInstantModel:
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         monkeypatch.setattr("zvisiongenerator.ideogram4_instant_builder.build_instant_model", lambda *a, **k: pytest.fail("built"))
 
-        assert ensure_instant_model(str(tmp_path / "models" / "zit"), _CONFIG, platform_key="linux") is True
+        assert ensure_instant_model(str(tmp_path / "models" / "zit"), platform_key="linux") is True
 
     def test_a_missing_folder_is_built_and_reports_its_phases(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         built: list[tuple] = []
-        monkeypatch.setattr("zvisiongenerator.ideogram4_instant_builder.build_instant_model", lambda source, target, cancelled=None: built.append((source, target)) or True)
+        monkeypatch.setattr("zvisiongenerator.ideogram4_instant_builder.build_instant_model", lambda source, target, download_components, cancelled=None: built.append((source, target)) or True)
         phases: list[str] = []
 
-        assert ensure_instant_model(str(tmp_path / "models" / "ideo"), _CONFIG, platform_key="linux", on_phase=phases.append) is True
+        assert ensure_instant_model(str(tmp_path / "models" / "ideo"), platform_key="linux", on_phase=phases.append) is True
 
-        assert built == [(instant_source(_CONFIG, "linux"), tmp_path / "models" / "ideo")]
+        assert built == [(instant_source("linux"), tmp_path / "models" / "ideo")]
         assert phases == [BUILDING_PHASE, LOADING_PHASE]
 
     def test_a_current_build_is_reused_and_a_pin_change_rebuilds(self, monkeypatch, tmp_path):
@@ -322,14 +329,13 @@ class TestEnsureInstantModel:
         target.mkdir(parents=True)
         from zvisiongenerator.utils.ideogram4_instant import write_build_record
 
-        write_build_record(target, instant_source(_CONFIG, "linux"))
+        write_build_record(target, instant_source("linux"))
         built: list[str] = []
-        monkeypatch.setattr("zvisiongenerator.ideogram4_instant_builder.build_instant_model", lambda source, target, cancelled=None: built.append(source.transformer_revision) or True)
+        monkeypatch.setattr("zvisiongenerator.ideogram4_instant_builder.build_instant_model", lambda source, target, download_components, cancelled=None: built.append(source.components) or True)
 
-        ensure_instant_model(str(target), _CONFIG, platform_key="linux")
-        changed = json.loads(json.dumps(_CONFIG))
-        changed["ideogram4_instant"]["transformer"]["revision"] = "d" * 40
-        ensure_instant_model(str(target), changed, platform_key="linux")
+        ensure_instant_model(str(target), platform_key="linux")
+        pin_instant(monkeypatch, tmp_path, components="owner/base@" + "d" * 40)
+        ensure_instant_model(str(target), platform_key="linux")
 
-        assert built == ["d" * 40]
+        assert built == ["owner/base@" + "d" * 40]
         assert (target / BUILD_RECORD_NAME).is_file()

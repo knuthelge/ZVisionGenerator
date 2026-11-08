@@ -27,9 +27,11 @@ import shutil
 import sys
 from pathlib import Path
 
+from zvisiongenerator.utils.model_metadata import alias_map
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.ltx_converted import LTX_MODEL_TYPES as LTX_VERSIONS
 from zvisiongenerator.utils.paths import get_ziv_data_dir
+from zvisiongenerator.utils.platform import PLATFORM_LABELS
 from zvisiongenerator.utils.stored_quant import parse_stored_quant_name
 
 
@@ -738,9 +740,9 @@ def _cmd_list(args):
         config = load_config()
     except ValueError:
         config = {}
-    aliases = config.get("model_aliases", {})
+    aliases = alias_map(config)
 
-    print(format_asset_table(models=models, video_models=video_models, loras=loras, aliases=aliases or None, platforms=config.get("platforms")))
+    print(format_asset_table(models=models, video_models=video_models, loras=loras, aliases=aliases, platforms=PLATFORM_LABELS))
 
 
 def _build_model_parser(*, prog: str = "ziv-model") -> argparse.ArgumentParser:
