@@ -194,7 +194,6 @@ zvisiongenerator/
 │   ├── interactive.py             Keyboard interrupt handling and review state
 │   ├── library_noise.py           Silence the known console noise of the audio models' libraries
 │   ├── licences.py                Pure parser and lookups of the licence records, and the licence notice for a download that is about to start
-│   ├── licences.yaml              The licence records of the models: one per licence, with its supplier, a summary, URLs and the models it covers
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── lora_family.py             Pure detector of the model family a LoRA was trained for, from its safetensors header and metadata (`LORA_FAMILY_VERSION`)
 │   ├── lora_files.py              Give a loader a LoRA under the tensor names its family reads: the tensors renamed, or a temporary renamed copy of the file for loaders that take only a path
@@ -208,6 +207,8 @@ zvisiongenerator/
 │   ├── matte_models.py            The pinned BiRefNet and ViTMatte repositories and the Models-page row of the background removal models
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)
+│   ├── model_metadata.py          Reader of the packaged model metadata (`load_model_metadata`, `model_entry`, `model_ids`, `for_platform`) and the YAML loader the packaged files share
+│   ├── model_metadata.yaml        Facts about the built-in models, never merged with the user's config: the licence records (one per licence, with its supplier, a summary and URLs) and a `models` entry per model naming the records that cover it
 │   ├── music_mode.py              Song or instrumental: what the Lyrics box of a music take makes (the Web UI's status line mirrors it)
 │   ├── moss_build.py              MOSS-Image's pinned sources, model folders, build records and shared stored copies
 │   ├── page_cache.py              Drop model files from the page cache once written or read

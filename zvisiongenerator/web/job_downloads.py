@@ -16,7 +16,7 @@ from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileU
 from zvisiongenerator.downloads import DownloadTarget, audio_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, target_present_offline, video_plan
 from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.config import enhancer_tier_models, model_display_name, model_reference, resolve_enhancer_model
-from zvisiongenerator.utils.licences import ENHANCER_LICENCE_TIERS, MATTE_LICENCE_MODEL, SEEDVR2_LICENCE_MODEL, enhancer_licence_model
+from zvisiongenerator.utils.licences import ENHANCER_LICENCE_TIERS, MATTE_LICENCE_MODEL, enhancer_licence_model
 from zvisiongenerator.utils.matte_models import MATTE_LABEL
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
@@ -112,7 +112,7 @@ def matte_part() -> JobDownloadPart:
 def seedvr2_tier_part(model_name: str, weights: SeedVR2Weights, models_dir: Path) -> JobDownloadPart:
     """Return the part for SeedVR2 tier *model_name* as *weights* run it, with its files under *models_dir*."""
     label = seedvr2_tier_label(model_name, weights)
-    return JobDownloadPart(label, SEEDVR2_LICENCE_MODEL, ROLE_MODEL, seedvr2_plan(model_name, models_dir=models_dir, weights=weights))
+    return JobDownloadPart(label, model_name, ROLE_MODEL, seedvr2_plan(model_name, models_dir=models_dir, weights=weights))
 
 
 def seedvr2_part(model_name: str | None) -> JobDownloadPart:
@@ -120,7 +120,7 @@ def seedvr2_part(model_name: str | None) -> JobDownloadPart:
     upscaler = get_seedvr2_upscaler()
     if upscaler is None:
         # The load reports that this platform has no SeedVR2 engine.
-        return JobDownloadPart(str(model_name), SEEDVR2_LICENCE_MODEL, ROLE_MODEL, None)
+        return JobDownloadPart(str(model_name), str(model_name), ROLE_MODEL, None)
     return seedvr2_tier_part(str(model_name), upscaler.weights, get_ziv_data_dir() / "models")
 
 

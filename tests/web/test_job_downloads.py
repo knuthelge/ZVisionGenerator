@@ -179,7 +179,7 @@ class TestPartsMatchTheRunner:
         parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas")
 
         assert [(part.role, part.label) for part in parts] == [("model", "SeedVR2 7B fp8")]
-        assert [part.model_id for part in parts] == ["seedvr2"]
+        assert [part.model_id for part in parts] == ["seedvr2-7b"]
         _same_downloads(parts, runner_planners)
 
     def test_a_creative_upscale_downloads_the_refinement_model(self, monkeypatch, runner_planners, tmp_path):
@@ -308,7 +308,7 @@ class TestUncheckedParts:
 
         parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas")
 
-        assert [(part.label, part.model_id, part.targets) for part in parts] == [("seedvr2-7b", "seedvr2", None)]
+        assert [(part.label, part.model_id, part.targets) for part in parts] == [("seedvr2-7b", "seedvr2-7b", None)]
 
 
 def test_a_job_that_needs_a_model_ref_refuses_without_one():

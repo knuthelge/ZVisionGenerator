@@ -15,6 +15,7 @@ from zvisiongenerator.web.workspace_contract import build_workflow_contract, can
 
 LICENSE_FILES = ("LICENSE", "THIRD_PARTY_LICENSES.md")
 LICENSE_EXPRESSION = "AGPL-3.0-or-later"
+PACKAGED_DATA_FILES = ("zvisiongenerator/config.yaml", "zvisiongenerator/utils/model_metadata.yaml")
 VENDORED_PACKAGES = ("ltx_core_mlx", "ltx_pipelines_mlx", "minimax_h3_mlx", "seedvr2_torch", "moss_image")
 
 
@@ -75,6 +76,7 @@ def test_distributions_include_exact_license_notices_and_metadata(built_distribu
         wheel_members = set(wheel.namelist())
         for vendored in VENDORED_PACKAGES:
             assert any(member.startswith(f"{vendored}/") for member in wheel_members), vendored
+        assert set(PACKAGED_DATA_FILES) <= wheel_members
 
     with tarfile.open(sdist_path, "r:gz") as sdist:
         root = _sdist_root(sdist)

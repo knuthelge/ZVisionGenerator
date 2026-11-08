@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import functools
+import hashlib
 import tempfile
 from argparse import Namespace
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import yaml
 
 from zvisiongenerator.core.job_plan import JobPlan
 from zvisiongenerator.core.video_types import ExtendSource
@@ -217,3 +219,25 @@ def load_packaged_config() -> dict[str, Any]:
     Inside a test, the ``packaged_config`` fixture returns the same thing.
     """
     return copy.deepcopy(shared_packaged_config())
+
+
+def metadata_copy() -> dict[str, Any]:
+    """Return a private deep copy of the packaged model metadata, so a test may change it freely.
+
+    Never write into ``load_model_metadata()``'s result itself: it is the shared cached parse. Pass the edited copy through
+    :func:`use_model_metadata`.
+    """
+    from zvisiongenerator.utils.model_metadata import load_model_metadata
+
+    return copy.deepcopy(load_model_metadata())
+
+
+def use_model_metadata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, data: dict[str, Any]) -> None:
+    """Make the metadata readers read *data* instead of the packaged file for this test."""
+    from zvisiongenerator.utils import model_metadata
+
+    text = yaml.safe_dump(data)
+    # Named by content: the parse is cached per path, so a second call in one test with other data must not reuse a path.
+    path = tmp_path / f"model_metadata-{hashlib.sha256(text.encode()).hexdigest()[:12]}.yaml"
+    path.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(model_metadata, "METADATA_FILE", path)

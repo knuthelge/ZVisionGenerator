@@ -1,7 +1,8 @@
-"""Licence records: the terms a model comes with, read from the packaged ``licences.yaml``.
+"""Licence records: the terms a model comes with, read from the packaged ``model_metadata.yaml``.
 
-The records are fixed facts about the models, so they live in their own file, read directly and never merged with the
-user's config. A contract test checks that every URL is a pinned file or a model page and every record names a known model.
+The records are fixed facts about the models, read directly and never merged with the user's config. Each model entry of the
+metadata names the records that cover it. A contract test checks that every URL is a pinned file or a model page and that
+every record is used and every id an entry names exists.
 """
 
 from __future__ import annotations
@@ -12,18 +13,16 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
-import yaml
+from zvisiongenerator.utils import model_metadata
 
 if TYPE_CHECKING:
     from zvisiongenerator.downloads.target import DownloadTarget
 
 __all__ = [
-    "DATA_FILE",
     "ENHANCER_LICENCE_TIERS",
     "MATTE_LICENCE_MODEL",
     "NOTICE_FOOTER",
     "NOTICE_HEADER",
-    "SEEDVR2_LICENCE_MODEL",
     "LicenceRecord",
     "enhancer_licence_model",
     "licence_notice",
@@ -34,14 +33,8 @@ __all__ = [
     "load_licences",
 ]
 
-DATA_FILE: Final = Path(__file__).with_name("licences.yaml")
-"""The packaged records: a mapping of record id to record."""
-
 MATTE_LICENCE_MODEL: Final = "matte"
 """The model id of the background removal models, which are no alias but have a licence record."""
-
-SEEDVR2_LICENCE_MODEL: Final = "seedvr2"
-"""The model id of the SeedVR2 upscale models (every tier and weights format), which are no alias but have a licence record."""
 
 ENHANCER_LICENCE_TIERS: Final = ("fast", "smart")
 """The prompt enhancer tiers that have a licence record; a custom model has none."""
@@ -55,14 +48,13 @@ NOTICE_FOOTER: Final = "These are short summaries; the linked licence is what ap
 
 @dataclass(frozen=True)
 class LicenceRecord:
-    """One licence and the models it covers (aliases, audio presets, ``matte``, ``seedvr2`` or ``enhancer-<tier>``); URLs are pinned to a revision or are a model page."""
+    """One licence; URLs are pinned to a revision or are a model page. The models it covers name it in their metadata entry."""
 
     id: str
     name: str
     supplier: str
     summary: str
     url: str
-    models: tuple[str, ...]
     url_label: str = "Licence"
     attribution: str | None = None
 
@@ -73,14 +65,14 @@ def enhancer_licence_model(tier: str) -> str:
 
 
 def load_licences() -> tuple[LicenceRecord, ...]:
-    """Return the packaged records in the order they are written; the file is read once."""
-    return _load(DATA_FILE)
+    """Return the packaged records in the order they are written; each metadata file is read once."""
+    return _records(model_metadata.METADATA_FILE)
 
 
 @cache
-def _load(path: Path) -> tuple[LicenceRecord, ...]:
-    """Read the records in *path*; cached per path."""
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+def _records(path: Path) -> tuple[LicenceRecord, ...]:
+    """Build the records of the metadata file *path*; cached per path."""
+    raw = model_metadata.load_model_metadata().get("licences") or {}
     return tuple(
         LicenceRecord(
             id=str(record_id),
@@ -88,7 +80,6 @@ def _load(path: Path) -> tuple[LicenceRecord, ...]:
             supplier=record["supplier"],
             summary=record["summary"],
             url=record["url"],
-            models=tuple(record["models"]),
             url_label=record.get("url_label", "Licence"),
             attribution=record.get("attribution"),
         )
@@ -97,8 +88,12 @@ def _load(path: Path) -> tuple[LicenceRecord, ...]:
 
 
 def licences_for(records: Sequence[LicenceRecord], model_id: str) -> tuple[LicenceRecord, ...]:
-    """Return the *records* that cover *model_id*, in the order given; empty when it has none."""
-    return tuple(record for record in records if model_id in record.models)
+    """Return the *records* that the metadata entry of *model_id* names, in the entry's order; empty for an unknown model."""
+    entry = model_metadata.model_entry(model_id)
+    if entry is None:
+        return ()
+    by_id = {record.id: record for record in records}
+    return tuple(by_id[record_id] for record_id in entry["licences"] if record_id in by_id)
 
 
 def licence_payload(records: Sequence[LicenceRecord], model_id: str) -> list[dict[str, Any]]:

@@ -30,7 +30,7 @@ from zvisiongenerator.utils.audio_settings import audio_settings_contract
 from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.h3_converted import CONVERTED_H3_STORAGES, read_converted_h3
-from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, SEEDVR2_LICENCE_MODEL, enhancer_licence_model, licence_payload, load_licences
+from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, enhancer_licence_model, licence_payload, load_licences
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.ltx_version import ltx_model_version
 from zvisiongenerator.utils.matte_models import MATTE_DOWNLOAD_SIZE_LABEL, MATTE_LABEL, MATTE_ROW_NAME
@@ -324,9 +324,11 @@ def build_models_response(
         for entry in web_config.video_inventory
     ]
     licences = load_licences()
+    seedvr2_model = web_config.seedvr2.tier.model if web_config.seedvr2 is not None else None
     for row in (*image_rows, *video_rows):
         row["download_needed"] = download_needed(KIND_MODEL, row["name"], row["downloaded"])
-        row["licences"] = licence_payload(licences, SEEDVR2_LICENCE_MODEL if row["family"] == "seedvr2" else row["name"])
+        # The SeedVR2 row is named by tier and weights format ("seedvr2-7b@q8"); its licence is looked up by the tier.
+        row["licences"] = licence_payload(licences, seedvr2_model if row["family"] == "seedvr2" and seedvr2_model else row["name"])
     return {
         "models_dir": web_config.models_dir,
         "loras_dir": web_config.loras_dir,

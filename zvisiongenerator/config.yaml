@@ -396,7 +396,7 @@ video_model_presets:
     distilled_lora:
       repo: "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9"
       filename: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
-      licence: ltx-2-community  # the licence record (utils/licences.yaml) named before the download
+      licence: ltx-2-community  # the licence record (utils/model_metadata.yaml) named before the download
     # macOS: the pinned MLX pack of each quantize level (the ltx-4 and ltx-8 aliases), and the folder a converted
     # checkpoint takes its VAEs, vocoder, upsampler and configs from. A pack is downloaded as exactly the files of
     # mlx_files, at its pinned revision. After changing a pin, list the files of the new revision that the vendored
