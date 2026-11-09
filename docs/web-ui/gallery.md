@@ -27,7 +27,7 @@ An audio take is a tile with an icon for its kind, the words of the take, a thin
 
 ![The Gallery filtered to Audio only, with music, speech and sound tiles](../assets/screenshots/placeholder.svg "gallery-audio")
 
-The viewer shows a player: the take's waveform over the browser's own audio controls. Click or drag the waveform to seek. **Details** lists the kind, model, voice, length, seed and format; the **Tempo · Key** of a song (*92 BPM · A minor*), the **Delivery** of a speech take in a built-in voice and the **Sound type** of a sound, each only when the take set it; how its text was written when it was [enhanced or filled in](../concepts/audio.md); and a **Note** when the model could not follow a setting of the take. **Reuse settings** opens the **Audio** tab on the take's kind with its settings; see [Takes and files](../concepts/audio.md#takes-and-files). **Download** and **Delete** work as for other files.
+The viewer shows a player: the take's waveform over the browser's own audio controls. Click or drag the waveform to seek. **Details** lists the kind, model, voice (the name of a saved voice while it exists), length, seed and format; the **Tempo · Key** of a song (*92 BPM · A minor*), the **Delivery** of a speech take in a default voice and the **Sound type** of a sound, each only when the take set it; how its text was written when it was [enhanced or filled in](../concepts/audio.md); and a **Note** when the model could not follow a setting of the take. **Reuse settings** opens the **Audio** tab on the take's kind with its settings; see [Takes and files](../concepts/audio.md#takes-and-files). **Download** and **Delete** work as for other files.
 
 An audio file without this app's settings, such as one you copied into the output folder, plays but has no **Reuse settings**.
 
@@ -36,7 +36,10 @@ An audio file without this app's settings, such as one you copied into the outpu
 **Use as** on an audio take offers:
 
 - **Audio track** opens **Video** with the file as the clip's [audio track](workspace.md#audio-track). It is greyed, with the reason, when the video model can't follow a track.
-- **Voice** (speech takes) opens **Audio** on Speech with the take as the recording and its text as **What it says**. It is greyed for a take longer than 30 seconds. This is how to keep one voice across separate takes; see [Voices](../concepts/audio.md#voices).
+- **Voice** (speech takes) opens **Audio** on Speech with the take as a one-off recording and its text as **What it says**.
+- **Saved voice** (speech takes) saves the take as a voice in **Your voices**. A take that followed a recording or a saved voice also asks for the consent tick. See [Voices](../concepts/audio.md#voices).
+
+Both are greyed for a take longer than 30 seconds.
 
 ## Select, move and delete
 
@@ -72,7 +75,7 @@ Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for th
 |---|---|---|
 | **Details** | Shows the settings the file was made with | ++i++ |
 | **Reuse settings** | Loads those settings into the Workspace | ++r++ |
-| **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video; opens audio as a video's audio track or a speech voice | ++e++ |
+| **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video; opens audio as a video's audio track, a speech voice or a saved voice | ++e++ |
 | **Extend** | Opens a video in Video, on its Extend kind | ++e++ |
 | **Upscale** | Upscales an image 2× or 4×, or a video 2× | ++x++ then ++2++ or ++4++ |
 | **Move** | Moves the file to a project. On a phone it is **Move to project…** in the **⋯** menu | |
@@ -96,7 +99,7 @@ When the prompt was enhanced, Details shows how, as one line such as *Fast · Ci
 
 - For an enhanced prompt, **Prompt** gets what you typed, **Enhanced** gets the rewrite, and the enhance options come back too.
 - For a video, Scene and Action are filled. A video that was itself an extension comes back with its source.
-- For audio, the settings the take was made with come back: the **Tempo** and **Key** of a song, the length, the **Delivery** of a speech take in a built-in voice and the **Type** of a sound. A setting the take did not set, such as a song made without a Tempo, comes back on **Auto**.
+- For audio, the settings the take was made with come back: the **Tempo** and **Key** of a song, the length, the **Delivery** of a speech take in a default voice, the saved voice of a take that followed one and the **Type** of a sound. A setting the take did not set, such as a song made without a Tempo, comes back on **Auto**.
 
 ### Use as
 

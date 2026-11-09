@@ -1,6 +1,8 @@
 # Voices: one picker for built-in, saved and described speech voices
 
-**Status:** Proposed (2026-11-07)
+**Status:** Done (2026-11-08, unreleased; built on `feat/speech-voices`)
+
+**What shipped.** One Voice picker with Play, **Your voices** above the default voices, and a **Voices** window (Your voices, New voice, From recording); **Use as** → **Saved voice** keeps a Gallery take and `--voice NAME` uses a saved voice in the CLI. It differs from the proposal below: the default voices have a preview clip but no descriptions, the CLI cannot save or design a voice, and a designed voice is made in the tabbed window, not a separate dialog. The Mac path is not measured.
 
 ## Problem
 

@@ -34,7 +34,7 @@ zvisiongenerator/
 │   │   └── vitmatte.py            Load ViTMatte and its image processor from a pinned snapshot
 │   ├── audio/                     Audio models, one backend module per family: torch on CUDA or MPS, and Qwen3-TTS on MLX on macOS
 │   │   ├── build_cancel.py        Check a Stop while a model is built
-│   │   ├── qwen3_tts.py           Qwen3-TTS 1.7B on CUDA through faster-qwen3-tts: CustomVoice for built-in voices, Base for a recording, one checkpoint at a time
+│   │   ├── qwen3_tts.py           Qwen3-TTS 1.7B on CUDA through faster-qwen3-tts: CustomVoice for built-in voices, Base for a recording or a saved voice, VoiceDesign for a new voice, one checkpoint at a time
 │   │   ├── qwen3_tts_instruct.py  Turn a Delivery into Qwen3-TTS's one instruction sentence per call
 │   │   ├── qwen3_tts_mlx.py       Qwen3-TTS 1.7B on MLX (macOS) through mlx-audio, with the same checkpoints and take logic
 │   │   ├── qwen3_tts_shim.py      The one-time patch that lets `qwen_tts` load on the locked transformers
@@ -127,11 +127,11 @@ zvisiongenerator/
 │   ├── latent_preview.py          Latent → RGB projection factors shared by live previews
 │   ├── image_types.py             Image request and artifacts
 │   ├── video_types.py             Video request and artifacts, and the extend source, spec and segment
-│   ├── audio_types.py             Audio request, voice reference and the clip a take returns
+│   ├── audio_types.py             Audio request, voice reference, voice design request and the clip a take returns
 │   ├── image_backend.py           Image backend protocol
 │   ├── matte.py                   Background removal chain protocol
 │   ├── video_backend.py           Video backend protocol and the optional VideoExtender protocol
-│   ├── audio_backend.py           Audio backend protocol: load, generate, close
+│   ├── audio_backend.py           Audio backend protocol: load, generate, close; the optional VoiceDesigner
 │   ├── video_family.py            Video family value types (frame rule, capabilities, steps) and the step settling
 │   ├── prompt_enhancer.py         Prompt-enhancer protocol
 │   ├── seedvr2.py                 SeedVR2 upscaler protocol
@@ -173,7 +173,7 @@ zvisiongenerator/
 │   ├── audio_settings.py          The vocabulary of the audio settings (tempo, key, speech delivery, sound type): the parsers, and the contract the Workspace payload serves to the Web UI
 │   ├── audio_save.py              Write a take as 16-bit FLAC through ffmpeg with its settings in the `zvisiongenerator.config` tag
 │   ├── audio_track.py             Read a user's audio track and build the window sound of an extension
-│   ├── audio_voice.py             Whether a voice recording needs the speaker's consent
+│   ├── audio_voice.py             Whether a voice recording needs the speaker's consent, and the consent stored with a saved voice
 │   ├── color_names.py             Plain colour names for hex codes (nearest by OKLab), for Palette Custom
 │   ├── config.py                  Config loading (image + video) and the settings that merge into the facts: resolved defaults, video families, the prompt enhancer's model choice
 │   ├── console.py                 Console formatting
@@ -232,6 +232,7 @@ zvisiongenerator/
 │   ├── references.py              Reference images: parse the `--reference` list and check the count and files against what a model takes
 │   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache; reads a header and its metadata in one bounded read
 │   ├── seedvr2.py                 SeedVR2 weight layouts, settings, memory estimate and tier choice
+│   ├── slug.py                    Turn free text into a file-name slug
 │   ├── speech_join.py             Join the parts of a long speech take: trim edge silence, even the levels, fade and add a pause
 │   ├── speech_text.py             Split speech text into parts at sentence ends and into its Delivery marks; find unknown marks and word their refusal
 │   ├── speech_realign.py          Merge the marks, pauses and line breaks of a model's Add delivery answer into the script's own text, word for word
@@ -245,6 +246,8 @@ zvisiongenerator/
 │   ├── video_support.py           Refuse a video request the model's family cannot do on this platform
 │   ├── video_tail.py              Read a clip's last frames, or all its frames, at their displayed size
 │   ├── video_upscale.py           LTX video file upscale (macOS): the clips it takes, its steps, menu option, progress units and time left
+│   ├── voice_candidates.py        The voice design candidates in `<data dir>/voice-design/`
+│   ├── voice_library.py           The saved voices in `<data dir>/voices/`: a WAV and a YAML record each, with the consent in the record
 │   └── yaml_round_trip.py         Comment-keeping YAML edits with ruamel.yaml (load, set and delete a key, quote what PyYAML reads differently), shared by the prompt builder and the config writer
 ├── web/
 │   ├── audio_enhance.py           The audio side of the prompt-enhance endpoint: request validation, the run and the stream frames
@@ -291,6 +294,7 @@ zvisiongenerator/
 │   ├── upscale_api.py             Plan a viewer upscale job: refinement model, carried settings, limits
 │   ├── video_clip.py              Resolve the model, steps, size and length a video job runs at, shared by the job and its memory estimate
 │   ├── video_conversion.py        Video checkpoint conversion from the Models page (LTX-2.3, LTX-2.5, MiniMax H3): inspect, then convert as a background job with progress
+│   ├── voices.py                  The logic behind the saved-voices routes
 │   ├── web_runner.py              Background workers for generation batches
 │   ├── workspace_api.py           Shared SPA payloads for workspace and models routes; every model option and row carries its licence records
 │   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
@@ -306,7 +310,7 @@ zvisiongenerator/
 
 | Path | Holds |
 |---|---|
-| `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed. The Audio tab is in `src/features/workspace/` with its state in `src/lib/state/` |
+| `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed. The Audio tab is in `src/features/workspace/` with its state in `src/lib/state/`, and the default voices' preview clips in `public/voices/` (see [Frontend](frontend.md#preview-clips)) |
 | `tests/` | The pytest suite, grouped by area: `web/`, `video/`, `image/`, `prompts/`, `downloads/`, `converters/`, `contracts/`, `backends/` (with `cuda/` and `mac/`), `audio/` and `common/`. `conftest.py` holds the autouse guards and fixtures, `_factories.py` and the other `_*.py` files the helpers shared between areas, and `fixtures/` the JSON the frontend tests also read. See [Conventions](conventions.md#tests) |
 | `bench/enhance/` | The [prompt-enhancer bench](enhancer-bench.md); not packaged |
 | `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX, MOSS-Image, BiRefNet, YuE2, Stable Audio 3 and Qwen3-TTS code |

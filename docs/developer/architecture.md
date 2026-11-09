@@ -81,5 +81,7 @@ The server is FastAPI. It serves the built Svelte app from `web/static/app/` and
 | User settings | `~/.ziv/config.yaml` | `utils/config.py`, `web/config_contract.py` |
 | Gallery and LoRA index, job log, recent prompts, LoRA sources | `~/.ziv/ziv.sqlite3` | `utils/app_db.py`, `web/gallery_index.py`, `web/lora_index.py`, `web/job_log.py`, `web/recent_prompts.py`, `web/lora_sources.py`. See [App database](app-database.md) |
 | Presets | `~/.ziv/presets/` | `web/presets.py`. See [Settings presets](web-server.md#settings-presets) |
+| Saved voices | `~/.ziv/voices/` | `utils/voice_library.py`. See [Saved voices](web-server.md#saved-voices) |
+| Voice design candidates | `~/.ziv/voice-design/` | `utils/voice_candidates.py`. See [Voice design jobs](web-server.md#voice-design-jobs) |
 | Error logs | `~/.ziv/logs/` | `utils/app_log.py` |
 | Settings of each output | Inside the PNG or MP4 | `utils/provenance.py` |

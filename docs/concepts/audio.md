@@ -6,7 +6,7 @@ The app makes music, speech and sound on your own computer. There are three kind
 |---|---|---|---|---|---|
 | **Music** | Songs and instrumentals | YuE2 3B | `yue2` | about 8 GB | 6:00 |
 | **Music** | Instrumentals | Stable Audio 3 Medium | `sa3` | about 10 GB, shared with its sound | 380 s |
-| **Speech** | Text read aloud, in one of nine built-in voices or in a voice that follows a recording | Qwen3-TTS 1.7B | `qwen3_tts` | about 5 GB, and about 4.9 GB more the first time a recording is followed | about 10 minutes (10,000 characters) |
+| **Speech** | Text read aloud, in one of nine default voices or in a voice of your own | Qwen3-TTS 1.7B | `qwen3_tts` | about 4.5 GB, and about 4.5 GB more for cloning a voice and again for designing one, each the first time it is used | about 10 minutes (10,000 characters) |
 | **Sound** | Ambience and sound effects | Stable Audio 3 Medium | `sa3` | about 10 GB | 380 s |
 
 In the [Web UI](../web-ui/workspace.md#the-audio-tab) they are the **Audio** tab; in the [CLI](../cli/audio.md) they are `ziv audio`. Every take is saved as a [FLAC file](#takes-and-files) that you can play in the [Gallery](../web-ui/gallery.md#audio), reuse, or give to a video as its [audio track](video.md#audio-track).
@@ -71,9 +71,9 @@ In the Web UI, [Describe it](prompt-enhancer.md#describe-it-and-fill-in) can wri
 
 ### Voices
 
-**Voice** is either one of the model's nine built-in voices or a recording to follow:
+**Voice** is one library: **Your voices**, the ones you saved, above the nine **Default voices**.
 
-| Voice | The take is read in |
+| Default voice | Native language |
 |---|---|
 | **Ryan** (the default), **Aiden** | English |
 | **Vivian**, **Serena**, **Uncle Fu** | Chinese |
@@ -81,15 +81,30 @@ In the Web UI, [Describe it](prompt-enhancer.md#describe-it-and-fill-in) can wri
 | **Eric** | Sichuan Chinese |
 | **Ono Anna** | Japanese |
 | **Sohee** | Korean |
-| **From a recording** | A voice that follows a recording of 3 to 30 seconds |
 
-Each built-in voice is listed with its native language. The model works out the language of the text itself; the [`language`](configuration.md#audio_model_presets) setting of the model's preset can name one instead. Every part of a long text is read in the same voice.
+The language beside a default voice is its native one, not a limit: every voice reads all ten languages the model knows (Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish and Italian) and carries its accent into the others. English text reads without an accent in **Ryan** or **Aiden**. The model works out the language of the text itself; the [`language`](configuration.md#audio_model_presets) setting of the model's preset can name one instead. Every part of a long text is read in the same voice.
 
-Built-in voices come with the model. **From a recording** needs a second set of model files (about 4.9 GB), which download the first time a take follows a recording.
+Default voices come with the model.
 
-To keep a voice across separate takes, pick it again, or make takes until one fits and use it as the voice: in the Gallery, **Use as** → **Voice**.
+#### Your voices
 
-**From a recording** needs three things:
+A saved voice is a short reference recording and what it says; any take can read its text in that voice. Saved voices live in `~/.ziv/voices/` and never appear in the Gallery.
+
+A voice comes from a [description](#design-a-voice), a [recording](#follow-a-recording) or a speech take of 30 seconds or less (**Use as** → **Saved voice** in the Gallery).
+
+Voices are made in the Web UI. The CLI uses them with `--voice NAME`; see [A saved voice](../cli/audio.md#a-saved-voice).
+
+#### Design a voice
+
+**New voice** makes a voice from a description, with the model's VoiceDesign checkpoint. Describe how the voice sounds (age, gender, tone, pace and accent), such as `A warm British woman in her thirties, calm and clear`, and the model makes three candidates that each read a **preview line**. The line starts as a sentence in the language of your Speech text and is saved with the voice as its transcript, so it must read in 3 to 30 seconds.
+
+Candidates are kept in `~/.ziv/voice-design/`, never in the Gallery. Designing needs the VoiceDesign files, a separate download of about 4.5 GB the first time. Stopping a run keeps the candidates made so far.
+
+The same description makes a different voice every time, so save the candidate you like: it is a recording that the model clones in every later take, and the voice stays the same. Delivery cannot change a saved voice (see [Delivery](#delivery)), so describe the manner in the description: `A calm man in his fifties with a low voice, like a nature documentary narrator`.
+
+#### Follow a recording
+
+A recording needs three things:
 
 - The **recording**, 3 to 30 seconds of speech.
 - **What it says**: the words spoken in the recording.
@@ -98,11 +113,17 @@ To keep a voice across separate takes, pick it again, or make takes until one fi
 !!! tip "Clone from a clean recording"
     Use a clean, close-miked recording without background noise. A phone, radio or old recording makes the cloned voice hiss and sound less like the speaker.
 
-**The consent is never saved**, not in the file, the Gallery or the browser, so it is asked again whenever the voice changes or the page reloads. The CLI asks for it as `--voice-consent`. A take made in a built-in voice is the model's own voice, so using it as a voice needs no tick; a take that was itself cloned from a recording still does.
+A recording can be used **once**, for the next takes, or **saved** as a voice. The cloning files (about 4.5 GB) download the first time a take follows a recording or a saved voice.
+
+#### Consent
+
+Cloning a voice needs the speaker's permission, which you confirm with a tick. A recording, or a take that followed one, asks once when you save it as a voice, and the voice remembers it. Used once, it isn't remembered, so it asks again after a page reload or a change of voice. Designed voices and the default voices are nobody's voice, so they don't ask.
+
+The consent is stored in the voice's record in `~/.ziv/voices/`, never in a take's file or the Gallery.
 
 ### Delivery
 
-**Delivery** is how a built-in voice says the text. It has five settings, set with `--emotion`, `--manner`, `--pace`, `--pitch` and `--expressiveness`. Left out, a setting stays at its neutral value:
+**Delivery** is how a default voice says the text. It has five settings, set with `--emotion`, `--manner`, `--pace`, `--pitch` and `--expressiveness`. Left out, a setting stays at its neutral value:
 
 | Flag | Choices | Neutral |
 |---|---|---|
@@ -127,11 +148,11 @@ A Vibe is a starting point, not a mode: picking one only sets the five values, a
 
 With every setting neutral, the model reads in its own manner.
 
-**A recording reads as recorded.** The delivery applies to the built-in voices only, so a take that follows a recording has none, and the CLI refuses the delivery options together with `--voice`.
+**Delivery works with the default voices only.** A saved voice or a recording reads as it was made, so a take that follows one has no delivery, and the CLI refuses the delivery options together with `--voice`. To get a different manner from a saved voice, make a new voice and describe that manner when you [design it](#design-a-voice).
 
 #### Marks
 
-A **mark** in the text changes the delivery from that point on. It is a word in square brackets:
+A **mark** in the text changes the delivery from that point on, for a default voice. It is a word in square brackets:
 
 | Mark | Sets |
 |---|---|
@@ -145,7 +166,7 @@ I thought we were friends. [sad] You never even called. [as set] Anyway, welcome
 
 In the Web UI, [**Insert → Delivery from here**](../web-ui/workspace.md#insert-into-the-text) puts a mark at the start of a sentence for you.
 
-A mark holds until the next mark or the end of the text. A mark sets one thing and the rest stays as set: `[whisper]` after `[sad]` is whispered in the delivery you set, not whispered and sad. The marks are not read aloud and do not count towards the 10,000 characters. A recording reads the text as recorded, so its marks are left out and the take carries a note saying so.
+A mark holds until the next mark or the end of the text. A mark sets one thing and the rest stays as set: `[whisper]` after `[sad]` is whispered in the delivery you set, not whispered and sad. The marks are not read aloud and do not count towards the 10,000 characters. A saved voice or a recording reads the text as made, so its marks are left out and the take carries a note saying so.
 
 A bracketed word that is not a mark, such as `[sadd]`, is refused before anything is made, with a message naming the word. Remove the brackets or use one of the marks above; for a pause write `…`, and for a laugh write `haha`. A text of marks alone is refused as empty. Other bracketed text, such as `[1]`, is read as written.
 
@@ -170,9 +191,9 @@ The length (`--seconds`) is how long the sound lasts, from 1 second to 380. Left
 
 ## Takes and files
 
-Every take is a lossless FLAC file named `music_<date>_<time>.flac`, `speech_…` or `sound_…`. The settings that made it are stored inside, which is how the Gallery's **Reuse settings** works for audio; the speaker's consent is not among them. For a cloned voice, the settings name the recording and what it says.
+Every take is a lossless FLAC file named `music_<date>_<time>.flac`, `speech_…` or `sound_…`. The settings that made it are stored inside, which is how the Gallery's **Reuse settings** works for audio; the speaker's consent is not among them. For a cloned voice, the settings name the recording and what it says; a saved voice is shown by its name in the Gallery while it exists, and Reuse picks it again.
 
-A take can be used as a video's audio track: **Use as** → **Audio track** in the Gallery or viewer opens **Video** with the file as the clip's [audio track](video.md#audio-track). A speech take of 30 seconds or less can also be used as the **Voice** of the next speech take.
+A take can be used as a video's audio track: **Use as** → **Audio track** in the Gallery or viewer opens **Video** with the file as the clip's [audio track](video.md#audio-track). A speech take of 30 seconds or less can also be used as the **Voice** of the next speech take, or saved with **Use as** → **Saved voice**.
 
 One batch (**Batch size** in the Web UI, `--runs` in the CLI) makes several takes with a single model load, each with its own random seed unless you set one.
 

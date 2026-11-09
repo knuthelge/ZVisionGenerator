@@ -168,7 +168,7 @@ MiniMax H3 is released under the MiniMax H3 Community License Agreement, publish
 | Model | Alias | Makes | Download | License |
 |---|---|---|---|---|
 | YuE2 3B | `yue2` | Songs and instrumentals | about 8 GB | CC BY-NC 4.0 with additional creator permission |
-| Qwen3-TTS 1.7B | `qwen3_tts` | Speech | about 5 GB, and about 4.9 GB more the first time a take follows a recording | Apache License 2.0 |
+| Qwen3-TTS 1.7B | `qwen3_tts` | Speech | about 4.5 GB, and about 4.5 GB more for cloning a voice and again for designing one, each the first time it is used | Apache License 2.0 |
 | Stable Audio 3 Medium | `sa3` | Ambience and sound effects, and instrumental music | about 10 GB | Stability AI Community License and Gemma Terms of Use |
 
 The alias is what you pass to `ziv audio -m`. What each kind does, and how long a take can be, is in [Audio](audio.md); what they need is in [Memory](memory.md#audio). YuE2 and Stable Audio 3 Medium are restricted in some way: read their [Licences](#licences) before you use the output.

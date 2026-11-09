@@ -339,22 +339,20 @@ A result lands in the **Written** tab beside your **Text**; ‹ **2 of 3** › s
 
 ### Voice
 
-**Voice** is the first group in Speech's *Settings*. Its select lists the model's nine built-in voices, each with its language (*Ryan · English*), and **From a recording**. Ryan is the default.
+**Voice** is the first group in Speech's *Settings*. Its dropdown lists **Your voices** (left out while you have none) above the nine **Default voices**, each shown with its language (*Ryan · English*). Ryan is the default.
 
-To follow a recording, choose **From a recording**: add a file of 3 to 30 seconds (Browse, upload or drop), type **What it says**, and tick *This is my voice, or I have the speaker's permission to clone it.* The tick is asked again whenever the voice changes. The cloning files download the first time you generate with a recording. See [Voices](../concepts/audio.md#voices).
-
-![The Voice section on From a recording, with the file, What it says and the consent tick](../assets/screenshots/placeholder.svg "audio-voice")
+The **Voices** window, opened from the buttons under the dropdown, is where you make and manage voices; see [Voices](../concepts/audio.md#voices). A speech take can also be kept as a voice from the Gallery: see [Use as](gallery.md#use-as-an-audio-track-or-a-voice).
 
 ### Delivery
 
-**Delivery** comes after Voice in Speech's *Settings* and sets how a built-in voice says the text. Pick one of the six **Vibe** tiles to fill the five rows below it, and edit any row:
+**Delivery** comes after Voice in Speech's *Settings* and sets how a default voice says the text. Pick one of the six **Vibe** tiles to fill the five rows below it, and edit any row:
 
 - **Emotion**: **Neutral**, or one of the emotions in four groups.
 - **Manner**: **Natural**, **Whisper** or **Shout**.
 - **Pace**: a slider from *Very slow* to *Very fast*.
 - **Pitch** and **Expressiveness**: **Low**, **Normal** or **High**.
 
-A changed row has a dot and its own reset; the reset beside **Vibe** puts all five back. With **From a recording** chosen in Voice, the section only says that a cloned voice reads as recorded. What each setting does and the Vibes' values are in [Delivery](../concepts/audio.md#delivery).
+A changed row has a dot and its own reset; the reset beside **Vibe** puts all five back. With a saved voice or a recording chosen in Voice, the section only says that the voice reads as it was made. What each setting does and the Vibes' values are in [Delivery](../concepts/audio.md#delivery).
 
 ![The Delivery section with the Calm narrator Vibe picked and its five values under it](../assets/screenshots/placeholder.svg "audio-delivery")
 

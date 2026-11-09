@@ -54,15 +54,15 @@ See [Stable Audio under Music](../concepts/audio.md#stable-audio-under-music).
 ziv-audio -m qwen3_tts --prompt "Welcome back. It's good to see you again."
 ```
 
-Without a voice option, the model reads in its default built-in voice, Ryan. The text can be up to 10,000 characters; see [Speech](../concepts/audio.md#speech).
+Without a voice option, the model reads in its default voice, Ryan. The text can be up to 10,000 characters; see [Speech](../concepts/audio.md#speech).
 
-### A built-in voice
+### A default voice
 
 ```bash
 ziv-audio -m qwen3_tts --prompt "Welcome back." --speaker aiden
 ```
 
-`--speaker` takes the id of one of the model's nine voices; `ziv-audio --help` lists them, and [Voices](../concepts/audio.md#voices) names them with their languages.
+`--speaker` takes the id of one of the model's nine default voices; `ziv-audio --help` lists them, and [Voices](../concepts/audio.md#voices) names them with their languages.
 
 ### Delivery
 
@@ -72,7 +72,7 @@ ziv-audio -m qwen3_tts --prompt "I thought we were friends. [sad] You never even
 ziv-audio -m qwen3_tts --prompt "Don't tell anyone." --manner whisper --emotion afraid
 ```
 
-`--emotion`, `--manner`, `--pace`, `--pitch` and `--expressiveness` set how a built-in voice says the text, and marks such as `[sad]` in the text change it from there on. `--vibe` starts all five from a named style (`calm-narrator`, `storyteller`, `excited-host`, `announcer`, `sad-confession` or `whispered-secret`), and the options then change one. They are refused with `--voice`. See [Delivery](../concepts/audio.md#delivery).
+`--emotion`, `--manner`, `--pace`, `--pitch` and `--expressiveness` set how a default voice says the text, and marks such as `[sad]` in the text change it from there on. `--vibe` starts all five from a named style (`calm-narrator`, `storyteller`, `excited-host`, `announcer`, `sad-confession` or `whispered-secret`), and the options then change one. They are refused with `--voice`: a saved voice or a recording reads as it was made. See [Delivery](../concepts/audio.md#delivery).
 
 ### A voice from a recording
 
@@ -81,13 +81,23 @@ ziv-audio -m qwen3_tts --prompt "Welcome back." \
   --voice me.wav --voice-text "Hello, this is me." --voice-consent
 ```
 
-The recording is 3 to 30 seconds long, and `--voice-text` is what it says. `--voice-consent` confirms the speaker allows their voice to be cloned; without it the command stops. The first time a take follows a recording, the cloning files (about 4.9 GB) download; the usual download prompt lists them first. See [Voices](../concepts/audio.md#voices).
+The recording is 3 to 30 seconds long, and `--voice-text` is what it says. `--voice-consent` confirms the speaker allows their voice to be cloned; without it the command stops. The first time a take follows a recording or a saved voice, the cloning files (about 4.5 GB) download; the usual download prompt lists them first. See [Follow a recording](../concepts/audio.md#follow-a-recording).
 
-A speech take made in a built-in voice can be the voice of another take without `--voice-consent`. Its text is what `--voice-text` says:
+A speech take made in a default voice can be the voice of another take without `--voice-consent`. Its text is what `--voice-text` says:
 
 ```bash
 ziv-audio -m qwen3_tts --prompt "And then it rained." --voice speech_2026-11-01_10-00-00.flac --voice-text "Welcome back."
 ```
+
+### A saved voice
+
+```bash
+ziv-audio -m qwen3_tts --prompt "And then it rained." --voice Morgan
+```
+
+`--voice` also takes the name of a voice saved in the Web UI, in any case, or its file slug. A file by that name in the current folder is used as a recording first. A saved voice brings its own transcript and consent, so `--voice-text` and `--voice-consent` are refused with it.
+
+The CLI cannot save or design voices; see [Your voices](../concepts/audio.md#your-voices).
 
 ## Sound
 

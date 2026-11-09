@@ -131,9 +131,9 @@ MiniMax H3 extends only 24 fps sources whose width and height are multiples of 3
 | `--expressiveness LEVEL` | `normal` | `low`, `normal` or `high`. Same rule as `--emotion` |
 | `--vibe ID` | none | Start the delivery of speech in a built-in voice from a named style: `calm-narrator`, `storyteller`, `excited-host`, `announcer`, `sad-confession` or `whispered-secret`. `--emotion`, `--manner`, `--pace`, `--pitch` and `--expressiveness` then change one. Same rule as `--emotion` |
 | `--speaker ID` | the model's first voice | The built-in voice a speech model reads in, such as `ryan` or `vivian`. Refused together with `--voice` |
-| `--voice PATH` | none | A recording of the voice to follow, 3 to 30 seconds long. Speech models that clone a voice only. Needs `--voice-text`. Without it the model reads in a built-in voice (`--speaker`) |
-| `--voice-text` | none | What the `--voice` recording says |
-| `--voice-consent` | off | Confirms the speaker of the `--voice` recording allows cloning their voice. Needed with `--voice`, except for a speech take made in a built-in voice, which anyone may follow |
+| `--voice PATH\|NAME` | none | A recording of the voice to follow, 3 to 30 seconds long, or the name of a saved voice (saved in the Web UI; the name in any case, or its file slug). A file by that name is used as a recording first. A recording needs `--voice-text`. Speech models that clone a voice only. Without it the model reads in a default voice (`--speaker`) |
+| `--voice-text` | none | What the `--voice` recording says. Refused with a saved voice, which has its own transcript |
+| `--voice-consent` | off | Confirms the speaker of the `--voice` recording allows cloning their voice. Needed with a recording, except for a speech take made in a default voice, which anyone may follow. Refused with a saved voice |
 | `--enhance [SPEC]` | off | Rewrite a sound's description or a song's style before the model loads. A sound takes `space`, `distance`, `over_time` and `movement`; music takes `genre`, `music_mood`, `instruments`, `without`, `singer` and `production`. Put `+` between several values, as in `instruments=guitar+violin`. See [Enhance the prompt](audio.md#enhance-the-prompt). Refused for speech |
 | `--enhance-note TEXT` | none | A direction for the enhancer, up to 300 characters. Implies `--enhance` |
 | `--no-enhance` | | Turn enhancement off |

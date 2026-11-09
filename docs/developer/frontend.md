@@ -52,15 +52,17 @@ Let the user choose a path on the server's machine with `PathField`, or `PathInp
 - **Settings.** `VoiceSection` comes first for Speech, then Batch, Length (s) for Sound and Seed. On a phone the chips are built by `audioChips`.
 - **What a Generate sends.** `audioFormData` builds the fields Copy CLI reads for the open kind only (see [Web server](web-server.md#audio-jobs)). A setting (Lyrics, Tempo, Key, length, Sound Type, Delivery) goes only when its control is shown for the open (model, kind): `workspaceCapabilities` lists the workflow's controls minus the `hidden_controls` of the model's row, and `AudioView.shown` carries the result. Delivery also needs a built-in voice. A blank `tempo`, `key` or `seconds` is Auto. The plan, the download dialog and the submit all read this one form.
 - **Settings in the draft.** `audioTempo`, `audioKey`, `musicSeconds` (0 is the model's default), `soundType` and `speechDelivery` sit in the `audioSettings` and `audioDelivery` scopes, so a Reset puts them all back to Auto and the defaults. An exact prefill (Reuse, Retry, Load settings) does so only for the settings of the kind it opens (`AUDIO_KIND_SETTINGS` in `audioDraft.ts`) before it sets the take's own, and leaves the other kinds' settings as the form has them. `audioPrefill` reads the flat keys of a Reuse link (`tempo`, `key`, `seconds` by kind, `sound_type`, the five delivery keys), and `audioCliCommand` writes them as flags, leaving out Auto and default values. The `audio_settings_cases.json` and `audio_cli_cases.json` fixtures pin both round trips in Vitest and pytest.
-- **The speaker's consent.** The tick lives in `lib/state/voiceConsent.svelte.ts`: in memory only, never in the draft, an address or a job's settings. A new recording, Reset and a prefill that replaces the voice clear it. A Use as → Voice from a take made in a built-in voice (no `voice_clone`) marks the voice `exempt`, so no tick is asked for.
+- **The speaker's consent.** The tick of a one-off recording lives in `lib/state/voiceConsent.svelte.ts`: in memory only, never in the draft, an address or a job's settings. A new recording, Reset and a prefill that replaces the voice clear it. A Use as → Voice from a take made in a built-in voice (no `voice_clone`) marks the voice `exempt`, so no tick is asked for. A saved voice asks for none: the server keeps its consent in the voice's record, and the tick is sent once, with the recording, on **Save voice**.
+- **The voice.** `voiceMode` is `builtin`, `recording` (a one-off) or `saved`, with `savedVoice` the slug. Delivery is hidden for the last two. A saved voice that the list no longer holds keeps the choice and turns Generate off; only this tab's own Delete moves the draft back to the default voice. See [Voices](#voices).
 - **Held uploads.** The recording is held in `heldUploads.voice` and persisted in the upload store, so it survives a visit to the Gallery and a reload, like the Video tab's audio track.
 
-**Use as for takes.** For an audio take the asset menu and the viewer's Use as list **Audio track** and, for a speech take, **Voice** (disabled with the reason when the Video model cannot follow a track, or the take is over the speech model's `max_voice_seconds`). Both go through the prefill a Reuse uses with `use_as` set, so only that one slot changes. The params are the contract the Audio tab reads:
+**Use as for takes.** For an audio take the asset menu and the viewer's Use as list **Audio track** and, for a speech take, **Voice** and **Saved voice** (greyed when the Video model cannot follow a track, or the take is over the speech model's `max_voice_seconds`). Both go through the prefill a Reuse uses with `use_as` set, so only that one slot changes. The params are the contract the Audio tab reads:
 
 | Target | Params |
 |---|---|
 | Audio track | `workflow=txt2vid`, `audio_track_path` (the take's file), `audio_track_start=0`, `use_as=audio_track`; the draft's other slots, its first frame included, are kept and only the Video tab's held upload goes |
 | Voice | `workflow=speech`, `voice_path` (the take's file), `voice_text` (the take's text), `use_as=voice`, and `voice_clone=true` only when the take was made from a recording (`has_reference_voice`) |
+| Saved voice | Opens `SaveVoiceDialog` over the viewer instead of a prefill; **Save voice** posts to `POST /api/voices`, with no navigation |
 
 `voice_clone` tells the Speech tab to show the consent tick: a voice that is itself a clone is a person's, while a take the model chose the voice of (*Any*) needs none. The server decides the same way when the job is submitted (`voice_needs_consent`). The speaker's consent is never in a URL or a draft.
 
@@ -81,6 +83,32 @@ The pick is `projectPick.current` (`lib/state/projectPick.svelte.ts`): a project
 A moved file follows its slots: `draft.retargetPaths(map)` points every path slot that held it (start image, frames, references, audio tracks, voice, extend source) at the new path. A delete uses `emptySlotsHolding` (`lib/state/assetRemoval.ts`) and empties them. `jobStore.replaceOutputs(moves)` keeps a finished job's outputs under the moved file's new ID, because the server's record of the job keeps the old one.
 
 **Paths.** `cliOutputDir` (`lib/state/cliCommand.ts`) chooses the `-o` of Copy CLI: the Extend source's `output_folder` only while the Extend workflow is open, else the project's folder, else the root. `pickerStart` (`lib/state/pathBrowser.ts`) gives the file browser's starting folder; a field's own value wins.
+
+## Voices
+
+`voicesStore` (`lib/state/voices.svelte.ts`, runes, the pattern of the presets store) holds the saved voices and the voice designer's kept candidates; mutations throw so the caller shows the server's reason. `loaded` stays false until the first read, so a draft that names a saved voice is not called deleted before the list is known.
+
+The Voice dropdown (`VoiceSection`, or `VoicePopover` on a phone) and its two buttons open one **Voices** window, `VoicesWindow.svelte`. Whether it is open and on which tab is `lib/state/voiceWindow.svelte.ts`, because the column, the sheet and the ready notice can all open it. The two forms are module state, so a half-filled form survives closing the window and a page reload clears it. Pure parts are in `features/workspace/newVoice.ts` and `audioView.ts` (`VoiceView`: the options, what **Play** plays and the one reason Generate is off).
+
+### Preview clips
+
+The Play button of a default voice plays `/app-static/voices/<id>.mp3`, a clip in `frontend/public/voices/` that the build copies to `zvisiongenerator/web/static/app/voices/`. `tests/contracts/test_voice_previews.py` fails when a configured voice id has no clip or a clip has no voice.
+
+The clips are made from the model and committed. Each reads the same sentence with seed 1 and is encoded to a 64 kbit/s mono MP3 with the tags removed:
+
+```bash
+out=$(mktemp -d)
+text="Hello, this is what my voice sounds like. I can read your story, your script, or anything else you write."
+for id in ryan aiden vivian serena uncle_fu dylan eric ono_anna sohee; do
+  uv run ziv audio -m qwen3_tts --speaker "$id" --prompt "$text" --seed 1 -o "$out"
+  ffmpeg -y -i "$out"/speech_*.flac -map_metadata -1 -ac 1 -b:a 64k "frontend/public/voices/$id.mp3"
+  rm "$out"/speech_*.flac
+done
+```
+
+Level each clip with `-af volume=<gain>dB` on the ffmpeg call: one fixed gain per clip that brings it to about -18 LUFS, held back where a peak guard needs it.
+
+**Remake the clips whenever the `voices` list, a voice's id or the model's checkpoint changes**: the test only checks that the files exist. Then run `make frontend-build` and commit the rebuilt files.
 
 ## Toasts
 
