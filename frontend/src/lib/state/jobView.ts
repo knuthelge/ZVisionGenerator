@@ -153,15 +153,39 @@ export function stepUnit(job: ActiveJobState): 'Batch' | 'Step' {
   return countsBatches(job) ? 'Batch' : 'Step';
 }
 
-/** What the job makes, one at a time: an image, a video, or a take (a piece of audio). */
-export function itemNoun(job: ActiveJobState): 'image' | 'video' | 'take' {
+/** What the job makes, one at a time: an image, a video, a take (a piece of audio) or a voice (a candidate of the voice designer). */
+export function itemNoun(job: ActiveJobState): 'image' | 'video' | 'take' | 'voice' {
+  if (isVoiceDesignJob(job)) return 'voice';
   if (isAudioJob(job)) return 'take';
   return isVideo(job) ? 'video' : 'image';
 }
 
-/** Whether the job makes audio (music, speech or sound). */
+/** Whether the job designs candidate voices from a description. It makes audio but no takes: nothing it makes reaches the Gallery. */
+export function isVoiceDesignJob(job: { workflow?: string }): boolean {
+  return job.workflow === 'voice_design';
+}
+
+/** Whether the job makes audio takes (music, speech or sound). */
 export function isAudioJob(job: ActiveJobState): boolean {
-  return job.media_type === 'audio';
+  return job.media_type === 'audio' && !isVoiceDesignJob(job);
+}
+
+/** How far a design job has come: the voices made of the voices asked for (the last `audio_progress` event; none before the first). */
+export function voiceDesignProgress(job: ActiveJobState): { done: number; total: number } {
+  const total = Math.max(1, Math.floor(job.audio?.total ?? (Number.isFinite(job.runs) ? job.runs : 1)));
+  return { done: Math.min(total, Math.max(0, job.audio?.step ?? 0)), total };
+}
+
+/**
+ * The one line that says where a design job is: waiting, loading (or downloading) the design model, which voice it has made of how
+ * many, or just that it is making them before the first is done.
+ */
+export function voiceDesignLine(job: ActiveJobState): string {
+  const phase = jobPhase(job);
+  if (phase === 'queue') return 'Waiting in the queue';
+  if (phase === 'load') return job.download?.role === 'model' || job.loadPhase === 'downloading' ? 'Downloading VoiceDesign…' : 'Loading VoiceDesign…';
+  const { done, total } = voiceDesignProgress(job);
+  return done > 0 ? `Voice ${done} of ${total}` : 'Making voices';
 }
 
 /** The field that holds the text of a take, by kind: what the job card calls its prompt. */
@@ -249,6 +273,10 @@ function promptsPerRun(job: ActiveJobState): number {
 }
 
 export function iterations(job: ActiveJobState): Iterations {
+  if (isVoiceDesignJob(job)) {
+    const { done, total } = voiceDesignProgress(job);
+    return jobPhase(job) === 'generate' ? { total, index: Math.min(total - 1, done), done } : { total, index: 0, done: 0 };
+  }
   const perRun = promptsPerRun(job);
   const total = Math.max(1, Number.isFinite(job.runs) ? Math.floor(job.runs) : 1) * perRun;
   const run = Number.isFinite(job.batchIndex) ? Math.max(0, Math.floor(job.batchIndex)) : 0;
@@ -348,6 +376,10 @@ export function jobBar(job: ActiveJobState): JobBar {
   // While files download the bar shows that download; it goes back to the steps once generation starts.
   const download = activeDownload(job);
   if (download) return { kind: 'download', fraction: downloadFraction(download), role: download.role };
+  if (isVoiceDesignJob(job)) {
+    const { done, total } = iterations(job);
+    return { kind: 'bar', fraction: job.status === 'completed' ? 1 : done / total };
+  }
   const { total, index, done } = iterations(job);
   const active = isActive(job);
   const generating = jobPhase(job) === 'generate';
@@ -406,6 +438,7 @@ export function headline(job: ActiveJobState): string {
     if (total === 1) return 'Paused';
     return job.itemFinished ? `Paused after ${noun} ${index + 1} of ${total}` : `Paused before ${noun} ${index + 1} of ${total}`;
   }
+  if (isVoiceDesignJob(job)) return voiceDesignLine(job);
   if (phase === 'queue') return 'Waiting to start';
   if (phase === 'enhance') {
     if (job.download?.role === 'enhancer') return 'Downloading the prompt enhancer';
@@ -521,6 +554,7 @@ export function documentTitle(base: string, reviewing: boolean): string {
 
 function generateLabel(job: ActiveJobState): string {
   if (job.workflow === 'upscale') return 'Upscale';
+  if (isVoiceDesignJob(job)) return 'Make voices';
   return isVideo(job) ? 'Generate video' : 'Generate';
 }
 
@@ -583,6 +617,7 @@ function rowDetail(job: ActiveJobState, key: JobPhase, status: PhaseRowStatus, t
     if (job.loadPhase === 'building') return 'first use only';
     return job.loadQuant ? `q${job.loadQuant} copy · first use only` : job.model_label || job.model;
   }
+  if (key === 'generate' && isVoiceDesignJob(job)) return `${iterations(job).done} of ${total}`;
   if (key === 'generate') return total > 1 ? `${total} ${itemNoun(job)}s` : '';
   return '';
 }
@@ -614,6 +649,7 @@ function audioPositionLabel(job: ActiveJobState): string {
 /** Where the current item sits in the batch, or what runs next when paused between items. */
 export function positionLabel(job: ActiveJobState): string {
   if (job.workflow === 'upscale') return 'Source';
+  if (isVoiceDesignJob(job)) return 'Description';
   if (isAudioJob(job)) return audioPositionLabel(job);
   const perRun = promptsPerRun(job);
   const runs = Math.max(1, Math.floor(job.runs || 1));
@@ -658,6 +694,7 @@ export function outcome(job: ActiveJobState): { text: string; error: boolean; sa
   let text = job.message;
   if (job.status === 'cancelled' && !job.message.startsWith('Removed')) text = DOWNLOAD_STOP_TEXT[job.downloadStop ?? ''] ?? 'You stopped the job.';
   if (job.status === 'unknown') text = 'The server restarted and no longer has this job.';
+  if (isVoiceDesignJob(job)) return { text, error: job.status === 'failed', saved: done === 0 ? 'No voices made' : `${done} of ${total} voices made` };
   const savedText = saved === 0 ? 'Nothing saved' : total > 1 ? `${saved} of ${total} saved to the Gallery` : 'Saved to the Gallery';
   return { text, error: job.status === 'failed', saved: total > 1 && notRun > 0 ? `${savedText} · ${notRun} not run` : savedText };
 }

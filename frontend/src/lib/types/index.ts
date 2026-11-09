@@ -76,7 +76,7 @@ export interface AudioSettingsVocabulary {
 export type WorkspaceWorkflow = Workflow | AudioWorkflow;
 
 /** Workflow of a job: a Workspace workflow, an upscale of an existing image, or the kind of an audio job. */
-export type JobWorkflow = Workflow | 'upscale' | AudioWorkflow;
+export type JobWorkflow = Workflow | 'upscale' | AudioWorkflow | 'voice_design';
 
 export type UpscaleFactor = 2 | 4;
 
@@ -151,6 +151,8 @@ export interface GalleryAsset {
   file_bytes?: number | null;
   /** A speech take made from a recording of a voice (the recording itself is not stored with the take). */
   has_reference_voice?: boolean;
+  /** A speech take made in a saved voice that still exists: the voice's name; null once it is deleted or for any other take. */
+  voice_name?: string | null;
   /** A song's lyrics, section lines included; null otherwise. */
   lyrics?: string | null;
   /** A song that reached the model's cap and was faded out there. */
@@ -419,6 +421,8 @@ export interface SpeechAudioModel extends AudioModelBase {
   default_voice: string | null;
   /** Whether the files that cloning a recording needs are downloaded; null when the model has none to fetch or the state is unknown. */
   voice_download?: { downloaded: boolean } | null;
+  /** Whether the model can make a voice from a description (it has VoiceDesign files). */
+  can_design: boolean;
 }
 
 /** A sound model: the lengths it makes, and the one a new draft starts with. */
@@ -1386,8 +1390,10 @@ export interface DraftState {
   soundType: SoundType;
   /** Audio tab, Speech: how a built-in voice says the text; a recording ignores it. */
   speechDelivery: SpeechDeliveryValues;
-  /** Audio tab, Speech: whether the take reads in a built-in voice (`builtin`) or follows a recording (`recording`). */
-  voiceMode: 'builtin' | 'recording';
+  /** Audio tab, Speech: whether the take reads in a built-in voice (`builtin`), follows a one-off recording (`recording`) or follows a voice from the library (`saved`). */
+  voiceMode: 'builtin' | 'recording' | 'saved';
+  /** Audio tab, Speech: the slug of the saved voice a `saved` take follows; null when none is chosen. */
+  savedVoice: string | null;
   /** Audio tab, Speech: the id of the built-in voice; null is the model's default voice. */
   speechSpeaker: string | null;
   /** Audio tab, Speech: the recording's path on the host; null when none is set or it was uploaded (`voiceUpload`). */
@@ -1414,6 +1420,48 @@ export interface DraftState {
 export type PrefillParams = Record<string, string | string[]>;
 
 export type WorkspacePrefill = Partial<Omit<DraftState, 'historyCollapsed' | 'sidebarCollapsed' | 'lastGeneratedAt' | 'version'>>;
+
+// ── Saved voices ──────────────────────────────────────────────────────────────
+
+/** A voice in the library: a reference recording and the words it says. */
+export interface SavedVoice {
+  slug: string;
+  name: string;
+  /** What the recording says: the transcript a take follows it with. */
+  text: string;
+  origin: 'recording' | 'design';
+  seconds: number;
+  /** The description a designed voice was made from; null for a recording. */
+  description: string | null;
+  created_at: string;
+}
+
+/** One candidate of the voice designer: its stable id, its number (counted from 1 in the order made, across batches), its length, whether it can be saved (`reason` says why not) and the name of the voice it was saved as. */
+export interface VoiceCandidate {
+  id: string;
+  number: number;
+  seconds: number;
+  saveable: boolean;
+  reason: string | null;
+  /** The name of the voice this candidate was saved as; null while unpicked. */
+  saved_as: string | null;
+}
+
+/** One press of Make 3: the description and the preview line it was made from, and its candidates in the order they were made. */
+export interface VoiceDesignBatch {
+  batch_id: string;
+  description: string;
+  /** The preview line each candidate reads, which is saved with the voice. */
+  text: string;
+  created_at: string;
+  candidates: VoiceCandidate[];
+}
+
+/** What the designer has made and kept until Clear voices: the batches, newest first, and how many saveable candidates are not yet saved. */
+export interface VoiceDesignState {
+  batches: VoiceDesignBatch[];
+  unpicked: number;
+}
 
 // ── Settings presets ──────────────────────────────────────────────────────────
 

@@ -672,6 +672,13 @@ function _clearHeldUploads(scopes: readonly Scope[]): void {
   }
 }
 
+/** Forget the held voice recording and its tick, and return the draft fields that name it, with its words, emptied. */
+function _droppedRecording(): Pick<DraftState, 'voicePath' | 'voiceUpload' | 'voiceText'> {
+  heldUploads.setVoice(null);
+  voiceConsent.reset();
+  return { voicePath: null, voiceUpload: null, voiceText: '' };
+}
+
 let _draft = $state<DraftState>(loadFromStorage());
 let _authorityReady = $state(false);
 // What the server last reported about the extend source; fetched again on load, so it is not saved with the draft.
@@ -1029,9 +1036,10 @@ export const draft = {
   },
 
   /**
-   * Set or clear the recording the Speech tab's voice follows: the draft holds its path or the upload's file name and the
-   * file is held for Generate. A new recording is a new voice, so the speaker's tick is cleared with it; the transcript the
-   * person typed stays, whatever the recording does. Choosing one switches the voice to *From a recording*.
+   * Set or clear the one-off recording the Speech tab's voice follows: the draft holds its path or the upload's file name and
+   * the file is held for Generate. A new recording is a new voice, so the speaker's tick is cleared with it; the transcript the
+   * person typed stays, whatever the recording does. Choosing one switches the voice to *From recording*; the built-in or saved
+   * voice chosen before it stays in the draft, for `leaveRecording`.
    */
   setVoice(value: SlotValue): void {
     heldUploads.setVoice(value !== null && 'file' in value ? value.file : null);
@@ -1042,6 +1050,35 @@ export const draft = {
       voiceUpload: value !== null && 'file' in value ? value.file.name : null,
       voiceMode: value === null ? _draft.voiceMode : 'recording',
     };
+    this.saveDraft();
+  },
+
+  /** Drop the one-off recording, its words and its tick, and go back to the voice chosen before it: the saved voice, else the built-in one. */
+  leaveRecording(): void {
+    _draft = { ..._draft, ..._droppedRecording(), voiceMode: _draft.savedVoice === null ? 'builtin' : 'saved' };
+    this.saveDraft();
+  },
+
+  /** Make the take follow the saved voice *slug*; a one-off recording is dropped. */
+  setSavedVoice(slug: string): void {
+    _draft = { ..._draft, ..._droppedRecording(), voiceMode: 'saved', savedVoice: slug };
+    this.saveDraft();
+  },
+
+  /** Make the take follow the built-in voice *speaker* (null is the model's default voice); a saved voice and a one-off recording are dropped. */
+  setBuiltinVoice(speaker: string | null): void {
+    _draft = { ..._draft, ..._droppedRecording(), voiceMode: 'builtin', savedVoice: null, speechSpeaker: speaker };
+    this.saveDraft();
+  },
+
+  /**
+   * Forget the saved voice *slug* when it is the one the draft holds: a take that follows it goes back to the model's default
+   * built-in voice, and a one-off recording just loses the voice it would return to. Only the person's own delete in this tab
+   * calls it: a list that merely lacks the chosen voice (a reload, another tab) leaves the choice for the view to flag.
+   */
+  dropSavedVoice(slug: string): void {
+    if (_draft.savedVoice !== slug) return;
+    _draft = _draft.voiceMode === 'saved' ? { ..._draft, voiceMode: 'builtin', savedVoice: null, speechSpeaker: null } : { ..._draft, savedVoice: null };
     this.saveDraft();
   },
 

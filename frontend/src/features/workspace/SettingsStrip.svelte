@@ -69,6 +69,7 @@
         {#if chip.download?.kind === 'downloading'}<Icon name="download" size={12} class="setchip-dl" />{:else if chip.download?.kind === 'failed'}<Icon name="alert" size={12} class="setchip-bad" />{/if}
         {#if chip.label}<span class="setchip-k">{chip.label}</span>{/if}
         <span class="setchip-v" class:on={chip.on}>{chip.value}</span>
+        {#if chip.count}<span class="setchip-n" aria-label="{chip.count} voices to pick from">{chip.count}</span>{/if}
         {#if chip.filled}<FilledMark />{/if}
         {#if chip.warn}<Icon name="alert" size={12} class="setchip-warn" />{/if}
       </button>
@@ -89,6 +90,7 @@
   .setchip:disabled, .setchip:disabled .setchip-v { color: var(--color-text-muted); cursor: default; }
   .setchip-k { color: var(--color-text-muted); font-weight: 500; }
   .setchip-v { max-width: 36vw; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-weight: 500; }
+  .setchip-n { margin-left: 2px; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-primary-main); }
   .setchip-v.on { color: var(--color-primary-main); }
   .setchip[data-changed='true']::after { content: ''; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-primary-main); }
   .setchip[aria-expanded='true'], .setchip[aria-expanded='true'] .setchip-k, .setchip[aria-expanded='true'] .setchip-v { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }

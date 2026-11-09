@@ -368,6 +368,14 @@ describe('cliCommand for audio', () => {
     expect(cliCommand(cloned).command).not.toContain('--voice-consent');
   });
 
+  it('names a saved voice by its slug alone: no transcript, no consent flag, no speaker or delivery', () => {
+    const saved = { mode: 'audio', workflow: 'speech', model: 'qwen3_tts', prompt: 'Hi', saved_voice: 'narrator' };
+
+    expect(cliCommand(saved)).toEqual({ command: 'ziv audio --model qwen3_tts --kind speech --prompt Hi --voice narrator', caveats: [] });
+    expect(cliCommand({ ...saved, speaker: 'ryan', emotion: 'afraid', voice_path: '/v/me.wav', voice_text: 'Hello', voice_consent: ['false', 'on'] }).command).toBe('ziv audio --model qwen3_tts --kind speech --prompt Hi --voice narrator');
+    expect(cliCommand({ ...saved, workflow: 'sound', model: 'sa3' }).command).not.toContain('--voice');
+  });
+
   it('sends lyrics with music, the length with music and sound and a voice with speech only', () => {
     const extras = { lyrics: '[verse]', seconds: '12', voice_path: '/v/me.wav', voice_text: 'Hello', voice_consent: 'on' };
 

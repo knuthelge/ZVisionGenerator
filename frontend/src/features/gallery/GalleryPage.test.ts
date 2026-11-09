@@ -8,7 +8,7 @@ import { galleryMemory, workspaceMemory } from '$lib/state/pageMemory';
 import { projectPick } from '$lib/state/projectPick.svelte';
 import { projectsStore } from '$lib/state/projects.svelte';
 import { hasPendingReference, takeReference } from '$lib/state/pendingReference.svelte';
-import type { GalleryAsset, GalleryPage as GalleryPageResponse, MoveResult } from '$lib/types';
+import type { GalleryAsset, GalleryPage as GalleryPageResponse, MoveResult, SavedVoice, WorkspaceContext } from '$lib/types';
 
 const galleryApiMocks = vi.hoisted(() => ({
   getGallery: vi.fn<() => Promise<GalleryPageResponse>>(),
@@ -18,6 +18,11 @@ const galleryApiMocks = vi.hoisted(() => ({
 
 const projectApiMocks = vi.hoisted(() => ({ listProjects: vi.fn(), createProject: vi.fn() }));
 vi.mock('$lib/api/projects', () => projectApiMocks);
+const workspaceApiMocks = vi.hoisted(() => ({
+  getWorkspaceCoreContext: vi.fn<() => Promise<WorkspaceContext>>(),
+}));
+
+vi.mock('$lib/api/workspace', async (importOriginal) => ({ ...(await importOriginal<typeof import('$lib/api/workspace')>()), getWorkspaceCoreContext: workspaceApiMocks.getWorkspaceCoreContext }));
 
 const routerMocks = vi.hoisted(() => ({
   params: {} as Record<string, string>,
@@ -47,6 +52,11 @@ vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
     }),
   };
 });
+const voiceApiMocks = vi.hoisted(() => ({
+  saveRecordingVoice: vi.fn<(form: FormData) => Promise<SavedVoice>>(),
+}));
+
+vi.mock('$lib/api/voices', async (importOriginal) => ({ ...(await importOriginal<typeof import('$lib/api/voices')>()), saveRecordingVoice: voiceApiMocks.saveRecordingVoice }));
 
 beforeEach(() => {
   confirmMocks.requestConfirm.mockReset();
@@ -79,7 +89,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 }));
 
 import GalleryPage from './GalleryPage.svelte';
-import { makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../test-utils/audio';
+import { makeAudioAsset, makeImportedAudio, makeSpeechAsset, withAudio } from '../../test-utils/audio';
 import { mountComponent, settle } from '../../test-utils/mount';
 import { optionLabels, pickOption } from '../../test-utils/select';
 import { makeContext, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
@@ -177,6 +187,9 @@ beforeEach(() => {
   galleryApiMocks.deleteAsset.mockReset();
   galleryApiMocks.moveAssets.mockReset();
   projectApiMocks.listProjects.mockReset().mockResolvedValue([{ name: 'Night Bus', path: '/out/Night Bus' }, { name: 'Zoo', path: '/out/Zoo' }]);
+  workspaceApiMocks.getWorkspaceCoreContext.mockReset();
+  workspaceApiMocks.getWorkspaceCoreContext.mockRejectedValue(new Error('offline'));
+  workspaceMemory.forget();
   toastMocks.addToast.mockReset();
   toastMocks.dismissToast.mockReset();
   routerMocks.params = {};
@@ -1480,6 +1493,7 @@ describe('GalleryPage with audio', () => {
   });
 
   it('sends a speech take as the voice to the Speech tab, with its text', async () => {
+    workspaceMemory.set(withAudio(makeContext()));
     galleryApiMocks.getGallery.mockResolvedValue(reply([makeSpeechAsset()]));
     mountPage();
     await settle();
@@ -1489,6 +1503,114 @@ describe('GalleryPage with audio', () => {
     (document.querySelector('[role="menu"] [data-action="use-voice"]') as HTMLButtonElement).click();
 
     expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'speech', voice_path: '/outputs/out/speech.flac', voice_text: 'Welcome back to the workshop.', use_as: 'voice' });
+  });
+});
+
+describe('GalleryPage Use as -> Saved voice', () => {
+  const reply = (assets: GalleryAsset[]) => ({ assets, page: 1, total_pages: 1, total_count: assets.length });
+  const MORGAN: SavedVoice = { slug: 'harbour', name: 'Harbour', text: 'Welcome back to the workshop.', origin: 'recording', seconds: 21, description: null, created_at: '2026-11-08T11:00:00Z' };
+
+  beforeEach(() => {
+    voiceApiMocks.saveRecordingVoice.mockReset();
+    workspaceMemory.set(withAudio(makeContext()));
+  });
+
+  async function openMenu(asset: GalleryAsset): Promise<void> {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([asset]));
+    mountPage();
+    await settle();
+    (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+  }
+
+  it('opens the dialog on the page, saves the take by its path, says so in a toast and goes nowhere', async () => {
+    voiceApiMocks.saveRecordingVoice.mockResolvedValue(MORGAN);
+    await openMenu(makeSpeechAsset());
+    (document.querySelector('[role="menu"] [data-action="use-save-voice"]') as HTMLButtonElement).click();
+    await settle();
+
+    const name = document.querySelector<HTMLInputElement>('#sv-name')!;
+    name.value = 'Harbour';
+    flushSync(() => name.dispatchEvent(new Event('input', { bubbles: true })));
+    flushSync(() => document.querySelector<HTMLButtonElement>('[data-action="save-voice"]')!.click());
+    await settle();
+
+    const form = voiceApiMocks.saveRecordingVoice.mock.calls[0][0];
+    expect([form.get('model'), form.get('name'), form.get('voice_path'), form.get('voice_text')]).toEqual(['qwen3_tts', 'Harbour', '/outputs/out/speech.flac', 'Welcome back to the workshop.']);
+    expect(toastMocks.addToast).toHaveBeenCalledWith('Saved voice "Harbour"', 'success');
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"][aria-label="Save as voice"]')).toBeNull();
+  });
+
+  it('does not open the dialog for a take over the limit: the item is greyed', async () => {
+    await openMenu(makeSpeechAsset({ duration: 44 }));
+    const item = document.querySelector<HTMLButtonElement>('[role="menu"] [data-action="use-save-voice"]')!;
+    item.click();
+    await settle();
+
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(document.querySelector('[role="dialog"][aria-label="Save as voice"]')).toBeNull();
+  });
+});
+
+describe('GalleryPage Use as -> Saved voice on a cold load', () => {
+  const reply = (assets: GalleryAsset[]) => ({ assets, page: 1, total_pages: 1, total_count: assets.length });
+
+  async function openSavedVoiceMenu(asset: GalleryAsset): Promise<HTMLButtonElement> {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([asset]));
+    mountPage();
+    await settle();
+    (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+    return document.querySelector<HTMLButtonElement>('[role="menu"] [data-action="use-save-voice"]')!;
+  }
+
+  it('reads the Workspace context when an audio take is listed and the memory is empty: a long take is greyed, a short one can be saved', async () => {
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(withAudio(makeContext()));
+    const long = makeSpeechAsset({ id: 'long.flac', filename: 'long.flac', duration: 46 });
+    const short = makeSpeechAsset({ id: 'short.flac', filename: 'short.flac', duration: 12 });
+    galleryApiMocks.getGallery.mockResolvedValue(reply([long, short]));
+    mountPage();
+    await settle();
+
+    expect(workspaceApiMocks.getWorkspaceCoreContext).toHaveBeenCalledTimes(1);
+    expect(workspaceMemory.get()).not.toBeNull();
+    (target.querySelector('button[aria-label="More actions for long.flac"]') as HTMLButtonElement).click();
+    flushSync();
+    const greyed = document.querySelector<HTMLButtonElement>('[role="menu"] [data-action="use-save-voice"]')!;
+    expect(greyed.getAttribute('aria-disabled')).toBe('true');
+    expect(document.querySelector('[role="menu"] [data-action="use-voice"]')!.getAttribute('aria-disabled')).toBe('true');
+    greyed.click();
+    await settle();
+    expect(document.querySelector('[role="dialog"][aria-label="Save as voice"]')).toBeNull();
+  });
+
+  it('lets a short take be named and saved from the dialog', async () => {
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(withAudio(makeContext()));
+    const item = await openSavedVoiceMenu(makeSpeechAsset({ duration: 12 }));
+    expect(item.getAttribute('aria-disabled')).not.toBe('true');
+    item.click();
+    await settle();
+
+    const name = document.querySelector<HTMLInputElement>('#sv-name')!;
+    name.value = 'Harbour';
+    flushSync(() => name.dispatchEvent(new Event('input', { bubbles: true })));
+    expect(document.querySelector<HTMLButtonElement>('[data-action="save-voice"]')!.disabled).toBe(false);
+  });
+
+  it('leaves the item unavailable when the context cannot be read', async () => {
+    const item = await openSavedVoiceMenu(makeSpeechAsset({ duration: 12 }));
+
+    expect(workspaceApiMocks.getWorkspaceCoreContext).toHaveBeenCalledTimes(1);
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('does not read the context for a gallery without audio takes', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([makeAsset()]));
+    mountPage();
+    await settle();
+
+    expect(workspaceApiMocks.getWorkspaceCoreContext).not.toHaveBeenCalled();
   });
 });
 

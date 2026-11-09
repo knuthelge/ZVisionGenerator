@@ -64,7 +64,7 @@ const MARKED: DraftState = {
   audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain', audioSeconds: 30,
   audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
   speechDelivery: { emotion: 'sad', manner: 'whisper', pace: 'slow', pitch: 'low', expressiveness: 'high' },
-  voiceMode: 'recording', speechSpeaker: 'vivian', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
+  voiceMode: 'recording', speechSpeaker: 'vivian', savedVoice: 'narrator', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
   audioRewrites: { style: EMPTY, sound: { text: 'Heavy rain.', from: { input: 'rain', model: 'sa3', task: 'sound' }, history: [] }, text: EMPTY },
   lyricsVersions: [{ text: 'my words', mine: true }, { text: 'better words', mine: false }], lyricsCurrent: 1,
   enhanceSettingsAudio: { sound: { space: 'forest' }, style: null },
@@ -81,7 +81,7 @@ const OPEN: Record<WorkspaceTab, Partial<DraftState>> = {
 
 const TEXT_WORKFLOW: Record<WorkspaceTab, string> = { image: 'txt2img', video: 'txt2vid', extend: 'extend', audio: 'speech' };
 
-const AUDIO_TAB_KEYS = ['audioKind', 'audioModels', 'audioStyle', 'lyrics', 'speechText', 'soundPrompt', 'audioSeconds', 'audioTempo', 'audioKey', 'musicSeconds', 'soundType', 'speechDelivery', 'voiceMode', 'speechSpeaker', 'voicePath', 'voiceUpload', 'voiceText', 'audioRewrites', 'lyricsVersions', 'lyricsCurrent', 'enhanceSettingsAudio', 'audioDescribe'] as const;
+const AUDIO_TAB_KEYS = ['audioKind', 'audioModels', 'audioStyle', 'lyrics', 'speechText', 'soundPrompt', 'audioSeconds', 'audioTempo', 'audioKey', 'musicSeconds', 'soundType', 'speechDelivery', 'voiceMode', 'speechSpeaker', 'savedVoice', 'voicePath', 'voiceUpload', 'voiceText', 'audioRewrites', 'lyricsVersions', 'lyricsCurrent', 'enhanceSettingsAudio', 'audioDescribe'] as const;
 
 beforeEach(() => {
   localStorage.clear();
@@ -96,6 +96,12 @@ describe('FIELD_SCOPE', () => {
     draft.hydrateFromContext(ctx, null);
 
     expect(Object.keys(FIELD_SCOPE).sort()).toEqual(Object.keys(draft.state).sort());
+  });
+
+  it('puts the saved voice in the voice scope with the rest of the Speech voice, so the Audio Reset clears it and nothing else does', () => {
+    expect(FIELD_SCOPE.savedVoice).toBe('voice');
+    expect(keysOf(RESET_SCOPE.audio)).toContain('savedVoice');
+    for (const tab of ['image', 'video', 'extend'] as const) expect(keysOf(RESET_SCOPE[tab])).not.toContain('savedVoice');
   });
 
   it('lists only scopes a tab can reset or a transition keeps', () => {
@@ -148,6 +154,18 @@ describe('Reset on each tab', () => {
     draft.resetSelections(ctx);
 
     expect(draft.state).toMatchObject({ steps: 28, guidance: 6.2, referenceImageStrength: 0.5, runs: 1, seed: null });
+  });
+
+  it('puts a chosen saved voice back on the default built-in voice, and drops the held recording with it', () => {
+    draft.hydrateFromContext(ctx, null);
+    draft.patch({ ...OPEN.audio });
+    draft.setSavedVoice('narrator');
+    heldUploads.setVoice(file('me.wav'));
+
+    draft.resetSelections(ctx);
+
+    expect(draft.state).toMatchObject({ voiceMode: 'builtin', savedVoice: null, speechSpeaker: null });
+    expect(heldUploads.voice).toBeNull();
   });
 
   it('keeps the model, LoRAs, quantization, prompt, prompt file, extend source and layout', () => {

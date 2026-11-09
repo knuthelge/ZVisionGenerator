@@ -1,7 +1,7 @@
 import type { MascotMood, MascotTool } from '$lib/components/atoms/Mascot.svelte';
 import { PHASE_DECODE } from '$lib/components/molecules/audioAurora';
 import type { ActiveJobState, JobWorkflow } from '$lib/types';
-import { isAudioJob, jobPhase, stepFraction } from './jobView';
+import { isAudioJob, isVoiceDesignJob, jobPhase, stepFraction } from './jobView';
 import { isAudioWorkflow } from './workspaceTab';
 
 /**
@@ -75,7 +75,7 @@ function jobMood(job: ActiveJobState | null): MascotMood | null {
       // A render waiting for approval: the mascot looks to the user.
       if (job.review) return 'curious';
       if (job.stageName === 'enhancing_prompts') return 'reading';
-      if (isAudioJob(job)) {
+      if (isAudioJob(job) || isVoiceDesignJob(job)) {
         if (!isMakingTake(job)) return 'thinking';
         return isFinishingTake(job) ? 'finishing' : 'creating';
       }
@@ -115,9 +115,9 @@ export function mascotProgress(job: ActiveJobState | null): number | undefined {
   return job && !isAudioJob(job) && jobPhase(job) === 'generate' && job.stageName !== 'upscale' && job.totalSteps > 0 ? stepFraction(job) : undefined;
 }
 
-/** Pick what the mascot wears or holds: headphones for audio, a clapperboard for video workflows, otherwise a brush. */
+/** Pick what the mascot wears or holds: headphones for audio and for designing a voice, a clapperboard for video workflows, otherwise a brush. */
 export function mascotTool(workflow: JobWorkflow | undefined): MascotTool {
-  if (isAudioWorkflow(workflow)) return 'audio';
+  if (isAudioWorkflow(workflow) || isVoiceDesignJob({ workflow })) return 'audio';
   return workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? 'clapper' : 'brush';
 }
 

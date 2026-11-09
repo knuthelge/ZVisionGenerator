@@ -15,7 +15,7 @@ export interface JobSettingsPrefill {
 /** The fields of an audio job's settings the Audio tab loads back, as a Reuse link names them (the speaker's consent is never recorded, so it is never among them). `prompt_input` and `enhance_record` are read apart: see `audioJobPrefill`. */
 const AUDIO_PREFILL_KEYS = [
   ...['workflow', 'model', 'prompt', 'lyrics', 'seconds', 'tempo', 'key', 'speaker'],
-  ...['emotion', 'manner', 'pace', 'pitch', 'expressiveness', 'sound_type', 'voice_path', 'voice_text', 'seed', 'runs'],
+  ...['emotion', 'manner', 'pace', 'pitch', 'expressiveness', 'sound_type', 'saved_voice', 'voice_path', 'voice_text', 'seed', 'runs'],
 ] as const;
 
 /** Whether an audio job recorded how its text was written: its `enhance_record` field holds a non-empty JSON object. Not whether `prompt_input` is truthy, as the user's own text may be empty. */

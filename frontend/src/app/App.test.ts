@@ -7,6 +7,7 @@ import { mascotHome } from '$lib/state/mascotHome.svelte';
 import { projectPick } from '$lib/state/projectPick.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import { router } from '$lib/state/router.svelte';
+import { voiceWindow } from '$lib/state/voiceWindow.svelte';
 import { lastEventSource } from '../test-utils/eventSource';
 import type { AppConfig, WorkspaceContext } from '$lib/types';
 
@@ -23,6 +24,14 @@ const workspaceApiMocks = vi.hoisted(() => ({
 const projectApiMocks = vi.hoisted(() => ({ listProjects: vi.fn(), createProject: vi.fn() }));
 
 vi.mock('$lib/api/projects', () => projectApiMocks);
+const voicesApiMocks = vi.hoisted(() => ({
+  getDesignState: vi.fn(),
+}));
+
+vi.mock('$lib/api/voices', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/api/voices')>();
+  return { ...actual, getDesignState: voicesApiMocks.getDesignState };
+});
 
 vi.mock('$lib/api/config', () => ({
   getConfig: configApiMocks.getConfig,
@@ -185,5 +194,94 @@ describe('App startup routing', () => {
     expect(finished[0].type).toBe('success');
     projectPick.set(null);
     jobStore.clearJob();
+  });
+
+  describe('a finished voice design job', () => {
+    const DESIGN_CONTEXT = { job_id: 'job-design', workflow: 'voice_design', media_type: 'audio', prompt: 'A warm woman', model: 'qwen3_tts', runs: 3, created_at: '' } as const;
+
+    async function finishDesignJob(): Promise<void> {
+      configApiMocks.getConfig.mockResolvedValue(makeConfig('gallery'));
+      app = flushSync(() => mount(App, { target }));
+      await settle();
+      jobStore.clearJob();
+      jobStore.startJob({ ...DESIGN_CONTEXT });
+      await settle();
+      lastEventSource().emit('job_completed', { type: 'job_completed', outputs: [] });
+      await settle();
+    }
+
+    beforeEach(() => {
+      toasts.splice(0, toasts.length);
+      voiceWindow.open = false;
+      voiceWindow.requested = false;
+      voicesApiMocks.getDesignState.mockReset();
+      voicesApiMocks.getDesignState.mockResolvedValue({ batches: [], unpicked: 3 });
+    });
+
+    afterEach(() => {
+      jobStore.clearJob();
+      toasts.splice(0, toasts.length);
+      voiceWindow.open = false;
+      voiceWindow.requested = false;
+    });
+
+    it('announces the new voices on any page with a notice that stays, not the generic one', async () => {
+      await finishDesignJob();
+
+      expect(toasts.map((toast) => toast.message)).toEqual(['Your new voices are ready']);
+      expect(toasts[0]).toMatchObject({ type: 'success', timeout: 0, action: { label: 'Pick one' } });
+      expect(mascotHome.placement).toMatchObject({ mood: 'cheerful' });
+    });
+
+    it('reads the kept candidates again, so the count on New voice is current', async () => {
+      await finishDesignJob();
+
+      expect(voicesApiMocks.getDesignState).toHaveBeenCalled();
+    });
+
+    it('opens the Workspace on New voice from Pick one', async () => {
+      await finishDesignJob();
+      expect(router.page).toBe('gallery');
+      // The Workspace that opens has nothing to load in this test.
+      workspaceApiMocks.getWorkspaceCoreContext.mockReturnValue(new Promise(() => undefined));
+      workspaceApiMocks.getWorkspaceContext.mockReturnValue(new Promise(() => undefined));
+
+      toasts[0].action!.run();
+
+      expect(router.page).toBe('workspace');
+      expect(voiceWindow.requested).toBe(true);
+    });
+
+    it('stays quiet while the Voices window is open on New voice, where the candidates arrive', async () => {
+      voiceWindow.show('new');
+
+      await finishDesignJob();
+
+      expect(toasts).toEqual([]);
+      expect(voicesApiMocks.getDesignState).toHaveBeenCalled();
+    });
+
+    it('announces them when the window is open on another tab', async () => {
+      voiceWindow.show('yours');
+
+      await finishDesignJob();
+
+      expect(toasts.map((toast) => toast.message)).toEqual(['Your new voices are ready']);
+    });
+
+    it('keeps the failure toast for a design job that failed, and reads the candidates it kept', async () => {
+      configApiMocks.getConfig.mockResolvedValue(makeConfig('gallery'));
+      app = flushSync(() => mount(App, { target }));
+      await settle();
+      jobStore.clearJob();
+      jobStore.startJob({ ...DESIGN_CONTEXT });
+      await settle();
+
+      lastEventSource().emit('job_failed', { type: 'job_failed', message: 'Out of memory.' });
+      await settle();
+
+      expect(toasts.map((toast) => toast.message)).toEqual(['Generation failed: Out of memory.']);
+      expect(voicesApiMocks.getDesignState).toHaveBeenCalled();
+    });
   });
 });

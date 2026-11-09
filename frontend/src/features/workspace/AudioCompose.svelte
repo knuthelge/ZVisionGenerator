@@ -326,7 +326,7 @@
 {/snippet}
 
 {#snippet insertTools()}
-  <InsertMenu textarea={insertBox} {vocabulary} delivery={view.shown.showDelivery && !view.voice.recording} />
+  <InsertMenu textarea={insertBox} {vocabulary} delivery={view.shown.showDelivery && !view.voice.cloned} />
   {#if enhancer}
     <button
       bind:this={scriptButton}
@@ -503,7 +503,7 @@
         text={s.speechText}
         staleReason={view.staleReason}
         pace={view.pace}
-        recording={view.voice.recording}
+        recording={view.voice.cloned}
         model={s.model}
         {vocabulary}
         {busy}

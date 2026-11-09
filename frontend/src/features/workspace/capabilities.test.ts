@@ -315,6 +315,13 @@ describe('workspaceCapabilities for an audio model', () => {
     expect(workspaceCapabilities(context, audioState('music', 'yue2')).offersDelivery).toBe(false);
   });
 
+  it('shows no Delivery controls for a saved voice either, which is read as recorded, and still offers the section', () => {
+    const caps = workspaceCapabilities(context, { ...audioState('speech', 'qwen3_tts'), voiceMode: 'saved', savedVoice: 'narrator' } as DraftState);
+
+    expect(caps.showDelivery).toBe(false);
+    expect(caps.offersDelivery).toBe(true);
+  });
+
   it('shows the Lyrics box only where the row of the model does not hide it', () => {
     expect(workspaceCapabilities(context, audioState('music', 'yue2')).showLyrics).toBe(true);
     expect(workspaceCapabilities(context, audioState('music', 'sa3')).showLyrics).toBe(false);

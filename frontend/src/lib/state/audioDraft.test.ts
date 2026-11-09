@@ -148,6 +148,22 @@ describe('audioPrefill', () => {
     expect(replacesVoice({ speaker: 'vivian' }, 'speech')).toBe(true);
   });
 
+  it('follows the saved voice a Reuse names, without a recording, a transcript, a speaker or a delivery, and needs no exemption', () => {
+    const { patch, voice } = audioPrefill({ workflow: 'speech', prompt: 'Hello', saved_voice: 'narrator', voice_text: 'ignored', emotion: 'sad' }, ctx, 'speech');
+
+    expect(patch).toMatchObject({ speechText: 'Hello', voiceMode: 'saved', savedVoice: 'narrator', voicePath: null, voiceUpload: null, voiceText: '' });
+    expect(patch).not.toHaveProperty('speechSpeaker');
+    expect(patch).not.toHaveProperty('speechDelivery');
+    expect(voice).toEqual({ exempt: false });
+    expect(replacesVoice({ saved_voice: 'narrator' }, 'speech')).toBe(true);
+    expect(replacesVoice({ saved_voice: 'narrator' }, 'music')).toBe(false);
+  });
+
+  it('clears the saved voice when a Reuse names a built-in voice or a recording', () => {
+    expect(audioPrefill({ workflow: 'speech', prompt: 'Hello', speaker: 'vivian' }, ctx, 'speech').patch).toMatchObject({ voiceMode: 'builtin', savedVoice: null });
+    expect(audioPrefill({ workflow: 'speech', prompt: 'Hello', voice_path: '/voices/me.wav', voice_text: 'Hi' }, ctx, 'speech').patch).toMatchObject({ voiceMode: 'recording', savedVoice: null });
+  });
+
   it('prefers the recording to a speaker when a link names both', () => {
     const { patch } = audioPrefill({ workflow: 'speech', prompt: 'Hello', speaker: 'vivian', voice_path: '/voices/me.wav', voice_text: 'Hi' }, ctx, 'speech');
 

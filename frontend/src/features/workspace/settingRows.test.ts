@@ -108,7 +108,20 @@ describe('the Audio voice', () => {
     draft.setVoice({ path: '/voices/me.wav' });
     expect(changedRowCount(caps, draft.state, defaults)).toBe(1);
     expect(chipChanged('voice', caps, draft.state, defaults)).toBe(true);
-    expect(chipKeys('voice', caps, draft.state)).toEqual(['voiceMode', 'speechSpeaker', 'voicePath', 'voiceUpload', 'voiceText']);
+    expect(chipKeys('voice', caps, draft.state)).toEqual(['voiceMode', 'speechSpeaker', 'savedVoice', 'voicePath', 'voiceUpload', 'voiceText']);
+  });
+
+  it('counts a chosen saved voice as a change in the Voice row, and the default built-in voice again as none', () => {
+    const { state, defaults } = onSpeech();
+    const caps = workspaceCapabilities(audioCtx, state);
+
+    draft.setSavedVoice('narrator');
+    expect(rowChanged('voice', draft.state, defaults)).toBe(true);
+    expect(chipChanged('voice', caps, draft.state, defaults)).toBe(true);
+    expect(changedRowCount(caps, draft.state, defaults)).toBe(1);
+
+    draft.patch({ voiceMode: 'builtin', savedVoice: null });
+    expect(chipChanged('voice', caps, draft.state, defaults)).toBe(false);
   });
 
   it('counts a built-in voice other than the default as a change, and the default as none', () => {

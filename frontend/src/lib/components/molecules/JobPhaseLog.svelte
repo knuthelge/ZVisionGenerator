@@ -4,7 +4,7 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import Alert from './Alert.svelte';
   import {
-    activeDownload, audioRows, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, isActive, isAudioJob, isPaused, isVideo, itemActivity, itemNoun, iterations, jobPhase, livePreviewNote, loadBody, outcome, outputAspect, phaseRows,
+    activeDownload, audioRows, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, isActive, isAudioJob, isPaused, isVideo, isVoiceDesignJob, itemActivity, itemNoun, iterations, jobPhase, livePreviewNote, loadBody, outcome, outputAspect, phaseRows,
     positionLabel, readySummary, stageBars, stepFraction, stepUnit, type PhaseRow, type PhaseRowStatus
   } from '$lib/state/jobView';
   import { formatClock } from '$lib/state/clock';
@@ -57,8 +57,10 @@
   // A finished cut-out sits on a checkerboard; the live preview is the opaque render and never does.
   const previewTransparent = $derived(pausedBetween && lastOutput?.transparent === true);
   const audio = $derived(isAudioJob(job));
+  // A design job's title already says which voice it is on, so no step block repeats it.
+  const designing = $derived(isVoiceDesignJob(job));
   const takeRows = $derived(audioRows(job));
-  const showMedia = $derived(preview && active && generating && !isVideo(job) && !audio && !job.review);
+  const showMedia = $derived(preview && active && generating && !isVideo(job) && !audio && !designing && !job.review);
   // Some models render no live preview; once past the first one, say so instead of promising it.
   const previewNote = $derived(livePreviewNote(job));
 
@@ -220,7 +222,7 @@
                   {#if isVideo(job)}<Badge><Icon name="film" size={12} />No live preview for video</Badge>{/if}
                 </div>
               {/if}
-              {@render stepBlock()}
+              {#if !designing}{@render stepBlock()}{/if}
             </div>
             {#if showMedia}
               <figure class="job-media" class:empty={!previewSrc || failedPreviewUrl === previewSrc} style:width="{previewWidth}px" style:aspect-ratio={aspect}>

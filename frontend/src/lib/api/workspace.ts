@@ -1,6 +1,6 @@
 import { api } from './client';
 import { parseQuery } from '$lib/prefillParams';
-import type { WorkspaceContext, JobContext, JobDownloadPlan, JobList, JobSnapshot, GalleryPage, PrefillParams } from '$lib/types';
+import type { WorkspaceContext, JobContext, JobControlAction, JobDownloadPlan, JobList, JobSnapshot, GalleryPage, PrefillParams } from '$lib/types';
 
 export function getWorkspaceContext(params?: Record<string, string>): Promise<WorkspaceContext> {
   const query = params ? '?' + new URLSearchParams(params).toString() : '';
@@ -50,6 +50,11 @@ export function jobReviewUrl(jobId: string, iteration: number, attempt: number):
 
 export function cancelJob(jobId: string): Promise<void> {
   return api.post(`/api/jobs/${jobId}/cancel`);
+}
+
+/** Send the running job a control: `POST /jobs/{id}/controls/{action}`. */
+export function sendJobControl(jobId: string, action: JobControlAction): Promise<unknown> {
+  return api.post(`/jobs/${encodeURIComponent(jobId)}/controls/${action}`);
 }
 
 export function listJobs(): Promise<JobList> {

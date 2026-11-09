@@ -95,7 +95,7 @@ export const QWEN_VOICES: AudioVoice[] = [
 /** The audio models of a machine that runs all three kinds. */
 export const AUDIO_MODELS: AudioModelOption[] = [
   { id: 'yue2', label: 'YuE2 3B', kind: 'music', type: 'audio', hidden_controls: ['length'], limits: { max_seconds: 360 }, instrumental_sections: '[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]', licences: [] },
-  { id: 'qwen3_tts', label: 'Qwen3-TTS 1.7B', kind: 'speech', type: 'audio', hidden_controls: [], limits: { max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }, voices: QWEN_VOICES, default_voice: 'ryan', voice_download: { downloaded: false }, licences: [] },
+  { id: 'qwen3_tts', label: 'Qwen3-TTS 1.7B', kind: 'speech', type: 'audio', hidden_controls: [], limits: { max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }, voices: QWEN_VOICES, default_voice: 'ryan', voice_download: { downloaded: false }, can_design: true, licences: [] },
   { id: 'sa3', label: 'Stable Audio 3 Medium', kind: 'sound', type: 'audio', hidden_controls: [], limits: { min_seconds: 1, max_seconds: 380, default_seconds: 12 }, licences: [] },
 ];
 

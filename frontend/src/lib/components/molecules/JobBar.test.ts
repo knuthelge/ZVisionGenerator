@@ -61,4 +61,28 @@ describe('JobBar', () => {
     expect(target.querySelector('[aria-label="Model download"]')?.getAttribute('aria-valuenow')).toBe('0.25');
     expect(target.querySelector('[aria-label="Job progress"]')).toBeNull();
   });
+
+  describe('a voice design job', () => {
+    const design = (overrides: Partial<ActiveJobState> = {}) => makeJob({
+      workflow: 'voice_design', media_type: 'audio', prompt: 'A warm woman in her thirties', runs: 3, currentStep: 0, totalSteps: 0, supported_controls: ['quit'],
+      audio: { phase: 'Design', step: 2, total: 3, part: 1, parts: 1 }, ...overrides,
+    });
+
+    it('reads Voice 2 of 3 over the description, with a bar at two thirds', () => {
+      const { target } = mountComponent(JobBar, { job: design(), ondetails: vi.fn() });
+
+      const bar = target.querySelector('[data-testid="job-bar"]') as HTMLElement;
+      expect(bar.querySelector('.jb-headline')?.textContent).toBe('Voice 2 of 3');
+      expect(bar.querySelector('.jb-workflow')?.textContent).toBe('New voice');
+      expect(bar.querySelector('.jb-prompt-text')?.textContent).toBe('A warm woman in her thirties');
+      expect(bar.querySelector('[aria-label="Job progress"]')?.getAttribute('aria-valuenow')).toBe(String(2 / 3));
+    });
+
+    it('has no Pause, only the details button that holds Cancel', () => {
+      const { target } = mountComponent(JobBar, { job: design(), ondetails: vi.fn() });
+
+      expect(Array.from(target.querySelectorAll('button')).some((button) => button.textContent?.includes('Pause'))).toBe(false);
+      expect(target.querySelector('button[aria-label="Job details"]')).not.toBeNull();
+    });
+  });
 });

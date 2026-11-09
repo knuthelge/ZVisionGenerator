@@ -124,7 +124,7 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     showTempo: visible.has('tempo'),
     showKey: visible.has('key'),
     offersDelivery: visible.has('delivery'),
-    showDelivery: visible.has('delivery') && state.voiceMode !== 'recording',
+    showDelivery: visible.has('delivery') && state.voiceMode === 'builtin',
     showSoundType: visible.has('sound_type'),
     showVoice: visible.has('voice') && visible.has('voice_path') && visible.has('voice_text'),
     supportsNegativePrompt,

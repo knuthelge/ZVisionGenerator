@@ -42,6 +42,7 @@ const AUDIO_SETTING_DEFAULTS = {
   speechDelivery: DEFAULT_SPEECH_DELIVERY,
   voiceMode: 'builtin',
   speechSpeaker: null,
+  savedVoice: null,
   voicePath: null,
   voiceUpload: null,
   voiceText: '',
@@ -166,12 +167,12 @@ export function hydrateAudio(ctx: WorkspaceContext, state: DraftState, preferred
 
 /**
  * Whether Workspace prefill params replace the Speech voice: a Use as → Voice naming a recording, a Reuse of a take (it names
- * the prompt, and a take without a recording is in a built-in voice) or any params that name a recording or a built-in voice.
+ * the prompt, and a take without a recording is in a built-in voice) or any params that name a saved voice, a recording or a built-in voice.
  */
 export function replacesVoice(params: Record<string, string | undefined>, kind: AudioWorkflow): boolean {
   if (kind !== 'speech') return false;
   if (params.use_as === 'voice') return Boolean(params.voice_path);
-  return params.prompt !== undefined || params.voice_path !== undefined || params.speaker !== undefined;
+  return params.prompt !== undefined || params.saved_voice !== undefined || params.voice_path !== undefined || params.speaker !== undefined;
 }
 
 /** The fields of the draft a Reuse of Enhanced text builds on: the box's earlier versions and the Enhance options. */
@@ -211,7 +212,7 @@ function settingsPatch(params: Record<string, string | undefined>, kind: AudioWo
     const type = SOUND_TYPES.find((id) => id === params.sound_type);
     if (type !== undefined) patch.soundType = type;
   }
-  if (kind === 'speech' && !params.voice_path && shows('delivery') && DELIVERY_FIELDS.some((field) => params[field] !== undefined)) {
+  if (kind === 'speech' && !params.voice_path && !params.saved_voice && shows('delivery') && DELIVERY_FIELDS.some((field) => params[field] !== undefined)) {
     patch.speechDelivery = { ...DEFAULT_SPEECH_DELIVERY, ...Object.fromEntries(DELIVERY_FIELDS.flatMap((field) => (params[field] ? [[field, params[field]]] : []))) };
   }
   return patch;
@@ -251,10 +252,12 @@ export function audioPrefill(params: Record<string, string | undefined>, ctx: Wo
   let voice: AudioPrefill['voice'] = null;
 
   const setVoice = (): void => {
-    const path = params.voice_path;
-    if (path && shows('voice_path')) Object.assign(patch, { voiceMode: 'recording', voicePath: path, voiceUpload: null });
-    else if (shows('voice')) Object.assign(patch, { voiceMode: 'builtin', speechSpeaker: params.speaker ?? null, voicePath: null, voiceUpload: null });
-    if (params.voice_text !== undefined && shows('voice_text')) patch.voiceText = params.voice_text;
+    const saved = params.saved_voice;
+    const path = saved ? undefined : params.voice_path;
+    if (saved && shows('voice')) Object.assign(patch, { voiceMode: 'saved', savedVoice: saved, voicePath: null, voiceUpload: null });
+    else if (path && shows('voice_path')) Object.assign(patch, { voiceMode: 'recording', savedVoice: null, voicePath: path, voiceUpload: null });
+    else if (shows('voice')) Object.assign(patch, { voiceMode: 'builtin', savedVoice: null, speechSpeaker: params.speaker ?? null, voicePath: null, voiceUpload: null });
+    if (params.voice_text !== undefined && shows('voice_text') && !saved) patch.voiceText = params.voice_text;
     else if (!path) patch.voiceText = '';
     voice = { exempt: params.voice_clone !== 'true' && params.use_as === 'voice' };
   };

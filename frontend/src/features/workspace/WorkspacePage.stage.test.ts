@@ -672,7 +672,8 @@ describe('WorkspacePage asset actions and settings', () => {
       await settle();
 
       expect(draft.state.referenceImagePaths).toEqual(['/in/a.png', '/in/b.png', '/in/c.png']);
-      expect(toasts).toEqual([]);
+      // A tap on a greyed item says why, as a toast.
+      expect(toastMessages()).toEqual(['all 3 in use']);
     });
 
     it('adds a reference the Gallery asked for once the restore has settled', async () => {

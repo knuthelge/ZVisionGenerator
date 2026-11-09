@@ -37,6 +37,7 @@
   import { popover, type PopoverAlign } from '$lib/actions/popover';
   import Icon from '../atoms/Icon.svelte';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import { addToast } from '$lib/state/toasts.svelte';
   import Sheet from './Sheet.svelte';
 
   interface Props {
@@ -74,8 +75,27 @@
     return menuItems().find((item) => item.getAttribute('aria-disabled') !== 'true');
   }
 
-  function select(entry: ActionMenuItem): void {
-    if (entry.disabled) return;
+  /**
+   * Say why a greyed item is off: a mouse reads the tooltip, so only a finger, a pen or a key gets the reason as a toast. The menu
+   * stays open. On a phone the toast sits above the sheet, so it never covers the menu.
+   */
+  function explain(entry: ActionMenuItem, event: MouseEvent): void {
+    if (!entry.title || (event as PointerEvent).pointerType === 'mouse') return;
+    if (layout.compact && menuEl) document.documentElement.style.setProperty('--toast-bottom', `${window.innerHeight - menuEl.getBoundingClientRect().top + 12}px`);
+    addToast(entry.title, 'info');
+  }
+
+  // The toast's place above the sheet lasts as long as the menu is open.
+  $effect(() => {
+    if (!open) return;
+    return () => document.documentElement.style.removeProperty('--toast-bottom');
+  });
+
+  function select(entry: ActionMenuItem, event: MouseEvent): void {
+    if (entry.disabled) {
+      explain(entry, event);
+      return;
+    }
     onclose();
     entry.onselect?.();
   }
@@ -121,7 +141,7 @@
       href={entry.href}
       download={entry.download}
       data-action={entry.id}
-      onclick={() => select(entry)}
+      onclick={(event) => select(entry, event)}
     >{@render content()}</a>
   {:else}
     <button
@@ -134,7 +154,7 @@
       aria-disabled={entry.disabled ? 'true' : undefined}
       title={entry.title}
       data-action={entry.id}
-      onclick={() => select(entry)}
+      onclick={(event) => select(entry, event)}
     >{@render content()}</button>
   {/if}
 {/snippet}

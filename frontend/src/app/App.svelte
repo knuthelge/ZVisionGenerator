@@ -4,7 +4,7 @@
   import { getConfig } from '$lib/api/config';
   import { shouldApplyStartupView } from './startupRouting';
   import { jobStore } from '$lib/state/job.svelte';
-  import { documentTitle, failureToastText, isReviewing } from '$lib/state/jobView';
+  import { documentTitle, failureToastText, isReviewing, isVoiceDesignJob } from '$lib/state/jobView';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import type { MascotReaction } from '$lib/state/mascot';
   import { addToast } from '$lib/state/toasts.svelte';
@@ -12,6 +12,8 @@
   import { projectPick } from '$lib/state/projectPick.svelte';
   import { projectsStore } from '$lib/state/projects.svelte';
   import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
+  import { voiceWindow } from '$lib/state/voiceWindow.svelte';
+  import { voicesStore } from '$lib/state/voices.svelte';
   import type { JobLogEntry, PageId, WorkspaceWorkflow } from '$lib/types';
   import Spinner from '$lib/components/atoms/Spinner.svelte';
   import TopNav from '$lib/components/organisms/TopNav.svelte';
@@ -62,14 +64,43 @@
     toast?.();
   }
 
+  /** React to a job that ended. A design job keeps the candidates it made however it ended, so the count on New voice is read again. */
+  function jobEnded(reaction: MascotReaction, toast?: () => void): void {
+    if (designJobEnded()) void voicesStore.loadDesign();
+    jobEndedElsewhere(reaction, toast);
+  }
+
+  function designJobEnded(): boolean {
+    return jobStore.current !== null && isVoiceDesignJob(jobStore.current);
+  }
+
+  /**
+   * Announce finished voices on any page. The notice stays until dismissed, and is left out while the window is open on New voice,
+   * where the candidates show as they arrive.
+   */
+  function announceNewVoices(): void {
+    if (voiceWindow.onNewVoice) return;
+    addToast('Your new voices are ready', 'success', {
+      timeout: 0,
+      action: { label: 'Pick one', run: () => { voiceWindow.request(); router.navigate('workspace'); } },
+    });
+  }
+
   // The job list stays current on every page, so the logo knows when the mascot is out at work.
   onMount(() => {
     const stopJobSync = jobStore.startSync();
     const unsubscribeLifecycle = jobStore.subscribeLifecycle({
-      onComplete: (outputs) => jobEndedElsewhere('cheerful', () => completionToast(outputs, projectPick.current)),
-      onFailed: () => jobEndedElsewhere('sad', () => addToast(failureToastText(jobStore.current?.message, jobStore.queuedJobs.length > 0), 'error')),
-      onCancelled: () => jobEndedElsewhere('surprised'),
-      onLost: () => jobEndedElsewhere('surprised'),
+      onComplete: (outputs) => {
+        if (designJobEnded()) {
+          jobEnded('cheerful');
+          announceNewVoices();
+        } else {
+          jobEnded('cheerful', () => completionToast(outputs, projectPick.current));
+        }
+      },
+      onFailed: () => jobEnded('sad', () => addToast(failureToastText(jobStore.current?.message, jobStore.queuedJobs.length > 0), 'error')),
+      onCancelled: () => jobEnded('surprised'),
+      onLost: () => jobEnded('surprised'),
     });
     return () => {
       stopJobSync();

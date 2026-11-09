@@ -43,4 +43,13 @@ describe('jobStatusLine', () => {
   it('says Review while a render waits', () => {
     expect(jobStatusLine(job({ status: 'paused', paused: true, review: { iteration: 1, decisions: ['approve', 'discard'] } as ActiveJobState['review'] }), 0)).toEqual({ text: 'Review', tone: 'review' });
   });
+
+  it('reads Voice 2 of 3 for a designed voice, never a step', () => {
+    const design = (overrides: Partial<ActiveJobState> = {}) => job({ workflow: 'voice_design', media_type: 'audio', runs: 3, currentStep: 0, totalSteps: 0, ...overrides });
+
+    expect(jobStatusLine(design({ audio: { phase: 'Design', step: 2, total: 3, part: 1, parts: 1 } }), 0)).toEqual({ text: 'Voice 2 of 3', tone: 'running' });
+    expect(jobStatusLine(design({ phase: 'load' }), 0).text).toBe('Loading VoiceDesign…');
+    expect(jobStatusLine(design({ phase: 'queue', status: 'queued' }), 0).text).toBe('Waiting in the queue');
+    expect(jobStatusLine(design(), 0).text).toBe('Making voices');
+  });
 });

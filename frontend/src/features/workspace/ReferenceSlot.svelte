@@ -51,11 +51,15 @@
     unused?: boolean;
     /** What the slot holds: an image (a picture of it) or an audio track (the waveform icon in the thumbnail's place). */
     kind?: 'image' | 'audio';
+    /** Show the thumbnail before the name; off for a row that is just a name and its facts (a voice recording). */
+    thumb?: boolean;
+    /** Browse and upload stay beside a file that is chosen; off for a row whose clear button is the way to another file (a voice recording). A slot with no usable file offers them either way. */
+    swappable?: boolean;
   }
 
   let {
     idBase, label, names, emptyText, emptyMuted = false, path, file, onfilechange, onpathchange,
-    emptyIcon = 'reference', clearable = true, onfileschange, dropText, missing = false, error, name = '', detail = '', unused = false, kind = 'image',
+    emptyIcon = 'reference', clearable = true, onfileschange, dropText, missing = false, error, name = '', detail = '', unused = false, kind = 'image', thumb = true, swappable = true,
   }: Props = $props();
 
   const audio = $derived(kind === 'audio');
@@ -125,25 +129,29 @@
   ondrop={handleDrop}
 >
   <InspectorRow {label} labelId="{idBase}-label">
-    <div class="reference-thumb" class:missing data-testid="slot-thumb" data-missing={missing}>
-      {#if missing}
-        <Icon name="alert" size={16} />
-      {:else if audio}
-        <Icon name="waveform" size={18} />
-      {:else}
-        <ReferenceThumbContent {file} {path} alt={names.preview} {emptyIcon} />
-      {/if}
-    </div>
+    {#if thumb}
+      <div class="reference-thumb" class:missing data-testid="slot-thumb" data-missing={missing}>
+        {#if missing}
+          <Icon name="alert" size={16} />
+        {:else if audio}
+          <Icon name="waveform" size={18} />
+        {:else}
+          <ReferenceThumbContent {file} {path} alt={names.preview} {emptyIcon} />
+        {/if}
+      </div>
+    {/if}
     {#if dragOver && dropText}
       <span class="reference-name drop">{dropText}</span>
     {:else}
       <span class="reference-name" class:empty={!name && emptyMuted} class:missing title={name}>{name || emptyText}</span>
       {#if detail}<span class="reference-detail" data-testid="{idBase}-detail">{detail}</span>{/if}
     {/if}
-    <button id="{idBase}-browse" type="button" class="ui-btn ui-btn-row" title="Browse for {noun}" aria-label={names.browse} onclick={() => { browsing = true; }}><Icon name="folder" size={14} /></button>
-    <!-- No name: the chosen file is attached on submit only while it is the slot's image (see WorkspacePage). -->
-    <input id="{idBase}-file" bind:this={fileInput} type="file" accept={audio ? AUDIO_ACCEPT : IMAGE_ACCEPT} multiple={onfileschange !== undefined} class="hidden" onchange={(e) => handleFiles(e.currentTarget)}>
-    <label for="{idBase}-file" class="ui-btn ui-btn-row" title="Upload {noun} from this device" aria-label={names.upload}><Icon name="upload" size={14} /></label>
+    {#if swappable || !name || missing}
+      <button id="{idBase}-browse" type="button" class="ui-btn ui-btn-row" title="Browse for {noun}" aria-label={names.browse} onclick={() => { browsing = true; }}><Icon name="folder" size={14} /></button>
+      <!-- No name: the chosen file is attached on submit only while it is the slot's image (see WorkspacePage). -->
+      <input id="{idBase}-file" bind:this={fileInput} type="file" accept={audio ? AUDIO_ACCEPT : IMAGE_ACCEPT} multiple={onfileschange !== undefined} class="hidden" onchange={(e) => handleFiles(e.currentTarget)}>
+      <label for="{idBase}-file" class="ui-btn ui-btn-row" title="Upload {noun} from this device" aria-label={names.upload}><Icon name="upload" size={14} /></label>
+    {/if}
     {#if clearable}
       <button id="{idBase}-clear" type="button" class="ui-btn ui-btn-row" aria-label={names.clear} title="Clear" onclick={clear}><Icon name="close" size={14} /></button>
     {/if}

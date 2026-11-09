@@ -11,9 +11,13 @@
     confirmLabel: string;
     /** Save the preset under the chosen name; a rejection is shown in the dialog and keeps it open. */
     onsubmit: (name: string) => Promise<void>;
+    /** What the dialog says when a rejection carries no reason of its own. */
+    failureText?: string;
+    /** Stack above another dialog that asks for the name. */
+    elevated?: boolean;
   }
 
-  let { open = $bindable(false), title, initialName = '', confirmLabel, onsubmit }: Props = $props();
+  let { open = $bindable(false), title, initialName = '', confirmLabel, onsubmit, failureText = 'Could not save the preset.', elevated = false }: Props = $props();
 
   let name = $state('');
   let saving = $state(false);
@@ -37,14 +41,14 @@
       await onsubmit(trimmed);
       open = false;
     } catch (err) {
-      serverError = errorText(err, 'Could not save the preset.');
+      serverError = errorText(err, failureText);
     } finally {
       saving = false;
     }
   }
 </script>
 
-<Modal bind:open {title} size="sm">
+<Modal bind:open {title} size="sm" {elevated}>
   {#snippet children()}
     <form class="preset-name" onsubmit={(event) => { event.preventDefault(); void submit(); }}>
       <label class="ui-label" for="preset-name">Name</label>

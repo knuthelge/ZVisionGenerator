@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { AUDIO_MODELS, AUDIO_SETTINGS } from '../../test-utils/audio';
 import { emptyAudioRewrites } from '$lib/state/audioRewrites';
 import { DEFAULT_SPEECH_DELIVERY } from '$lib/state/audioDraft';
-import type { AudioModelOption, DraftState } from '$lib/types';
-import { audioFormData, audioView, type AudioViewInput } from './audioView';
+import type { AudioModelOption, DraftState, SavedVoice } from '$lib/types';
+import { audioFormData, audioView, recordingLengthError, savedChoice, type AudioViewInput } from './audioView';
 
 /** The controls each kind's first model shows: a song with lyrics sets no length. */
 const SHOWN = {
@@ -21,7 +21,7 @@ function state(overrides: Partial<DraftState> = {}): DraftState {
   return {
     workflow: 'music', model: 'yue2', audioKind: 'music', audioStyle: '', lyrics: '', speechText: '', soundPrompt: '', audioSeconds: 10,
     audioTempo: null, audioKey: null, musicSeconds: 0, soundType: 'auto', speechDelivery: DEFAULT_SPEECH_DELIVERY,
-    voiceMode: 'builtin', voicePath: null, voiceUpload: null, voiceText: '', runs: 1, seed: null, audioRewrites: emptyAudioRewrites(),
+    voiceMode: 'builtin', savedVoice: null, voicePath: null, voiceUpload: null, voiceText: '', runs: 1, seed: null, audioRewrites: emptyAudioRewrites(),
     ...overrides,
   } as DraftState;
 }
@@ -52,21 +52,42 @@ describe('the voice of the Speech tab', () => {
     expect(speech({ speechSpeaker: 'vivian' })).toMatchObject({ speaker: 'vivian', choice: 'vivian', summary: { text: 'Vivian', tone: 'muted' }, chip: 'Vivian' });
   });
 
-  it('lists the nine built-in voices with their languages and then From a recording', () => {
+  it('lists the nine default voices with their languages, and no entry for a recording', () => {
     const options = speech().options;
 
-    expect(options).toHaveLength(10);
-    expect(options[0]).toEqual({ value: 'ryan', label: 'Ryan · English' });
-    expect(options[5]).toEqual({ value: 'dylan', label: 'Dylan · Beijing Chinese' });
-    expect(options[9]).toEqual({ value: 'recording', label: 'From a recording' });
+    expect(options).toHaveLength(9);
+    expect(options[0]).toEqual({ value: 'ryan', label: 'Ryan · English', group: 'Default voices' });
+    expect(options[5]).toEqual({ value: 'dylan', label: 'Dylan · Beijing Chinese', group: 'Default voices' });
+    expect(options.some((option) => option.value === 'recording')).toBe(false);
   });
 
   it('falls back to the default voice when the draft names one the model does not have', () => {
     expect(speech({ speechSpeaker: 'nobody' })).toMatchObject({ speaker: 'ryan', choice: 'ryan' });
   });
 
-  it('sends no speaker with a recording, and offers the recording as the choice', () => {
-    expect(speech(RECORDING)).toMatchObject({ recording: true, speaker: '', choice: 'recording', summary: { text: 'me.wav', tone: 'active' }, chip: 'me.wav' });
+  it('sends no speaker with a one-off recording, which has no choice in the select but keeps its name for the summary and the chip', () => {
+    expect(speech(RECORDING)).toMatchObject({ recording: true, speaker: '', choice: '', summary: { text: 'me.wav', tone: 'active' }, chip: 'me.wav' });
+  });
+
+  it('plays the clip of the voice: a saved voice\'s recording, the one-off recording, a default voice\'s preview clip', () => {
+    const held = new File(['x'], 'me.wav');
+
+    expect(speech(SAVED, LOADED).play).toEqual({ src: '/api/voices/narrator/audio', file: null, label: 'Narrator' });
+    expect(speech(RECORDING).play).toEqual({ src: '/api/browse/media?purpose=audio_track&path=%2Fvoices%2Fme.wav', file: null, label: 'the recording' });
+    expect(view({ ...RECORDING, voicePath: null, voiceUpload: 'me.wav' }, { file: held }).voice.play).toEqual({ src: null, file: held, label: 'the recording' });
+    expect(speech().play).toEqual({ src: '/app-static/voices/ryan.mp3', file: null, label: 'a preview of Ryan' });
+    expect(speech({ speechSpeaker: 'dylan' }).play).toEqual({ src: '/app-static/voices/dylan.mp3', file: null, label: 'a preview of Dylan' });
+    expect(speech({ ...SAVED, savedVoice: 'gone' }, LOADED).play.src).toBeNull();
+    expect(view({ ...RECORDING, voicePath: null, voiceUpload: 'me.wav' }, { file: null }).voice.play.src).toBeNull();
+  });
+
+  it('counts the designed voices waiting to be picked into the summary, but never over an error', () => {
+    const waiting = { voices: { loaded: true, list: [NARRATOR], unpicked: 3 } };
+
+    expect(speech({}, waiting)).toMatchObject({ pending: 3, summary: { text: 'Ryan · 3 to pick from', tone: 'muted' }, chip: 'Ryan' });
+    expect(speech(SAVED, waiting).summary).toEqual({ text: 'Narrator · 3 to pick from', tone: 'active' });
+    expect(speech({ ...SAVED, savedVoice: 'gone' }, waiting).summary).toEqual({ text: 'Voice deleted', tone: 'error' });
+    expect(speech({}, { voices: { loaded: true, list: [], unpicked: 0 } }).summary.text).toBe('Ryan');
   });
 
   it('says the cloning files are still to download only for a recording, and only while they are not downloaded', () => {
@@ -104,6 +125,96 @@ describe('what a submit sends for the voice', () => {
 
   it('sends no speaker for music or sound', () => {
     expect(audioFormData(view({ workflow: 'music', audioStyle: 'calm' }), state({ workflow: 'music', audioStyle: 'calm' })).has('speaker')).toBe(false);
+  });
+});
+
+const NARRATOR: SavedVoice = { slug: 'narrator', name: 'Narrator', text: 'Hello, this is the narrator.', origin: 'recording', seconds: 6, description: null, created_at: '2026-11-08T10:00:00Z' };
+const ZED: SavedVoice = { slug: 'zed', name: 'zed', text: 'A designed voice.', origin: 'design', seconds: 8, description: 'a calm old man', created_at: '2026-11-08T11:00:00Z' };
+const SAVED = { workflow: 'speech' as const, speechText: 'Hello there.', voiceMode: 'saved' as const, savedVoice: 'narrator' };
+const LOADED = { voices: { loaded: true, list: [NARRATOR, ZED] } };
+
+describe('a saved voice', () => {
+  const speech = (overrides: Partial<DraftState> = {}, input: Partial<AudioViewInput> = {}) => view({ workflow: 'speech', speechText: 'Hello there.', ...overrides }, input);
+
+  it('lists Your voices by name first, then Default voices, and has no Your voices group while the library is empty', () => {
+    const options = speech({}, LOADED).voice.options;
+
+    expect(options.map((option) => option.group)).toEqual(['Your voices', 'Your voices', ...Array(9).fill('Default voices')]);
+    expect(options.slice(0, 2)).toEqual([
+      { value: 'saved:narrator', label: 'Narrator', group: 'Your voices' },
+      { value: 'saved:zed', label: 'zed', group: 'Your voices' },
+    ]);
+    expect(speech({}, { voices: { loaded: true, list: [] } }).voice.options.some((option) => option.group === 'Your voices')).toBe(false);
+    expect(speech().voice.options).toHaveLength(9);
+  });
+
+  it('is a clone: it names the voice, sends the slug alone, and needs no speaker, consent, delivery or pace', () => {
+    const result = speech(SAVED, { ...LOADED, consent: { ticked: false, exempt: false } });
+
+    expect(result.voice).toMatchObject({
+      saved: true, cloned: true, recording: false, speaker: '', choice: savedChoice('narrator'), deleted: false, error: null,
+      needsConsent: false, summary: { text: 'Narrator', tone: 'active' }, chip: 'Narrator', sent: { saved: 'narrator' },
+    });
+    expect(result.reason).toBeNull();
+    expect(result.pace).toBe('normal');
+  });
+
+  it('says the cloning files are still to download, as for a recording', () => {
+    const downloaded = { ...SPEECH_MODEL, voice_download: { downloaded: true } } as typeof SPEECH_MODEL;
+
+    expect(speech(SAVED, LOADED).voice.cloneDownload).toBe(true);
+    expect(speech(SAVED, { ...LOADED, model: downloaded }).voice.cloneDownload).toBe(false);
+  });
+
+  describe('that is gone from the library', () => {
+    const DELETED = 'This saved voice was deleted. Choose another voice.';
+
+    it('turns Generate off with the reason, and shows no error line under the voice, once the library has loaded without it', () => {
+      const result = speech({ ...SAVED, savedVoice: 'gone' }, LOADED);
+
+      expect(result.reason).toBe(DELETED);
+      expect(result.reasonFromVoice).toBe(true);
+      expect(result.voice).toMatchObject({ deleted: true, error: null, chip: 'deleted', summary: { text: 'Voice deleted', tone: 'error' } });
+    });
+
+    it('says nothing before the first load, as the library is not known yet', () => {
+      const result = speech({ ...SAVED, savedVoice: 'gone' }, { voices: { loaded: false, list: [] } });
+
+      expect(result.reason).toBeNull();
+      expect(result.voice).toMatchObject({ deleted: false, error: null });
+    });
+
+    it('keeps the choice and still names the slug in what it would send', () => {
+      expect(speech({ ...SAVED, savedVoice: 'gone' }, LOADED).voice).toMatchObject({ saved: true, sent: { saved: 'gone' }, choice: 'saved:gone' });
+    });
+
+    it('is not an error for a built-in voice or a recording, whatever the draft remembers', () => {
+      expect(speech({ voiceMode: 'builtin', savedVoice: 'gone' }, LOADED).reason).toBeNull();
+      expect(speech({ ...RECORDING, savedVoice: 'gone' }, { ...LOADED, consent: { ticked: true, exempt: false } }).reason).toBeNull();
+    });
+  });
+});
+
+describe('what a submit sends for a saved voice', () => {
+  const sent = (overrides: Partial<DraftState>, input: Partial<AudioViewInput> = LOADED) => {
+    const fields = { workflow: 'speech' as const, model: 'qwen3_tts', speechText: 'Hello there.', ...overrides };
+    return audioFormData(view(fields, input), state(fields));
+  };
+
+  it('sends saved_voice and no speaker, recording fields, consent or delivery, though the draft keeps them', () => {
+    const form = sent({ ...SAVED, speechSpeaker: 'sohee', voicePath: '/voices/me.wav', voiceText: 'Hi, it is me.', speechDelivery: { ...DEFAULT_SPEECH_DELIVERY, emotion: 'sad' } });
+
+    expect(form.get('saved_voice')).toBe('narrator');
+    for (const field of ['speaker', 'voice_path', 'voice_file', 'voice_text', 'voice_consent', 'emotion', 'manner', 'pace', 'pitch', 'expressiveness']) expect(form.has(field)).toBe(false);
+  });
+
+  it('sends the slug of a voice the library lost, as the server answers it with its own refusal', () => {
+    expect(sent({ ...SAVED, savedVoice: 'gone' }).get('saved_voice')).toBe('gone');
+  });
+
+  it('sends no saved_voice with a built-in voice or a recording', () => {
+    expect(sent({ savedVoice: 'narrator' }).has('saved_voice')).toBe(false);
+    expect(sent({ ...RECORDING, savedVoice: 'narrator' }).has('saved_voice')).toBe(false);
   });
 });
 
@@ -317,5 +428,16 @@ describe('the Enhanced text of a box', () => {
     const own = state({ workflow: 'sound', model: 'sa3', soundPrompt: '', audioRewrites: rewrites('Heavy rain.', '') });
 
     expect(audioFormData(view(own), own).get('prompt_input')).toBe('');
+  });
+});
+
+describe('recordingLengthError', () => {
+  const range = { min: 3, max: 30 };
+
+  it('reads a length in whole seconds, rounded toward the side of the range it misses', () => {
+    expect(recordingLengthError(1.5, range)).toBe('Use a recording of 3 to 30 seconds. This one is 0:01.');
+    expect(recordingLengthError(2.9, range)).toBe('Use a recording of 3 to 30 seconds. This one is 0:02.');
+    expect(recordingLengthError(30.1, range)).toBe('Use a recording of 3 to 30 seconds. This one is 0:31.');
+    expect(recordingLengthError(95, range)).toBe('Use a recording of 3 to 30 seconds. This one is 1:35.');
   });
 });

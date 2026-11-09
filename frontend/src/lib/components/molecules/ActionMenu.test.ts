@@ -5,6 +5,7 @@ const layoutMock = vi.hoisted(() => ({ compact: false, mode: 'wide', coarse: fal
 
 vi.mock('$lib/state/layoutMode.svelte', () => ({ layout: layoutMock }));
 
+import { toasts } from '$lib/state/toasts.svelte';
 import { mountComponent, settle } from '../../../test-utils/mount';
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
@@ -15,6 +16,8 @@ describe('ActionMenu', () => {
 
   beforeEach(() => {
     Object.assign(layoutMock, { compact: false, mode: 'wide', coarse: false });
+    toasts.splice(0, toasts.length);
+    document.documentElement.style.removeProperty('--toast-bottom');
   });
 
   function mountMenu(items: ActionMenuEntry[], onclose = vi.fn()) {
@@ -104,6 +107,50 @@ describe('ActionMenu', () => {
       flushSync(() => row('off')?.click());
       expect(onselect).not.toHaveBeenCalled();
       expect(onclose).not.toHaveBeenCalled();
+    });
+
+    describe('with a tooltip', () => {
+      const REASON = 'Use a take of 30 s or less as a voice';
+      const greyed = (onselect = vi.fn()): ActionMenuEntry[] => [{ kind: 'item', id: 'voice', label: 'Voice', disabled: true, title: REASON, onselect }];
+      const click = (pointerType: string) => flushSync(() => row('voice')?.dispatchEvent(new PointerEvent('click', { bubbles: true, pointerType })));
+
+      it('show the reason as a toast on a touch, keeping the menu open and choosing nothing', () => {
+        const onselect = vi.fn();
+        const onclose = vi.fn();
+        mountMenu(greyed(onselect), onclose);
+        click('touch');
+
+        expect(toasts.map((toast) => [toast.type, toast.message])).toEqual([['info', REASON]]);
+        expect(onselect).not.toHaveBeenCalled();
+        expect(onclose).not.toHaveBeenCalled();
+      });
+
+      it('show the reason as a toast for a key press, which has no tooltip to read', () => {
+        mountMenu(greyed());
+        click('');
+
+        expect(toasts.map((toast) => toast.message)).toEqual([REASON]);
+      });
+
+      it('leave a mouse to the tooltip: no toast', () => {
+        mountMenu(greyed());
+        click('mouse');
+
+        expect(toasts).toHaveLength(0);
+      });
+
+      it('lift the toast above the sheet on a phone while the menu is open, and let it drop back when the menu closes', () => {
+        Object.assign(layoutMock, { compact: true, mode: 'compact', coarse: true });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+        const props = mountMenu(greyed());
+        flushSync();
+        vi.spyOn(document.querySelector('[role="menu"]') as HTMLElement, 'getBoundingClientRect').mockReturnValue({ top: 500 } as DOMRect);
+        click('touch');
+
+        expect(document.documentElement.style.getPropertyValue('--toast-bottom')).toBe('312px');
+        flushSync(() => { props.open = false; });
+        expect(document.documentElement.style.getPropertyValue('--toast-bottom')).toBe('');
+      });
     });
 
     it('keep their menuitem role and aria-disabled, and stay in the menu when every item is off', () => {

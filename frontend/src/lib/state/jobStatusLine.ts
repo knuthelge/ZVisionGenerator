@@ -1,10 +1,11 @@
 import type { ActiveJobState } from '$lib/types';
-import { isReviewing, iterations, jobPhase, stepUnit } from './jobView';
+import { isReviewing, isVoiceDesignJob, iterations, jobPhase, stepUnit, voiceDesignLine } from './jobView';
 
-/** One short line of job state for a strip or a bar: Ready, Step 12 of 32 (Batch 3 of 28 for a video upscale), Review, 2 queued. */
+/** One short line of job state for a strip or a bar: Ready, Step 12 of 32 (Batch 3 of 28 for a video upscale, Voice 2 of 3 for a designed voice), Review, 2 queued. */
 export function jobStatusLine(job: ActiveJobState | null, queuedCount: number): { text: string; tone: 'idle' | 'running' | 'review' } {
   if (job && isReviewing(job)) return { text: 'Review', tone: 'review' };
   if (job && (job.status === 'running' || job.status === 'paused' || job.status === 'queued')) {
+    if (isVoiceDesignJob(job)) return { text: voiceDesignLine(job), tone: 'running' };
     const phase = jobPhase(job);
     if (phase === 'queue') return { text: 'Queued', tone: 'running' };
     if (phase === 'enhance') return { text: job.status === 'paused' ? 'Paused' : 'Enhancing…', tone: 'running' };

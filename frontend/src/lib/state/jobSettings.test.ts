@@ -40,6 +40,12 @@ describe('jobSettingsPrefill', () => {
     });
   });
 
+  it('loads the saved voice of a speech job as the slug alone', () => {
+    expect(jobSettingsPrefill({ mode: 'audio', workflow: 'speech', model: 'qwen3_tts', prompt: 'Hello', saved_voice: 'narrator', runs: '1' }).params).toEqual({
+      workflow: 'speech', model: 'qwen3_tts', prompt: 'Hello', saved_voice: 'narrator', runs: '1',
+    });
+  });
+
   it('splits an inline image job into prefill params and the remaining settings', () => {
     const { params, patch } = jobSettingsPrefill({
       mode: 'image', workflow: 'img2img', model: 'zit', prompt_source: 'inline', prompt: 'a lake', negative_prompt: 'blur',

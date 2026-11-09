@@ -80,16 +80,37 @@ describe('AssetViewer with audio', () => {
     expect(help.textContent).toContain('audio track or voice');
   });
 
-  it('lists the audio track under Use as, and the voice for a speech take', () => {
+  it('lists the audio track under Use as, and the voice and the saved voice for a speech take', () => {
     const onuseaudio = vi.fn();
-    mountViewer({ assets: [talk], onuseaudio, useAs: { audio_track: { disabled: false, hint: 'Video tab, from 0 s' }, voice: { disabled: false, hint: 'Speech, text filled in' } } });
+    mountViewer({ assets: [talk], onuseaudio, useAs: { audio_track: { disabled: false, hint: 'Video tab, from 0 s' }, voice: { disabled: false, hint: 'Speech, text filled in' }, save_voice: { disabled: false, hint: 'Keep it in your voices' } } });
 
     flushSync(() => action('reference')!.click());
     const items = Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
-    expect(items).toEqual(['Audio track Video tab, from 0 s', 'Voice Speech, text filled in']);
+    expect(items).toEqual(['Audio track Video tab, from 0 s', 'Voice Speech, text filled in', 'Saved voice Keep it in your voices']);
 
-    flushSync(() => (document.querySelector('[role="menu"] [role="menuitem"]:last-child') as HTMLElement).click());
+    flushSync(() => (document.querySelector('[role="menu"] [data-action="use-voice"]') as HTMLElement).click());
     expect(onuseaudio).toHaveBeenCalledWith(talk, 'voice');
+  });
+
+  it('reports Saved voice to the host', () => {
+    const onuseaudio = vi.fn();
+    mountViewer({ assets: [talk], onuseaudio, useAs: { voice: { disabled: false }, save_voice: { disabled: false }, voiceMaxSeconds: 30 } });
+    flushSync(() => action('reference')!.click());
+    flushSync(() => (document.querySelector('[role="menu"] [data-action="use-save-voice"]') as HTMLElement).click());
+    expect(onuseaudio).toHaveBeenCalledWith(talk, 'save_voice');
+  });
+
+  it('greys Voice and Saved voice for a take over the limit, with the reason as the tooltip and none in the row', () => {
+    const long = makeSpeechAsset({ duration: 44 });
+    mountViewer({ assets: [long], useAs: { voice: { disabled: false }, save_voice: { disabled: false }, voiceMaxSeconds: 30 } });
+    flushSync(() => action('reference')!.click());
+
+    for (const id of ['use-voice', 'use-save-voice']) {
+      const item = document.querySelector<HTMLElement>(`[role="menu"] [data-action="${id}"]`)!;
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      expect(item.title).toBe('Use a take of 30 s or less as a voice');
+      expect(item.querySelector('.action-menu-hint')).toBeNull();
+    }
   });
 
   it('shows the Generation and File facts of a take, with the cut at the cap', () => {

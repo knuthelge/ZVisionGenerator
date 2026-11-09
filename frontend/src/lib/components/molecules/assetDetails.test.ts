@@ -111,6 +111,14 @@ describe('assetDetailSections for an audio take', () => {
     expect(assetDetailSections(makeSpeechAsset({ ...excited.delivery })).generation.map((fact) => fact.label)).not.toContain('Delivery');
   });
 
+  it('names the saved voice a speech take followed while it exists, and falls back to the recording once the voice is gone', () => {
+    const recorded = { has_reference_voice: true, reuse_workspace_url: '#/workspace?workflow=speech&voice_path=%2Fdata%2Fvoices%2Fnarrator.wav&voice_text=Hi.' };
+
+    expect(facts(makeSpeechAsset({ ...recorded, voice_name: 'Narrator' }))['Voice']).toBe('Narrator');
+    expect(facts(makeSpeechAsset({ ...recorded, voice_name: null }))['Voice']).toBe('narrator.wav');
+    expect(facts(makeSpeechAsset({ voice_name: null, reuse_workspace_url: '#/workspace?workflow=speech&speaker=ryan' }))['Voice']).toBe('ryan');
+  });
+
   it('names the sound type of a sound by its label, and shows none for a take without one', () => {
     const label = AUDIO_SETTINGS.sound_types.find((type) => type.id === 'ambience')!.label;
     expect(facts(makeAudioAsset({ kind: 'sound', sound_type: 'ambience' }))['Sound type']).toBe(label);

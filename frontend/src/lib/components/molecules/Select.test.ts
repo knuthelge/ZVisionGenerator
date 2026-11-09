@@ -216,5 +216,47 @@ describe('Select', () => {
       pickOption(box, 'Dm');
       expect(onchange).toHaveBeenCalledExactlyOnceWith('Dm');
     });
+  describe('stacked groups', () => {
+    const VOICES = [
+      { value: 'ryan', label: 'Ryan · English', group: 'Built-in' },
+      { value: 'aiden', label: 'Aiden · English', group: 'Built-in' },
+      { value: 'saved:morgan', label: 'Morgan', group: 'Saved' },
+    ];
+
+    it('lists each run of a group under its heading, in the order given', () => {
+      const { box } = mountSelect({ options: VOICES, value: 'ryan' });
+      const options = openOptions(box);
+
+      expect(options.map((option) => option.dataset.value)).toEqual(['ryan', 'aiden', 'saved:morgan']);
+      const groups = Array.from(document.querySelectorAll('[role="listbox"] [role="group"]'));
+      expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['Built-in', 'Saved']);
+      expect(groups[1].querySelectorAll('[role="option"]')).toHaveLength(1);
+    });
+
+    it('picks from under a heading and walks the options with the keys across the headings', () => {
+      const onchange = vi.fn();
+      const { box } = mountSelect({ options: VOICES, value: 'aiden', onchange });
+      const list = document.getElementById(openOptions(box)[0].closest('[role="listbox"]')!.id)!;
+      const active = () => list.querySelector('[data-active="true"]')?.getAttribute('data-value');
+
+      key(list, 'ArrowDown');
+      expect(active()).toBe('saved:morgan');
+      key(list, 'ArrowUp');
+      expect(active()).toBe('aiden');
+      key(list, 'ArrowDown');
+      expect(active()).toBe('saved:morgan');
+      flushSync(() => box.click());
+
+      pickOption(box, 'saved:morgan');
+      expect(onchange).toHaveBeenCalledExactlyOnceWith('saved:morgan');
+    });
+
+    it('shows no groups when no option has one', () => {
+      const { box } = mountSelect({});
+      openOptions(box);
+
+      expect(document.querySelector('[role="listbox"] [role="group"]')).toBeNull();
+    });
+  });
   });
 });

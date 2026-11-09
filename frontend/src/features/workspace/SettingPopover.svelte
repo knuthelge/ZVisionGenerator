@@ -330,7 +330,7 @@
         {/each}
       </div>
     {:else if key === 'voice'}
-      <VoicePopover voice={audio.voice} />
+      <VoicePopover voice={audio.voice} model={audio.model} />
     {:else if key === 'delivery' && vocabulary}
       <DeliveryControls {vocabulary} recording={false} popover={true} />
     {:else if key === 'extendSeconds'}

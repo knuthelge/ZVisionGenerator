@@ -2,6 +2,7 @@ import { parseQuery } from '$lib/prefillParams';
 import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
 import { imageSupport } from '$lib/state/imageSlots';
 import { workflowMode } from '$lib/state/promptEnhance';
+import { stripMarks } from '$lib/state/speechDelivery';
 import type { AssetUpscaleFactor, DraftState, GalleryAsset, JobWorkflow, PrefillParams, SpeechAudioModel, UpscaleFactor, UpscaleMethod, Workflow, WorkspaceContext } from '$lib/types';
 
 /** Where an image goes: an image's start image, one more reference, a video's first frame, or a video's last frame. */
@@ -10,14 +11,19 @@ export type ReferenceTarget = 'image' | 'reference' | 'video' | 'last';
 /** The targets that fill a single slot of a tab; a reference joins the list instead. */
 export type SlotTarget = Exclude<ReferenceTarget, 'reference'>;
 
-/** Where an audio take goes: the Video tab's audio track, or the Speech tab's voice. */
-export type AudioUseTarget = 'audio_track' | 'voice';
+/** Where an audio take goes: the Video tab's audio track, the Speech tab's voice, or the library of saved voices. */
+export type AudioUseTarget = 'audio_track' | 'voice' | 'save_voice';
 
 /**
  * What the Use as menu shows for each target: whether it can be picked, and a hint (or the reason it can't).
  * `voiceMaxSeconds` is the longest take the Speech tab takes as a voice.
  */
-export type UseAsState = Partial<Record<ReferenceTarget | AudioUseTarget, { disabled: boolean; hint?: string }>> & { voiceMaxSeconds?: number };
+export type UseAsState = Partial<Record<ReferenceTarget | AudioUseTarget, { disabled: boolean; hint?: string }>> & {
+  /** The longest take, in seconds, a speech model takes as a voice. */
+  voiceMaxSeconds?: number;
+  /** The id of the speech model a take is saved as a voice for: the one that takes the longest voice. */
+  voiceModel?: string;
+};
 
 /** Callbacks for the actions every asset surface offers; an absent callback hides its action. */
 export interface AssetActionHandlers {
@@ -36,6 +42,8 @@ export interface AssetActionHandlers {
 /** The Use as hints of the audio targets. */
 export const AUDIO_TRACK_HINT = 'Video tab, from 0 s';
 export const VOICE_HINT = 'Speech, text filled in';
+export const SAVE_VOICE_HINT = 'Keep it in your voices';
+const SPEECH_MODELS_UNKNOWN = 'Speech models not loaded';
 
 const WORKFLOW_LABELS: Record<JobWorkflow, string> = {
   txt2img: 'Text to image',
@@ -47,6 +55,7 @@ const WORKFLOW_LABELS: Record<JobWorkflow, string> = {
   music: 'Music',
   speech: 'Speech',
   sound: 'Sound',
+  voice_design: 'New voice',
 };
 
 /** Describe a workflow value in words; unknown values are shown as they are. */
@@ -146,11 +155,11 @@ function modelLabel(options: readonly { id: string; label: string }[], id: strin
 
 /**
  * Return what the Use as menu shows for each target, read from the model each tab opens on: the draft's model for the tab
- * it is in, else the model that mode last ran, else the context's current one. Without a context nothing is known, so the
- * menu shows no hints and disables nothing.
+ * it is in, else the model that mode last ran, else the context's current one. Without a context the image targets show no
+ * hints and are not disabled, but a voice can't be judged (its length limit is the speech model's), so those are unavailable.
  */
 export function useAsState(ctx: WorkspaceContext | null, state: DraftState): UseAsState {
-  if (ctx === null) return {};
+  if (ctx === null) return { voice: { disabled: true, hint: SPEECH_MODELS_UNKNOWN }, save_voice: { disabled: true, hint: SPEECH_MODELS_UNKNOWN } };
   const ownMode = workflowMode(state.workflow);
   const imageModel = (ownMode === 'image' ? state.model : state.savedSettings.image?.model) || (ctx.current_image_model ?? '');
   const videoModel = (ownMode === 'video' ? state.model : state.savedSettings.video?.model) || (ctx.current_video_model ?? '');
@@ -193,7 +202,13 @@ function audioUseState(ctx: WorkspaceContext, videoModel: string, videoName: str
     audio_track: videoTakesAudioTrack(ctx, videoModel) ? { disabled: false, hint: AUDIO_TRACK_HINT } : { disabled: true, hint: `${videoName || 'The video model'} can't follow an audio track` },
     voice: cloning.length > 0 ? { disabled: false, hint: VOICE_HINT } : { disabled: true, hint: 'No speech model here can use a voice' },
   };
-  if (cloning.length > 0) state.voiceMaxSeconds = Math.max(...cloning.map((model) => model.limits.max_voice_seconds));
+  // Saving a take as a voice needs the same speech model and the same length as following it once.
+  state.save_voice = { ...state.voice!, hint: cloning.length > 0 ? SAVE_VOICE_HINT : state.voice!.hint };
+  if (cloning.length > 0) {
+    const longest = cloning.reduce((best, model) => (model.limits.max_voice_seconds > best.limits.max_voice_seconds ? model : best));
+    state.voiceMaxSeconds = longest.limits.max_voice_seconds;
+    state.voiceModel = longest.id;
+  }
   return state;
 }
 
@@ -239,6 +254,23 @@ export function voiceParams(asset: GalleryAsset): Record<string, string> {
   const params: Record<string, string> = { workflow: 'speech', voice_path: asset.file_path ?? '', voice_text: asset.prompt ?? '', use_as: 'voice' };
   if (asset.has_reference_voice === true) params.voice_clone = 'true';
   return params;
+}
+
+/** What the Save as voice dialog starts from: the take's file, its words without Delivery marks, and whether the tick is asked for. */
+export interface SaveVoiceStart {
+  text: string;
+  consentNeeded: boolean;
+}
+
+/**
+ * Return what saving a speech take as a voice starts from. The words are the take's prompt without its Delivery *marks*, which
+ * steer the delivery and are not said, and without the spaces they leave behind. The tick is asked for only when the take was
+ * itself made from a recording (`has_reference_voice`): such a voice is the speaker's, and a take in a built-in voice is nobody's.
+ */
+export function saveVoiceStart(asset: GalleryAsset, marks: readonly string[]): SaveVoiceStart {
+  // A mark leaves its spaces behind: runs shrink to one, a space before punctuation (`harbour [sad].`) goes, and the ends are trimmed.
+  const text = stripMarks(asset.prompt ?? '', marks).replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+([.,!?;:])/g, '$1').trim();
+  return { text, consentNeeded: asset.has_reference_voice === true };
 }
 
 /** Return whether a video can be extended right now. */

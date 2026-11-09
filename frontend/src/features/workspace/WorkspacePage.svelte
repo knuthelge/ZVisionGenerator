@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import { api, errorText } from '$lib/api/client';
+  import { errorText } from '$lib/api/client';
   import { draft, extendStepFor, slotPaths, videoTimingFor } from '$lib/state/draft.svelte';
   import { hasPath } from '$lib/state/imageSlots';
   import { anyEnhancedUsed, enhancedPartUsed, submittedCaption, submittedPair } from '$lib/state/promptEnhance';
@@ -16,7 +16,7 @@
   import { GALLERY_PULL_PX, galleryPullReady, stageSwipeOutcome, wheelStep, type StageMoves } from './stageSwipe';
   import { addToast } from '$lib/state/toasts.svelte';
   import { firstValues } from '$lib/prefillParams';
-  import { checkReferencePaths, getWorkspaceCoreContext, planGenerate, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
+  import { checkReferencePaths, getWorkspaceCoreContext, planGenerate, sendJobControl, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
   import { confirmDownloads } from '$lib/state/confirmDownloads';
   import { updateConfig } from '$lib/api/config';
   import { workspaceMemory } from '$lib/state/pageMemory';
@@ -41,9 +41,9 @@
     mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, LicenceMark, ModelStatusBadges, ReviewStage, Segmented, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, LicenceMark, ModelStatusBadges, ReviewStage, SaveVoiceDialog, Segmented, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { compactUi } from '$lib/state/compactUi.svelte';
-  import { failureToastText, isReviewing } from '$lib/state/jobView';
+  import { failureToastText, isReviewing, isVoiceDesignJob } from '$lib/state/jobView';
   import { first, jobSettingsPrefill } from '$lib/state/jobSettings';
   import { cliCommand, cliOutputDir, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
   import { appliedPreset, presetDiffersFrom, presetSettingsFromDraft } from '$lib/state/presets';
@@ -83,9 +83,12 @@
   import { autoSoundSeconds, soundTypeLabel } from '$lib/state/soundSettings';
   import { deliverySummary } from '$lib/state/speechDelivery';
   import { voiceConsent } from '$lib/state/voiceConsent.svelte';
+  import { voiceWindow } from '$lib/state/voiceWindow.svelte';
+  import { voicesStore } from '$lib/state/voices.svelte';
   import { AUDIO_KIND_INFO, VIDEO_KIND_INFO, type KindChoice } from './kindInfo';
   import { currentImagesView } from './imagesView';
   import PresetMenu from './PresetMenu.svelte';
+  import VoicesWindow from './VoicesWindow.svelte';
   import { audioChips, pendingChips, settingsChips, type ChipKey } from './settingsChips';
   import { Sheet } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
@@ -720,6 +723,8 @@
   async function handleJobComplete(outputs: GalleryAsset[]): Promise<void> {
     react('cheerful');
     refreshModelStatus();
+    // A design job's voices reach no Gallery; the app announces them, on this page and every other.
+    if (jobStore.current && isVoiceDesignJob(jobStore.current)) return;
     await galleryStore.refresh();
     completionToast(outputs, projectPick.current);
   }
@@ -902,6 +907,24 @@
     if (path) untrack(() => addReference(path));
   });
 
+  // Pick one, from the ready notice on any page, opens the Voices window on New voice. It waits until the draft is back.
+  $effect(() => {
+    if (!authorityReady || !voiceWindow.requested) return;
+    voiceWindow.takeRequest();
+    untrack(openNewVoice);
+  });
+
+  /** Open the Speech tab and the Voices window on New voice. */
+  function openNewVoice(): void {
+    if (!context) return;
+    if (draft.state.workflow !== 'speech') {
+      draft.setTab('audio');
+      draft.setAudioKind('speech', context);
+      _prevTab = workspaceTab(draft.state.workflow);
+    }
+    voiceWindow.show('new');
+  }
+
   function useAsReference(asset: GalleryAsset, target: ReferenceTarget): void {
     if (!asset.file_path) return;
     if (target === 'reference') {
@@ -921,12 +944,20 @@
     closeLightbox();
   }
 
+  // The speech take being saved as a voice.
+  let voiceTake = $state<GalleryAsset | null>(null);
+
   /**
    * Make an audio take the Video tab's audio track (from 0 s) or the Speech tab's voice. Both go through the same prefill as
    * a Reuse, marked by `use_as` (`audio_track`, `voice`) so only that one slot changes; see `audioTrackParams` and `voiceParams`.
    */
   function useAudio(asset: GalleryAsset, target: AudioUseTarget): void {
     if (!asset.file_path || useAs[target]?.disabled) return;
+    // Saved as a voice, a take opens its dialog over the page (and the viewer) and nothing else changes.
+    if (target === 'save_voice') {
+      voiceTake = asset;
+      return;
+    }
     const params = target === 'audio_track' ? audioTrackParams(asset) : voiceParams(asset);
     // The track sits on the Video tab: within it the take just goes in place, and the opened tab shows it without a toast.
     if (target === 'audio_track' && workspaceTab(draft.state.workflow) === 'video') {
@@ -1126,6 +1157,8 @@
     // Load stored draft as the baseline state.
     draft.loadDraft();
     void presetsStore.load();
+    void voicesStore.load();
+    void voicesStore.loadDesign();
     extendInspection.reset();
     clipMemory.reset();
 
@@ -1433,7 +1466,7 @@
 
   /** Send a job control; the job's events show what it did. */
   function sendControl(action: JobControlAction): (jobId: string) => Promise<unknown> {
-    return (jobId) => api.post(`/jobs/${encodeURIComponent(jobId)}/controls/${action}`);
+    return (jobId) => sendJobControl(jobId, action);
   }
 
   async function handleSubmit(e: Event): Promise<void> {
@@ -2181,6 +2214,10 @@
   />
 {/if}
 
+{#if audio?.active && audio.kind === 'speech'}
+  <VoicesWindow voice={audio.voice} model={audio.model} vocabulary={context?.audio_settings} />
+{/if}
+
 {#if context}
   <DiscoverDrawer
     bind:open={discoverOpen}
@@ -2216,6 +2253,8 @@
   ondelete={deleteWorkspaceAsset}
   onmove={moveWorkspaceAsset}
 />
+
+<SaveVoiceDialog asset={voiceTake} model={useAs.voiceModel ?? null} vocabulary={context?.audio_settings} onclose={() => { voiceTake = null; }} />
 
 <style>
   /* Chips in the toolbar share the height of the selects beside them. */

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Icon, Waveform } from '$lib/components/atoms';
-  import { activeDownload, isActive, isAudioJob, isPaused, isVideo, jobPhase, livePreviewNote, outputAspect, stepFraction } from '$lib/state/jobView';
+  import { PEAK_COUNT } from '$lib/components/atoms/Waveform.svelte';
+  import { activeDownload, headline, isActive, isAudioJob, isPaused, isVideo, isVoiceDesignJob, jobPhase, livePreviewNote, outputAspect, stepFraction } from '$lib/state/jobView';
   import type { ActiveJobState, AudioWorkflow } from '$lib/types';
   import AudioAurora from './AudioAurora.svelte';
   import { lastTakeCaption } from './audioAurora';
@@ -14,12 +15,16 @@
   let { job, class: extraClass = '' }: Props = $props();
 
   const AUDIO_SLOT_ASPECT = 4;
+  /** The bars of a design job's tile: a voice has no waveform until it is made, so the tile holds a still, even one. */
+  const DESIGN_PEAKS = Array.from({ length: PEAK_COUNT }, (_, index) => Math.round(70 + 120 * Math.abs(Math.sin(index * 0.55) * Math.cos(index * 0.17))));
 
   const phase = $derived(jobPhase(job));
   // The slot keeps the output's shape from the start, so it never jumps.
   // A take has no picture: its slot is a 4:1 strip.
   const audio = $derived(isAudioJob(job));
-  const aspect = $derived(audio ? AUDIO_SLOT_ASPECT : outputAspect(job));
+  // A design job makes voices, not takes: its slot is the same strip, with a still waveform and no Aurora.
+  const designing = $derived(isVoiceDesignJob(job));
+  const aspect = $derived(audio || designing ? AUDIO_SLOT_ASPECT : outputAspect(job));
   // Paused between images: the image that just finished, sharp. Otherwise the transient live preview.
   const pausedBetween = $derived(isPaused(job) && phase === 'generate' && !!job.itemFinished);
   const lastOutput = $derived(job.outputs[job.outputs.length - 1]);
@@ -99,7 +104,7 @@
 {/snippet}
 
 <!-- The forming image, as large as the stage allows; the job's facts sit in the card beside it. -->
-<figure class="job-preview {extraClass}" class:empty={!shown && !wave && !live} style:aspect-ratio={aspect} style:--ar={aspect} data-testid="job-preview">
+<figure class="job-preview {extraClass}" class:empty={!shown && !wave && !live && !designing} style:aspect-ratio={aspect} style:--ar={aspect} data-testid="job-preview">
   {#if shown && src}
     <img
       {src}
@@ -109,6 +114,9 @@
       onerror={(event) => { failedUrl = event.currentTarget.getAttribute('src'); }}
     >
     <figcaption class="media-tag job-preview-tag">{tag}</figcaption>
+  {:else if designing}
+    <span class="job-preview-wave job-preview-design"><Waveform peaks={DESIGN_PEAKS} /></span>
+    <figcaption class="media-tag job-preview-tag">{headline(job)}</figcaption>
   {:else if live}
     <AudioAurora
       kind={job.workflow as AudioWorkflow}
@@ -139,6 +147,7 @@
   @media (prefers-reduced-motion: reduce) { .job-preview.empty { animation: none; } }
   .job-preview-tag { position: absolute; top: 8px; left: 8px; }
   .job-preview-wave { position: absolute; inset: 14% 6%; display: block; }
+  .job-preview-design { color: var(--color-text-muted); }
   .job-preview-play { position: absolute; right: 8px; bottom: 8px; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; color: var(--color-text-primary); background: color-mix(in srgb, var(--color-bg-surface) 80%, transparent); box-shadow: 0 0 0 1px var(--color-border-subtle); }
   @media (hover: hover) { .job-preview-play:hover { background: var(--color-bg-surface); } }
   .job-preview-note { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; text-align: center; font-size: var(--text-content); font-weight: 600; color: var(--color-text-secondary); }

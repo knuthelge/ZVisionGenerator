@@ -121,8 +121,9 @@ function soundTypeFact(asset: GalleryAsset, vocabulary: AudioSettingsVocabulary 
   return { label: 'Sound type', value: vocabulary?.sound_types.find((type) => type.id === asset.sound_type)?.label ?? asset.sound_type };
 }
 
-/** The Voice fact of a speech take: the recording's file name, else the name of the built-in voice it was read in (its id when this machine does not list it), else a dash. */
+/** The Voice fact of a speech take: the name of the saved voice it followed (while that voice exists), else the recording's file name, else the name of the built-in voice it was read in (its id when this machine does not list it), else a dash. */
 function voiceFact(asset: GalleryAsset, audioModels: readonly AudioModelOption[] | undefined): string {
+  if (asset.voice_name) return asset.voice_name;
   const params = reuseParams(asset);
   if (asset.has_reference_voice === true) return typeof params.voice_path === 'string' && params.voice_path !== '' ? fileName(params.voice_path) : 'A recording';
   const speaker = typeof params.speaker === 'string' && params.speaker !== '' ? params.speaker : null;

@@ -6,7 +6,7 @@
   import { acceptsPageShortcut } from '$lib/keyboard';
   import { workflowLabel } from '$lib/state/assetActions';
   import {
-    downloadLabel, etaLabel, finishingText, headline, isActive, isAudioJob, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone, stepUnit,
+    downloadLabel, etaLabel, finishingText, headline, isActive, isAudioJob, isPaused, isVoiceDesignJob, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone, stepUnit,
     stageBars, type JobTone
   } from '$lib/state/jobView';
   import { formatClock } from '$lib/state/clock';
@@ -121,7 +121,7 @@
     if (action === 'quit' && (layout.coarse || layout.compact) && !cancelArmed) {
       const approved = await requestConfirm({
         question: 'Cancel this job?',
-        info: `The ${noun}s already saved are kept.`,
+        info: `The ${noun}s already ${isVoiceDesignJob(job) ? 'made' : 'saved'} are kept.`,
         confirmLabel: 'Cancel job',
         cancelLabel: 'Keep running',
       });
@@ -196,7 +196,7 @@
   });
   const stepMs = $derived(stepTiming?.stepMs ?? null);
   // A single-stage, single-item job: the job bar is the step bar, so it carries the live step cues.
-  const headerSteps = $derived(total === 1 && active && phase === 'generate' && !stageBars(job).length && !isAudioJob(job));
+  const headerSteps = $derived(total === 1 && active && phase === 'generate' && !stageBars(job).length && !isAudioJob(job) && !isVoiceDesignJob(job));
   const activity = $derived(itemActivity(job));
   const headerLive = $derived(ticking && !offline);
 

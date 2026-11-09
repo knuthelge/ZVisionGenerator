@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 
-import { makeSpeechAsset } from '../../../test-utils/audio';
+import { makeAudioAsset, makeSpeechAsset } from '../../../test-utils/audio';
 import { assetMenuEntries, audioUseEntries, referenceEntries, upscaleEntries } from './assetMenu';
 
 function option(factor: 2 | 4, overrides: Partial<AssetUpscaleFactor> = {}): AssetUpscaleFactor {
@@ -155,26 +155,49 @@ describe('referenceEntries', () => {
 describe('audioUseEntries', () => {
   const items = (entries: ReturnType<typeof audioUseEntries>) => entries.flatMap((entry) => (entry.kind === 'item' ? [entry] : []));
 
-  it('disables a speech take longer than the model takes as a voice, with the reason as its hint and tooltip', () => {
-    const [, voice] = items(audioUseEntries(makeSpeechAsset({ duration: 44 }), vi.fn(), { voiceMaxSeconds: 30 }));
+  it('offers Saved voice next to Voice for a speech take, each with its hint', () => {
+    const entries = items(audioUseEntries(makeSpeechAsset(), vi.fn(), { voice: { disabled: false, hint: 'Speech, text filled in' }, save_voice: { disabled: false, hint: 'Keep it in your voices' } }));
 
-    expect(voice).toMatchObject({ label: 'Voice', disabled: true });
-    expect(voice!.hint).toContain('30');
-    expect(voice!.title).toBe(voice!.hint);
+    expect(entries.map((entry) => [entry.id, entry.label, entry.hint, entry.disabled])).toEqual([
+      ['use-audio-track', 'Audio track', 'Video tab, from 0 s', false],
+      ['use-voice', 'Voice', 'Speech, text filled in', false],
+      ['use-save-voice', 'Saved voice', 'Keep it in your voices', false],
+    ]);
+  });
+
+  it('offers no voice item for music or sound', () => {
+    expect(items(audioUseEntries(makeAudioAsset(), vi.fn())).map((entry) => entry.id)).toEqual(['use-audio-track']);
+    expect(items(audioUseEntries(makeAudioAsset({ kind: 'sound' }), vi.fn())).map((entry) => entry.id)).toEqual(['use-audio-track']);
+  });
+
+  it('greys Voice and Saved voice for a take longer than the model takes, with no reason line and the reason as the tooltip', () => {
+    const [, voice, saved] = items(audioUseEntries(makeSpeechAsset({ duration: 44 }), vi.fn(), { voiceMaxSeconds: 30 }));
+
+    for (const entry of [voice, saved]) {
+      expect(entry).toMatchObject({ disabled: true, hint: undefined, title: 'Use a take of 30 s or less as a voice' });
+    }
+    expect([voice.label, saved.label]).toEqual(['Voice', 'Saved voice']);
+  });
+
+  it('greys both for a machine where no speech model can follow a voice, with the same tooltip and no hint', () => {
+    const none = { disabled: true, hint: 'No speech model here can use a voice' };
+    const [, voice, saved] = items(audioUseEntries(makeSpeechAsset(), vi.fn(), { voice: none, save_voice: none }));
+
+    for (const entry of [voice, saved]) expect(entry).toMatchObject({ disabled: true, hint: undefined, title: none.hint });
   });
 
   it('reports the chosen target', () => {
     const onuseaudio = vi.fn();
     for (const entry of items(audioUseEntries(makeSpeechAsset(), onuseaudio))) entry.onselect?.();
 
-    expect(onuseaudio.mock.calls.map(([, target]) => target)).toEqual(['audio_track', 'voice']);
+    expect(onuseaudio.mock.calls.map(([, target]) => target)).toEqual(['audio_track', 'voice', 'save_voice']);
   });
 
   it('puts them in the asset menu under Use as, and offers no upscale or extend for a take', () => {
     const menu = assetMenuEntries(makeSpeechAsset(), { onreuse: vi.fn(), onuseaudio: vi.fn(), onupscale: vi.fn(), onextend: vi.fn(), ondelete: vi.fn() });
 
     expect(menu.map((entry) => (entry.kind === 'item' ? entry.id : entry.kind === 'heading' ? entry.label : entry.kind))).toEqual([
-      'reuse', 'separator', 'Use as', 'use-audio-track', 'use-voice', 'separator', 'download', 'separator', 'delete',
+      'reuse', 'separator', 'Use as', 'use-audio-track', 'use-voice', 'use-save-voice', 'separator', 'download', 'separator', 'delete',
     ]);
   });
 });

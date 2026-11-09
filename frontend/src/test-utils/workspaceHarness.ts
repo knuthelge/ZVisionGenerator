@@ -16,12 +16,13 @@ import { workspaceMemory } from '$lib/state/pageMemory';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { pendingTriggers } from '$lib/state/loraTriggers.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
+import { voicesStore } from '$lib/state/voices.svelte';
 import { memoryUploadStore } from '$lib/state/uploadStore';
 import type { WorkspaceContext } from '$lib/types';
 import { makeGalleryPage } from './workspace';
 import {
   browseApiMocks, configApiMocks, discoverApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, modelApiMocks,
-  EMPTY_JOB_PLAN, presetApiMocks, promptFileApiMocks, recentPromptsApiMocks, videoMemoryApiMocks, workspaceApiMocks,
+  EMPTY_JOB_PLAN, presetApiMocks, promptFileApiMocks, recentPromptsApiMocks, videoMemoryApiMocks, voiceApiMocks, workspaceApiMocks,
 } from './workspaceMocks';
 
 // The timer that is real while a test fakes the debounce timers.
@@ -47,6 +48,10 @@ export function resetWorkspaceTest(): void {
   discoverApiMocks.getCurated.mockImplementation(async (model) => ({ family: model.family, size: null, version: null, hf_enabled: false, entries: [] }));
   for (const mock of Object.values(presetApiMocks)) mock.mockReset();
   presetApiMocks.listPresets.mockResolvedValue([]);
+  for (const mock of Object.values(voiceApiMocks)) mock.mockReset();
+  voiceApiMocks.listVoices.mockResolvedValue([]);
+  voiceApiMocks.getDesignState.mockResolvedValue({ batches: [], unpicked: 0 });
+  voicesStore.reset();
   firstRun.reset();
   configApiMocks.updateConfig.mockClear();
   workspaceApiMocks.skipFirstRun.mockClear();

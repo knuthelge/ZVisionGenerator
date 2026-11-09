@@ -192,7 +192,7 @@ describe('settingsChips', () => {
 
 describe('audioChips', () => {
   const audioState = { workflow: 'speech', audioSeconds: 12, audioTempo: null, seed: null, runs: 1, audioDescribe: AUDIO_FIELD_DEFAULTS.audioDescribe } as DraftState;
-  const voice = { summary: { text: 'Ryan', tone: 'muted' as const }, recording: false, chip: 'Ryan' };
+  const voice = { summary: { text: 'Ryan', tone: 'muted' as const }, cloned: false, chip: 'Ryan', pending: 0 };
 
   function audioFacts(overrides: Partial<AudioChipFacts> = {}): AudioChipFacts {
     return { kind: 'speech', state: audioState, modelLabel: 'Qwen3-TTS 1.7B', modelDownloaded: true, voice, voiceBlocks: false, changed: () => false, delivery: { shown: false, summary: 'Natural' }, showLength: false, seconds: null, lengthAuto: false, soundType: { shown: false, label: 'Auto' }, tempo: { shown: false }, key: { shown: false, name: null }, showSeed: true, showRuns: true, ...overrides };
@@ -252,10 +252,18 @@ describe('audioChips', () => {
 
   it('marks a model that is not downloaded, a followed recording, and a recording that is wrong', () => {
     expect(audioChips(audioFacts({ modelDownloaded: false })).find((chip) => chip.key === 'model')?.warn).toBe(true);
-    const cloned = { summary: { text: 'me.wav', tone: 'active' as const }, recording: true, chip: 'me.wav' };
+    const cloned = { summary: { text: 'me.wav', tone: 'active' as const }, cloned: true, chip: 'me.wav', pending: 0 };
     expect(audioChips(audioFacts({ voice: cloned })).find((chip) => chip.key === 'voice')).toMatchObject({ value: 'me.wav', on: true, warn: false });
-    const wrong = { summary: { text: 'Use a recording of 3 to 30 seconds', tone: 'error' as const }, recording: true, chip: 'me.wav' };
+    const wrong = { summary: { text: 'Use a recording of 3 to 30 seconds', tone: 'error' as const }, cloned: true, chip: 'me.wav', pending: 0 };
     expect(audioChips(audioFacts({ voice: wrong })).find((chip) => chip.key === 'voice')?.warn).toBe(true);
+  });
+
+  it('counts the designed voices waiting to be picked on the Voice chip, and warns on a deleted voice', () => {
+    const waiting = { ...voice, pending: 3 };
+    expect(audioChips(audioFacts({ voice: waiting })).find((chip) => chip.key === 'voice')).toMatchObject({ value: 'Ryan', count: 3 });
+    expect(audioChips(audioFacts({ voice })).find((chip) => chip.key === 'voice')).not.toHaveProperty('count');
+    const deleted = { summary: { text: 'Voice deleted', tone: 'error' as const }, cloned: true, chip: 'deleted', pending: 0 };
+    expect(audioChips(audioFacts({ voice: deleted })).find((chip) => chip.key === 'voice')).toMatchObject({ value: 'deleted', warn: true });
   });
 
   it('marks the Voice chip changed when the voice differs from its default', () => {
@@ -266,7 +274,7 @@ describe('audioChips', () => {
   });
 
   it('warns on the Voice chip while the voice holds Generate back', () => {
-    const cloned = { summary: { text: 'me.wav', tone: 'active' as const }, recording: true, chip: 'me.wav' };
+    const cloned = { summary: { text: 'me.wav', tone: 'active' as const }, cloned: true, chip: 'me.wav', pending: 0 };
 
     expect(audioChips(audioFacts({ voice: cloned, voiceBlocks: true })).find((chip) => chip.key === 'voice')?.warn).toBe(true);
   });

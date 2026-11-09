@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
-import type { AssetUpscaleFactor, DraftState, GalleryAsset } from '$lib/types';
+import type { AssetUpscaleFactor, DraftState, GalleryAsset, SpeechAudioModel } from '$lib/types';
 
 import { AUDIO_MODELS, makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
 import { makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
-import { assetAspect, canExtend, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, describeFallbackReason, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, seedvr2Options, upscaleFactors, upscaleOption, useAsState, voiceParams, voiceTooLongReason, workflowLabel } from './assetActions';
+import { assetAspect, canExtend, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, describeFallbackReason, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, saveVoiceStart, seedvr2Options, upscaleFactors, upscaleOption, useAsState, voiceParams, voiceTooLongReason, workflowLabel } from './assetActions';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -159,6 +159,7 @@ describe('extend actions', () => {
 
   it('labels the workflow and explains the extend fallbacks', () => {
     expect(workflowLabel('extend')).toBe('Extend video');
+    expect(workflowLabel('voice_design')).toBe('New voice');
     expect(describeFallbackReason('missing_source_video')).not.toBe('missing_source_video');
     expect(describeFallbackReason('extend_unavailable')).not.toBe('extend_unavailable');
   });
@@ -181,8 +182,14 @@ describe('useAsState', () => {
     current_video_model: 'ltx-8',
   });
 
-  it('shows nothing without a context', () => {
-    expect(useAsState(null, state())).toEqual({});
+  it('shows no image hints without a context and leaves the voice targets unavailable', () => {
+    const result = useAsState(null, state());
+
+    expect(result.image).toBeUndefined();
+    expect(result.reference).toBeUndefined();
+    expect(result.voice?.disabled).toBe(true);
+    expect(result.save_voice?.disabled).toBe(true);
+    expect(result.audio_track).toBeUndefined();
   });
 
   it('reads the model each tab opens on', () => {
@@ -271,10 +278,46 @@ describe('Use as for audio takes', () => {
   it('enables the voice with a speech model that clones one, and takes its voice limit', () => {
     const result = useAsState(context(), state());
     expect(result.voice).toEqual({ disabled: false, hint: 'Speech, text filled in' });
+    expect(result.save_voice).toEqual({ disabled: false, hint: 'Keep it in your voices' });
     expect(result.voiceMaxSeconds).toBe(30);
+    expect(result.voiceModel).toBe('qwen3_tts');
 
     const none = useAsState(context({ audio_models: [AUDIO_MODELS[0]] }), state());
     expect(none.voice).toEqual({ disabled: true, hint: 'No speech model here can use a voice' });
+    expect(none.save_voice).toEqual({ disabled: true, hint: 'No speech model here can use a voice' });
+    expect(none.voiceModel).toBeUndefined();
+  });
+
+  it('saves a take for the speech model that takes the longest voice', () => {
+    const speech = AUDIO_MODELS[1] as SpeechAudioModel;
+    const longer: SpeechAudioModel = { ...speech, id: 'longer', limits: { ...speech.limits, max_voice_seconds: 60 } };
+    const result = useAsState(context({ audio_models: [speech, longer] }), state());
+
+    expect(result.voiceModel).toBe('longer');
+    expect(result.voiceMaxSeconds).toBe(60);
+  });
+
+  it('starts saving a take as a voice from its file and its words without Delivery marks', () => {
+    const asset = makeSpeechAsset({ prompt: 'Welcome back. [laugh] Tonight we [whisper]walk the harbour.' });
+
+    expect(saveVoiceStart(asset, ['laugh', 'whisper'])).toEqual({ text: 'Welcome back. Tonight we walk the harbour.', consentNeeded: false });
+    // A bracket that names no mark is text and stays.
+    expect(saveVoiceStart(asset, ['laugh']).text).toContain('[whisper]');
+  });
+
+  it('leaves no stray space where a Delivery mark was removed: at the start, in the middle and before punctuation', () => {
+    const text = (prompt: string) => saveVoiceStart(makeSpeechAsset({ prompt }), ['sad', 'laugh']).text;
+
+    expect(text('[sad] The harbour is quiet.')).toBe('The harbour is quiet.');
+    expect(text('The [sad] harbour is quiet.')).toBe('The harbour is quiet.');
+    expect(text('The harbour is quiet [sad].')).toBe('The harbour is quiet.');
+    expect(text('Is it quiet [laugh]? Yes [sad]!')).toBe('Is it quiet? Yes!');
+  });
+
+  it('asks for the consent tick only for a take that itself followed a recording', () => {
+    expect(saveVoiceStart(makeSpeechAsset({ has_reference_voice: true }), []).consentNeeded).toBe(true);
+    expect(saveVoiceStart(makeSpeechAsset({ has_reference_voice: false }), []).consentNeeded).toBe(false);
+    expect(saveVoiceStart(makeSpeechAsset({ has_reference_voice: undefined }), []).consentNeeded).toBe(false);
   });
 });
 

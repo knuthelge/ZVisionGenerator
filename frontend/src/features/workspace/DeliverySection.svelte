@@ -8,7 +8,7 @@
   interface Props {
     /** The delivery vocabulary of the Workspace payload. */
     vocabulary: AudioSettingsVocabulary;
-    /** The voice follows a recording: the section holds one line and nothing is sent. */
+    /** The voice is a saved voice or a one-off recording: the section holds one line and nothing is sent. */
     recording: boolean;
     /** The delivery differs from its defaults: the section's changed mark and its reset. */
     changed: boolean;

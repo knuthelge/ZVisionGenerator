@@ -124,6 +124,7 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   speechDelivery: 'audioDelivery',
   voiceMode: 'voice',
   speechSpeaker: 'voice',
+  savedVoice: 'voice',
   voicePath: 'voice',
   voiceUpload: 'voice',
   voiceText: 'voice',

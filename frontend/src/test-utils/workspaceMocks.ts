@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { AudioWorkflow, CuratedList, DownloadItem, GalleryPage, JobContext, JobDownloadPlan, JobSnapshot, MoveResult, RecentMode, RecentPrompt, RowDownloadPlan, SettingsPreset, WorkflowMode, WorkspaceContext } from '$lib/types';
+import type { AudioWorkflow, CuratedList, DownloadItem, GalleryPage, JobContext, JobDownloadPlan, JobSnapshot, MoveResult, RecentMode, RecentPrompt, RowDownloadPlan, SavedVoice, SettingsPreset, VoiceDesignState, WorkflowMode, WorkspaceContext } from '$lib/types';
 import { stubBrowseInfo, stubBrowseMediaUrl, stubBrowsePreviewUrl } from './pathBrowser';
 
 // The API mocks of the Workspace page tests. A test file wires them in with `vi.mock(path, async () => ...)`
@@ -69,6 +69,19 @@ export const presetApiMocks = {
   updatePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string, body: unknown) => Promise<SettingsPreset>>(),
   renamePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string, name: string) => Promise<SettingsPreset>>(),
   deletePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string) => Promise<{ status: string }>>(),
+};
+
+/** The saved-voices API (`$lib/api/voices`); the address builders are the real ones, so a player gets its real source. */
+export const voiceApiMocks = {
+  listVoices: vi.fn<() => Promise<SavedVoice[]>>(),
+  saveRecordingVoice: vi.fn<(form: FormData) => Promise<SavedVoice>>(),
+  renameVoice: vi.fn<(slug: string, name: string) => Promise<SavedVoice>>(),
+  deleteVoice: vi.fn<(slug: string) => Promise<{ status: string }>>(),
+  planVoiceDesign: vi.fn(),
+  submitVoiceDesign: vi.fn(),
+  getDesignState: vi.fn<() => Promise<VoiceDesignState>>(),
+  saveCandidate: vi.fn<(candidateId: string, name: string) => Promise<SavedVoice>>(),
+  clearCandidates: vi.fn<() => Promise<{ status: string }>>(),
 };
 
 export const recentPromptsApiMocks = {

@@ -475,6 +475,41 @@ describe('JobCard', () => {
 
   });
 
+  describe('a voice design job', () => {
+    const design = (overrides: Partial<ActiveJobState> = {}): Partial<ActiveJobState> => ({
+      workflow: 'voice_design', media_type: 'audio', prompt: 'A warm woman in her thirties', model_label: 'Qwen3-TTS 1.7B VoiceDesign', currentStep: 0, totalSteps: 0, runs: 3, supported_controls: ['quit'],
+      audio: { phase: 'Design', step: 2, total: 3, part: 1, parts: 1 }, ...overrides,
+    });
+
+    it('is titled by the voice it is on, with the New voice label and no take', () => {
+      render(design());
+
+      expect(card().querySelector('.job-title')?.textContent).toBe('Voice 2 of 3');
+      expect(card().querySelector('.ui-area-label')?.textContent).toBe('New voice');
+      expect(card().textContent).not.toMatch(/take/i);
+    });
+
+    it('fills its bar by the voices made', () => {
+      render(design());
+
+      expect(jobBar().getAttribute('aria-valuenow')).toBe('67');
+      expect(jobBar().getAttribute('aria-valuetext')).toBe('2 of 3 voices done');
+    });
+
+    it('logs Make voices with how many are made, over the description, with no step block and no preview', () => {
+      render(design());
+
+      expect(log().querySelector('.job-label')?.textContent).toContain('Ready');
+      const current = log().querySelectorAll('.job-label')[1];
+      expect(current.textContent).toContain('Make voices');
+      expect(current.textContent).toContain('2 of 3');
+      expect(log().querySelector('.ui-help')?.textContent).toBe('Description');
+      expect(log().querySelector('.job-prompt')?.textContent).toBe('A warm woman in her thirties');
+      expect(log().querySelector('.job-step')).toBeNull();
+      expect(log().querySelector('.job-media')).toBeNull();
+    });
+  });
+
   describe('an audio job', () => {
     const take = (overrides: Partial<ActiveJobState> = {}): Partial<ActiveJobState> => ({
       workflow: 'music', media_type: 'audio', currentStep: 0, totalSteps: 0, runs: 2, supported_controls: IMAGE_CONTROLS, ...overrides,

@@ -51,6 +51,16 @@ describe('QueuePanel', () => {
     expect(loadButtons()).toHaveLength(1);
   });
 
+  it('shows a queued design job by its description, its model, the New voice label and its voices, with no Load settings', () => {
+    mountPanel([makeJob({
+      workflow: 'voice_design', job_type: 'Voice design', prompt: 'A warm woman in her thirties', model: 'qwen3_tts', model_label: 'Qwen3-TTS 1.7B VoiceDesign', runs: 3, meta: '3 voices', settings: {},
+    })]);
+
+    expect(target.querySelector('.queue-prompt')?.textContent).toBe('A warm woman in her thirties');
+    expect(target.querySelector('.queue-meta')?.textContent).toBe('Qwen3-TTS 1.7B VoiceDesign · New voice · 3 voices');
+    expect(loadButtons()).toHaveLength(0);
+  });
+
   it('names the model by its label in the queue row, falling back to its id', () => {
     mountPanel([makeJob({ model: 'klein9b', model_label: 'FLUX.2 Klein 9B' }), makeJob({ id: 'job-2', job_id: 'job-2', model: 'zit' })]);
 

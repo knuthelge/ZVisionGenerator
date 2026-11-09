@@ -31,6 +31,8 @@ export interface SettingChip {
   filled?: boolean;
   /** A glyph before the label and value (the Audio tab's Kind chip). */
   icon?: IconName;
+  /** A count after the value, such as the designed voices waiting to be picked; omitted when there is none. */
+  count?: number;
   /** The preset chip's applied preset slug, empty when none is applied. */
   applied?: string;
   /** The LoRA chip's files: one is downloading (how far, or null while its size is unknown) or one failed. */
@@ -120,7 +122,7 @@ export interface AudioChipFacts {
   modelLabel: string;
   modelDownloaded: boolean;
   /** The Speech voice, when the model can follow a recording; null otherwise. */
-  voice: Pick<VoiceView, 'summary' | 'recording' | 'chip'> | null;
+  voice: Pick<VoiceView, 'summary' | 'cloned' | 'chip' | 'pending'> | null;
   /** Generate is held back by the voice (a transcript or tick still missing): the chip warns. */
   voiceBlocks: boolean;
   /** Whether a chip's settings differ from their defaults (`SETTING_ROWS` decides which settings are the chip's). */
@@ -152,7 +154,7 @@ export function audioChips(f: AudioChipFacts): SettingChip[] {
   const chips: (SettingChip | null)[] = [
     { key: 'kind', label: '', value: AUDIO_KIND_INFO[f.kind].label, changed: false, icon: AUDIO_KIND_INFO[f.kind].icon },
     { key: 'model', label: '', value: f.modelLabel, changed: false, warn: !f.modelDownloaded },
-    f.voice ? { key: 'voice', label: 'Voice', value: f.voice.chip, changed: f.changed('voice'), on: f.voice.recording && f.voice.summary.tone === 'active', warn: f.voice.summary.tone === 'error' || f.voiceBlocks } : null,
+    f.voice ? { key: 'voice', label: 'Voice', value: f.voice.chip, changed: f.changed('voice'), on: f.voice.cloned && f.voice.summary.tone === 'active', warn: f.voice.summary.tone === 'error' || f.voiceBlocks, ...(f.voice.pending > 0 ? { count: f.voice.pending } : {}) } : null,
     f.delivery.shown ? { key: 'delivery', label: 'Delivery', value: f.delivery.summary, changed: f.changed('delivery'), on: f.changed('delivery'), filled: marked.includes('vibe') } : null,
     f.tempo.shown ? { key: 'tempo', label: 'Tempo', value: s.audioTempo === null ? 'Auto' : String(s.audioTempo), changed: f.changed('tempo'), filled: marked.includes('tempo') } : null,
     f.key.shown ? { key: 'key', label: 'Key', value: f.key.name === null ? 'Auto' : keyShortName(f.key.name), changed: f.changed('key'), filled: marked.includes('key') } : null,

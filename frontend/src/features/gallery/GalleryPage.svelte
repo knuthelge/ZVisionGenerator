@@ -9,6 +9,7 @@
   import { router } from '$lib/state/router.svelte';
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import { getGallery, deleteAsset } from '$lib/api/gallery';
+  import { getWorkspaceCoreContext } from '$lib/api/workspace';
   import { galleryStore, type GalleryQuery, type SortOrder } from '$lib/state/gallery.svelte';
   import type { MediaFilter } from '$lib/state/galleryFilter';
   import { belongsToView } from '$lib/state/viewMoves';
@@ -17,9 +18,9 @@
   import { audioTrackParams, extendParams, referenceParams, reuseParams, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { requestReference } from '$lib/state/pendingReference.svelte';
   import { startUpscale } from '$lib/state/upscale';
-  import type { GalleryAsset, MoveResult, UpscaleFactor, UpscaleMethod } from '$lib/types';
+  import type { GalleryAsset, MoveResult, UpscaleFactor, UpscaleMethod, WorkspaceContext } from '$lib/types';
   import { Button, Spinner } from '$lib/components/atoms';
-  import { Alert, AssetTile, AssetViewer, EmptyState, MoveMenu, PageHeader, Select, requestConfirm } from '$lib/components/molecules';
+  import { Alert, AssetTile, AssetViewer, EmptyState, MoveMenu, PageHeader, SaveVoiceDialog, Select, requestConfirm } from '$lib/components/molecules';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import { hasOpenModal, isCommandKey, isPlainKey, isTyping } from '$lib/keyboard';
   import { gridColumns, moveInGrid } from './gridNav';
@@ -537,8 +538,22 @@
     router.navigate('workspace', reuseParams(asset));
   }
 
-  // What the Use as items show comes from the Workspace as it was last seen; before it was ever opened, nothing is known.
-  const useAs = $derived(useAsState(workspaceMemory.get(), draft.state));
+  // What the Use as items and the Save as voice dialog show comes from the Workspace context: the one the Workspace last
+  // loaded, or, on a cold load of this page, one read here as soon as an audio take is listed. Until it is known the voice
+  // items are unavailable, and stay so if the read fails.
+  let context = $state<WorkspaceContext | null>(workspaceMemory.get());
+  let contextRequested = false;
+  $effect(() => {
+    if (context !== null || contextRequested || !assets.some((asset) => asset.media_type === 'audio')) return;
+    contextRequested = true;
+    getWorkspaceCoreContext()
+      .then((loaded) => {
+        workspaceMemory.set(loaded);
+        context = loaded;
+      })
+      .catch(() => undefined);
+  });
+  const useAs = $derived(useAsState(context, draft.state));
 
   function useAsReference(asset: GalleryAsset, target: ReferenceTarget): void {
     if (!asset.file_path) return;
@@ -549,9 +564,16 @@
     } else router.navigate('workspace', referenceParams(asset, target));
   }
 
-  /** An audio take becomes the Video tab's audio track or the Speech tab's voice; the Workspace reads the params on mount. */
+  // The speech take being saved as a voice: the dialog stays on this page, over the viewer when it is open.
+  let voiceTake = $state<GalleryAsset | null>(null);
+
+  /** An audio take becomes the Video tab's audio track or the Speech tab's voice (the Workspace reads the params on mount), or opens the dialog that saves it as a voice. */
   function useAudio(asset: GalleryAsset, target: AudioUseTarget): void {
     if (!asset.file_path) return;
+    if (target === 'save_voice') {
+      voiceTake = asset;
+      return;
+    }
     router.navigate('workspace', target === 'audio_track' ? audioTrackParams(asset) : voiceParams(asset));
   }
 
@@ -767,13 +789,15 @@
   onreference={useAsReference}
   onuseaudio={useAudio}
   {useAs}
-  audioModels={workspaceMemory.get()?.audio_models}
-  audioVocabulary={workspaceMemory.get()?.audio_settings}
+  audioModels={context?.audio_models}
+  audioVocabulary={context?.audio_settings}
   onextend={extendAsset}
   onupscale={upscaleAsset}
   ondelete={deleteSingle}
   onmove={moveSingle}
 />
+
+<SaveVoiceDialog asset={voiceTake} model={useAs.voiceModel ?? null} vocabulary={context?.audio_settings} onclose={() => { voiceTake = null; }} />
 
 <style>
   /* A tile's shape while the assets load: the image square over a caption, in the tile's surface. */

@@ -6,6 +6,9 @@
  * who has just chosen the voice. A voice that is itself a take the model chose the voice of (an *Any* take, used as the
  * voice) needs no consent, which `exempt` records; a reload forgets that too, so the tick is asked for once more.
  */
+/** The sentence beside the tick that confirms the speaker's consent. */
+export const VOICE_CONSENT_TEXT = "This is my voice, or I have the speaker's permission to clone it.";
+
 class VoiceConsent {
   /** The tick is set. */
   ticked = $state(false);

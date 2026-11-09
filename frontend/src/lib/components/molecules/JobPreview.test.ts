@@ -93,6 +93,36 @@ describe('JobPreview', () => {
     expect(downloading.target.textContent).not.toContain('Loading the model');
   });
 
+  describe('a voice design job', () => {
+    const designJob = (overrides: Partial<ActiveJobState> = {}) => makeJob({
+      workflow: 'voice_design', media_type: 'audio', width: null, height: null, runs: 3, audio: { phase: 'Design', step: 2, total: 3, part: 1, parts: 1 }, ...overrides,
+    });
+    const figure = (target: HTMLElement) => target.querySelector('[data-testid="job-preview"]') as HTMLElement;
+
+    it('is a still waveform tile tagged with where the job is, in the strip shape of a take', () => {
+      const { target } = mountComponent(JobPreview, { job: designJob() });
+
+      expect(Number.parseFloat(figure(target).style.aspectRatio)).toBeGreaterThan(1);
+      expect(figure(target).querySelector('svg')).not.toBeNull();
+      expect(figure(target).querySelector('.job-preview-tag')?.textContent).toBe('Voice 2 of 3');
+      expect(figure(target).classList.contains('empty')).toBe(false);
+    });
+
+    it('draws no Aurora, whatever the phase', () => {
+      for (const overrides of [{}, { audio: null }, { phase: 'load' as const }, { status: 'queued' as const, phase: 'queue' as const }]) {
+        const { target } = mountComponent(JobPreview, { job: designJob(overrides) });
+        expect(target.querySelector('canvas[data-testid="audio-aurora"]')).toBeNull();
+        expect(figure(target).querySelector('img')).toBeNull();
+      }
+    });
+
+    it('says what the job is doing before any voice is made', () => {
+      const { target } = mountComponent(JobPreview, { job: designJob({ audio: null, phase: 'load' }) });
+
+      expect(figure(target).querySelector('.job-preview-tag')?.textContent).toBe('Loading VoiceDesign…');
+    });
+  });
+
   describe('an audio job', () => {
     const takeJob = (overrides: Partial<ActiveJobState> = {}) => makeJob({ workflow: 'music', media_type: 'audio', width: null, height: null, ...overrides });
     const figure = (target: HTMLElement) => target.querySelector('[data-testid="job-preview"]') as HTMLElement;

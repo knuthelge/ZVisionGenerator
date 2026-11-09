@@ -7,7 +7,9 @@ import { draft } from '$lib/state/draft.svelte';
 import { downloadedTiers } from '$lib/state/enhancerDownload.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { projectPick } from '$lib/state/projectPick.svelte';
+import { jobStore } from '$lib/state/job.svelte';
 import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
+import { toasts } from '$lib/state/toasts.svelte';
 import { voiceConsent } from '$lib/state/voiceConsent.svelte';
 import type { AudioEnhanceFrame, AudioRewrites, DraftState, GalleryAsset, JobContext, WorkspaceContext } from '$lib/types';
 
@@ -161,20 +163,17 @@ async function typeInto(id: string, value: string): Promise<void> {
   await settle();
 }
 
-async function pickVoice(file = new File(['voice'], 'narrator.wav', { type: 'audio/wav' })): Promise<void> {
-  const input = target.querySelector('#ws-voice-file') as HTMLInputElement;
-  Object.defineProperty(input, 'files', { configurable: true, value: [file] });
-  input.dispatchEvent(new Event('change', { bubbles: true }));
-  await settle();
-}
-
-/** Pick an option of the Voice select (a built-in voice id, or `recording`) in the Settings column, or in the open Voice popover. */
+/** Pick an option of the Voice select (a default voice id, or `saved:<slug>`) in the Settings column, or in the open Voice popover. */
 async function chooseVoice(choice: string, within: ParentNode = target): Promise<void> {
   pickOption(within.querySelector('[data-testid="voice-select"] button, [data-testid="pop-voice-select"] button') as HTMLElement, choice);
   await settle();
 }
 
-const chooseRecording = (): Promise<void> => chooseVoice('recording');
+/** Make a one-off recording the voice, as Use once does in the Voices window: the block under the Voice select then holds it. */
+async function chooseRecording(file = new File(['voice'], 'narrator.wav', { type: 'audio/wav' })): Promise<void> {
+  draft.setVoice({ file });
+  await settle();
+}
 
 async function tick(): Promise<void> {
   consent()!.click();
@@ -705,17 +704,13 @@ describe('the Audio tab', () => {
       expect(reason()).toBeNull();
       expect(submitButton().disabled).toBe(false);
 
-      await chooseRecording();
-      expect(reason()).toContain('Choose');
-      expect(submitButton().disabled).toBe(true);
-
       trackApi.readFileLength.mockResolvedValue(2);
-      await pickVoice();
+      await chooseRecording();
       expect(target.querySelector('#ws-voice-error')?.textContent).toContain('0:02');
       expect(reason()).toContain('30');
 
       trackApi.readFileLength.mockResolvedValue(12);
-      await pickVoice(new File(['voice2'], 'narrator2.wav', { type: 'audio/wav' }));
+      await chooseRecording(new File(['voice2'], 'narrator2.wav', { type: 'audio/wav' }));
       expect(reason()).toContain('says');
       expect(field('ws-voice-text').getAttribute('aria-invalid')).toBe('true');
 
@@ -736,12 +731,12 @@ describe('the Audio tab', () => {
       expect(Object.fromEntries(sent.entries())).toEqual({ mode: 'audio', workflow: 'speech', model: 'qwen3_tts', prompt: 'Hello there.', speaker: 'ryan', emotion: 'neutral', manner: 'natural', pace: 'normal', pitch: 'normal', expressiveness: 'normal', runs: '1' });
     });
 
-    it('lists the nine built-in voices with their languages, then From a recording, and shows the voice in the section header', async () => {
+    it('lists the nine default voices with their languages, and shows the voice in the section header', async () => {
       await mountAudio('speech');
       const select = target.querySelector('[data-testid="voice-select"] button') as HTMLElement;
 
       expect(optionLabels(select)).toEqual([
-        'Ryan · English', 'Aiden · English', 'Vivian · Chinese', 'Serena · Chinese', 'Uncle Fu · Chinese', 'Dylan · Beijing Chinese', 'Eric · Sichuan Chinese', 'Ono Anna · Japanese', 'Sohee · Korean', 'From a recording',
+        'Ryan · English', 'Aiden · English', 'Vivian · Chinese', 'Serena · Chinese', 'Uncle Fu · Chinese', 'Dylan · Beijing Chinese', 'Eric · Sichuan Chinese', 'Ono Anna · Japanese', 'Sohee · Korean',
       ]);
       expect(target.querySelector('[data-section="voice"] .inspector-summary')?.textContent).toBe('Ryan');
     });
@@ -780,7 +775,6 @@ describe('the Audio tab', () => {
       await typeInto('ws-prompt', 'Hello there.');
       await chooseVoice('vivian');
       await chooseRecording();
-      await pickVoice();
       await typeInto('ws-voice-text', 'Hello, this is my voice.');
       await tick();
 
@@ -796,7 +790,7 @@ describe('the Audio tab', () => {
 
       await chooseRecording();
 
-      expect(target.querySelector('[data-testid="voice-download-hint"]')?.textContent).toBe('Voice cloning downloads about 4.9 GB the first time you generate with a recording.');
+      expect(target.querySelector('[data-testid="voice-download-hint"]')?.textContent).toBe('Voice cloning downloads its model the first time you generate with a recording or a saved voice.');
     });
 
     it('shows no download hint once the cloning files are downloaded', async () => {
@@ -833,7 +827,6 @@ describe('the Audio tab', () => {
       await mountAudio('speech');
       await typeInto('ws-prompt', 'Hello there.');
       await chooseRecording();
-      await pickVoice();
       await typeInto('ws-voice-text', 'Hello, this is my voice.');
       await tick();
 
@@ -979,7 +972,7 @@ describe('the Audio tab', () => {
       await chooseRecording();
 
       expect(section('delivery')).not.toBeNull();
-      expect(delivery().querySelector('[data-testid="delivery-recording-note"]')?.textContent).toBe('A cloned voice reads as recorded; Delivery applies to the built-in voices.');
+      expect(delivery().querySelector('[data-testid="delivery-recording-note"]')?.textContent).toBe('Your voices read as they were made. Delivery works with the default voices.');
       expect(delivery().querySelector('[data-testid="delivery-controls"]')).toBeNull();
       expect(summary()).toBeNull();
       draft.setVoice({ path: '/voices/me.wav' });
@@ -1034,7 +1027,6 @@ describe('the Audio tab', () => {
       await mountAudio('speech');
       await typeInto('ws-prompt', 'Hello there.');
       await chooseRecording();
-      await pickVoice();
       await typeInto('ws-voice-text', 'Hello, this is my voice.');
       await tick();
       expect(consent()!.checked).toBe(true);
@@ -1043,7 +1035,7 @@ describe('the Audio tab', () => {
     it('clears with a new file, which keeps the typed transcript', async () => {
       await ticked();
 
-      await pickVoice(new File(['other'], 'other.wav', { type: 'audio/wav' }));
+      await chooseRecording(new File(['other'], 'other.wav', { type: 'audio/wav' }));
 
       expect(consent()!.checked).toBe(false);
       expect(draft.state.voiceText).toBe('Hello, this is my voice.');
@@ -2171,6 +2163,41 @@ expect(document.querySelector('#ws-enhance-panel')?.closest('[role="dialog"]')?.
       expect(target.querySelector('#ws-lyrics')).toBeNull();
       const sent = Object.fromEntries((await submitForm(target)).entries());
       expect(sent).toMatchObject({ model: 'sa3', prompt: 'A warm folk tune.', prompt_input: 'warm folk' });
+    });
+  });
+
+  describe('a job that ends', () => {
+    const DESIGN = { job_id: 'job-design', workflow: 'voice_design', media_type: 'audio', prompt: 'A warm woman', model: 'qwen3_tts', runs: 3, created_at: '' } as const;
+
+    it('refreshes the Gallery and says Generation complete for a take', async () => {
+      await mountAudio('speech');
+      toasts.splice(0, toasts.length);
+      jobStore.startJob({ job_id: 'job-take', workflow: 'speech', media_type: 'audio', prompt: 'Hello', model: 'qwen3_tts', runs: 1, created_at: '' });
+      await settle();
+      const loads = galleryApiMocks.getGallery.mock.calls.length;
+
+      lastEventSource().emit('job_completed', { type: 'job_completed', outputs: [] });
+      await settle();
+
+      expect(galleryApiMocks.getGallery.mock.calls.length).toBeGreaterThan(loads);
+      expect(toasts.map((toast) => toast.message)).toContain('Generation complete');
+    });
+
+    it('neither refreshes the Gallery nor says Generation complete for a voice design job, which makes nothing for it', async () => {
+      await mountAudio('speech');
+      toasts.splice(0, toasts.length);
+      jobStore.startJob({ ...DESIGN });
+      await settle();
+      const loads = galleryApiMocks.getGallery.mock.calls.length;
+      const statusReads = workspaceApiMocks.getWorkspaceCoreContext.mock.calls.length;
+
+      lastEventSource().emit('job_completed', { type: 'job_completed', outputs: [] });
+      await settle();
+
+      expect(galleryApiMocks.getGallery.mock.calls.length).toBe(loads);
+      expect(toasts.map((toast) => toast.message)).not.toContain('Generation complete');
+      // The model's download state is still read, so VoiceDesign shows as downloaded.
+      expect(workspaceApiMocks.getWorkspaceCoreContext.mock.calls.length).toBeGreaterThan(statusReads);
     });
   });
 
@@ -3856,8 +3883,8 @@ expect(document.querySelector('#ws-enhance-panel')?.closest('[role="dialog"]')?.
       const clipboard = mockClipboard();
       await mountAudio('speech');
       await typeInto('ws-prompt', 'Hello there.');
-      await chooseRecording();
-      draft.patch({ voicePath: '/voices/me.wav', voiceText: 'Hello, this is my voice.' });
+      draft.setVoice({ path: '/voices/me.wav' });
+      draft.update('voiceText', 'Hello, this is my voice.');
       await settle();
 
       (target.querySelector('button[aria-label="Copy CLI command"]') as HTMLButtonElement).click();
@@ -3875,7 +3902,6 @@ expect(document.querySelector('#ws-enhance-panel')?.closest('[role="dialog"]')?.
     it('keeps the voice recording through a visit to the Gallery', async () => {
       await mountAudio('speech');
       await chooseRecording();
-      await pickVoice();
       expect(target.querySelector('#ws-voice-label')).not.toBeNull();
 
       await unmount(app!);
@@ -4104,11 +4130,9 @@ expect(document.querySelector('#ws-enhance-panel')?.closest('[role="dialog"]')?.
       const pop = () => target.querySelector('[data-testid="setting-popover"]') as HTMLElement;
 
       expect(pop().querySelector('#ws-pop-voice-text')).toBeNull();
-      await chooseVoice('recording', pop());
-      expect(pop().querySelector('#ws-pop-voice-text')).not.toBeNull();
-
       draft.setVoice({ path: '/voices/me.wav' });
       await settle();
+      expect(pop().querySelector('#ws-pop-voice-text')).not.toBeNull();
       expect(pop().querySelector('input[type="checkbox"]')).not.toBeNull();
       expect(pop().querySelector('input[type="checkbox"]')).toHaveProperty('checked', false);
     });
@@ -4182,6 +4206,19 @@ expect(document.querySelector('#ws-enhance-panel')?.closest('[role="dialog"]')?.
 
       expect(draft.state).toMatchObject({ workflow: 'speech', voiceMode: 'recording', voicePath: '/outputs/out/speech.flac', voiceText: 'Welcome back to the workshop.' });
       expect(consent()!.checked).toBe(false);
+    });
+
+    it('opens the dialog that saves a take as a voice, over the page and without changing the draft', async () => {
+      const take = makeSpeechAsset({ prompt: 'Welcome back to the workshop.' });
+      await mountAudio('music', { assets: [take] });
+      (target.querySelector('.latest-region button[aria-label="More actions for speech.flac"]') as HTMLButtonElement).click();
+      flushSync();
+      (document.querySelector('[role="menu"] [data-action="use-save-voice"]') as HTMLElement).click();
+      await settle();
+
+      expect(document.querySelector('[role="dialog"][aria-label="Save as voice"]')).not.toBeNull();
+      expect((document.querySelector('#sv-text') as HTMLTextAreaElement).value).toBe('Welcome back to the workshop.');
+      expect(draft.state.workflow).toBe('music');
     });
 
     it('fills the tab from a reused take: kind, model, words, lyrics and seed', async () => {

@@ -1,7 +1,9 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
   import { SaveProject } from '$lib/components/molecules';
+  import { workflowLabel } from '$lib/state/assetActions';
   import { hasJobSettings } from '$lib/state/jobSettings';
+  import { isVoiceDesignJob } from '$lib/state/jobView';
   import type { JobSnapshot } from '$lib/types';
 
   interface Props {
@@ -13,6 +15,11 @@
   }
 
   let { jobs, onremove, onload, onclear }: Props = $props();
+
+  /** The meta line of a design job: its model's long label may be cut short, "New voice · 3 voices" never. */
+  function designTail(job: JobSnapshot): string {
+    return [workflowLabel(job.workflow), job.meta].filter(Boolean).join(' · ');
+  }
 
   function details(job: JobSnapshot): string {
     const runs = `${job.runs} ${job.runs === 1 ? 'run' : 'runs'}`;
@@ -32,9 +39,14 @@
           <span class="queue-pos" class:next={index === 0} aria-label="Position {job.queue_position ?? index + 1}">{job.queue_position ?? index + 1}</span>
           <div class="queue-text">
             <span class="queue-prompt" title={job.prompt}>{job.prompt || (job.workflow === 'upscale' ? 'No prompt recorded' : 'Prompt file')}</span>
-            <span class="queue-meta">{details(job)}</span>
-            {#if job.save_project}
-              <SaveProject name={job.save_project} testid="queue-project" />
+            {#if isVoiceDesignJob(job)}
+              <!-- A design job is not a run of a workflow: its meta already says how many voices. -->
+              <span class="queue-meta queue-meta-split"><span class="queue-model">{job.model_label || job.model}</span><span class="queue-tail">{` · ${designTail(job)}`}</span></span>
+            {:else}
+              <span class="queue-meta">{details(job)}</span>
+              {#if job.save_project}
+                <SaveProject name={job.save_project} testid="queue-project" />
+              {/if}
             {/if}
           </div>
           {#if index === 0}<span class="ui-badge ui-badge-info queue-tag">Starts next</span>{/if}
@@ -63,6 +75,9 @@
   .queue-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
   .queue-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-content); color: var(--color-text-primary); }
   .queue-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
+  .queue-meta-split { display: flex; }
+  .queue-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .queue-tail { flex: none; white-space: pre; }
   @media (max-width: 639px) {
     .queue-tag { display: none; }
     .queue-action { font-size: 0; gap: 0; }

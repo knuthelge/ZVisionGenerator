@@ -120,8 +120,18 @@ describe('mascotMood for an audio take', () => {
   });
 });
 
+describe('mascotMood for a voice design job', () => {
+  const design = (overrides: Partial<ActiveJobState> = {}) => job('running', 0, 0, { media_type: 'audio', workflow: 'voice_design', ...overrides });
+
+  it('thinks until the first voice is made, then creates', () => {
+    expect(mascotMood({ job: design() })).toBe('thinking');
+    expect(mascotMood({ job: design({ audio: { phase: 'Design', step: 1, total: 3, part: 1, parts: 1 } }) })).toBe('creating');
+  });
+});
+
 describe('mascotTool', () => {
-  it('wears headphones for every kind of audio', () => {
+  it('wears headphones for every kind of audio, and for designing a voice', () => {
+    expect(mascotTool('voice_design')).toBe('audio');
     expect(mascotTool('music')).toBe('audio');
     expect(mascotTool('speech')).toBe('audio');
     expect(mascotTool('sound')).toBe('audio');

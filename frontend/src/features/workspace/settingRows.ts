@@ -27,7 +27,7 @@ export const SETTING_ROWS = [
   { id: 'key', keys: ['audioKey'], chip: 'key', visible: (caps) => caps.showKey },
   { id: 'musicLength', keys: ['musicSeconds'], chip: 'length', visible: (caps) => caps.showLength && caps.audioKind === 'music' },
   { id: 'delivery', keys: ['speechDelivery'], chip: 'delivery', visible: (caps) => caps.showDelivery },
-  { id: 'voice', keys: ['voiceMode', 'speechSpeaker', 'voicePath', 'voiceUpload', 'voiceText'], chip: 'voice', visible: (caps) => caps.showVoice },
+  { id: 'voice', keys: ['voiceMode', 'speechSpeaker', 'savedVoice', 'voicePath', 'voiceUpload', 'voiceText'], chip: 'voice', visible: (caps) => caps.showVoice },
   { id: 'extendLength', keys: ['extendFrames'], chip: 'extendSeconds', visible: (caps) => caps.showExtendLength },
   { id: 'steps', keys: ['steps'], chip: 'steps', visible: (caps) => caps.showSteps },
   { id: 'guidance', keys: ['guidance'], chip: 'guidance', visible: (caps) => caps.showGuidance },

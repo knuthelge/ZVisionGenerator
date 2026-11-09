@@ -281,7 +281,8 @@ const AUDIO_PROMPT_ERRORS: Record<string, string> = {
  * with sound and with music of a model that sets it (the form sends none otherwise), and a voice with speech only, as the form
  * shows them. A setting on Auto (blank) or at its default (a sound type of `auto`, a delivery value of neutral) is left out. A
  * recording from a file or a gallery take is named by its path; `--voice-consent` follows the form's tick, which a take made
- * in a built-in voice never shows. A built-in voice is `--speaker` with its delivery, and a recording replaces both.
+ * in a built-in voice never shows. A built-in voice is `--speaker` with its delivery, and a recording replaces both. A saved voice is
+ * `--voice` with its slug alone, as its record holds the transcript and the consent.
  *
  * @throws {Error} When the text is blank, or a voice recording has no transcript.
  */
@@ -307,9 +308,13 @@ function audioCliCommand(settings: JobSettings, options: CliCommandOptions): Cli
   if (kind === 'sound' && text(settings, 'sound_type') !== 'auto') flag('--sound-type', text(settings, 'sound_type'));
 
   if (kind === 'speech') {
+    const saved = text(settings, 'saved_voice');
     const upload = text(settings, 'voice_file');
     const voice = upload ?? text(settings, 'voice_path');
-    if (voice !== undefined) {
+    if (saved !== undefined) {
+      // The record holds the transcript and the consent, so the command names the voice alone.
+      args.push('--voice', saved);
+    } else if (voice !== undefined) {
       const transcript = text(settings, 'voice_text');
       if (transcript === undefined) throw new Error('Write what the recording says first.');
       if (upload !== undefined) caveats.push('uploaded_voice');

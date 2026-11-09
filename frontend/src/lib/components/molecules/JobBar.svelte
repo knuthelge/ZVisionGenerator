@@ -2,7 +2,7 @@
   import { errorText } from '$lib/api/client';
   import { Badge, Icon, StepProgress } from '$lib/components/atoms';
   import { workflowLabel } from '$lib/state/assetActions';
-  import { downloadLabel, etaLabel, headline, isActive, isPaused, itemNoun, iterations, jobBar, jobControls, jobPhase, stageBars } from '$lib/state/jobView';
+  import { downloadLabel, etaLabel, headline, isActive, isPaused, isVoiceDesignJob, itemNoun, iterations, jobBar, jobControls, jobPhase, stageBars } from '$lib/state/jobView';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ActiveJobState, JobControlAction } from '$lib/types';
 
@@ -57,7 +57,7 @@
   }
 </script>
 
-<!-- The compact job card: one row of facts, the progress, the prompt. ⋯ opens the full card as the Job sheet. -->
+<!-- The compact job card: one row of facts, the progress, the prompt. ⋯ opens the full card as the Job sheet. A design job has no Pause: Cancel is in the sheet. -->
 <div class="job-bar ui-overlay" data-tone={paused ? 'paused' : 'running'} data-testid="job-bar" aria-label="Running job">
   <div class="jb-row">
     <span class="jb-status"><i class="jb-dot"></i><span class="ui-area-label jb-workflow">{workflowLabel(job.workflow)}</span></span>
@@ -67,7 +67,7 @@
       {#if active}
         {#if paused}
           <button type="button" class="ui-btn ui-btn-sm ui-btn-primary" disabled={!available.has('resume') || offline || sending} onclick={() => void send('resume', onresume)}><Icon name="play" size={12} />Resume</button>
-        {:else}
+        {:else if !isVoiceDesignJob(job)}
           <button type="button" class="ui-btn ui-btn-sm" disabled={!available.has('pause') || offline || sending || pending === 'pause'} onclick={() => void send('pause', onpause)}><Icon name="pause" size={12} />{pending === 'pause' ? 'Pausing' : 'Pause'}</button>
         {/if}
       {/if}

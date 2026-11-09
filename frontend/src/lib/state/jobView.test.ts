@@ -4,9 +4,9 @@ import { auroraNote, auroraProgress, MUSIC_PHASES } from '$lib/components/molecu
 import type { ActiveJobState, AudioWorkflow } from '$lib/types';
 import { downloadFromEvent, trackJobEvent } from './jobPhases';
 import {
-  activeDownload, AUDIO_FIELD_LABELS, audioFraction, audioRows, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, finishingText, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isSteppedStage, isVideo, isVideoUpscale, itemActivity, itemFraction, iterations, itemNoun,
+  activeDownload, AUDIO_FIELD_LABELS, audioFraction, audioRows, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, finishingText, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isAudioJob, isSteppedStage, isVideo, isVideoUpscale, isVoiceDesignJob, itemActivity, itemFraction, iterations, itemNoun,
   jobBar, jobControls, jobTone, livePreviewNote, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
-  reviewVideoUrl, stageBars, stepUnit, timeLeft
+  reviewVideoUrl, stageBars, stepUnit, timeLeft, voiceDesignLine, voiceDesignProgress
 } from './jobView';
 import { formatClock } from './clock';
 
@@ -669,5 +669,70 @@ describe('an audio job', () => {
     expect(headline(take())).toBe('Making the take');
     expect(headline(take({ runs: 3, status: 'completed', phase: 'generate' }))).toBe('Finished 3 takes');
     expect(headline(take({ runs: 2, status: 'failed' }))).toBe('Failed on take 1 of 2');
+  });
+});
+
+describe('a voice design job', () => {
+  const progress = (step: number, total = 3) => ({ phase: 'Design', step, total, part: 1, parts: 1 });
+  const design = (overrides: Partial<ActiveJobState> = {}) => job({
+    workflow: 'voice_design', media_type: 'audio', model_label: 'Qwen3-TTS 1.7B VoiceDesign', runs: 3, currentStep: 0, totalSteps: 0, supported_controls: ['quit'], ...overrides,
+  });
+
+  it('is its own kind of job: audio, but neither a take nor an image', () => {
+    expect(isVoiceDesignJob(design())).toBe(true);
+    expect(isAudioJob(design())).toBe(false);
+    expect(isVoiceDesignJob(job({ workflow: 'speech', media_type: 'audio' }))).toBe(false);
+    expect(isAudioJob(job({ workflow: 'speech', media_type: 'audio' }))).toBe(true);
+    expect(itemNoun(design())).toBe('voice');
+    expect(audioRows(design({ audio: progress(1) }))).toEqual([]);
+  });
+
+  it('says where it is: waiting, loading, downloading, making, then which voice of how many', () => {
+    expect(voiceDesignLine(design({ status: 'queued', phase: 'queue' }))).toBe('Waiting in the queue');
+    expect(voiceDesignLine(design({ phase: 'load' }))).toBe('Loading VoiceDesign…');
+    expect(voiceDesignLine(design({ phase: 'load', loadPhase: 'downloading' }))).toBe('Downloading VoiceDesign…');
+    expect(voiceDesignLine(design())).toBe('Making voices');
+    expect(voiceDesignLine(design({ audio: progress(2) }))).toBe('Voice 2 of 3');
+    expect(voiceDesignLine(design({ audio: progress(1, 6), runs: 3 }))).toBe('Voice 1 of 6');
+  });
+
+  it('counts the voices made as the work done, and never past the voices asked for', () => {
+    expect(voiceDesignProgress(design())).toEqual({ done: 0, total: 3 });
+    expect(voiceDesignProgress(design({ audio: progress(2) }))).toEqual({ done: 2, total: 3 });
+    expect(voiceDesignProgress(design({ audio: progress(5) }))).toEqual({ done: 3, total: 3 });
+    expect(iterations(design({ audio: progress(2) }))).toEqual({ total: 3, index: 2, done: 2 });
+    expect(iterations(design({ phase: 'load', audio: progress(2) }))).toEqual({ total: 3, index: 0, done: 0 });
+  });
+
+  it('titles the card with that line in flight, and by voices once it has ended', () => {
+    expect(headline(design({ audio: progress(2) }))).toBe('Voice 2 of 3');
+    expect(headline(design({ status: 'queued', phase: 'queue' }))).toBe('Waiting in the queue');
+    expect(headline(design({ audio: progress(3), status: 'completed' }))).toBe('Finished 3 voices');
+    expect(headline(design({ audio: progress(2), status: 'failed' }))).toBe('Failed on voice 3 of 3');
+    expect(headline(design({ audio: progress(2), status: 'cancelled' }))).toBe('Stopped after 2 of 3 voices');
+    expect(headline(design({ audio: progress(2), connection: 'reconnecting' }))).toBe('Reconnecting…');
+  });
+
+  it('fills the bar by voices made, with no segments', () => {
+    expect(jobBar(design())).toEqual({ kind: 'bar', fraction: 0 });
+    expect(jobBar(design({ audio: progress(2) }))).toEqual({ kind: 'bar', fraction: 2 / 3 });
+    expect(jobBar(design({ audio: progress(2), status: 'failed' }))).toEqual({ kind: 'bar', fraction: 2 / 3 });
+    expect(jobBar(design({ audio: progress(3), status: 'completed' }))).toEqual({ kind: 'bar', fraction: 1 });
+  });
+
+  it('offers Cancel only: no Pause, Skip or Repeat', () => {
+    expect(jobControls(design({ audio: progress(1) }))).toEqual({ job: ['quit'], item: [] });
+    expect(jobControls(design({ status: 'queued', phase: 'queue' }))).toEqual({ job: ['quit'], item: [] });
+  });
+
+  it('names its row Make voices with the count in its detail, and its text the description', () => {
+    expect(phaseRows(design({ audio: progress(2) })).at(-1)).toMatchObject({ key: 'generate', label: 'Make voices', detail: '2 of 3', status: 'current' });
+    expect(positionLabel(design())).toBe('Description');
+  });
+
+  it('says how many voices were made, not that anything reached the Gallery', () => {
+    expect(outcome(design({ audio: progress(3), status: 'completed' }))?.saved).toBe('3 of 3 voices made');
+    expect(outcome(design({ audio: progress(2), status: 'cancelled' }))?.saved).toBe('2 of 3 voices made');
+    expect(outcome(design({ status: 'failed', message: 'No sound.' }))).toMatchObject({ error: true, saved: 'No voices made' });
   });
 });

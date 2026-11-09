@@ -29,6 +29,8 @@
     fill?: boolean;
     /** `side` docks the dialog to the right edge at full height, as a drawer; a phone still gets its bottom sheet. */
     placement?: 'center' | 'side';
+    /** Extra classes for the dialog box itself, such as a fixed height. */
+    class?: string;
     onclose?: () => void;
     children?: Snippet;
     footer?: Snippet;
@@ -44,6 +46,7 @@
     elevated = false,
     fill = false,
     placement = 'center',
+    class: extraClass = '',
     onclose,
     children,
     footer
@@ -177,7 +180,7 @@
         aria-describedby={describedby}
         tabindex="-1"
         data-placement={placement}
-        class="modal-dialog ui-overlay relative flex max-h-full w-full flex-col transition-[max-width] duration-200 motion-reduce:transition-none focus:outline-none pointer-events-auto {SIZE_CLASSES[size]} {side ? 'h-full rounded-none border-l border-border-subtle' : fill ? 'max-sm:h-full max-sm:max-w-none max-sm:rounded-none' : ''}"
+        class="modal-dialog ui-overlay relative flex max-h-full w-full flex-col transition-[max-width] duration-200 motion-reduce:transition-none focus:outline-none pointer-events-auto {SIZE_CLASSES[size]} {extraClass} {side ? 'h-full rounded-none border-l border-border-subtle' : fill ? 'max-sm:h-full max-sm:max-w-none max-sm:rounded-none' : ''}"
       >
       {#if title}
         <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-2.5">

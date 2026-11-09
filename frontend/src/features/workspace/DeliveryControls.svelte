@@ -10,7 +10,7 @@
   interface Props {
     /** The delivery vocabulary the Workspace payload serves: the Vibes and the choices of every setting. */
     vocabulary: AudioSettingsVocabulary;
-    /** The voice follows a recording: the controls give way to one line, and nothing is sent. */
+    /** The voice is a saved voice or a one-off recording: the controls give way to one line, and nothing is sent. */
     recording: boolean;
     /** Put all five values back (the section's reset); omitted where the container has its own Reset. */
     onreset?: () => void;
@@ -43,7 +43,7 @@
 </script>
 
 {#if recording}
-  <p class="delivery-note" data-testid="{testBase}-recording-note">A cloned voice reads as recorded; Delivery applies to the built-in voices.</p>
+  <p class="delivery-note" data-testid="{testBase}-recording-note">Your voices read as they were made. Delivery works with the default voices.</p>
 {:else}
   <div class="delivery" data-testid="{testBase}-controls">
     {#if onreset}

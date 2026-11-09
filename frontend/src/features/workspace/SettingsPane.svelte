@@ -260,7 +260,7 @@
     {/if}
 
     {#if caps.showVoice}
-      <VoiceSection voice={audio.voice} changed={isChanged('voice')} onreset={resetVoice} />
+      <VoiceSection voice={audio.voice} model={audio.model} changed={isChanged('voice')} onreset={resetVoice} />
     {/if}
 
     {#if caps.offersDelivery && context.audio_settings}

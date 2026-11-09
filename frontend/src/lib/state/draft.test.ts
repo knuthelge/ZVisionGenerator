@@ -2230,7 +2230,7 @@ describe('applyPreset', () => {
     videoKind: 'extend', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
     audioSeconds: 30, audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
     speechDelivery: { emotion: 'sad', manner: 'whisper', pace: 'slow', pitch: 'low', expressiveness: 'high' },
-    voiceMode: 'recording', speechSpeaker: 'vivian', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
+    voiceMode: 'recording', speechSpeaker: 'vivian', savedVoice: 'narrator', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
     audioRewrites: { style: { text: '', from: null, history: [] }, sound: { text: 'Heavy rain.', from: { input: 'rain', model: 'sa3', task: 'sound' }, history: [] }, text: { text: '', from: null, history: [] } },
     lyricsVersions: [{ text: 'my words', mine: true }, { text: 'better words', mine: false }],
     lyricsCurrent: 1,

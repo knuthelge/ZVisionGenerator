@@ -5,7 +5,7 @@
     disabled?: boolean;
     /** A second line under the label, in the muted shade. */
     hint?: string;
-    /** The column the option sits in when the list lays its groups out side by side (`groupColumns`). */
+    /** The group the option sits in: a titled column when the list lays its groups out side by side (`groupColumns`), else a heading over its run of options (every option of such a list has one). */
     group?: string;
   }
 
@@ -104,6 +104,22 @@
       else groups.set(option.group, [...(groups.get(option.group) ?? []), index]);
     });
     return { plain, groups: [...groups.entries()].map(([name, indexes]) => ({ name, indexes })) };
+  });
+
+  /**
+   * Without `groupColumns`, options that have a `group` are listed in order under a heading for each run of one group. A list that
+   * uses groups this way gives every option one. Null when no option has a group.
+   */
+  const sections = $derived.by(() => {
+    if (groupColumns || !options.some((option) => option.group !== undefined)) return null;
+    const runs: { name: string; indexes: number[] }[] = [];
+    options.forEach((option, index) => {
+      const name = option.group ?? '';
+      const last = runs[runs.length - 1];
+      if (last && last.name === name) last.indexes.push(index);
+      else runs.push({ name, indexes: [index] });
+    });
+    return runs;
   });
 
   /** The enabled option in the column beside the active one, at the same row (or the nearest below it); -1 when there is none. */
@@ -320,6 +336,15 @@
             </div>
           {/each}
         </div>
+      {:else if sections}
+        {#each sections as section, position (position)}
+          <div role="group" aria-label={section.name}>
+            <p class="ui-select-group ui-area-label" aria-hidden="true">{section.name}</p>
+            {#each section.indexes as index (options[index].value)}
+              {@render optionRow(options[index], index)}
+            {/each}
+          </div>
+        {/each}
       {:else}
         {#each options as option, index (option.value)}
           {@render optionRow(option, index)}
