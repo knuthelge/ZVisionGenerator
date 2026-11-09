@@ -24,7 +24,7 @@ _PIN = re.compile(r"[0-9a-f]{40}")
 # The two SeedVR2 weight repos stay unpinned: their files are chosen by name, not by revision.
 _SEEDVR2_REPOS = {"numz/SeedVR2_comfyUI", "AInVFX/SeedVR2_comfyUI"}
 _LTX_IDS = [model_id for model_id in model_ids("video") if model_entry(model_id)["family"] == "ltx"]
-_ROLES = {"model", "transformer", "latent_upsampler", "text_encoder", "lora", "components", "sft", "turbo_lora", "voice", "birefnet", "vitmatte"}
+_ROLES = {"model", "transformer", "latent_upsampler", "text_encoder", "lora", "components", "sft", "turbo_lora", "voice", "design", "birefnet", "vitmatte"}
 
 
 @pytest.mark.parametrize("platform_key", _PLATFORMS)

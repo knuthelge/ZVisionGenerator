@@ -1,8 +1,9 @@
 """Qwen3-TTS speech backend on CUDA, through faster-qwen3-tts (CUDA graphs).
 
-The model has two checkpoints: CustomVoice reads in one of the built-in voices, Base follows a voice recording. The backend
-loads the one checkpoint its preset's ``files`` name, once, when the batch loads; the runner decides which by handing it a preset
-whose ``files`` are the Base files for a batch that follows a recording. Parts, the voice, progress and the join are
+The model has three checkpoints: CustomVoice reads in one of the built-in voices, Base follows a voice recording, VoiceDesign makes a
+new voice from a description. The backend loads the one checkpoint its preset's ``files`` name, once, when the batch loads; the runner
+decides which by handing it a preset whose ``files`` are the Base files for a batch that follows a recording, or the design files for
+a voice design run (:meth:`Qwen3TtsBackend.design_voice`). Parts, the voice, progress and the join are
 :mod:`speech_takes`'; this backend is its engine for Qwen.
 
 Loading reads the Hugging Face cache only; it never downloads. ``qwen_tts`` needs a one-time patch for the locked
@@ -134,6 +135,25 @@ class Qwen3TtsBackend:
             return np.zeros(0, dtype=np.float32), False
         # One frame of tolerance: the part of a cloned take is cut out of the reference and the part together.
         return wave, wave.shape[0] / SAMPLE_RATE >= (max_new_tokens - 1) / _FRAMES_PER_SECOND
+
+    def design_voice(self, description: str, text: str, seed: int) -> np.ndarray:
+        """Return the 24 kHz mono wave of *text* spoken in a voice made from *description*, generated with *seed*.
+
+        Needs the VoiceDesign checkpoint, which :meth:`load` has loaded for a design run. The wave is empty when the model made no sound.
+        """
+        import torch
+
+        torch.manual_seed(seed)
+        waves, _ = self._model.generate_voice_design(
+            text=text,
+            instruct=description,
+            language=str(self._settings["language"]),
+            max_new_tokens=int(self._preset.limits.max_new_tokens),
+        )
+        wave = np.asarray(waves[0], dtype=np.float32).reshape(-1)
+        if wave.shape[0] <= 1:  # the library answers a take without codes with a single zero sample
+            return np.zeros(0, dtype=np.float32)
+        return wave
 
     def _load_model(self, folder: str, cancelled: CancelCheck | None) -> Any:
         """Load the checkpoint in *folder* onto the device in bfloat16 and capture its CUDA graphs."""

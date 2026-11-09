@@ -15,7 +15,8 @@ from fastapi.testclient import TestClient
 from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_two_kind_preset, yue2_preset
 from tests._fake_audio import fake_read_config, install_fake_audio, write_fake_audio
 from tests._paths import FIXTURES
-from tests.audio._helpers import case_request, clip, fake_backend, patch_runner, voice_folder
+from tests._speech_fakes import RATE, tone
+from tests.audio._helpers import case_fields, case_request, clip, fake_backend, patch_runner, save_case_voice, voice_folder
 from tests.web._helpers import make_web_config, wait_for_status
 
 from zvisiongenerator.core.audio_backend import AudioCancelled
@@ -28,6 +29,7 @@ from zvisiongenerator.downloads.target import DownloadProgress, TargetCheck
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
 from zvisiongenerator.web.audio_job import AudioFields, audio_request_from_fields
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.voice_library import save_voice
 from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import model_download_plan as plan_module
 from zvisiongenerator.web import server as web_server
@@ -273,7 +275,8 @@ class TestFormMatchesCopyCli:
 
     @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
     def test_the_form_of_a_case_makes_the_takes_of_its_command(self, env, monkeypatch, voices, case):
-        fields = {key: ([item for item in value] if isinstance(value, list) else str(value).replace("/voices/", f"{voices}/")) for key, value in case["settings"].items()}
+        save_case_voice(case)
+        fields = case_fields(case, voices)
         backend = fake_backend(clip(0.2))
         patch_runner(monkeypatch, backend)
 
@@ -638,6 +641,83 @@ class TestMissingFfmpeg:
         _refused(no_ffmpeg.post(path, model="sa3", prompt="rain"), "ffmpeg")
 
 
+class TestSavedVoice:
+    """A saved voice follows the library recording with its stored transcript: no tick, no speaker, no delivery."""
+
+    @pytest.fixture
+    def anna(self):
+        return save_voice("Anna", tone(4.0), RATE, text="Hello, this is Anna.", consent="given")
+
+    def test_a_saved_voice_is_followed_without_a_tick_or_a_transcript(self, env, anna):
+        response = env.post(model="qwen3_tts", prompt="More words.", saved_voice=anna.slug)
+
+        assert response.status_code == 200, response.text
+        (job,) = env.submitted
+        assert job["request"].voice == VoiceRef(str(anna.path), "Hello, this is Anna.")
+        assert (job["request"].speaker, job["request"].delivery) == (None, None)
+        assert "Hello, this is Anna." not in job["context"]["meta"] and job["context"]["meta"].endswith("voice")
+
+    def test_an_unknown_saved_voice_is_refused_and_nothing_is_queued(self, env):
+        _refused(env.post(model="qwen3_tts", prompt="More words.", saved_voice="nobody"), 'No saved voice "nobody". Choose another voice.')
+        assert env.submitted == []
+
+    def test_a_slug_that_reaches_outside_the_library_is_an_unknown_voice(self, env):
+        _refused(env.post(model="qwen3_tts", prompt="More words.", saved_voice="../me"), "No saved voice")
+
+    def test_the_recording_fields_sent_along_are_ignored(self, env, anna, tmp_path):
+        voices = voice_folder(tmp_path)
+
+        response = env.post(
+            model="qwen3_tts",
+            prompt="More words.",
+            saved_voice=anna.slug,
+            voice_path=str(voices / "cloned.flac"),
+            voice_text="Another text.",
+            voice_consent="false",
+            speaker="eric",
+            emotion="grumpy",
+        )
+
+        assert response.status_code == 200, response.text
+        request = env.submitted[0]["request"]
+        assert request.voice == VoiceRef(str(anna.path), "Hello, this is Anna.")
+        assert (request.speaker, request.delivery) == (None, None)
+        assert env.post(model="qwen3_tts", prompt="More words.", saved_voice=anna.slug, voice_path=str(tmp_path / "gone.wav")).status_code == 200
+
+    def test_the_voice_of_a_kind_that_cannot_follow_one_is_not_looked_up(self, env):
+        assert env.post(model="sa3", prompt="rain", saved_voice="nobody").status_code == 200
+        assert env.submitted[0]["request"].voice is None
+
+    @pytest.mark.parametrize("saved_voice", ["", "   "])
+    def test_a_blank_saved_voice_leaves_the_recording_to_its_consent_tick(self, env, tmp_path, saved_voice):
+        voices = voice_folder(tmp_path)
+
+        response = env.post(model="qwen3_tts", prompt="More words.", saved_voice=saved_voice, voice_path=str(voices / "me.wav"), voice_text="Hello, this is me.")
+
+        _refused(response, "permission")
+        assert env.submitted == []
+
+    def test_an_unknown_saved_voice_does_not_let_a_recording_past_its_consent_tick(self, env, tmp_path):
+        voices = voice_folder(tmp_path)
+
+        response = env.post(model="qwen3_tts", prompt="More words.", saved_voice="nobody", voice_path=str(voices / "me.wav"), voice_text="Hello, this is me.")
+
+        _refused(response, 'No saved voice "nobody"')
+        assert env.submitted == []
+
+    def test_a_voice_whose_recording_is_gone_is_refused(self, env, anna):
+        anna.path.unlink()
+
+        _refused(env.post(model="qwen3_tts", prompt="More words.", saved_voice=anna.slug), "No saved voice")
+
+    def test_the_job_records_the_slug_for_load_settings_and_retry(self, env, anna):
+        env.post(model="qwen3_tts", prompt="More words.", saved_voice=anna.slug)
+        settings = env.submitted[0]["context"]["settings"]
+
+        assert settings["saved_voice"] == anna.slug and "voice_consent" not in settings
+        assert env.post(**settings).status_code == 200
+
+
 class TestPlan:
     @pytest.fixture
     def plan_env(self, env, monkeypatch, tmp_path):
@@ -678,6 +758,17 @@ class TestPlan:
 
         assert [(entry["model"], entry["supplier"]) for entry in licences] == [(model, supplier) for supplier in suppliers]
         assert all(entry["url"].startswith("https://") for entry in licences)
+
+    def test_the_plan_of_a_saved_voice_lists_the_voice_model_files_and_refuses_an_unknown_voice(self, plan_env):
+        anna = save_voice("Anna", tone(4.0), RATE, text="Hello, this is Anna.", consent="given")
+
+        bare = plan_env.post("/api/generate/plan", model="qwen3_tts", prompt="Hello there.").json()
+        planned = plan_env.post("/api/generate/plan", model="qwen3_tts", prompt="Hello there.", saved_voice=anna.slug).json()
+        unknown = plan_env.post("/api/generate/plan", model="qwen3_tts", prompt="Hello there.", saved_voice="nobody")
+
+        assert planned["total_bytes"] > bare["total_bytes"]
+        _refused(unknown, "No saved voice")
+        assert plan_env.submitted == []
 
     def test_a_model_on_disk_has_nothing_to_download(self, plan_env):
         plan_env.present = {"m-a-p/YuE2-3B", "m-a-p/YuE2-Vae"}

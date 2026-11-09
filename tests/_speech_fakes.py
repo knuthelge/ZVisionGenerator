@@ -106,6 +106,9 @@ class FakeFasterModel:
     def generate_voice_clone(self, text: str, language: str, voice_clone_prompt: Any = None, max_new_tokens: int = 1200, **_: Any) -> tuple[list[np.ndarray], int]:
         return self._answer({"kind": "voice_clone", "text": text, "language": language, "voice_clone_prompt": voice_clone_prompt, "max_new_tokens": max_new_tokens})
 
+    def generate_voice_design(self, text: str, instruct: str, language: str, max_new_tokens: int = 2048, **_: Any) -> tuple[list[np.ndarray], int]:
+        return self._answer({"kind": "voice_design", "text": text, "instruct": instruct, "language": language, "max_new_tokens": max_new_tokens})
+
 
 def install_fake_faster_qwen(monkeypatch: Any, tmp_path: Path, *, waves: list[np.ndarray] | None = None) -> SimpleNamespace:
     """Make the Qwen backend load :class:`FakeFasterModel` from fake snapshot folders and note the shim and the memory release.

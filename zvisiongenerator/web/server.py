@@ -46,11 +46,12 @@ from zvisiongenerator.backends import (
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu, smart_budget_bytes
 from zvisiongenerator.converters.convert_checkpoint import H3_MODEL_TYPE, LTX_MODEL_TYPES, MODEL_TYPES, VIDEO_MODEL_TYPES
 from zvisiongenerator.converters.lora_import import import_lora_local
-from zvisiongenerator.core.audio_types import AudioGenerationRequest
+from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceDesignRequest, VoiceRef
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, SettledSteps, settle_video_steps
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
+from zvisiongenerator.downloads.declaration import declared_repo_ids
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
 from zvisiongenerator.utils.model_metadata import alias_map, model_display_name
@@ -104,6 +105,8 @@ from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
 from zvisiongenerator.utils.lora_preview import LARGE_PREVIEW_EDGE, PREVIEW_EDGE
 from zvisiongenerator.utils.references import check_reference_count, check_reference_files, missing_reference_files
 from zvisiongenerator.utils.upscale import VIDEO_UPSCALE_FACTOR
+from zvisiongenerator.utils.voice_candidates import candidate_file, candidates_dir, clear_candidates
+from zvisiongenerator.utils.voice_library import delete_voice, list_voices, rename_voice, voice_by_slug
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_row_name, seedvr2_tier_label
 from zvisiongenerator.upscale_runner import read_upscale_source
 from zvisiongenerator.video_file_upscale_runner import read_video_upscale_source
@@ -152,7 +155,7 @@ from zvisiongenerator.web.lora_details import describe_installed
 from zvisiongenerator.web.lora_download import LoraInstaller, import_source
 from zvisiongenerator.web.lora_sources import SOURCES, LoraSourcesError
 from zvisiongenerator.web.recent_prompts import RECENT_MODES, RecentPrompts, RecentPromptsError, recent_prompt_entry
-from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_model_part, job_download_parts, job_model_part, planned_targets
+from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_design_part, audio_model_part, job_download_parts, job_model_part, planned_targets
 from zvisiongenerator.web.model_download_plan import parts_summary, row_plan
 from zvisiongenerator.web.path_browser import (
     AUDIO_TRACK_EXTENSIONS,
@@ -174,6 +177,7 @@ from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.projects import PROJECT_FIELD, create_project, folder_project, list_projects, project_dir
+from zvisiongenerator.web.voices import design_payload, parse_design_body, save_candidate_voice, save_recording_voice, staged_upload, voice_payload
 from zvisiongenerator.web.presets import create_preset, delete_preset, list_presets, rename_preset, update_preset
 from zvisiongenerator.web.model_delete import (
     DeleteTarget,
@@ -1880,7 +1884,7 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
     The submit checks both.
 
     The fields are the ones Copy CLI reads (``workflow``, ``model``, ``prompt``, ``lyrics``, ``seconds``, ``tempo``, ``key``, ``voice_path`` or the
-    ``voice_file`` upload, ``voice_text``, ``voice_consent``, ``speaker``, the delivery fields ``emotion``, ``manner``, ``pace``, ``pitch`` and
+    ``voice_file`` upload, ``voice_text``, ``voice_consent``, ``saved_voice`` (the slug of a saved voice, which replaces the recording fields, the speaker and the delivery), ``speaker``, the delivery fields ``emotion``, ``manner``, ``pace``, ``pitch`` and
     ``expressiveness``, ``sound_type``, ``seed`` and ``runs``) and the request is the one ``ziv audio`` builds.
 
     The job's workflow is the form's ``workflow`` (the kind of the take; the model's first kind when the form names none).
@@ -1904,11 +1908,14 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
     check_seed(seed)
     output_dir = _resolve_output_dir(web_config.output_dir)
     save_dir = _project_save_dir(form, output_dir)
+    follows_voice = preset.follows_voice(workflow)
+    saved_voice = _resolve_saved_voice(form) if follows_voice else None
     fields = AudioFields(
         prompt=_untrimmed_text(form, "prompt"),
         lyrics=_untrimmed_text(form, "lyrics"),
         seconds=_optional_float(form, "seconds"),
-        voice_path=_resolve_voice_file(form, output_dir) if preset.follows_voice(workflow) else None,
+        voice_path=None if saved_voice is not None or not follows_voice else _resolve_voice_file(form, output_dir),
+        saved_voice=saved_voice,
         voice_text=_optional_text(form, "voice_text"),
         voice_consent=_checkbox(form, "voice_consent"),
         speaker=_optional_text(form, "speaker"),
@@ -1971,6 +1978,21 @@ def _untrimmed_text(form: Any, key: str) -> str:
     """Return a text field exactly as submitted (the text of a take keeps its spaces), or an empty string when it is missing."""
     value = form.get(key)
     return "" if value is None else str(value)
+
+
+def _resolve_saved_voice(form: Any) -> VoiceRef | None:
+    """Return the reference of the saved voice an audio form names (``saved_voice``, a slug), or ``None`` when it names none.
+
+    Raises:
+        ValueError: When no saved voice has that slug.
+    """
+    slug = _optional_text(form, "saved_voice")
+    if slug is None:
+        return None
+    try:
+        return voice_by_slug(slug).voice_ref()
+    except FileNotFoundError as exc:
+        raise ValueError(f'No saved voice "{slug}". Choose another voice.') from exc
 
 
 def _resolve_voice_file(form: Any, output_dir: str) -> str | None:
@@ -2768,8 +2790,8 @@ async def api_first_run_skip() -> dict[str, bool]:
 
 
 @contextmanager
-def _preset_http_errors() -> Iterator[None]:
-    """Map the preset store's errors to HTTP statuses: 409 taken, 404 missing, 422 invalid, 500 unwritable."""
+def _store_http_errors(noun: str) -> Iterator[None]:
+    """Map a store's errors to HTTP statuses: 409 taken, 404 missing, 422 invalid, 500 unwritable (the message names the *noun* stored)."""
     try:
         yield
     except FileExistsError as exc:
@@ -2779,7 +2801,7 @@ def _preset_http_errors() -> Iterator[None]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Could not access the presets: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Could not access the {noun}: {exc}") from exc
 
 
 @app.get("/api/presets")
@@ -2791,30 +2813,168 @@ def api_presets_list() -> dict[str, Any]:
 @app.post("/api/presets")
 def api_presets_create(body: dict[str, Any]) -> dict[str, Any]:
     """Create a preset from a JSON body ``{name, mode, model, settings}``; the slug follows the name."""
-    with _preset_http_errors():
+    with _store_http_errors("presets"):
         return create_preset(body).to_dict()
 
 
 @app.put("/api/presets/{mode}/{slug}")
 def api_presets_update(mode: str, slug: str, body: dict[str, Any]) -> dict[str, Any]:
     """Overwrite the preset *slug* of *mode* from a JSON body ``{name, model, settings}`` whose name keeps the slug."""
-    with _preset_http_errors():
+    with _store_http_errors("presets"):
         return update_preset(mode, slug, body).to_dict()
 
 
 @app.post("/api/presets/{mode}/{slug}/rename")
 def api_presets_rename(mode: str, slug: str, body: dict[str, Any]) -> dict[str, Any]:
     """Rename the preset *slug* of *mode* from a JSON body ``{name}``; its slug follows the new name."""
-    with _preset_http_errors():
+    with _store_http_errors("presets"):
         return rename_preset(mode, slug, body.get("name")).to_dict()
 
 
 @app.delete("/api/presets/{mode}/{slug}")
 def api_presets_delete(mode: str, slug: str) -> dict[str, str]:
     """Delete the preset *slug* of *mode*."""
-    with _preset_http_errors():
+    with _store_http_errors("presets"):
         delete_preset(mode, slug)
     return {"status": "ok"}
+
+
+@app.get("/api/voices")
+def api_voices_list() -> dict[str, Any]:
+    """Return the saved voices sorted by name."""
+    return {"voices": [voice_payload(voice) for voice in list_voices()]}
+
+
+@app.get("/api/voices/{slug}/audio")
+def api_voices_audio(slug: str) -> FileResponse:
+    """Serve the reference recording of the saved voice *slug*; only library files are served, found by their slug."""
+    with _store_http_errors("saved voices"):
+        voice = voice_by_slug(slug)
+    return FileResponse(voice.path, media_type="audio/wav")
+
+
+@app.post("/api/voices")
+async def api_voices_save(request: Request) -> dict[str, Any]:
+    """Save a recording as a voice from a multipart form: ``model``, ``name``, ``voice_file`` (an upload) or ``voice_path``, ``voice_text`` and ``voice_consent``."""
+    form = await request.form()
+    with _store_http_errors("saved voices"):
+        return await run_in_threadpool(_save_voice_from_form, form, load_web_config())
+
+
+def _save_voice_from_form(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
+    """Save the recording a voice form carries and return the voice; an upload wins over a typed path and its temporary copy is always removed.
+
+    Raises:
+        ValueError: If ffmpeg is missing, the model is unknown or cannot follow a voice, there is no recording, or the voice is invalid (see ``save_recording_voice``).
+        FileExistsError: When a voice already has that name.
+    """
+    try:
+        require_ffmpeg()
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
+    preset = find_audio_model(web_config.app_config, _optional_text(form, "model"))
+    fields = {"name": _optional_text(form, "name") or "", "text": _untrimmed_text(form, "voice_text"), "ticked": _checkbox(form, "voice_consent")}
+    uploaded_file = form.get(_upload_field("voice_path"))
+    if _is_uploaded_file(uploaded_file):
+        with staged_upload(uploaded_file) as path:
+            return voice_payload(save_recording_voice(preset, path=path, **fields))
+    typed_path = _optional_text(form, "voice_path")
+    if typed_path is None:
+        raise ValueError("Choose or record the voice first.")
+    return voice_payload(save_recording_voice(preset, path=_host_local_file(typed_path, "voice_path"), **fields))
+
+
+@app.post("/api/voices/{slug}/rename")
+def api_voices_rename(slug: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Rename the saved voice *slug* from a JSON body ``{name}``; its slug and files stay."""
+    with _store_http_errors("saved voices"):
+        return voice_payload(rename_voice(slug, body.get("name")))
+
+
+@app.delete("/api/voices/{slug}")
+def api_voices_delete(slug: str) -> dict[str, str]:
+    """Delete the saved voice *slug*, refused while a job runs because the job may be reading it."""
+    _ensure_no_active_job("Delete is off while a job runs: the job may be reading this voice. Wait for all jobs to finish, then try again.")
+    with _store_http_errors("saved voices"):
+        delete_voice(slug)
+    return {"status": "ok"}
+
+
+@app.post("/api/voices/design/plan")
+def api_voices_design_plan(body: dict[str, Any]) -> dict[str, Any]:
+    """Return the download plan of the design job a JSON body ``{model, description, text}`` asks for: the VoiceDesign checkpoint, with its licence and size."""
+    with _store_http_errors("saved voices"):
+        _request, preset = parse_design_body(body, load_web_config().app_config)
+    return _summarize_job_parts((audio_design_part(preset),))
+
+
+@app.post("/api/voices/design")
+def api_voices_design_submit(body: dict[str, Any]) -> JSONResponse:
+    """Queue the job that designs 3 candidate voices from a JSON body ``{model, description, text}`` and return its flat job context; the job has no recorded settings and is not logged."""
+    web_config = load_web_config()
+    with _store_http_errors("saved voices"):
+        request, preset = parse_design_body(body, web_config.app_config)
+    context = _voice_design_context(request, preset)
+    try:
+        job_id = web_runner.submit_voice_design_job(
+            request=request,
+            preset=preset,
+            config=web_config.app_config,
+            out_dir=candidates_dir(),
+            planned_targets=planned_targets((audio_design_part(preset),)),
+            admission_check=_reject_while_busy,
+            context=context,
+        )
+    except JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _job_response(job_id, context, UPSCALE_SUPPORTED_CONTROLS)
+
+
+def _voice_design_context(request: VoiceDesignRequest, preset: AudioPreset) -> dict[str, Any]:
+    """Build the public context of a design job: what the queue shows, with no ``settings`` because there is no take to load settings from or retry."""
+    return {
+        "workflow": "voice_design",
+        "job_type": "Voice design",
+        "media_type": "audio",
+        "model": preset.id,
+        "model_label": f"{preset.label} VoiceDesign",
+        "prompt": request.description,
+        "runs": request.count,
+        "meta": f"{request.count} voices",
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/voices/design")
+def api_voices_design_latest() -> dict[str, Any]:
+    """Return every voice design candidate: ``batches`` (newest first, each with its description, preview line and time) and the ``unpicked`` count (see ``design_payload``)."""
+    return design_payload(load_web_config().app_config)
+
+
+@app.delete("/api/voices/design/candidates")
+def api_voices_design_clear() -> dict[str, str]:
+    """Delete every candidate, refused while a design job is queued or running because it adds to them."""
+    jobs = web_runner.list_jobs()
+    if any(job.get("workflow") == "voice_design" for job in (jobs["active_job"], *jobs["queued_jobs"]) if job is not None):
+        raise HTTPException(status_code=409, detail="Clear is off while voices are being made. Stop the job or wait for it to finish, then try again.")
+    with _store_http_errors("saved voices"):
+        clear_candidates(candidates_dir())
+    return {"status": "ok"}
+
+
+@app.get("/api/voices/design/{candidate_id}/audio")
+def api_voices_design_audio(candidate_id: str) -> FileResponse:
+    """Serve candidate *candidate_id*; the id never names another recording, so a cleared or unknown one is a 404 and the answer may be cached."""
+    with _store_http_errors("saved voices"):
+        path = candidate_file(candidates_dir(), candidate_id)
+    return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "private, max-age=86400, immutable"})
+
+
+@app.post("/api/voices/design/{candidate_id}/save")
+def api_voices_design_save(candidate_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Save candidate *candidate_id* as a designed voice from a JSON body ``{name}``; the voice's transcript is the line of the candidate's batch and the other candidates stay."""
+    with _store_http_errors("saved voices"):
+        return voice_payload(save_candidate_voice(candidate_id, body.get("name"), load_web_config().app_config))
 
 
 @app.get("/api/models")
@@ -2982,7 +3142,7 @@ def api_delete_audio_model(name: str) -> dict[str, Any]:
     if target is None or not target.on_disk:
         raise not_downloaded
     # Every repository of the plan counts, also one the running download has not created in the cache yet.
-    _ensure_not_downloading(repo_ids=tuple(files.repo_id for files in (*preset.files, *preset.voice_files)), paths=(target.path,))
+    _ensure_not_downloading(repo_ids=declared_repo_ids(preset.id, sys.platform), paths=(target.path,))
     try:
         delete_model(target)
     except FileNotFoundError as exc:

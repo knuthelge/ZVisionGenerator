@@ -14,7 +14,7 @@ from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.audio_request import check_speech_request, resolve_audio_seconds, resolve_speaker
 from zvisiongenerator.utils.audio_settings import DELIVERY_FIELDS, parse_delivery, parse_key, parse_sound_type, parse_tempo
-from zvisiongenerator.utils.audio_voice import voice_needs_consent
+from zvisiongenerator.utils.audio_voice import CONSENT_REQUIRED, voice_needs_consent
 
 __all__ = ["AudioFields", "audio_request_from_fields"]
 
@@ -24,7 +24,6 @@ _PROMPT_REQUIRED = {
     "sound": "Describe the sound first.",
 }
 _VOICE_TEXT_REQUIRED = "Write what the recording says first."
-_CONSENT_REQUIRED = "Cloning a voice needs the speaker's permission: tick the box to confirm it."
 
 
 @dataclass(frozen=True)
@@ -36,6 +35,8 @@ class AudioFields:
         lyrics: The lyrics, as submitted; blank for none.
         seconds: The requested length of a sound or of music from a model that sets its length, or ``None`` for Auto.
         voice_path: The recording to follow (a typed path, or the saved upload), or ``None``.
+        saved_voice: The saved voice to follow, with its stored transcript, or ``None``. It replaces the recording, its transcript, the consent and the built-in voice
+            and delivery: the speaker's consent is in the voice's record, so there is no tick to check.
         voice_text: What the recording says, trimmed, or ``None``.
         voice_consent: Whether the consent box was ticked.
         speaker: The built-in voice the form chose (an id of the preset's ``voices``), or ``None`` for the preset's default; ignored with a recording.
@@ -53,6 +54,7 @@ class AudioFields:
     lyrics: str = ""
     seconds: float | None = None
     voice_path: str | None = None
+    saved_voice: VoiceRef | None = None
     voice_text: str | None = None
     voice_consent: bool = False
     speaker: str | None = None
@@ -73,7 +75,7 @@ def audio_request_from_fields(preset: AudioPreset, kind: str, fields: AudioField
     """Check *fields* against *preset* as a *kind* take and return the request of one take (its seed is set per take by the runner).
 
     Lyrics count for music of a model that sings them, the length for a (model, kind) that sets it, the tempo and key for music, the sound type for sound,
-    and the voice for speech only. Line breaks are the browser's
+    and the voice for speech only. A saved voice stands for itself and needs no tick. Line breaks are the browser's
     CRLF made LF again. A voice needs its transcript and the speaker's consent, except a speech take of this app made
     without a reference voice; speech is checked against the model's limits (text length, voice length, readable voice).
     A speech take without a recording is read in the built-in voice the form chose, else the model's default; with a
@@ -89,8 +91,7 @@ def audio_request_from_fields(preset: AudioPreset, kind: str, fields: AudioField
     if not prompt.strip():
         raise ValueError(_PROMPT_REQUIRED[kind])
     lyrics = _line_breaks(fields.lyrics) if preset.takes_lyrics(kind) and fields.lyrics.strip() else ""
-    voice_path = fields.voice_path if kind == "speech" else None
-    voice = _voice(fields, voice_path)
+    voice = _speech_voice(fields) if kind == "speech" else None
     sound_type = parse_sound_type(fields.sound_type) if kind == "sound" else None
     seconds = resolve_audio_seconds(fields.seconds, preset, kind, sound_type, name="seconds")
     enhance_record = fields.enhance_record or None
@@ -115,14 +116,20 @@ def audio_request_from_fields(preset: AudioPreset, kind: str, fields: AudioField
     return request
 
 
-def _voice(fields: AudioFields, voice_path: str | None) -> VoiceRef | None:
-    """Return the voice to follow, after checking that it has a transcript and the consent it needs."""
+def _speech_voice(fields: AudioFields) -> VoiceRef | None:
+    """Return the voice a speech take follows: the saved voice when the form names one (the recording fields are ignored), else the checked recording, else ``None``."""
+    return fields.saved_voice if fields.saved_voice is not None else _recording(fields)
+
+
+def _recording(fields: AudioFields) -> VoiceRef | None:
+    """Return the recording to follow, after checking that it has a transcript and the consent it needs."""
+    voice_path = fields.voice_path
     if voice_path is None:
         return None
     if not fields.voice_text:
         raise ValueError(_VOICE_TEXT_REQUIRED)
     if not fields.voice_consent and not fields.voice_unread and voice_needs_consent(voice_path):
-        raise ValueError(_CONSENT_REQUIRED)
+        raise ValueError(CONSENT_REQUIRED)
     return VoiceRef(voice_path, fields.voice_text)
 
 

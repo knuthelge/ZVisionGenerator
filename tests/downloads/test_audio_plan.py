@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
 from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_preset, yue2_preset
 
-from zvisiongenerator.downloads.plans import audio_plan
+from zvisiongenerator.downloads.plans import audio_design_plan, audio_plan
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
 
@@ -75,3 +76,23 @@ class TestQwenCloningFiles:
         preset = _preset("yue2", yue2=yue2_preset())
 
         assert audio_plan(preset, voice=True) == audio_plan(preset)
+
+
+class TestDesignPlan:
+    """The VoiceDesign checkpoint is planned apart, for a voice design job only."""
+
+    def test_the_design_plan_is_the_voicedesign_checkpoint_alone(self):
+        targets = audio_design_plan(_preset("qwen3_tts", qwen3_tts=qwen3_tts_preset()))
+
+        assert [(target.repo_id, target.revision) for target in targets] == [("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", "5ecdb67327fd37bb2e042aab12ff7391903235d3")]
+        assert "speech_tokenizer/model.safetensors" in targets[0].allow_patterns
+
+    def test_the_model_plan_never_includes_the_design_checkpoint(self):
+        preset = _preset("qwen3_tts", qwen3_tts=qwen3_tts_preset())
+
+        for voice in (False, True):
+            assert "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign" not in [target.repo_id for target in audio_plan(preset, voice=voice)]
+
+    def test_a_model_without_design_files_cannot_be_planned(self):
+        with pytest.raises(ValueError, match="yue2"):
+            audio_design_plan(_preset("yue2", yue2=yue2_preset()))

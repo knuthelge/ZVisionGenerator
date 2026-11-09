@@ -26,9 +26,9 @@ from typing import Any
 from PIL import Image
 
 from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_video_backend, release_accelerator_memory
-from zvisiongenerator.audio_runner import run_audio_batch
+from zvisiongenerator.audio_runner import run_audio_batch, run_voice_design
 from zvisiongenerator.built_models import ensure_built_model
-from zvisiongenerator.core.audio_types import AudioGenerationRequest
+from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceDesignRequest
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.progress_events import exception_message
 from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
@@ -63,6 +63,7 @@ from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import audio_peaks, gallery_asset_for_output_path, gallery_asset_to_json
 from zvisiongenerator.web.job_downloads import (
     JobDownloadPart,
+    audio_design_part,
     audio_model_part,
     enhancer_part,
     image_model_part,
@@ -434,6 +435,35 @@ class WebRunner:
                 output_dir=output_dir,
                 progress_callback=progress_callback,
                 control_signal=control_signal,
+            ),
+        )
+
+    def submit_voice_design_job(
+        self,
+        *,
+        request: VoiceDesignRequest,
+        preset: AudioPreset,
+        config: dict[str, Any],
+        out_dir: Path,
+        planned_targets: Sequence[DownloadTarget] = (),
+        admission_check: Callable[[], None] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Queue the job that designs candidate voices from a description; the worker downloads the design checkpoint, loads it once and adds a batch of candidates to those in *out_dir*.
+
+        The job is exclusive and supports Quit only. It is not logged, and its candidates never reach the output folder.
+        """
+        control_signal = SkipSignal()
+        return self._submit_job(
+            job_type="voice_design",
+            exclusive=True,
+            control_signal=control_signal,
+            supported_controls=UPSCALE_SUPPORTED_CONTROLS,
+            context=dict(context or {}),
+            planned_targets=planned_targets,
+            admission_check=admission_check,
+            target_factory=lambda progress_callback: self._run_voice_design_request(
+                request=request, preset=preset, config=config, out_dir=out_dir, progress_callback=progress_callback, control_signal=control_signal
             ),
         )
 
@@ -1034,6 +1064,28 @@ class WebRunner:
             progress_callback=progress_callback,
             skip_signal=control_signal,
         )
+
+    def _run_voice_design_request(
+        self,
+        *,
+        request: VoiceDesignRequest,
+        preset: AudioPreset,
+        config: dict[str, Any],
+        out_dir: Path,
+        progress_callback: Callable[[EventPayload], None],
+        control_signal: SkipSignal,
+    ) -> None:
+        """Download the design checkpoint (as ``model_downloading`` events), then make the candidates inside the worker thread.
+
+        Quit stops the job while queued, during the download, during the load and between candidates. A run that fails raises, after
+        the candidates made before it were written.
+        """
+        if control_signal.pending() == "quit":
+            progress_callback({"type": "batch_cancelled", "mode": "audio", "completed_iterations": 0, "total_iterations": request.count})
+            return
+        if not self._ensure_downloads(audio_design_part(preset), mode="audio", total_iterations=request.count, progress_callback=progress_callback, control_signal=control_signal, files_required=True):
+            return
+        run_voice_design(request, preset, config, out_dir=out_dir, progress_callback=progress_callback, skip_signal=control_signal)
 
     def _run_video_request(
         self,

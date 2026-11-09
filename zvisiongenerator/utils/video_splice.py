@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import os
 import shutil
 import subprocess
@@ -12,6 +13,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from zvisiongenerator.utils.atomic_write import write_bytes_atomic
 from zvisiongenerator.utils.ffmpeg import tool_error
 from zvisiongenerator.utils.video_extend import AUDIO_FADE_SAMPLES, AUDIO_LEAD_SECONDS, AUDIO_SAMPLE_RATE
 from zvisiongenerator.utils.video_probe import VideoProbe, parse_fraction, probe_video
@@ -349,10 +351,21 @@ def mux_audio(video: str | Path, wav: str | Path, output: str | Path) -> None:
 
 def write_pcm16_wav(samples: np.ndarray, path: str | Path, sample_rate: int = AUDIO_SAMPLE_RATE) -> None:
     """Write audio of shape ``(channels, samples)`` with values in -1..1 as a 16-bit PCM WAV file, by default at ``AUDIO_SAMPLE_RATE``."""
+    _write_pcm16(samples, str(path), sample_rate)
+
+
+def write_pcm16_wav_atomic(samples: np.ndarray, path: str | Path, sample_rate: int = AUDIO_SAMPLE_RATE) -> None:
+    """Write *samples* as :func:`write_pcm16_wav` does, replacing *path* atomically so a reader never sees a half-written file."""
+    buffer = io.BytesIO()
+    _write_pcm16(samples, buffer, sample_rate)
+    write_bytes_atomic(Path(path), buffer.getvalue())
+
+
+def _write_pcm16(samples: np.ndarray, target: str | io.BytesIO, sample_rate: int) -> None:
     import numpy as np
 
     pcm = (np.clip(np.asarray(samples, dtype=np.float32), -1.0, 1.0) * 32767).astype(np.int16)
-    with wave.open(str(path), "wb") as writer:
+    with wave.open(target, "wb") as writer:
         writer.setnchannels(pcm.shape[0])
         writer.setsampwidth(2)
         writer.setframerate(sample_rate)

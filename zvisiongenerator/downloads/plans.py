@@ -132,6 +132,19 @@ def audio_plan(preset: AudioPreset, *, voice: bool = False) -> tuple[DownloadTar
     return tuple(DownloadTarget(item.repo_id, item.revision, item.patterns) for item in files)
 
 
+def audio_design_plan(preset: AudioPreset) -> tuple[DownloadTarget, ...]:
+    """Return one target per repository that designing a voice with the audio *preset* needs, at the pinned commit.
+
+    Only the preset's ``design_files``: the model's own files and the cloning files are not part of it.
+
+    Raises:
+        ValueError: If the preset has no ``design_files``.
+    """
+    if not preset.design_files:
+        raise ValueError(f"Audio model '{preset.id}' has no design_files, so it cannot design a voice.")
+    return tuple(DownloadTarget(item.repo_id, item.revision, item.patterns) for item in preset.design_files)
+
+
 def video_model_downloaded(
     model_ref: str,
     *,

@@ -140,7 +140,7 @@ def _status(preset: AudioPreset, platform_key: str, budget: MemoryBudget | None,
 
     ``memory_fit`` is the model's measured peak on this platform against *budget*, in the shape of an image model's
     (``none`` is its only ``by_quantize`` key); ``None`` without a budget or a measured peak. ``downloaded`` covers the model's
-    ``files`` only; a speech model also gets ``voice_download``: ``{"downloaded": bool}`` for its cloning files, or ``None`` when it has none.
+    ``files`` only; a speech model also gets ``voice_download``: ``{"downloaded": bool}`` for its cloning files, or ``None`` when it has none, and ``can_design``: whether it has VoiceDesign files.
     """
     try:
         fit = audio_memory_fit(preset, platform_key, budget)
@@ -148,7 +148,8 @@ def _status(preset: AudioPreset, platform_key: str, budget: MemoryBudget | None,
         status: dict[str, Any] = {"downloaded": all(present(target) for target in audio_plan(preset)), "memory_fit": memory_fit}
         if "speech" in preset.kinds:
             status["voice_download"] = {"downloaded": all(present(DownloadTarget(item.repo_id, item.revision, item.patterns)) for item in preset.voice_files)} if preset.voice_files else None
+            status["can_design"] = bool(preset.design_files)
         return status
     except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
         warnings.warn(f"Could not determine status for audio model '{preset.id}': {exc}", stacklevel=2)
-        return {"downloaded": None, "memory_fit": None, **({"voice_download": None} if "speech" in preset.kinds else {})}
+        return {"downloaded": None, "memory_fit": None, **({"voice_download": None, "can_design": bool(preset.design_files)} if "speech" in preset.kinds else {})}

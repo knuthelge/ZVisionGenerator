@@ -4,7 +4,8 @@ A preset is one audio model, keyed by its model id (``-m yue2``). The metadata (
 the kinds of audio the model makes (``kinds``, the first one the default), the backend family and the pinned files it runs
 from, its own ceilings (``limits``) and, per accelerator (``cuda``, ``mps``), the measured memory peak and an optional backend
 family. The config (``audio_model_presets.<id>``) holds the model knobs (``settings``), shared or overridden per accelerator.
-A speech model may list built-in ``voices`` and the ``voice_files`` that cloning a recording needs on top of ``files``. What a
+A speech model may list built-in ``voices``, the ``voice_files`` that cloning a recording needs on top of ``files`` and the
+``design_files`` that designing a voice from a description needs. What a
 model can do is decided per (model, kind): speech follows a voice, sound takes a length, and music takes a length unless the
 model sings lyrics (``lyrics: true``), in which case the lyrics set it. The functions here read a config
 ``dict`` and the packaged metadata (parsed once) and touch nothing else: no other file, no network.
@@ -43,6 +44,7 @@ AUDIO_PLATFORMS: Final = ("cuda", "mps")
 _SECTION: Final = "audio_model_presets"
 _AUDIO_KIND: Final = "audio"
 _VOICE_ROLE: Final = "voice"
+_DESIGN_ROLE: Final = "design"
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,8 @@ class AudioPreset:
         voices: The built-in voices of a speech model, the first one the default; empty for a model without any.
         voice_files: The pinned files a take that follows a voice recording also needs (speech), downloaded only for such a take; empty when
             ``files`` already serve cloning.
+        design_files: The pinned files that designing a voice from a description needs (speech), downloaded only when a voice is designed;
+            empty when the model cannot design a voice.
         lyrics: Whether the model sings lyrics, so that its music takes lyrics and their sections set the length.
     """
 
@@ -140,6 +144,7 @@ class AudioPreset:
     platforms: Mapping[str, AudioPlatform]
     voices: tuple[AudioVoice, ...] = ()
     voice_files: tuple[AudioFiles, ...] = ()
+    design_files: tuple[AudioFiles, ...] = ()
     lyrics: bool = False
 
     @property
@@ -217,7 +222,8 @@ def _preset(model_id: str, raw: object) -> AudioPreset:
     settings = _settings(block.get("settings"), f"{where}.settings")
     pairs = model_targets(model_id, sys.platform) or ()
     voice_files = tuple(_files(target) for target in role_targets(pairs, _VOICE_ROLE))
-    files = tuple(_files(target) for role, target in pairs if role != _VOICE_ROLE)
+    design_files = tuple(_files(target) for target in role_targets(pairs, _DESIGN_ROLE))
+    files = tuple(_files(target) for role, target in pairs if role not in (_VOICE_ROLE, _DESIGN_ROLE))
     kinds = tuple(entry["kinds"])
     lyrics = bool(entry.get("lyrics", False))
     if lyrics:
@@ -233,6 +239,7 @@ def _preset(model_id: str, raw: object) -> AudioPreset:
         platforms=_platforms(entry.get("platforms"), block.get("platforms"), where),
         voices=tuple(AudioVoice(voice["id"], voice["label"], voice["language"]) for voice in entry.get("voices", ())),
         voice_files=voice_files,
+        design_files=design_files,
         lyrics=lyrics,
     )
 

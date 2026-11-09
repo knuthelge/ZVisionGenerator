@@ -51,6 +51,7 @@ from zvisiongenerator.utils.library_noise import MUTED_ERROR_TEXT, mute_library_
 from zvisiongenerator.utils.live_line import route_stderr_through_live_line
 from zvisiongenerator.utils.music_mode import INSTRUMENTAL, music_mode
 from zvisiongenerator.utils.prompt_enhance_audio import AudioEnhanceSettings, audio_enhance_context, caption_task
+from zvisiongenerator.utils.voice_library import SavedVoice, find_voice, list_voices
 
 logger = logging.getLogger(__name__)
 
@@ -188,14 +189,18 @@ def _build_audio_parser(*, prog: str = "ziv-audio", voices: Mapping[str, Sequenc
         help=f"The built-in voice a speech model reads in (default: the model's first voice). Speech models with built-in voices only; {_speaker_choices(voices)} Use --voice to follow a recording instead.",
     )
     parser.add_argument(
-        "--voice", type=str, default=None, metavar="PATH", help="An audio recording of the voice to follow, 3 to 30 seconds. Speech models that can clone a voice only. Needs --voice-text."
+        "--voice",
+        type=str,
+        default=None,
+        metavar="PATH|NAME",
+        help="An audio recording to follow (3 to 30 seconds), or the name of a saved voice (save one in the Web UI). A recording needs --voice-text. Speech models that can clone a voice only.",
     )
-    parser.add_argument("--voice-text", type=str, default=None, help="What the --voice recording says.")
+    parser.add_argument("--voice-text", type=str, default=None, help="What the --voice recording says. Not for a saved voice.")
     parser.add_argument(
         "--voice-consent",
         action="store_true",
         default=False,
-        help="Confirm the speaker of --voice allows cloning their voice. Needed with --voice, except for a speech take this app made in a built-in voice.",
+        help="Confirm the speaker of the --voice recording allows cloning their voice. Needed with a recording, except for a speech take this app made in a built-in voice; not for a saved voice.",
     )
     add_enhance_arguments(parser, mode="audio")
     return parser
@@ -295,18 +300,40 @@ def _resolve_delivery(parser: argparse.ArgumentParser, args: argparse.Namespace,
         parser.error(str(e))
 
 
-def _resolve_voice(parser: argparse.ArgumentParser, args: argparse.Namespace) -> VoiceRef | None:
-    """Return the voice to follow, after checking the recording exists, says what it says, and is allowed to be cloned."""
-    if args.voice is None:
-        return None
-    path = Path(args.voice).expanduser().resolve()  # recorded in the take's settings, so it must work from any folder
-    if not path.is_file():
-        parser.error(f"Voice recording not found: {path}")
+def _saved_voice_ref(parser: argparse.ArgumentParser, args: argparse.Namespace, voice: SavedVoice) -> VoiceRef:
+    """Return the reference of the saved *voice*, refusing the flags that only a new recording needs (its transcript and consent are saved with it)."""
+    if args.voice_text is not None:
+        parser.error(f'--voice-text: the saved voice "{voice.name}" has its own transcript; drop it')
+    if args.voice_consent:
+        parser.error(f'--voice-consent: the saved voice "{voice.name}" was confirmed when it was saved; drop it')
+    return voice.voice_ref()
+
+
+def _unknown_voice_message(name: str, saved: Sequence[SavedVoice]) -> str:
+    """Return the refusal of a ``--voice`` that is neither a file nor a saved voice, naming the saved voices."""
+    listing = f"Saved voices: {', '.join(voice.name for voice in saved)}." if saved else "You have no saved voices yet."
+    return f'No recording or saved voice named "{name}". {listing}'
+
+
+def _recording_ref(parser: argparse.ArgumentParser, args: argparse.Namespace, path: Path) -> VoiceRef:
+    """Return the reference of the recording at *path*, after checking it says what it says and is allowed to be cloned."""
     if args.voice_text is None or not args.voice_text.strip():
         parser.error("Add --voice-text: what the voice recording says.")
     if not args.voice_consent and voice_needs_consent(path):
         parser.error("Add --voice-consent: cloning a voice needs the speaker's permission.")
     return VoiceRef(str(path), args.voice_text.strip())
+
+
+def _resolve_voice(parser: argparse.ArgumentParser, args: argparse.Namespace) -> VoiceRef | None:
+    """Return the voice to follow: ``--voice`` as a recording when a file by that name exists, else as a saved voice (by name or slug); refuse one that is neither."""
+    if args.voice is None:
+        return None
+    path = Path(args.voice).expanduser().resolve()  # recorded in the take's settings, so it must work from any folder
+    if path.is_file():
+        return _recording_ref(parser, args, path)
+    if (saved := find_voice(args.voice)) is not None:
+        return _saved_voice_ref(parser, args, saved)
+    parser.error(_unknown_voice_message(args.voice, list_voices()))
 
 
 def _resolve_speaker(parser: argparse.ArgumentParser, args: argparse.Namespace, preset: AudioPreset, kind: str) -> str | None:

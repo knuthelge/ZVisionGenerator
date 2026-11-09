@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
 
-__all__ = ["AudioClip", "AudioGenerationRequest", "SpeechDelivery", "VoiceRef"]
+__all__ = ["AudioClip", "AudioGenerationRequest", "SpeechDelivery", "VoiceDesignRequest", "VoiceRef"]
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,21 @@ class VoiceRef:
 
     path: str
     text: str
+
+
+@dataclass(frozen=True)
+class VoiceDesignRequest:
+    """A request to design a voice from a description.
+
+    Attributes:
+        description: The voice in words (age, tone, pace, accent).
+        text: The line every candidate speaks; it becomes the transcript of a saved voice.
+        count: How many candidates to make.
+    """
+
+    description: str
+    text: str
+    count: int = 3
 
 
 @dataclass(frozen=True)

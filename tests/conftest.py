@@ -76,6 +76,14 @@ def _presets_in_tmp(tmp_path_factory, monkeypatch):
     monkeypatch.setattr("zvisiongenerator.web.presets.get_ziv_data_dir", _lazy_tmp_dir(tmp_path_factory, "ziv-data"))
 
 
+@pytest.fixture(autouse=True)
+def _voices_in_tmp(tmp_path_factory, monkeypatch):
+    """Keep every test's saved voices and design candidates in a temporary data directory, never the real ``~/.ziv/voices`` or ``~/.ziv/voice-design``."""
+    voices_root = _lazy_tmp_dir(tmp_path_factory, "ziv-voices")
+    monkeypatch.setattr("zvisiongenerator.utils.voice_library.get_ziv_data_dir", voices_root)
+    monkeypatch.setattr("zvisiongenerator.utils.voice_candidates.get_ziv_data_dir", voices_root)
+
+
 _HUB_DOWNLOADS = ("hf_hub_download", "snapshot_download")
 
 

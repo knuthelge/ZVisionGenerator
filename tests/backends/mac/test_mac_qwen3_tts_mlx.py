@@ -23,7 +23,9 @@ from zvisiongenerator.core.audio_types import AudioGenerationRequest, SpeechDeli
 PRESET = qwen_preset().on_platform("mps")
 CLONING_PRESET = replace(PRESET, files=PRESET.voice_files)
 """The preset as the runner hands it to the backend for a batch that follows a recording: the Base files in place of CustomVoice's."""
-CUSTOM, BASE = "Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen3-TTS-12Hz-1.7B-Base"
+DESIGN_PRESET = replace(PRESET, files=PRESET.design_files)
+"""The preset as the runner hands it to the backend for a voice design run: the VoiceDesign files in place of CustomVoice's."""
+CUSTOM, BASE, DESIGN = "Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen3-TTS-12Hz-1.7B-Base", "Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 VOICE = VoiceRef("/voices/me.wav", "Hello, this is me.")
 LONG_TEXT = "The first sentence is here. " * 30  # three parts of at most 500 characters
 
@@ -331,3 +333,43 @@ class TestCutAndSilence:
             _generate(_backend(), _request(LONG_TEXT), cancelled=cancelled, on_progress=on_progress)
 
         assert len(fake.model.loaded[0].calls) == 1
+
+
+class TestDesignVoice:
+    def test_a_preset_whose_files_are_the_design_files_loads_voice_design(self, fake):
+        _backend(DESIGN_PRESET)
+
+        assert [event for event in fake.events if event[0] == "load"] == [("load", DESIGN)]
+
+    def test_the_description_text_language_and_limit_are_passed_with_no_voice_and_the_seed_is_set_before_the_call(self, fake):
+        _backend(DESIGN_PRESET).design_voice("A calm older woman.", "Hello there.", 21)
+
+        (call,) = fake.model.loaded[0].calls
+        assert call == {
+            "text": "Hello there.",
+            "voice": None,
+            "instruct": "A calm older woman.",
+            "lang_code": "auto",
+            "split_pattern": "",
+            "max_tokens": 1200,
+            "seed": 21,
+        }
+
+    def test_the_call_runs_with_the_free_buffer_cache_off(self, fake):
+        _backend(DESIGN_PRESET).design_voice("A calm voice.", "Hello.", 1)
+
+        assert [event for event in fake.events if event[0] in ("cache_limit", "cache_restored")] == [("cache_limit", 0), ("cache_restored",)]
+
+    def test_the_pieces_of_the_result_are_joined_as_mono_float32(self, fake):
+        fake.model.results = [[(tone(0.5), 10), (tone(0.25), 5)]]
+
+        wave = _backend(DESIGN_PRESET).design_voice("A calm voice.", "Hello.", 1)
+
+        assert (wave.dtype, wave.shape) == (np.float32, (round(0.75 * RATE),))
+
+    def test_a_result_without_pieces_is_an_empty_wave(self, fake):
+        fake.model.results = [[]]
+
+        wave = _backend(DESIGN_PRESET).design_voice("A calm voice.", "Hello.", 1)
+
+        assert (wave.dtype, wave.shape) == (np.float32, (0,))

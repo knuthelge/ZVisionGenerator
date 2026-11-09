@@ -17,7 +17,9 @@ from zvisiongenerator.core.audio_types import AudioGenerationRequest, SpeechDeli
 PRESET = qwen_preset()
 CLONING_PRESET = replace(PRESET, files=PRESET.voice_files)
 """The preset as the runner hands it to the backend for a batch that follows a recording: the Base files in place of CustomVoice's."""
-CUSTOM, BASE = "Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen3-TTS-12Hz-1.7B-Base"
+DESIGN_PRESET = replace(PRESET, files=PRESET.design_files)
+"""The preset as the runner hands it to the backend for a voice design run: the VoiceDesign files in place of CustomVoice's."""
+CUSTOM, BASE, DESIGN = "Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen3-TTS-12Hz-1.7B-Base", "Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 VOICE = VoiceRef("/voices/me.wav", "Hello, this is me.")
 LONG_TEXT = "The first sentence is here. " * 30  # three parts of at most 500 characters
 
@@ -239,3 +241,46 @@ class TestCutAndSilence:
 
         with pytest.raises(RuntimeError, match="The model made no sound for this text. Try another seed."):
             _generate(_backend(), _request())
+
+
+class TestDesignVoice:
+    def test_a_preset_whose_files_are_the_design_files_loads_voice_design(self, fake):
+        _backend(DESIGN_PRESET)
+
+        (load,) = fake.model.loaded
+        assert load["folder"].endswith(DESIGN)
+
+    def test_the_description_text_language_and_limit_are_passed_and_the_seed_is_set_before_the_call(self, fake):
+        _backend(DESIGN_PRESET).design_voice("A calm older woman.", "Hello there.", 21)
+
+        (call,) = fake.model.loaded[0]["instance"].calls
+        assert call == {
+            "kind": "voice_design",
+            "text": "Hello there.",
+            "instruct": "A calm older woman.",
+            "language": "auto",
+            "max_new_tokens": 1200,
+            "seed": 21,
+        }
+
+    def test_the_candidate_is_the_models_wave_as_mono_float32(self, fake):
+        fake.model.waves = [tone(1.0).astype(np.float64).reshape(1, -1)]
+
+        wave = _backend(DESIGN_PRESET).design_voice("A calm voice.", "Hello.", 1)
+
+        assert (wave.dtype, wave.shape) == (np.float32, (RATE,))
+
+    def test_each_candidate_is_seeded_by_its_own_seed(self, fake):
+        backend = _backend(DESIGN_PRESET)
+
+        backend.design_voice("A calm voice.", "Hello.", 5)
+        backend.design_voice("A calm voice.", "Hello.", 6)
+
+        assert [call["seed"] for call in fake.model.loaded[0]["instance"].calls] == [5, 6]
+
+    def test_the_single_zero_sample_of_a_take_without_codes_is_an_empty_wave(self, fake):
+        fake.model.waves = [np.zeros(1, dtype=np.float32)]
+
+        wave = _backend(DESIGN_PRESET).design_voice("A calm voice.", "Hello.", 1)
+
+        assert (wave.dtype, wave.shape) == (np.float32, (0,))

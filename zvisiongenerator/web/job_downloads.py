@@ -14,7 +14,7 @@ from zvisiongenerator.backends import prompt_enhancer_session
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads import DownloadTarget, target_present_offline
-from zvisiongenerator.downloads.plans import audio_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_plan
+from zvisiongenerator.downloads.plans import audio_design_plan, audio_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_plan
 from zvisiongenerator.utils.model_metadata import model_display_name
 from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.config import configured_enhancer_models, resolve_enhancer_model
@@ -31,6 +31,7 @@ __all__ = [
     "ROLE_MATTE",
     "ROLE_MODEL",
     "JobDownloadPart",
+    "audio_design_part",
     "audio_model_part",
     "enhancer_part",
     "image_model_part",
@@ -105,6 +106,11 @@ def ltx_video_upscale_part(request: LtxVideoUpscaleRequest, config: dict[str, An
 def audio_model_part(preset: AudioPreset, *, voice: bool = False) -> JobDownloadPart:
     """Return the part for the audio model *preset* an audio job generates with; *voice* when the take follows a recording, which also needs the cloning files."""
     return JobDownloadPart(preset.label, preset.id, ROLE_MODEL, audio_plan(preset, voice=voice))
+
+
+def audio_design_part(preset: AudioPreset) -> JobDownloadPart:
+    """Return the part for the VoiceDesign checkpoint a voice design job needs; ``ValueError`` when *preset* has no ``design_files``."""
+    return JobDownloadPart(f"{preset.label} VoiceDesign", preset.id, ROLE_MODEL, audio_design_plan(preset))
 
 
 def matte_part() -> JobDownloadPart:

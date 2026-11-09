@@ -20,6 +20,7 @@ YUE2_REPO = "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
 YUE2_VAE_REPO = "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
 QWEN_CUSTOM_REPO = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice@0c0e3051f131929182e2c023b9537f8b1c68adfe"
 QWEN_BASE_REPO = "Qwen/Qwen3-TTS-12Hz-1.7B-Base@fd4b254389122332181a7c3db7f27e918eec64e3"
+QWEN_DESIGN_REPO = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign@5ecdb67327fd37bb2e042aab12ff7391903235d3"
 SA3_CHECKPOINT_REPO = "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
 SA3_CONFIG_REPO = "cocktailpeanut/stable-audio-3-medium@a30034d70bd58f6e6f967ef28ecaa6c52c185d6c"
 SA3_TEXT_ENCODER_REPO = "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870"
@@ -62,13 +63,14 @@ QWEN_VOICES = [
 
 
 def qwen3_tts_preset() -> dict[str, Any]:
-    """Return the ``qwen3_tts`` preset (speech: CustomVoice in ``files``, Base in ``voice_files``, nine built-in voices)."""
+    """Return the ``qwen3_tts`` preset (speech: CustomVoice in ``files``, Base in ``voice_files``, VoiceDesign in ``design_files``, nine built-in voices)."""
     return {
         "label": "Qwen3-TTS 1.7B",
         "kinds": ["speech"],
         "family": "qwen3_tts",
         "files": [{"repo": QWEN_CUSTOM_REPO, "files": list(QWEN_FILES)}],
         "voice_files": [{"repo": QWEN_BASE_REPO, "files": list(QWEN_FILES)}],
+        "design_files": [{"repo": QWEN_DESIGN_REPO, "files": list(QWEN_FILES)}],
         "voices": [{"id": voice, "label": label, "language": language} for voice, label, language in QWEN_VOICES],
         "limits": {"max_new_tokens": 1200, "part_chars": 500, "max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30},
         "settings": {"language": "auto", "join_pause_ms": 300, "join_fade_ms": 10, "part_level_match_db": 3, "edge_silence_max_ms": 150},
@@ -164,7 +166,8 @@ def audio_entry(preset: dict[str, Any], *, licences: list[str] | None = None) ->
         "limits": dict(preset["limits"]),
         "licences": list(licences or []),
         "downloads": [{"ref": item["repo"], "files": list(item["files"])} for item in preset["files"]]
-        + [{"ref": item["repo"], "files": list(item["files"]), "role": "voice"} for item in preset.get("voice_files", ())],
+        + [{"ref": item["repo"], "files": list(item["files"]), "role": "voice"} for item in preset.get("voice_files", ())]
+        + [{"ref": item["repo"], "files": list(item["files"]), "role": "design"} for item in preset.get("design_files", ())],
     }
     if preset.get("lyrics"):
         entry["lyrics"] = True

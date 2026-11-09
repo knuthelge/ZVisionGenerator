@@ -1,8 +1,8 @@
 """Qwen3-TTS speech backend on macOS, through mlx-audio.
 
 The same model, preset and take logic as :mod:`qwen3_tts` on CUDA: the checkpoint is the one the preset's ``files`` name,
-loaded once when the batch loads (CustomVoice for the built-in voices, Base for a batch that follows a recording, the runner
-choosing by the preset it passes), and parts, the voice, progress and the join are :mod:`speech_takes`'. mlx-audio reads the
+loaded once when the batch loads (CustomVoice for the built-in voices, Base for a batch that follows a recording, VoiceDesign for a
+voice design run, the runner choosing by the preset it passes), and parts, the voice, progress and the join are :mod:`speech_takes`'. mlx-audio reads the
 official ``Qwen/…`` snapshots directly (it converts the PyTorch convolution layouts while loading), so the files are the CUDA
 engine's and the transformers shim is not involved.
 
@@ -142,6 +142,29 @@ class Qwen3TtsMlxBackend:
         if not waves:  # the model ended before its first token
             return np.zeros(0, dtype=np.float32), False
         return np.concatenate(waves), tokens >= max_new_tokens
+
+    def design_voice(self, description: str, text: str, seed: int) -> np.ndarray:
+        """Return the 24 kHz mono wave of *text* spoken in a voice made from *description*, generated with *seed*.
+
+        Needs the VoiceDesign checkpoint, which :meth:`load` has loaded for a design run; mlx-audio routes such a model's ``generate`` to
+        its voice design. MLX's free-buffer cache is off for the call. The wave is empty when the model made no sound.
+        """
+        import mlx.core as mx
+
+        from zvisiongenerator.backends.mac.memory import mlx_cache_limit
+
+        with mlx_cache_limit(0):
+            mx.random.seed(seed)  # mlx-audio has no seed argument; its sampling draws from the global key
+            results = self._model.generate(
+                text=text,
+                voice=None,
+                instruct=description,
+                lang_code=str(self._settings["language"]),
+                split_pattern="",
+                max_tokens=int(self._preset.limits.max_new_tokens),
+            )
+            waves = [np.asarray(result.audio, dtype=np.float32).reshape(-1) for result in results]
+        return np.concatenate(waves) if waves else np.zeros(0, dtype=np.float32)
 
     @staticmethod
     def _load_model(folder: str) -> Any:

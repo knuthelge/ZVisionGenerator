@@ -9,7 +9,10 @@ from typing import Any
 
 from zvisiongenerator.utils.provenance import read_config
 
-__all__ = ["voice_needs_consent"]
+__all__ = ["CONSENT_REQUIRED", "consent_for_saving", "voice_needs_consent"]
+
+# The message of the ``ValueError`` raised when a recording needs the speaker's consent and none was given; the Web UI and CLI show it as it is.
+CONSENT_REQUIRED = "Cloning a voice needs the speaker's permission: tick the box to confirm it."
 
 
 def _is_built_in_voice_take(config: Mapping[str, Any] | None) -> bool:
@@ -31,3 +34,20 @@ def voice_needs_consent(path: str | Path) -> bool:
     except subprocess.CalledProcessError, ValueError, OSError:
         return True
     return not _is_built_in_voice_take(config)
+
+
+def consent_for_saving(path: str | Path, ticked: bool) -> str:
+    """Return the consent to store with a voice saved from the recording at *path*: ``"given"`` or ``"not_needed"``.
+
+    Args:
+        path: The recording to save.
+        ticked: Whether the speaker's consent was confirmed.
+
+    Raises:
+        ValueError: With ``CONSENT_REQUIRED`` if the recording needs consent and *ticked* is false.
+    """
+    if ticked:
+        return "given"
+    if voice_needs_consent(path):
+        raise ValueError(CONSENT_REQUIRED)
+    return "not_needed"

@@ -16,7 +16,7 @@ from tests._factories import load_packaged_config, use_enhancer_models
 from tests._fake_audio import fake_read_config as read_config
 from tests._licences import use_licences
 from tests._paths import REPO_ROOT
-from tests.audio._helpers import case_request, clip, fake_backend, patch_runner, sine, voice_folder
+from tests.audio._helpers import case_request, clip, fake_backend, patch_runner, save_case_voice, sine, voice_folder
 
 from zvisiongenerator import audio_cli
 from zvisiongenerator.audio_cli import _build_audio_parser
@@ -32,6 +32,7 @@ from zvisiongenerator.utils import audio_request as audio_request_module
 from zvisiongenerator.utils.prompt_enhance_audio import SPACE_AXIS
 from zvisiongenerator.utils.provenance import build_audio_config_payload
 from zvisiongenerator.utils.video_splice import write_pcm16_wav
+from zvisiongenerator.utils.voice_library import save_voice
 from zvisiongenerator.web.audio_job import AudioFields, audio_request_from_fields
 from zvisiongenerator.web.gallery_audio import audio_asset_facts
 
@@ -356,6 +357,68 @@ class TestRefusals:
         assert "--runs" in refuses(monkeypatch, capsys, "-m", "sa3", "--prompt", "x", "-r", "0")
 
 
+class TestSavedVoice:
+    """``--voice`` names a saved voice when no file has that name."""
+
+    @pytest.fixture
+    def narrator(self):
+        """Save a 4 s voice called "Night Narrator" and return it."""
+        return save_voice("Night Narrator", sine(4.0)[0], 24000, text="Once upon a time.", consent="not_needed")
+
+    @pytest.mark.parametrize("given", ["Night Narrator", "night narrator", "NIGHT NARRATOR", "slug"])
+    def test_a_saved_voice_by_name_in_any_case_or_by_slug_is_followed_without_text_or_consent(self, env, monkeypatch, narrator, given):
+        given = narrator.slug if given == "slug" else given
+        (request,) = make(env, "-m", "qwen3_tts", "--prompt", "Hi", "--voice", given, monkeypatch=monkeypatch)
+
+        assert request.voice == VoiceRef(str(narrator.path), "Once upon a time.")
+        assert request.speaker is None and request.delivery is None
+
+    def test_a_file_wins_over_a_saved_voice_of_the_same_name(self, env, monkeypatch, voices, narrator):
+        monkeypatch.chdir(voices)
+        (voices / narrator.slug).write_bytes((voices / "any.flac").read_bytes())
+
+        (request,) = make(env, "-m", "qwen3_tts", "--prompt", "Hi", "--voice", narrator.slug, "--voice-text", "Hello", monkeypatch=monkeypatch)
+
+        assert request.voice == VoiceRef(str((voices / narrator.slug).resolve()), "Hello")
+
+    def test_a_transcript_is_refused_with_a_saved_voice(self, env, monkeypatch, capsys, narrator):
+        error = refuses(monkeypatch, capsys, "-m", "qwen3_tts", "--prompt", "x", "--voice", "night narrator", "--voice-text", "Hello")
+
+        assert "--voice-text" in error
+        assert env.ensure.call_count == 0 and env.backend.load.call_count == 0
+
+    def test_consent_is_refused_with_a_saved_voice(self, env, monkeypatch, capsys, narrator):
+        error = refuses(monkeypatch, capsys, "-m", "qwen3_tts", "--prompt", "x", "--voice", "night narrator", "--voice-consent")
+
+        assert "--voice-consent" in error
+        assert env.ensure.call_count == 0 and env.backend.load.call_count == 0
+
+    def test_an_unknown_name_lists_the_saved_voices(self, env, monkeypatch, capsys, narrator):
+        save_voice("Aunt Mae", sine(4.0)[0], 24000, text="Hello.", consent="not_needed")
+
+        error = refuses(monkeypatch, capsys, "-m", "qwen3_tts", "--prompt", "x", "--voice", "nobody")
+
+        assert "nobody" in error and "Aunt Mae" in error and "Night Narrator" in error
+        assert env.ensure.call_count == 0
+
+    def test_an_unknown_name_with_no_saved_voices_says_so(self, env, monkeypatch, capsys):
+        error = refuses(monkeypatch, capsys, "-m", "qwen3_tts", "--prompt", "x", "--voice", "nobody")
+
+        assert "nobody" in error and "no saved voices" in error
+
+    def test_delivery_is_refused_with_a_saved_voice(self, env, monkeypatch, capsys, narrator):
+        error = refuses(monkeypatch, capsys, "-m", "qwen3_tts", "--prompt", "x", "--voice", "night narrator", "--emotion", "sad")
+
+        assert "--emotion" in error
+
+    def test_a_speaker_is_refused_with_a_saved_voice(self, env, monkeypatch, capsys, narrator):
+        assert "--speaker" in refuses(monkeypatch, capsys, "-m", "qwen3_tts", "--prompt", "x", "--voice", "night narrator", "--speaker", "ryan")
+
+    @pytest.mark.parametrize("model", ["yue2", "sa3"])
+    def test_a_saved_voice_is_refused_by_a_model_that_cannot_follow_one(self, env, monkeypatch, capsys, narrator, model):
+        assert "--voice" in refuses(monkeypatch, capsys, "-m", model, "--prompt", "x", "--voice", "night narrator")
+
+
 class TestSteeringFlags:
     """``--kind``, ``--tempo``, ``--key``, the delivery flags and ``--sound-type``: each builds the request of the form and each is refused where it does not apply."""
 
@@ -648,6 +711,13 @@ class TestQwenCloningFiles:
 
         assert [target.repo_id for target in env.ensure.call_args.args[0]] == [self.CUSTOM, self.BASE]
 
+    def test_a_take_with_a_saved_voice_downloads_the_cloning_checkpoint_too(self, env, monkeypatch):
+        save_voice("Night Narrator", sine(4.0)[0], 24000, text="Once upon a time.", consent="not_needed")
+
+        make(env, "-m", "qwen3_tts", "--prompt", "Hello there.", "--voice", "night narrator", monkeypatch=monkeypatch)
+
+        assert [target.repo_id for target in env.ensure.call_args.args[0]] == [self.CUSTOM, self.BASE]
+
 
 class TestMemoryWarning:
     def test_a_card_that_is_too_small_is_warned_before_the_licence_notice_and_the_download(self, env, monkeypatch, capsys):
@@ -734,6 +804,7 @@ class TestCopyCli:
     def test_the_copied_command_runs_to_the_request_of_the_form(self, env, monkeypatch, voices, case):
         command = case["command"].replace("/voices/", f"{voices}/")
         assert command.startswith("ziv audio ")
+        save_case_voice(case)
 
         requests = make(env, *shlex.split(command)[2:], monkeypatch=monkeypatch)
 

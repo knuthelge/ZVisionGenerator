@@ -10,10 +10,12 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
     from zvisiongenerator.utils.audio_preset import AudioPreset
 
-__all__ = ["DECODE_PHASE", "SPEECH_PHASE", "AudioBackend", "AudioCancelled", "CancelCheck", "ProgressCallback", "raise_if_cancelled"]
+__all__ = ["DECODE_PHASE", "SPEECH_PHASE", "AudioBackend", "AudioCancelled", "CancelCheck", "ProgressCallback", "VoiceDesigner", "raise_if_cancelled"]
 
 DECODE_PHASE = "Decode"
 """The progress phase after the last step, when the decoder turns what was made into the waveform; it has no count of its own worth showing."""
@@ -86,4 +88,32 @@ class AudioBackend(Protocol):
 
     def close(self) -> None:
         """Free the model and the memory limits the backend set."""
+        ...
+
+
+@runtime_checkable
+class VoiceDesigner(Protocol):
+    """Optional capability: design a new voice from a written description.
+
+    Not part of :class:`AudioBackend`: only the Qwen3-TTS backends offer it, so a caller checks ``isinstance(backend, VoiceDesigner)``.
+    The backend must have been loaded with a preset whose ``files[0]`` is a voice-design checkpoint; the runner arranges this by
+    handing it ``replace(preset, files=preset.design_files)``.
+    """
+
+    @property
+    def sample_rate(self) -> int:
+        """The sample rate of the waves :meth:`design_voice` returns."""
+        ...
+
+    def design_voice(self, description: str, text: str, seed: int) -> np.ndarray:
+        """Speak *text* in a voice made from *description* and return it as one candidate.
+
+        Args:
+            description: The voice in words (age, tone, pace, accent).
+            text: The line to speak; it is also what the candidate sounds like when saved.
+            seed: Seeds the sampling, so the same seed gives the same candidate.
+
+        Returns:
+            A mono float32 wave at :attr:`sample_rate`; empty when the model made no sound.
+        """
         ...

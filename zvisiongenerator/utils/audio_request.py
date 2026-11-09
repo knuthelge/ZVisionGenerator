@@ -24,6 +24,7 @@ __all__ = [
     "auto_seconds",
     "check_seed",
     "check_speech_request",
+    "check_voice_seconds",
     "find_audio_preset",
     "resolve_audio_seconds",
     "resolve_speaker",
@@ -130,7 +131,14 @@ def check_speech_request(request: AudioGenerationRequest, limits: AudioLimits, *
         raise ValueError("Write the text to read.")
     if request.voice is None or not check_voice_file:
         return
-    seconds = probe_track_seconds(request.voice.path)
-    low, high = float(limits.min_voice_seconds), float(limits.max_voice_seconds)
-    if not low <= seconds <= high:
-        raise ValueError(f"The voice recording is {seconds:.1f} seconds long; use one between {low:g} and {high:g} seconds.")
+    check_voice_seconds(probe_track_seconds(request.voice.path), float(limits.min_voice_seconds), float(limits.max_voice_seconds))
+
+
+def check_voice_seconds(seconds: float, min_seconds: float, max_seconds: float) -> None:
+    """Refuse a voice recording of *seconds* outside *min_seconds*..*max_seconds*.
+
+    Raises:
+        ValueError: With the message the user sees.
+    """
+    if not min_seconds <= seconds <= max_seconds:
+        raise ValueError(f"The voice recording is {seconds:.1f} seconds long; use one between {min_seconds:g} and {max_seconds:g} seconds.")

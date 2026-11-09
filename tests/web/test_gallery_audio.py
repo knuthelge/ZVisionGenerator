@@ -17,12 +17,14 @@ from fastapi.testclient import TestClient
 from tests._audio_presets import audio_config, no_audio_models, qwen3_tts_preset, sa3_preset, sa3_two_kind_preset, use_audio_models, yue2_preset
 from tests._fake_audio import install_fake_audio, write_fake_audio
 from tests._paths import FIXTURES
+from tests._speech_fakes import RATE, tone
 from tests.audio._helpers import clip, sine
 from tests.web._helpers import make_web_config
 
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, SpeechDelivery, VoiceRef
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.provenance import build_audio_config_payload
+from zvisiongenerator.utils.voice_library import delete_voice, rename_voice, save_voice
 from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import gallery
 from zvisiongenerator.web import server as web_server
@@ -311,6 +313,38 @@ class TestAssetJson:
         assert payload["has_reference_voice"] is True
         params = _params(payload)
         assert (params["voice_path"], params["voice_text"]) == (str(tmp_path / "home" / "voices" / "me.wav"), "Hello, this is me.")
+
+    def test_a_take_in_a_saved_voice_names_it_and_reuses_it_by_slug_even_after_it_is_deleted(self, tmp_path):
+        voice = save_voice("Anna Lund", tone(4.0), RATE, text="Hello, this is Anna.", consent="given")
+        _take(tmp_path, "saved.flac", {**_CLONED, "voice_path": str(voice.path), "voice_text": voice.text})
+
+        payload = _json(tmp_path, "saved.flac")
+        params = _params(payload)
+
+        assert (payload["voice_name"], payload["has_reference_voice"]) == ("Anna Lund", True)
+        assert params["saved_voice"] == voice.slug and not {"voice_path", "voice_text", "speaker"} & params.keys()
+
+        rename_voice(voice.slug, "Anna L")
+        assert _json(tmp_path, "saved.flac")["voice_name"] == "Anna L"
+
+        delete_voice(voice.slug)
+        gone = _json(tmp_path, "saved.flac")
+        assert gone["voice_name"] is None and gone["has_reference_voice"] is True
+        assert _params(gone)["saved_voice"] == voice.slug and not {"voice_path", "voice_text", "speaker"} & _params(gone).keys()
+
+    def test_a_take_in_a_recording_outside_the_library_has_no_voice_name(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+        _take(tmp_path, "cloned.flac", _CLONED)
+
+        payload = _json(tmp_path, "cloned.flac")
+
+        assert payload["voice_name"] is None and "saved_voice" not in _params(payload)
+
+    def test_a_take_without_a_reference_voice_has_no_voice_name(self, tmp_path):
+        _take(tmp_path, "plain.flac", {**_ANY, "prompt": "Welcome back.", "speaker": "vivian"})
+
+        assert _json(tmp_path, "plain.flac")["voice_name"] is None
 
     def test_the_length_asked_for_and_the_cut_badge_come_from_the_settings(self, tmp_path):
         _take(tmp_path, "rain.flac", _SOUND)

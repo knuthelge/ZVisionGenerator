@@ -42,6 +42,12 @@
     "requests": [{"preset": "qwen3_tts", "kind": "speech", "prompt": "More words.", "lyrics": "", "seconds": null, "voice": {"path": "/voices/cloned.flac", "text": "Hello, this is me."}, "seed": 5, "speaker": null}]
   },
   {
+    "name": "speech in a saved voice",
+    "settings": {"mode": "audio", "workflow": "speech", "model": "qwen3_tts", "prompt": "Welcome back.", "saved_voice": "narrator", "runs": "1", "seed": "4"},
+    "command": "ziv audio --model qwen3_tts --kind speech --prompt 'Welcome back.' --voice narrator --seed 4",
+    "requests": [{"preset": "qwen3_tts", "kind": "speech", "prompt": "Welcome back.", "lyrics": "", "seconds": null, "voice": {"path": "/library/narrator.wav", "text": "Hello, this is the narrator."}, "seed": 4, "speaker": null}]
+  },
+  {
     "name": "a sound of a chosen length, two takes",
     "settings": {"mode": "audio", "workflow": "sound", "model": "sa3", "prompt": "rain on a tin roof, distant thunder", "seconds": "30", "runs": "2", "seed": "3"},
     "command": "ziv audio --model sa3 --kind sound --prompt 'rain on a tin roof, distant thunder' --seconds 30 --runs 2 --seed 3",

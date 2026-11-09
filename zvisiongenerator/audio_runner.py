@@ -3,6 +3,10 @@
 One job is one model: the backend loads once, makes every take of every run, and is closed in a ``finally`` also after a
 failure or a Stop. Pause, Repeat and Next work between takes (Next and Quit also stop a take in progress). The model's
 files are downloaded before the batch starts, by the caller: the Web UI's job runner, or ``ziv audio``.
+
+Designing a voice is the other job of this module: :func:`run_voice_design` loads the design checkpoint once, makes a few candidate
+voices from a description and writes them to the candidate store in the data folder (never the output folder). Only Quit stops it, and
+the candidates made so far are kept.
 """
 
 from __future__ import annotations
@@ -11,6 +15,8 @@ import os
 import random
 import sys
 import time
+import uuid
+from datetime import UTC, datetime
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -18,11 +24,11 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none, audio_platform_key, get_audio_backend, prompt_enhancer_session, release_accelerator_memory
-from zvisiongenerator.core.audio_backend import AudioBackend, AudioCancelled
-from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
+from zvisiongenerator.core.audio_backend import AudioBackend, AudioCancelled, VoiceDesigner
+from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest, VoiceDesignRequest
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_generation_finished, emit_progress
 from zvisiongenerator.downloads import target_present_offline
-from zvisiongenerator.downloads.plans import audio_plan
+from zvisiongenerator.downloads.plans import audio_design_plan, audio_plan
 from zvisiongenerator.job_controls import announce_repeat, pause_until_resumed, seed_range
 from zvisiongenerator.utils.audio_console import ConsoleProgress
 from zvisiongenerator.utils.audio_level import limit_peak, peak_of
@@ -34,8 +40,9 @@ from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.provenance import build_audio_config_payload
 from zvisiongenerator.utils.speech_text import request_speech_parts
 from zvisiongenerator.utils.torch_flags import preserved_torch_flags
+from zvisiongenerator.utils.voice_candidates import DesignBatch, DesignCandidate, add_batch, write_candidate
 
-__all__ = ["QUIT_MESSAGE", "run_audio_batch"]
+__all__ = ["QUIT_MESSAGE", "run_audio_batch", "run_voice_design"]
 
 _OUT_OF_MEMORY_HINT = "Close other apps that use the GPU and try again"
 """What the out-of-memory message tells the user to do; music adds ``or shorten the lyrics``."""
@@ -116,7 +123,7 @@ def run_audio_batch(
     backend = get_audio_backend(preset.family)
     fit = audio_memory_fit(preset, platform_key, accelerator_memory_budget_or_none())
     with _backend_session(backend):
-        if _load_unless_quit(backend, preset, request, platform_key, fit, skip=skip, progress_callback=progress_callback):
+        if _load_unless_quit(backend, _preset_to_load(preset, request), request.kind, platform_key, fit, skip=skip, progress_callback=progress_callback):
             emit_progress(progress_callback, "batch_started", mode="audio", total_iterations=runs, total_runs=runs)
             outcome = _make_takes(backend, request, preset, seeds, output_dir=output_dir, skip=skip, progress_callback=progress_callback, seed_range_=(seed_min, seed_max), memory_fit=fit)
         else:
@@ -133,28 +140,134 @@ def run_audio_batch(
     return outcome.saved
 
 
+def run_voice_design(
+    request: VoiceDesignRequest,
+    preset: AudioPreset,
+    config: dict[str, Any],
+    *,
+    out_dir: Path,
+    progress_callback: ProgressCallback | None = None,
+    skip_signal: SkipSignal | None = None,
+) -> DesignBatch:
+    """Make ``request.count`` candidate voices from the description with one load of the design checkpoint and write them to *out_dir*.
+
+    The caller has checked the request and downloaded the design checkpoint. Each candidate speaks ``request.text`` with its own
+    random seed and is written under a new id as ``<id>.wav`` (a peak above 1.0 is scaled to -1 dBFS); a model that makes no sound for a
+    seed adds no candidate. Only Quit stops the run, and the candidates made so far are kept. The batch is added to the candidates
+    already in *out_dir* last, in a ``finally``, with the candidates made so far, also after a failure; earlier batches are never
+    touched, and a batch without candidates is not added. The backend is closed and the accelerator memory given back whatever
+    happens.
+
+    Events sent to *progress_callback* (all with ``mode="audio"``): ``model_loading``, ``batch_started``, ``audio_progress``
+    (``phase="Design"``, ``step``, ``total``, ``part``, ``n_parts``, ``elapsed_secs``, ``eta_secs``) after each candidate, and
+    ``batch_completed`` or ``batch_cancelled``.
+
+    Args:
+        request: The description, the line to speak and how many candidates to make.
+        preset: The audio model of *request*, as this machine runs it (``AudioPreset.on_platform``); it must have ``design_files``.
+        config: The loaded config (seed bounds).
+        out_dir: The candidate folder (``voice_candidates.candidates_dir()``); created when missing.
+        progress_callback: Receives the events above.
+        skip_signal: The job's control signal; Quit is honoured.
+
+    Returns:
+        The batch, with the candidates made.
+
+    Raises:
+        FileNotFoundError: If a file of the design checkpoint is missing from the cache.
+        RuntimeError: If the model cannot design voices, runs out of GPU memory, fails, or makes no sound for any candidate.
+    """
+    seed_min, seed_max = seed_range(config)
+    skip = skip_signal or SkipSignal()
+    started = time.time()
+
+    prompt_enhancer_session.release_resident_enhancer()
+    if not all(target_present_offline(target) for target in audio_design_plan(preset)):
+        raise FileNotFoundError(f"{preset.label} VoiceDesign is not downloaded: some of its files are missing from the cache.")
+    backend = get_audio_backend(preset.family)
+    if not isinstance(backend, VoiceDesigner):
+        raise RuntimeError(f"{preset.label} cannot design voices.")
+
+    model = f"{preset.label} VoiceDesign"
+    made: list[DesignCandidate] = []
+    cancelled = True
+    batch_id = uuid.uuid4().hex
+    with _backend_session(backend):
+        try:
+            if _load_unless_quit(backend, replace(preset, files=preset.design_files, label=model), "speech", audio_platform_key(), None, skip=skip, progress_callback=progress_callback):
+                emit_progress(progress_callback, "batch_started", mode="audio", total_iterations=request.count)
+                cancelled = _make_candidates(backend, request, preset, out_dir, made, seed_range_=(seed_min, seed_max), skip=skip, progress_callback=progress_callback)
+        finally:
+            batch = DesignBatch(batch_id, preset.id, request.description, request.text, datetime.now(UTC).isoformat(timespec="seconds"), tuple(made))
+            add_batch(out_dir, batch)
+
+    if cancelled:
+        print(f"\n{QUIT_MESSAGE}")
+        emit_progress(progress_callback, "batch_cancelled", mode="audio", completed_iterations=len(made), total_iterations=request.count)
+        return batch
+    if not made:
+        raise RuntimeError(f"{model} made no sound. Try a different description.")
+    total_time = time.time() - started
+    print(f"\nDesign complete: {len(made)}/{request.count} candidates made in {total_time:.1f}s")
+    emit_progress(progress_callback, "batch_completed", mode="audio", completed_iterations=len(made), total_iterations=request.count, total_time=total_time)
+    return batch
+
+
+def _make_candidates(
+    designer: VoiceDesigner,
+    request: VoiceDesignRequest,
+    preset: AudioPreset,
+    out_dir: Path,
+    made: list[DesignCandidate],
+    *,
+    seed_range_: tuple[int, int],
+    skip: SkipSignal,
+    progress_callback: ProgressCallback | None,
+) -> bool:
+    """Design one candidate per step and append each written one to *made*, so a failure keeps the earlier ones; return whether Quit stopped it."""
+    began = time.time()
+    for step in range(1, request.count + 1):
+        if skip.pending() == "quit":
+            return True
+        seed = random.randint(*seed_range_)
+        print(f"[{step}/{request.count}] seed={seed}")
+        with _friendly_oom(preset, "speech", None):
+            samples = designer.design_voice(request.description, request.text, seed)
+        if samples.size:
+            if peak_of(samples) > 1.0:
+                samples = limit_peak(samples, _LEVEL_CEILING_DB)
+            made.append(write_candidate(out_dir, samples, designer.sample_rate))
+        else:
+            print("  The model made no sound; skipped.")
+        elapsed = time.time() - began
+        eta = elapsed / step * (request.count - step)
+        emit_progress(progress_callback, "audio_progress", mode="audio", phase="Design", step=step, total=request.count, part=1, n_parts=1, elapsed_secs=elapsed, eta_secs=eta)
+    return False
+
+
 def _load_unless_quit(
     backend: AudioBackend,
-    preset: AudioPreset,
-    request: AudioGenerationRequest,
+    to_load: AudioPreset,
+    kind: str,
     platform_key: str,
     fit: dict[str, Any] | None,
     *,
     skip: SkipSignal,
     progress_callback: ProgressCallback | None,
 ) -> bool:
-    """Load the model unless Quit is queued, before the load or while it runs; return whether it is loaded.
+    """Load *to_load* (shown by its label) unless Quit is queued, before the load or while it runs; return whether it is loaded.
 
     The backend checks Quit (and only Quit: Skip leaves the load alone) between the tensors it reads, so a stop during a long
-    load ends it early; the caller's backend session then frees what was loaded.
+    load ends it early; the caller's backend session then frees what was loaded. A memory error is reported for a *kind* take
+    against *fit*.
     """
     if skip.pending() == "quit":
         return False
-    print(f"Loading {preset.label}...", flush=True)
-    emit_progress(progress_callback, "model_loading", mode="audio", model=preset.label)
+    print(f"Loading {to_load.label}...", flush=True)
+    emit_progress(progress_callback, "model_loading", mode="audio", model=to_load.label)
     try:
-        with _friendly_oom(preset, request.kind, fit):
-            backend.load(_preset_to_load(preset, request), platform_key, cancelled=lambda: skip.pending() == "quit")
+        with _friendly_oom(to_load, kind, fit):
+            backend.load(to_load, platform_key, cancelled=lambda: skip.pending() == "quit")
     except AudioCancelled:
         return False
     return True

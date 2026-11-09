@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from tests._audio_presets import (
     QWEN_BASE_REPO,
     QWEN_CUSTOM_REPO,
+    QWEN_DESIGN_REPO,
     YUE2_REPO,
     audio_config,
     audio_entries,
@@ -156,6 +157,18 @@ class TestInventoryRows:
 
         assert audio_inventory_rows(audio_config(), _BUDGET) == []
 
+    def test_one_unreadable_speech_model_leaves_both_voice_downloads_unknown(self, env):
+        def broken(target: DownloadTarget) -> bool:
+            if target.repo_id.startswith("Qwen/"):
+                raise OSError("cache unreadable")
+            return True
+
+        with pytest.warns(UserWarning, match="Could not determine status for audio model 'qwen3_tts'"):
+            rows = _rows(env, audio_config(), target_present=broken)
+
+        assert (rows["qwen3_tts"]["downloaded"], rows["qwen3_tts"]["voice_download"], rows["qwen3_tts"]["can_design"]) == (None, None, True)
+        assert rows["yue2"]["downloaded"] is True and "can_design" not in rows["yue2"]
+
     def test_the_packaged_config_has_a_row_per_model(self, env):
         rows = audio_inventory_rows(load_packaged_config(), _BUDGET)
 
@@ -249,6 +262,16 @@ class TestDeleteRoute:
             web_server.download_flights.finish(flight, "stopped")
         assert (env.hub / "models--m-a-p--YuE2-3B").is_dir()
 
+    def test_is_refused_while_the_voicedesign_repository_downloads(self, client, env):
+        _cache(env.hub, QWEN_CUSTOM_REPO.split("@")[0])
+        flight, owner = web_server.download_flights.claim(DownloadTarget("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"))
+        assert owner
+        try:
+            assert client.delete("/api/audio-models/qwen3_tts").status_code == 409
+        finally:
+            web_server.download_flights.finish(flight, "stopped")
+        assert (env.hub / "models--Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice").is_dir()
+
 
 class TestCacheListing:
     def test_the_repositories_of_every_preset_are_used(self, env):
@@ -293,14 +316,14 @@ class TestQwenCloningFiles:
         assert rows["qwen3_tts"]["voice_download"] is None
         assert "voice_download" not in rows["yue2"] and "voice_download" not in rows["sa3"]
 
-    def test_deleting_removes_both_checkpoints(self, env):
-        for repo in (QWEN_CUSTOM_REPO, QWEN_BASE_REPO):
+    def test_deleting_removes_every_checkpoint(self, env):
+        for repo in (QWEN_CUSTOM_REPO, QWEN_BASE_REPO, QWEN_DESIGN_REPO):
             _cache(env.hub, repo.split("@")[0])
         preset = next(item for item in parse_audio_presets(self._config()) if item.id == "qwen3_tts")
 
         target = audio_delete_target(preset, platform_key=sys.platform)
 
-        assert target.repo_ids == ("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
+        assert target.repo_ids == ("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen/Qwen3-TTS-12Hz-1.7B-Base", "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")
         delete_model(target)
         assert not any(env.hub.iterdir())
 
@@ -310,16 +333,36 @@ class TestQwenCloningFiles:
 
         assert audio_delete_target(preset, platform_key=sys.platform).repo_ids == ("Qwen/Qwen3-TTS-12Hz-1.7B-Base",)
 
-    def test_the_disk_size_adds_both_checkpoints(self, env):
-        for repo in (QWEN_CUSTOM_REPO, QWEN_BASE_REPO):
+    def test_the_disk_size_adds_every_checkpoint(self, env):
+        for repo in (QWEN_CUSTOM_REPO, QWEN_BASE_REPO, QWEN_DESIGN_REPO):
             _cache(env.hub, repo.split("@")[0])
 
         row = _rows(env, self._config(), target_present=lambda _target: True)["qwen3_tts"]
 
-        assert row["disk_size_label"] == disk_size_label(2)
+        assert row["disk_size_label"] == disk_size_label(3)
 
-    def test_the_cache_listing_uses_both_repositories(self, env):
-        assert {"qwen/qwen3-tts-12hz-1.7b-customvoice", "qwen/qwen3-tts-12hz-1.7b-base"} <= used_repo_ids([], {}, platform_key=sys.platform)
+    def test_the_cache_listing_uses_every_repository(self, env):
+        assert {"qwen/qwen3-tts-12hz-1.7b-customvoice", "qwen/qwen3-tts-12hz-1.7b-base", "qwen/qwen3-tts-12hz-1.7b-voicedesign"} <= used_repo_ids([], {}, platform_key=sys.platform)
+
+    def test_deleting_with_only_the_design_files_on_disk_still_finds_them(self, env):
+        _cache(env.hub, QWEN_DESIGN_REPO.split("@")[0])
+        preset = next(item for item in parse_audio_presets(self._config()) if item.id == "qwen3_tts")
+
+        assert audio_delete_target(preset, platform_key=sys.platform).repo_ids == ("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",)
+
+    def test_the_design_files_do_not_count_toward_the_row_download(self, env):
+        row = _rows(env, self._config(), target_present=lambda target: target.repo_id != "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")["qwen3_tts"]
+
+        assert (row["downloaded"], row["voice_download"], row["can_design"]) == (True, {"downloaded": True}, True)
+
+    def test_a_speech_model_without_design_files_cannot_design_and_other_kinds_have_no_key(self, env, monkeypatch, tmp_path):
+        preset = qwen3_tts_preset()
+        del preset["design_files"]
+        use_audio_models(monkeypatch, tmp_path, qwen3_tts=preset, yue2=yue2_preset(), sa3=sa3_preset())
+        rows = _rows(env, audio_config(), target_present=lambda _target: True)
+
+        assert rows["qwen3_tts"]["can_design"] is False
+        assert "can_design" not in rows["yue2"] and "can_design" not in rows["sa3"]
 
     def test_the_models_page_download_plan_stays_on_the_main_files(self, env):
         part = row_plan("audio", "qwen3_tts", _web_config(env, self._config()))

@@ -63,6 +63,7 @@ def _routed_calls(model_type: str, **arguments) -> list[tuple[str, dict]]:
         speech_tokenizer=SimpleNamespace(has_encoder=True),
         supported_speakers=["ryan"],
         generate_custom_voice=branch("custom_voice"),
+        generate_voice_design=branch("voice_design"),
         _generate_icl=branch("icl"),
     )
     model._resolve_generation_options = lambda *options: qwen3_tts.Model._resolve_generation_options(model, *options)
@@ -75,6 +76,13 @@ def test_a_customvoice_checkpoint_reads_the_voice_in_one_piece_whatever_the_spli
 
     assert branch == "custom_voice"
     assert (kwargs["speaker"], kwargs["language"], kwargs["instruct"], kwargs["max_tokens"]) == ("ryan", "auto", None, 7)
+
+
+def test_a_voicedesign_checkpoint_designs_the_voice_from_the_description_and_takes_no_voice():
+    ((branch, kwargs),) = _routed_calls("voice_design", text="Hello.", voice=None, instruct="A calm voice.", lang_code="auto", split_pattern="", max_tokens=7)
+
+    assert branch == "voice_design"
+    assert (kwargs["text"], kwargs["instruct"], kwargs["language"], kwargs["max_tokens"]) == ("Hello.", "A calm voice.", "auto", 7)
 
 
 def test_a_base_checkpoint_with_a_recording_follows_it_and_takes_no_voice():

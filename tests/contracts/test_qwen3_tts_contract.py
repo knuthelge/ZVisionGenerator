@@ -8,6 +8,7 @@ interpreter and the observations are read back as JSON; the test process itself 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -40,6 +41,7 @@ _SCRIPT = textwrap.dedent(
             "from_pretrained": params(FasterQwen3TTS.from_pretrained),
             "generate_custom_voice": params(FasterQwen3TTS.generate_custom_voice),
             "generate_voice_clone": params(FasterQwen3TTS.generate_voice_clone),
+            "generate_voice_design": params(FasterQwen3TTS.generate_voice_design),
             "warmup": params(FasterQwen3TTS.warmup),
             "create_voice_clone_prompt": params(Qwen3TTSModel.create_voice_clone_prompt),
         },
@@ -77,9 +79,16 @@ _SCRIPT = textwrap.dedent(
 
 
 @pytest.fixture(scope="module")
-def observed() -> dict:
+def isolated_env(tmp_path_factory) -> dict[str, str]:
+    """Return the environment of a child interpreter with a temporary home, so onnxruntime writes its cache there and not under the real home folder."""
+    home = str(tmp_path_factory.mktemp("home"))
+    return {**os.environ, "HOME": home, "USERPROFILE": home}
+
+
+@pytest.fixture(scope="module")
+def observed(isolated_env) -> dict:
     """Import the libraries and apply the shim twice in a fresh interpreter, and return what it saw before and after."""
-    done = subprocess.run([sys.executable, "-I", "-c", _SCRIPT], capture_output=True, text=True, timeout=300, check=False)
+    done = subprocess.run([sys.executable, "-I", "-c", _SCRIPT], capture_output=True, text=True, timeout=300, check=False, env=isolated_env)
     assert done.returncode == 0, done.stderr[-3000:]
     line = next(line for line in done.stdout.splitlines() if line.startswith("RESULT"))
     return json.loads(line.removeprefix("RESULT"))
@@ -100,6 +109,12 @@ class TestLibrarySignatures:
 
         assert {"text", "language", "voice_clone_prompt", "max_new_tokens"} <= set(signature)
         assert not signature["voice_clone_prompt"]
+
+    def test_generate_voice_design_takes_the_description_text_language_and_limit(self, observed):
+        signature = observed["signatures"]["generate_voice_design"]
+
+        assert {"text", "instruct", "language", "max_new_tokens"} <= set(signature)
+        assert signature["text"] and signature["instruct"] and signature["language"] and not signature["max_new_tokens"]
 
     def test_the_model_can_warm_up_and_build_a_cloning_prompt_from_a_waveform_and_its_transcript(self, observed):
         assert "warmup" in observed["signatures"]
@@ -140,10 +155,10 @@ class TestShim:
         assert observed["private_modeling_qwen3_tts_tokenizer_v2"] is True
 
 
-def test_applying_the_shim_prints_nothing_about_sox_or_flash_attn():
+def test_applying_the_shim_prints_nothing_about_sox_or_flash_attn(isolated_env):
     """The first import of ``qwen_tts`` probes for the sox program (a shell's "sox: not found", a SoX warning) and flash_attn; none of that reaches the console."""
     code = "from zvisiongenerator.backends.audio.qwen3_tts_shim import apply_qwen_shim; apply_qwen_shim()"
-    done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=300, check=False)
+    done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=300, check=False, env=isolated_env)
 
     assert done.returncode == 0, done.stderr[-3000:]
     assert "sox" not in done.stderr.lower() and "flash-attn" not in done.stdout and done.stdout.strip() == ""

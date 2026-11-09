@@ -11,10 +11,12 @@ import numpy as np
 
 from tests._audio_presets import audio_config
 from tests._fake_audio import decode_fake, fake_save_flac, install_fake_audio
+from tests._speech_fakes import RATE, tone
 
 from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest, SpeechDelivery, VoiceRef
 from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
 from zvisiongenerator.utils.video_splice import write_pcm16_wav
+from zvisiongenerator.utils.voice_library import find_voice, save_voice
 
 
 def preset(model_id: str) -> AudioPreset:
@@ -90,8 +92,36 @@ def voice_folder(root: Path) -> Path:
     return folder
 
 
+def save_case_voice(case: dict) -> None:
+    """Save the voice ``narrator`` in the (isolated) library when *case* of ``tests/fixtures/audio_cli_cases.json`` follows a saved voice."""
+    if "saved_voice" not in case["settings"]:
+        return
+    save_voice("Narrator", tone(4.0), RATE, text="Hello, this is the narrator.", consent="given")
+
+
+def _saved_voice(name_or_slug: str):
+    """Return the saved voice a case names."""
+    voice = find_voice(name_or_slug)
+    assert voice is not None, f"the case needs the saved voice {name_or_slug!r}"
+    return voice
+
+
+def _case_voice_path(path: str, voices: Path) -> str:
+    if path.startswith("/library/"):
+        return str(_saved_voice(Path(path).stem).path)
+    return path.replace("/voices/", f"{voices}/")
+
+
+def case_fields(case: dict, voices: Path) -> dict[str, Any]:
+    """Return the form fields of *case* of ``tests/fixtures/audio_cli_cases.json`` with its ``/voices/`` paths moved into *voices* and a ``saved_voice`` turned into the slug of the saved voice of that name."""
+    fields = {key: ([item for item in value] if isinstance(value, list) else str(value).replace("/voices/", f"{voices}/")) for key, value in case["settings"].items()}
+    if "saved_voice" in fields:
+        fields["saved_voice"] = _saved_voice(fields["saved_voice"]).slug
+    return fields
+
+
 def case_request(item: dict, voices: Path) -> AudioGenerationRequest:
-    """Return the request a ``tests/fixtures/audio_cli_cases.json`` case expects, with its ``/voices/`` paths moved into *voices*."""
+    """Return the request a ``tests/fixtures/audio_cli_cases.json`` case expects, with its ``/voices/`` paths moved into *voices* and its ``/library/<name>.wav`` paths into the recording of the saved voice of that name."""
     voice = item["voice"]
     return AudioGenerationRequest(
         preset=item["preset"],
@@ -100,7 +130,7 @@ def case_request(item: dict, voices: Path) -> AudioGenerationRequest:
         lyrics=item["lyrics"],
         seconds=item["seconds"],
         requested_seconds=item.get("requested_seconds"),
-        voice=None if voice is None else VoiceRef(voice["path"].replace("/voices/", f"{voices}/"), voice["text"]),
+        voice=None if voice is None else VoiceRef(_case_voice_path(voice["path"], voices), voice["text"]),
         seed=item["seed"],
         speaker=item["speaker"],
         tempo=item.get("tempo"),

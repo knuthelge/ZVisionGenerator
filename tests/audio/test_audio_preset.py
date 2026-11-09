@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 import yaml
 
-from tests._audio_presets import QWEN_BASE_REPO, QWEN_CUSTOM_REPO, YUE2_REPO, YUE2_VAE_REPO, audio_config, qwen3_tts_preset, sa3_two_kind_preset, yue2_preset
+from tests._audio_presets import QWEN_BASE_REPO, QWEN_CUSTOM_REPO, QWEN_DESIGN_REPO, YUE2_REPO, YUE2_VAE_REPO, audio_config, qwen3_tts_preset, sa3_two_kind_preset, yue2_preset
 from tests._factories import load_packaged_config, packaged_metadata_copy, use_model_metadata
 from tests._paths import REPO_ROOT
 
@@ -355,3 +355,19 @@ class TestVoiceFiles:
         yue2 = parse_audio_presets(audio_config())[0]
 
         assert yue2.voice_files == ()
+
+
+class TestDesignFiles:
+    """The VoiceDesign files are the targets of the ``design`` role."""
+
+    def test_design_files_are_the_design_role_targets(self):
+        preset = next(item for item in parse_audio_presets(audio_config()) if item.id == "qwen3_tts")
+
+        assert [(files.repo_id, files.revision) for files in preset.design_files] == [("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", QWEN_DESIGN_REPO.split("@")[1])]
+        assert "speech_tokenizer/model.safetensors" in preset.design_files[0].patterns
+        assert [files.repo_id for files in preset.files] == ["Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]
+
+    def test_a_model_without_design_targets_has_no_design_files(self):
+        yue2 = parse_audio_presets(audio_config())[0]
+
+        assert yue2.design_files == ()

@@ -24,7 +24,7 @@ from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web import job_downloads as job_downloads_module
-from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_model_part, enhancer_part, is_committed, job_download_parts, missing_targets, planned_targets
+from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_design_part, audio_model_part, enhancer_part, is_committed, job_download_parts, missing_targets, planned_targets
 
 _PROMPTS = {"default": [("prompt", None)]}
 _CONFIG = {"generation": {}, **video_config()}
@@ -246,6 +246,14 @@ class TestAudioParts:
 
         assert [target.repo_id for target in audio_model_part(preset).targets] == ["Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]
         assert [target.repo_id for target in audio_model_part(preset, voice=True).targets] == ["Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"]
+
+    def test_the_design_part_is_the_voicedesign_checkpoint_alone(self):
+        preset = self._preset("qwen3_tts", audio_config(qwen3_tts=qwen3_tts_preset()))
+
+        part = audio_design_part(preset)
+
+        assert (part.label, part.model_id, part.role) == ("Qwen3-TTS 1.7B VoiceDesign", "qwen3_tts", "model")
+        assert [target.repo_id for target in part.targets] == ["Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"]
 
     def test_the_real_planner_downloads_the_preset_s_files(self):
         part = audio_model_part(self._preset("sa3", audio_config(sa3=sa3_preset())))

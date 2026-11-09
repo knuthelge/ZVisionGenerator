@@ -10,20 +10,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-import re
 import threading
 from typing import Any
-import unicodedata
 
 import yaml
 
 from zvisiongenerator.utils.atomic_write import write_text_atomic
 from zvisiongenerator.utils.paths import get_ziv_data_dir
+from zvisiongenerator.utils.slug import is_slug, slugify
 
 __all__ = ["SettingsPreset", "create_preset", "delete_preset", "list_presets", "rename_preset", "update_preset"]
-
-_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-_MAX_SLUG_LENGTH = 64
 
 _IMAGE_KEYS: dict[str, type] = {
     "quantize": int,
@@ -175,15 +171,14 @@ def _preset_path(mode: object, slug: str) -> Path:
     """Return the file of the preset *slug* of *mode*; raise ``ValueError`` for an unknown mode or a non-slug."""
     if mode not in _KEYS:
         raise ValueError("A preset's mode must be 'image' or 'video'.")
-    if not _SLUG_PATTERN.fullmatch(slug):
+    if not is_slug(slug):
         raise ValueError(f"Invalid preset slug: {slug!r}.")
     return _presets_dir() / mode / f"{slug}.yaml"
 
 
 def _slugify(name: str) -> str:
-    """Return the file slug of *name*: ASCII letters and digits in lowercase, other runs becoming one dash."""
-    ascii_text = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii").lower()
-    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text)[:_MAX_SLUG_LENGTH].strip("-")
+    """Return the file slug of *name*; raise ``ValueError`` when it holds no letter or digit."""
+    slug = slugify(name)
     if not slug:
         raise ValueError(f"A preset name needs at least one letter or digit: {name!r}.")
     return slug

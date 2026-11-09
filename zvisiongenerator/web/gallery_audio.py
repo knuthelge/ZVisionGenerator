@@ -1,7 +1,7 @@
 """The audio part of a gallery asset: the facts the viewer and the tile read, and the settings a Reuse restores.
 
 The functions read the settings embedded in a take (the config the save step wrote) and the facts the gallery read from
-the file, and return plain values. They never read a file themselves.
+the file, and return plain values. They read no media file; only a saved voice is looked up in the library.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from zvisiongenerator.utils.audio_settings import DELIVERY_FIELDS
 from zvisiongenerator.utils.enhance_record import enhance_record_summary, enhance_reuse_param
 from zvisiongenerator.utils.paths import expand_home
 from zvisiongenerator.utils.provenance import optional_float, optional_int, optional_text
+from zvisiongenerator.utils.voice_library import voice_by_slug, voice_slug_for_path
 from zvisiongenerator.web.audio_models import runnable_audio_models
 from zvisiongenerator.web.workspace_contract import AUDIO_WORKFLOW_VALUES
 
@@ -80,10 +81,13 @@ def audio_asset_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, 
     The facts include the recorded ``tempo``, ``key``, the five delivery values and ``sound_type`` (``None`` for what the take did not record), and
     ``enhance`` (the summary, the user's own ``prompt_input`` and the record of an enhanced take, else ``None``).
 
+    ``voice_name`` is the name of the saved voice the take followed while that voice exists, else ``None``.
+
     ``reuse_workspace_url`` restores the recorded settings and never the speaker's consent.
     """
     audio = asset.audio
-    reuse = _reuse_state(asset, web_config)
+    voice_slug = voice_slug_for_path(audio["voice_path"]) if audio["voice_path"] else None
+    reuse = _reuse_state(asset, web_config, voice_slug)
     return {
         "id": asset.id,
         "url": asset.media_url,
@@ -104,6 +108,7 @@ def audio_asset_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, 
         "sample_rate": audio["sample_rate"],
         "file_bytes": audio.get("bytes"),
         "has_reference_voice": audio["has_reference_voice"],
+        "voice_name": _saved_voice_name(voice_slug),
         "lyrics": audio["lyrics"],
         "cut": audio["cut"],
         "notes": audio["notes"],
@@ -138,7 +143,17 @@ def _generation(audio: Mapping[str, Any]) -> dict[str, Any]:
     return generation
 
 
-def _reuse_state(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]:
+def _saved_voice_name(slug: str | None) -> str | None:
+    """Return the name of the saved voice *slug*, or ``None`` when *slug* is ``None`` or the voice is gone or unreadable."""
+    if slug is None:
+        return None
+    try:
+        return voice_by_slug(slug).name
+    except FileNotFoundError:
+        return None
+
+
+def _reuse_state(asset: GalleryAsset, web_config: WebUiConfig, voice_slug: str | None) -> dict[str, Any]:
     """Return the reuse state and Reuse query params of an audio asset.
 
     The workflow is the take's kind; a file without this app's settings opens the first audio workflow. The recorded model
@@ -158,7 +173,7 @@ def _reuse_state(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]
         fallback_reasons.append("model_not_configured")
     params: dict[str, str] = {"workflow": workflow}
     if asset.has_reusable_config:
-        params.update(_reuse_params(asset, resolved_model))
+        params.update(_reuse_params(asset, resolved_model, voice_slug))
     state = {
         "requested_workflow": workflow,
         "resolved_workflow": workflow,
@@ -171,11 +186,12 @@ def _reuse_state(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]
     return {"state": state, "params": params}
 
 
-def _reuse_params(asset: GalleryAsset, model: str | None) -> dict[str, str]:
+def _reuse_params(asset: GalleryAsset, model: str | None, voice_slug: str | None) -> dict[str, str]:
     """Return the Reuse query params of a take with settings: the fields of the form, never the consent.
 
     An enhanced take puts the user's own text (which may be empty) in ``prompt``, the recorded text in ``enhanced_prompt`` and how it was written in ``enhance``;
-    any other take puts the recorded text in ``prompt``. A setting the take did not record is left out, so it reuses as Auto or the default.
+    any other take puts the recorded text in ``prompt``. A take that followed a saved voice (a recording in the voices folder) reuses it as ``saved_voice`` (its slug), without the recording or its transcript, even once
+    the voice is deleted, which the Workspace then shows as a deleted voice; a take that followed any other recording reuses its ``voice_path`` and ``voice_text``. A setting the take did not record is left out, so it reuses as Auto or the default.
     """
     audio = asset.audio
     params: dict[str, str] = {}
@@ -196,7 +212,9 @@ def _reuse_params(asset: GalleryAsset, model: str | None) -> dict[str, str]:
     for name in ("key", *DELIVERY_FIELDS, "sound_type"):
         if audio[name]:
             params[name] = audio[name]
-    if audio["voice_path"]:
+    if voice_slug is not None:
+        params["saved_voice"] = voice_slug
+    elif audio["voice_path"]:
         params["voice_path"] = audio["voice_path"]
         if audio["voice_text"]:
             params["voice_text"] = audio["voice_text"]
