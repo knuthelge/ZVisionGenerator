@@ -24,5 +24,18 @@
     "missing_source_video": "true",
     "scene": "",
     "prompt": ""
+  },
+  "extend_from": {
+    "workflow": "extend",
+    "scene": "",
+    "prompt": "",
+    "model": "ltx-8",
+    "lora": "",
+    "steps": "8",
+    "seed": "1",
+    "source_video": "/clips/walk.mp4",
+    "extend_frames": "48",
+    "extend_from": "3.208333",
+    "missing_source_video": "true"
   }
 }

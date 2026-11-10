@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from zvisiongenerator.utils.atomic_write import write_bytes_atomic
-from zvisiongenerator.utils.ffmpeg import tool_error
+from zvisiongenerator.utils.ffmpeg import capture_ffmpeg, tool_error
 from zvisiongenerator.utils.video_extend import AUDIO_FADE_SAMPLES, AUDIO_LEAD_SECONDS, AUDIO_SAMPLE_RATE
 from zvisiongenerator.utils.video_probe import VideoProbe, parse_fraction, probe_video
 
@@ -541,14 +541,12 @@ def _concat_list(source: ExtendSource, video_only: Path, segment: Path) -> str:
 
 
 def run_ffmpeg(command: list[str], message: str = "ffmpeg could not join the clips") -> None:
-    """Run an ffmpeg command, hiding its output.
+    """Run an ffmpeg command to completion, discarding what it prints.
 
     Raises:
         RuntimeError: If ffmpeg exits with an error; *message* leads the error text.
     """
-    result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, check=False)
-    if result.returncode != 0:
-        raise tool_error(message, result.stderr)
+    capture_ffmpeg(command, timeout=None, failure=message)
 
 
 def _check_joined(probe: VideoProbe, source: ExtendSource, *, extend_frames: int, audio: bool) -> None:

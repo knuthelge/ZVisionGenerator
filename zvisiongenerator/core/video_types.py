@@ -63,11 +63,35 @@ class ExtendSource:
 
 
 @dataclass(frozen=True)
+class ExtendCut:
+    """The part of a clip an extension keeps when it continues from a point rather than from the end.
+
+    Attributes:
+        keep_frames: Frames kept from the start of the clip; the last of them is the frame the extension continues from.
+        seconds: The time of that last kept frame on the clip's clock, snapped to the frame (not the time that was asked for).
+        original: The clip that was cut, which is untouched and is what the output records as its source.
+    """
+
+    keep_frames: int
+    seconds: float
+    original: Path
+
+
+@dataclass(frozen=True)
 class ExtendSpec:
-    """What to append to a source clip: the clip and the number of new frames (a multiple of 8)."""
+    """What to append to a source clip: the clip and the number of new frames (a multiple of 8).
+
+    With a *cut*, ``source`` is the temporary clip holding the kept part and ``cut.original`` is the clip it was cut from.
+    """
 
     source: ExtendSource
     frames: int
+    cut: ExtendCut | None = None
+
+    @property
+    def original_path(self) -> Path:
+        """The clip the extension continues as the user knows it: the cut's original, else the source itself."""
+        return self.cut.original if self.cut is not None else self.source.path
 
 
 @dataclass(frozen=True)

@@ -59,6 +59,7 @@ from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, seedvr2_tier_label
+from zvisiongenerator.utils.video_cut import applied_extend_cut
 from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import audio_peaks, gallery_asset_for_output_path, gallery_asset_to_json
 from zvisiongenerator.web.job_downloads import (
@@ -1132,32 +1133,38 @@ class WebRunner:
             control_signal=control_signal,
         ):
             return
-        progress_callback({"type": "model_loading", "mode": "video", "model": request.model_name or model_ref})
         backend = get_video_backend(request.model_family)
         workflow = build_video_workflow(args, enhance=plan.has_rewrites)
         lora_paths = request.lora_paths or []
         lora_weights = request.lora_weights or []
         loras = list(zip(lora_paths, lora_weights, strict=False)) or None
-        model, model_info = backend.load_model(
-            model_ref,
-            mode="extend" if getattr(args, "extend_source", None) is not None else "i2v" if request.image_path else "t2v",
-            end_image=getattr(args, "end_image_path", None) is not None,
-            low_memory=getattr(args, "low_memory", True),
-            loras=loras,
-            **video_load_options(request.model_family, config, request.model_name or model_ref, platform_key=sys.platform, upscale=bool(request.upscale), quiet=True),
-        )
-        run_video_batch(
-            backend=backend,
-            model=model,
-            model_info=model_info,
-            workflow=workflow,
-            prompts_data=prompts_data,
-            config=config,
-            args=args,
-            plan=plan,
-            progress_callback=progress_callback,
-            skip_signal=control_signal,
-        )
+        # An extension from a point cuts its source once, before the model loads, and removes the cut when the job ends,
+        # however it ends. The cut is a long ffmpeg call, so a Quit that arrived during it stops the job before the load.
+        with applied_extend_cut(args):
+            if control_signal.pending() == "quit":
+                progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": len(plan.iterations)})
+                return
+            progress_callback({"type": "model_loading", "mode": "video", "model": request.model_name or model_ref})
+            model, model_info = backend.load_model(
+                model_ref,
+                mode="extend" if getattr(args, "extend_source", None) is not None else "i2v" if request.image_path else "t2v",
+                end_image=getattr(args, "end_image_path", None) is not None,
+                low_memory=getattr(args, "low_memory", True),
+                loras=loras,
+                **video_load_options(request.model_family, config, request.model_name or model_ref, platform_key=sys.platform, upscale=bool(request.upscale), quiet=True),
+            )
+            run_video_batch(
+                backend=backend,
+                model=model,
+                model_info=model_info,
+                workflow=workflow,
+                prompts_data=prompts_data,
+                config=config,
+                args=args,
+                plan=plan,
+                progress_callback=progress_callback,
+                skip_signal=control_signal,
+            )
 
     def _ensure_matte_downloads(
         self,

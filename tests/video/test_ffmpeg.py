@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, ensure_ffmpeg, require_ffmpeg, staging_path, strip_audio, strip_ffmpeg_banner, tool_error
+from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, capture_ffmpeg, ensure_ffmpeg, require_ffmpeg, staging_path, strip_audio, strip_ffmpeg_banner, tool_error
 from zvisiongenerator.utils.video_splice import run_ffmpeg
 
 
@@ -330,3 +330,32 @@ class TestToolsDoNotReadTheTerminal:
             run_ffmpeg(["ffmpeg", "-i", "x"])
 
         assert mock_run.call_args.kwargs["stdin"] == subprocess.DEVNULL
+
+    def test_run_ffmpeg_waits_as_long_as_the_call_takes(self):
+        with patch("zvisiongenerator.utils.video_splice.subprocess.run", return_value=MagicMock(returncode=0, stdout=b"", stderr=b"")) as mock_run:
+            assert run_ffmpeg(["ffmpeg", "-i", "x"]) is None
+
+        assert mock_run.call_args.kwargs["timeout"] is None
+
+
+class TestCaptureFfmpeg:
+    """One ffmpeg call that prints its result to stdout."""
+
+    def test_returns_what_ffmpeg_printed_and_never_reads_the_terminal(self):
+        run = MagicMock(return_value=subprocess.CompletedProcess([], 0, b"picture", b""))
+
+        with patch("zvisiongenerator.utils.ffmpeg.subprocess.run", run):
+            assert capture_ffmpeg(["ffmpeg", "-i", "x"], timeout=5) == b"picture"
+
+        assert run.call_args.kwargs["stdin"] == subprocess.DEVNULL
+        assert run.call_args.kwargs["timeout"] == 5
+
+    def test_a_failure_says_what_was_being_done_and_ends_with_ffmpegs_own_message(self):
+        run = MagicMock(return_value=subprocess.CompletedProcess([], 1, b"", b"ffmpeg version 8\nInvalid data found"))
+
+        with patch("zvisiongenerator.utils.ffmpeg.subprocess.run", run), pytest.raises(RuntimeError, match="^could not read it: Invalid data found$"):
+            capture_ffmpeg(["ffmpeg"], timeout=5, failure="could not read it")
+
+    def test_running_past_the_timeout_is_an_error(self):
+        with patch("zvisiongenerator.utils.ffmpeg.subprocess.run", side_effect=subprocess.TimeoutExpired("ffmpeg", 5)), pytest.raises(RuntimeError, match="took longer than 5 s"):
+            capture_ffmpeg(["ffmpeg"], timeout=5)

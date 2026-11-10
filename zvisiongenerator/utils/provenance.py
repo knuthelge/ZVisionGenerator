@@ -95,6 +95,8 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
 
     An extension (``workflow`` ``"extend"``) records the action as sent, the ``source_video`` it continued and the
     new frames as ``extend_frames``; ``frame_count`` is the whole output clip and the size is the source's displayed one.
+    An extension that continued from a point records the original clip as ``source_video`` and the snapped time of the
+    last frame it kept as ``extend_from``; the temporary cut it was made from is not recorded.
 
     A clip that followed an audio track records its ``audio_track_path``, ``audio_track_start`` and ``audio_track_end``
     (where in the track the clip's sound ends), and ``generation.audio`` is true.
@@ -131,8 +133,10 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
         payload["end_image_path"] = _portable_path(request.end_image_path)
     payload.update(_audio_track_fields(request))
     if extend is not None:
-        payload["source_video"] = _portable_path(str(extend.source.path))
+        payload["source_video"] = _portable_path(str(extend.original_path))
         payload["extend_frames"] = extend.frames
+        if extend.cut is not None:
+            payload["extend_from"] = extend.cut.seconds
     payload.update(_enhance_fields(request.enhance_record))
     return _drop_unserializable(payload)
 
@@ -443,6 +447,8 @@ class RecordedSettings:
     # An extension: the clip it continued and the frames it added (``frame_count`` is the whole clip).
     source_video: str | None = None
     extend_frames: int | None = None
+    # The time of the last frame of ``source_video`` an extension kept, when it continued from a point rather than the end.
+    extend_from: float | None = None
     # The audio file a video followed, where in it the clip's sound started and where it ended.
     audio_track_path: str | None = None
     audio_track_start: float | None = None
@@ -483,6 +489,7 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         prompt_input=optional_text(config.get("prompt_input")),
         source_video=_local_path(optional_text(config.get("source_video"))),
         extend_frames=optional_int(config.get("extend_frames")),
+        extend_from=optional_float(config.get("extend_from")),
         audio_track_path=_local_path(optional_text(config.get("audio_track_path"))),
         audio_track_start=optional_float(config.get("audio_track_start")),
         audio_track_end=optional_float(config.get("audio_track_end")),

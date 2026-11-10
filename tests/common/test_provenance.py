@@ -15,7 +15,7 @@ from PIL.PngImagePlugin import PngInfo
 from tests._factories import make_extend_source
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
-from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.core.video_types import AudioTrack, ExtendCut, ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, staging_path
 from zvisiongenerator.utils.provenance import (
     IMAGE_CONFIG_SCHEMA,
@@ -894,6 +894,25 @@ class TestBuildExtendConfigPayload:
             "source_video": "/videos/clip.mp4",
             "extend_frames": 48,
         }
+
+    def test_an_extension_from_a_point_records_the_original_and_the_snapped_point_not_the_cut(self):
+        original = Path("/videos/walk.mp4")
+        cut_source = _make_extend_source(path=Path("/videos/.ziv-tmp-cut-ab12/cut.mp4"), frame_count=61)
+        request = _make_extend_request(cut_source, frames=48, extend=ExtendSpec(cut_source, 48, ExtendCut(keep_frames=61, seconds=2.5, original=original)))
+
+        payload = build_video_config_payload(request, VideoWorkingArtifacts())
+
+        assert payload["source_video"] == str(original)
+        assert payload["extend_from"] == 2.5
+        assert payload["frame_count"] == 61 + 48
+        assert STAGING_FILE_PREFIX not in json.dumps(payload)
+
+    def test_an_extension_from_the_end_records_no_point(self):
+        assert "extend_from" not in build_video_config_payload(_make_extend_request(), VideoWorkingArtifacts())
+
+    @pytest.mark.parametrize(("recorded", "expected"), [(2.5, 2.5), ("2.5", 2.5), (None, None), ("soon", None), ([], None)])
+    def test_the_recorded_point_is_read_back_and_a_malformed_one_is_dropped(self, recorded, expected):
+        assert recorded_settings({"workflow": "extend", "extend_from": recorded}).extend_from == expected
 
     def test_an_extension_records_where_in_the_track_its_new_part_ends(self):
         request = _make_extend_request(frames=48, audio_track=AudioTrack("/in/voice.mp3", 2.0))

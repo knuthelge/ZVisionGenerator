@@ -246,7 +246,7 @@ def run_video_batch(
                     )
 
                     if extend is not None:
-                        print(f"  {args.width}x{args.height}, +{extend.frames} frames from {extend.source.path.name}, seed={seed}")
+                        print(f"  {args.width}x{args.height}, +{extend.frames} frames from {extend.original_path.name}, seed={seed}")
                     else:
                         print(f"  {args.width}x{args.height}, {args.num_frames} frames, seed={seed}")
                     if args.upscale:
@@ -450,7 +450,7 @@ def _extend_spec(args: argparse.Namespace) -> ExtendSpec | None:
     source = getattr(args, "extend_source", None)
     if source is None:
         return None
-    return ExtendSpec(source, args.extend_frames)
+    return ExtendSpec(source, args.extend_frames, getattr(args, "extend_cut", None))
 
 
 def _emit_cancelled(progress_callback: ProgressCallback | None, completed: int, total: int) -> None:

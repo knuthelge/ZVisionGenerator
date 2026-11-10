@@ -96,6 +96,7 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--audio-start SECONDS` | `0` | Where in the track the clip's sound starts. Needs `--audio-file`. With `--extend` and the same file the source followed, the default is where the source's sound ended |
 | `--low-memory` / `--no-low-memory` | on | LTX: free each part of the model once it has run. On Macs with 24 GB or less it also streams the transformer from disk. MiniMax H3 always streams its blocks |
 | `--extend SRC` | none | Continue the video `SRC` and write a new file. See [Extending a video](../concepts/video.md#extending-a-video) |
+| `--extend-from SECONDS` | end of the video | Continue `--extend` from this point in the video instead of its end. The frame at that time is the last one kept and what follows it is dropped; the source file is not changed, and the new file holds the kept part plus the new part. Needs at least 25 frames before the point; a point at or past the last frame keeps the whole video. With a track from `--audio-file`, the default start moves back by the dropped frames. Needs `--extend` |
 | `--extend-seconds S` | `2` | Length to add with `--extend`, at the source's frame rate, rounded to a multiple of the model's step: 8 frames for LTX, 17 for MiniMax H3 |
 | `--extend-frames N` | | Frames to add with `--extend`, rounded to a multiple of the step (8 for LTX, 17 for MiniMax H3; at least one step). Can't be combined with `--extend-seconds` |
 | `-o`, `--output` | `.` | Output folder |

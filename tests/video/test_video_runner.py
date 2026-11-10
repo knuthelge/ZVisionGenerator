@@ -17,7 +17,7 @@ from tests.video._helpers import make_ltx_info
 
 from zvisiongenerator.core.job_plan import EnhanceStatus, JobPlan
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.core.video_types import AudioTrack, ExtendSpec
+from zvisiongenerator.core.video_types import AudioTrack, ExtendCut, ExtendSpec
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.video_runner import run_video_batch
@@ -795,6 +795,13 @@ class TestExtendBatch:
         assert request.extend == ExtendSpec(source, 48)
         assert (request.width, request.height, request.num_frames) == (512, 256, 73)
         assert request.image_path is None and request.upscale is None
+
+    def test_a_cut_reaches_the_extend_spec(self):
+        cut = ExtendCut(keep_frames=61, seconds=2.5, original=Path("/videos/walk.mp4"))
+
+        (request,), source = self._run(extend_cut=cut)
+
+        assert request.extend == ExtendSpec(source, 48, cut)
 
     def test_planned_scene_reaches_the_request_and_an_empty_prompt_is_accepted(self):
         (request,), _ = self._run()

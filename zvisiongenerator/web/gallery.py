@@ -114,6 +114,8 @@ class GalleryAsset:
     # An extension: the clip it continued and the frames it added; ``upscaled`` marks a video that was upscaled.
     source_video: str | None = None
     extend_frames: int | None = None
+    # The time of the last frame of the source an extension kept, when it continued from a point rather than the end.
+    extend_from: float | None = None
     upscaled: bool = False
     # The image a first-and-last-frame clip ends on.
     end_image_path: str | None = None
@@ -447,6 +449,8 @@ def _extend_reuse_params(asset: GalleryAsset, *, source_missing: bool) -> dict[s
         params["source_video"] = asset.source_video
     if asset.extend_frames is not None:
         params["extend_frames"] = str(asset.extend_frames)
+    if asset.extend_from is not None:
+        params["extend_from"] = _seconds_param(asset.extend_from)
     if source_missing:
         params["missing_source_video"] = "true"
     return params
@@ -722,6 +726,7 @@ def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any]) -
         source=_source_with_asset_id(root, metadata["source"]),
         source_video=metadata["source_video"],
         extend_frames=metadata["extend_frames"],
+        extend_from=metadata["extend_from"],
         upscaled=metadata["upscaled"],
         audio={**metadata["audio"], "bytes": file.size} if metadata["audio"] else metadata["audio"],
     )
@@ -782,6 +787,7 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
         "source": recorded.source,
         "source_video": recorded.source_video,
         "extend_frames": recorded.extend_frames,
+        "extend_from": recorded.extend_from,
         "upscaled": bool(recorded.generation.get("upscale")),
         "audio": audio_asset_facts(config, facts.get("audio")) if kind == "audio" else {},
     }

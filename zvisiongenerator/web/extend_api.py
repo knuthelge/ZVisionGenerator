@@ -181,6 +181,7 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading
         "rotation": probe.rotation if probe is not None else None,
         "fps": fps if probe is not None and fps > 0 else None,
         "frame_count": frame_count,
+        "video_start": probe.stream_offset if probe is not None else None,
         "duration_seconds": _source_duration(probe, fps, frame_count),
         "has_audio": probe.has_audio if probe is not None else None,
         "scene": scene,

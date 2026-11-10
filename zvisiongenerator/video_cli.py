@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import math
 import os
 import sys
 import warnings
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -31,6 +33,7 @@ from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.paths import canonical_model_name, resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
 from zvisiongenerator.utils.prompts import inspect_prompts_file
+from zvisiongenerator.utils.video_cut import applied_extend_cut, extend_cut_point, moved_track_end
 from zvisiongenerator.utils.video_extend import DEFAULT_EXTEND_SECONDS, EXTEND_FRAME_STEP, apply_extend_args, extend_step, load_extend_source, require_extend_family, resolve_extend_frames
 from zvisiongenerator.utils.video_support import unsupported_video_request
 from zvisiongenerator.utils.video_model_detect import detect_video_model
@@ -81,6 +84,13 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
         default=None,
         metavar="SRC",
         help="Continue the video SRC: generate what happens next and append it, writing a new file. The prompt may be empty.",
+    )
+    parser.add_argument(
+        "--extend-from",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="Continue --extend from this point in the video instead of its end: the frame at that time is kept and what follows it is dropped. Needs at least 25 frames before the point. The source file is not changed.",
     )
     extend_length = parser.add_mutually_exclusive_group()
     extend_length.add_argument(
@@ -156,9 +166,9 @@ def _resolve_upscale_steps(args: argparse.Namespace, config: dict[str, Any], mod
 
 
 def _check_extend_options(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    """Refuse extend options that cannot be used as given: no capability, options that choose a size, a bad length, a length without ``--extend``."""
+    """Refuse extend options that cannot be used as given: no capability, options that choose a size, a bad length, a length or point without ``--extend``."""
     if args.extend_path is None:
-        for value, flag in ((args.extend_seconds, "--extend-seconds"), (args.extend_frames, "--extend-frames")):
+        for value, flag in ((args.extend_seconds, "--extend-seconds"), (args.extend_frames, "--extend-frames"), (args.extend_from, "--extend-from")):
             if value is not None:
                 parser.error(f"{flag} requires --extend")
         return
@@ -391,6 +401,7 @@ def main(*, prog: str = "ziv-video") -> None:
     args.scene = (args.scene or "").strip() or None
     args.scene_input = args.prompt_input = None
     args.extend_source = None
+    args.extend_cut = None
     # One inline iteration: no prompt source was given, and there is a scene or a clip to continue (the prompt is then empty).
     inline_run = args.prompt is None and args.prompts_file is None and (args.scene is not None or args.extend_path is not None)
     args.prompts_file = str(Path(args.prompts_file or _DEFAULT_PROMPTS_FILE).expanduser())
@@ -403,6 +414,11 @@ def main(*, prog: str = "ziv-video") -> None:
 
     # An extension takes its scene, model and LoRAs from the source clip unless the options say otherwise.
     source = _load_extend_source(parser, args.extend_path) if args.extend_path is not None else None
+    if source is not None and args.extend_from is not None:
+        try:
+            args.extend_cut = extend_cut_point(source, args.extend_from)
+        except ValueError as e:
+            parser.error(str(e))
     if source is not None:
         if not scene_given:
             args.scene = source.scene
@@ -414,9 +430,10 @@ def main(*, prog: str = "ziv-video") -> None:
         except ValueError as e:
             parser.error(str(e))
         args.lora = _extend_lora(args.lora, source)
-        # Without --audio-start, a track the source followed continues from where its sound ended.
+        # Without --audio-start, a track the source followed continues from where its sound ended; for a cut, that is where the kept part's sound ends.
         if args.audio_track is not None and args.audio_start is None:
-            args.audio_track = continue_track(args.audio_track, source)
+            kept = source if args.extend_cut is None else replace(source, audio_track_end=moved_track_end(source, args.extend_cut))
+            args.audio_track = continue_track(args.audio_track, kept)
 
     # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...); the picked name chooses the quantize level
     # and is what the video records, as the Web UI does: on Windows/Linux ltx-4 and ltx-8 resolve to the same repo.
@@ -626,35 +643,43 @@ def main(*, prog: str = "ziv-video") -> None:
         if plan.cancelled:
             return
 
-        # Load model
-        print(f"Loading {model_info.family.upper()} video model: {args.model}")
-        try:
-            model, model_info = backend.load_model(
-                args.model,
-                mode=mode,
-                end_image=args.end_image_path is not None,
-                low_memory=args.low_memory,
-                loras=loras,
-                **video_load_options(model_info.family, config, model_name, platform_key=sys.platform, upscale=bool(args.upscale)),
+        # An extension from a point cuts its source once, before the model loads, and removes the cut when the run ends.
+        # Only making the cut is a usage error; a RuntimeError from the run itself is not caught here.
+        with contextlib.ExitStack() as cut:
+            try:
+                cut.enter_context(applied_extend_cut(args))
+            except RuntimeError as e:
+                logger.exception("Could not cut the extend source")
+                parser.error(str(e))
+            # Load model
+            print(f"Loading {model_info.family.upper()} video model: {args.model}")
+            try:
+                model, model_info = backend.load_model(
+                    args.model,
+                    mode=mode,
+                    end_image=args.end_image_path is not None,
+                    low_memory=args.low_memory,
+                    loras=loras,
+                    **video_load_options(model_info.family, config, model_name, platform_key=sys.platform, upscale=bool(args.upscale)),
+                )
+            except (RuntimeError, ValueError, OSError, ImportError) as e:
+                logger.exception("Failed to load video model %s", args.model)
+                parser.error(describe_refusal(e) or str(e))
+
+            # Build workflow
+            workflow = build_video_workflow(args, enhance=plan.has_rewrites)
+
+            run_video_batch(
+                backend=backend,
+                model=model,
+                model_info=model_info,
+                workflow=workflow,
+                prompts_data=prompts_data,
+                config=config,
+                args=args,
+                plan=plan,
+                skip_signal=skip,
             )
-        except (RuntimeError, ValueError, OSError, ImportError) as e:
-            logger.exception("Failed to load video model %s", args.model)
-            parser.error(describe_refusal(e) or str(e))
-
-        # Build workflow
-        workflow = build_video_workflow(args, enhance=plan.has_rewrites)
-
-        run_video_batch(
-            backend=backend,
-            model=model,
-            model_info=model_info,
-            workflow=workflow,
-            prompts_data=prompts_data,
-            config=config,
-            args=args,
-            plan=plan,
-            skip_signal=skip,
-        )
     finally:
         skip.stop()
 

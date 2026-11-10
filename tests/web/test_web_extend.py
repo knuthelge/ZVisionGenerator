@@ -19,6 +19,7 @@ from tests.web._helpers import post_video, stub_video_submission, make_web_confi
 from zvisiongenerator.web import extend_api as extend_api_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import video_clip as video_clip_module
+from zvisiongenerator.utils import video_cut as video_cut_module
 from zvisiongenerator.utils import video_extend as video_extend_module
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.model_memory import MemoryBudget, clip_memory_fit as real_clip_memory_fit
@@ -831,3 +832,80 @@ def test_inspect_route_has_no_output_folder_for_a_source_outside_the_output_fold
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
 
     assert _inspect({"path": str(clip.path)}).json()["output_folder"] is None
+
+
+# ── Extend from a point ──────────────────────────────────────────────────────
+
+
+def _forbid_cutting(monkeypatch) -> None:
+    """Fail on any ffmpeg cut: a submit, and the plan, only check the point; the job makes the cut when it runs."""
+    monkeypatch.setattr(video_cut_module, "cut_extend_source", lambda *_args, **_kwargs: pytest.fail("the cut must be made when the job runs, not when it is parsed"))
+
+
+def test_extend_submission_with_a_point_sets_the_cut_and_keeps_the_original_source(monkeypatch, tmp_path, clip):
+    submitted = _stub_extend_submission(monkeypatch, tmp_path, clip)
+    _forbid_cutting(monkeypatch)
+
+    response = _post_extend({"source_video": str(clip.path), "extend_from": "2.01", "prompt": "She walks away."})
+
+    assert response.status_code == 200
+    (job,) = submitted
+    args = job["args"]
+    assert (args.extend_cut.keep_frames, args.extend_cut.seconds, args.extend_cut.original) == (49, 2.0, clip.path.resolve())
+    assert args.extend_source.path == clip.path.resolve() and args.extend_source.frame_count == 97
+    assert list(tmp_path.glob("**/.ziv-tmp-cut-*")) == []
+    assert job["context"]["settings"]["extend_from"] == "2.01"
+
+
+@pytest.mark.parametrize("extend_from", [None, "", "4.0", "500"])
+def test_extend_submission_without_a_point_or_at_the_end_cuts_nothing(monkeypatch, tmp_path, clip, extend_from):
+    submitted = _stub_extend_submission(monkeypatch, tmp_path, clip)
+    data = {"source_video": str(clip.path), "prompt": "She walks away."}
+
+    _post_extend(data if extend_from is None else {**data, "extend_from": extend_from})
+
+    assert submitted[0]["args"].extend_cut is None
+
+
+def test_extend_submission_ignores_a_point_for_a_workflow_that_is_not_extend(monkeypatch, tmp_path, clip):
+    submitted = stub_video_submission(monkeypatch, tmp_path)
+
+    post_video({"workflow": "txt2vid", "prompt": "A fox.", "extend_from": "2"})
+
+    assert submitted[0]["args"].extend_cut is None
+
+
+def test_extend_submission_refuses_a_point_that_keeps_under_25_frames(monkeypatch, tmp_path, clip):
+    submitted = _stub_extend_submission(monkeypatch, tmp_path, clip)
+
+    response = _post_extend({"source_video": str(clip.path), "extend_from": "0.5", "prompt": "She walks away."})
+
+    assert response.status_code == 422
+    assert "at least 25 frames" in response.json()["detail"]
+    assert submitted == []
+
+
+@pytest.mark.parametrize("extend_from", ["-1", "nan", "soon"])
+def test_extend_submission_refuses_a_point_that_is_not_a_time(monkeypatch, tmp_path, clip, extend_from):
+    submitted = _stub_extend_submission(monkeypatch, tmp_path, clip)
+
+    response = _post_extend({"source_video": str(clip.path), "extend_from": extend_from, "prompt": "She walks away."})
+
+    assert response.status_code == 422
+    assert "extend_from" in response.json()["detail"] or "point" in response.json()["detail"]
+    assert submitted == []
+
+
+def test_the_plan_route_checks_the_point_and_makes_no_cut(monkeypatch, tmp_path, clip):
+    _stub_extend_submission(monkeypatch, tmp_path, clip)
+    _forbid_cutting(monkeypatch)
+    monkeypatch.setattr(web_server, "job_download_parts", lambda *_args, **_kwargs: ())
+    form = {"mode": "video", "model": "ltx-8", "workflow": "extend", "source_video": str(clip.path), "prompt": "She walks away."}
+
+    with TestClient(web_server.app) as client:
+        fine = client.post("/api/generate/plan", data={**form, "extend_from": "2"})
+        too_early = client.post("/api/generate/plan", data={**form, "extend_from": "0.5"})
+
+    assert fine.status_code == 200
+    assert too_early.status_code == 422 and "at least 25 frames" in too_early.json()["detail"]
+    assert list(tmp_path.glob("**/.ziv-tmp-cut-*")) == []

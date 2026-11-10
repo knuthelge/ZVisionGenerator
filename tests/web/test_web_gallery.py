@@ -395,6 +395,26 @@ def test_extend_asset_carries_source_and_new_frames(tmp_path, monkeypatch):
     assert payload["frame_count"] == 97
 
 
+def test_an_extension_from_a_point_reuses_it_with_its_original_source(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"\x00")
+
+    _payload, params = _video_reuse(tmp_path, _extend_config(source, extend_from=2.5, frame_count=61 + 48))
+
+    assert (params["source_video"], params["extend_from"], params["extend_frames"]) == (str(source), "2.5", "48")
+
+
+def test_an_extension_from_the_end_reuses_without_a_point(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"\x00")
+
+    _payload, params = _video_reuse(tmp_path, _extend_config(source))
+
+    assert "extend_from" not in params
+
+
 def test_other_videos_carry_no_source(tmp_path, monkeypatch):
     monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
 
@@ -476,6 +496,7 @@ def test_a_video_without_embedded_settings_still_shows_its_file_name(tmp_path):
             {"scene": "A wet street at night.", "prompt": "She waves slowly.", "scene_input": "My street.", "prompt_input": "She waves."},
         ),
         ("blank_text", {"scene": "", "prompt": ""}),
+        ("extend_from", {"scene": "", "prompt": "", "extend_from": 3.208333}),
     ],
 )
 def test_extend_reuse_params_match_the_shared_fixture_the_frontend_loads(tmp_path, monkeypatch, case, config):
@@ -486,7 +507,7 @@ def test_extend_reuse_params_match_the_shared_fixture_the_frontend_loads(tmp_pat
     payload, params = _video_reuse(tmp_path, _extend_config(Path("/clips/walk.mp4"), **config))
 
     assert params == expected
-    if case == "blank_text":
+    if case in {"blank_text", "extend_from"}:
         assert payload["prompt"] == ""  # the file name is not shown as the prompt
 
 

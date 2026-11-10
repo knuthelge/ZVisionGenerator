@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import warnings
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -20,6 +21,12 @@ from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser
 
 _LTX_SETTINGS = video_config()["video_model_presets"]["ltx"]
+
+
+@pytest.fixture(autouse=True)
+def _no_cut_made(monkeypatch):
+    """Keep a run from cutting a clip with ffmpeg; ``tests/video/test_video_cut.py`` covers the cut, and a test here can set its own."""
+    monkeypatch.setattr(video_cli, "applied_extend_cut", lambda _args: contextlib.nullcontext())
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +312,7 @@ def _run_cli(
     resolve=None,
     detect=None,
     default_frames=49,
+    run_error=None,
 ):
     """Run ``main()`` with heavy steps patched out; return what the batch received plus the backend and memory-check mocks."""
     import zvisiongenerator.video_cli as video_cli
@@ -349,6 +357,8 @@ def _run_cli(
 
     def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, skip_signal=None):
         captured.update(prompts_data=prompts_data, args=args, plan=plan)
+        if run_error is not None:
+            raise run_error
 
     monkeypatch.setattr(video_cli, "run_video_batch", _fake_run_video_batch)
     with patch("sys.argv", ["ziv-video", "-o", str(tmp_path / "out"), *argv]):
@@ -490,6 +500,87 @@ class TestVideoCliExtend:
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", seconds])
         assert "--extend-seconds" in capsys.readouterr().err
         self.backend.load_model.assert_not_called()
+
+    def test_parser_extend_from_option(self):
+        assert _build_video_parser().parse_args(["--extend", "clip.mp4", "--extend-from", "3.2"]).extend_from == 3.2
+        assert _build_video_parser().parse_args(["--extend", "clip.mp4"]).extend_from is None
+
+    def test_extend_from_without_extend_is_refused(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "m", "--prompt", "a dog", "--extend-from", "2"])
+        assert "--extend-from requires --extend" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("seconds", ["-1", "nan", "inf"])
+    def test_extend_from_must_be_a_finite_time_of_zero_or_more(self, monkeypatch, tmp_path, capsys, seconds):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-from=" + seconds])
+        assert "must be a finite number of seconds, 0 or more" in capsys.readouterr().err
+        self.backend.load_model.assert_not_called()
+
+    def test_a_point_that_keeps_under_25_frames_is_refused_before_the_model_loads(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-from", "0.5"])
+        assert "at least 25 frames" in capsys.readouterr().err
+        self.backend.load_model.assert_not_called()
+
+    def test_a_point_sets_the_cut_the_job_runs_on(self, monkeypatch, tmp_path):
+        source = self._source()
+        args = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-from", "2.51"], source=source)["args"]
+        assert args.extend_source is source
+        assert (args.extend_cut.keep_frames, args.extend_cut.seconds, args.extend_cut.original) == (61, 2.5, source.path)
+
+    @pytest.mark.parametrize("argv", [[], ["--extend-from", "500"]])
+    def test_no_point_or_one_at_the_end_cuts_nothing(self, monkeypatch, tmp_path, argv):
+        args = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", *argv])["args"]
+        assert args.extend_cut is None
+
+    def test_the_cut_is_made_before_the_model_loads_and_wraps_the_load(self, monkeypatch, tmp_path):
+        events: list[str] = []
+        cut_source = object()
+        seen: dict = {}
+
+        @contextlib.contextmanager
+        def _applied(args):
+            original = args.extend_source
+            args.extend_source = cut_source
+            seen["args"] = args
+            events.append("cut")
+            try:
+                yield
+            finally:
+                args.extend_source = original
+                events.append("removed")
+
+        def _load(*_args, **_kwargs):
+            events.append(f"load on cut: {seen['args'].extend_source is cut_source}")
+            return MagicMock(), make_ltx_info()
+
+        monkeypatch.setattr(video_cli, "applied_extend_cut", _applied)
+        backend = self.backend = MagicMock()
+        backend.load_model.side_effect = _load
+
+        _run_cli(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-from", "2.5"], backend=backend)
+
+        assert events == ["cut", "load on cut: True", "removed"]
+
+    def test_a_cut_that_cannot_be_made_is_a_usage_error_before_the_model_loads(self, monkeypatch, tmp_path, capsys):
+        def _failing(_args):
+            raise RuntimeError("ffmpeg could not cut the clip")
+
+        monkeypatch.setattr(video_cli, "applied_extend_cut", _failing)
+        backend = self.backend = MagicMock()
+
+        with pytest.raises(SystemExit, match="2"):
+            _run_cli(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-from", "2.5"], backend=backend)
+
+        assert "ffmpeg could not cut the clip" in capsys.readouterr().err
+        backend.load_model.assert_not_called()
+
+    def test_a_runtime_error_from_the_run_is_not_taken_for_a_failed_cut(self, monkeypatch, tmp_path):
+        backend = self.backend = MagicMock()
+
+        with pytest.raises(RuntimeError, match="generation broke"):
+            _run_cli(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-from", "2.5"], backend=backend, run_error=RuntimeError("generation broke"))
 
     @pytest.mark.parametrize("path", ["", "   "])
     def test_a_blank_extend_path_is_refused(self, monkeypatch, tmp_path, capsys, path):
@@ -1225,6 +1316,22 @@ class TestVideoCliAudioTrack:
         captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "ltx-8", "--audio-file", track], source=source)
 
         assert captured["args"].audio_track.start == 12.5
+
+    def test_an_extension_from_a_point_continues_the_track_from_where_the_kept_part_ends(self, monkeypatch, tmp_path):
+        track = self._track(tmp_path, 60.0, monkeypatch)
+        source = _cli_source(audio_track_path=track, audio_track_end=12.5)  # 120 frames at 24 fps; a point at 2.5 s keeps 61 of them
+
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "ltx-8", "--audio-file", track, "--extend-from", "2.5"], source=source)
+
+        assert captured["args"].audio_track.start == pytest.approx(12.5 - 59 / 24)
+
+    def test_the_start_cannot_move_before_the_start_of_the_track(self, monkeypatch, tmp_path):
+        track = self._track(tmp_path, 60.0, monkeypatch)
+        source = _cli_source(audio_track_path=track, audio_track_end=1.0)
+
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "ltx-8", "--audio-file", track, "--extend-from", "2.5"], source=source)
+
+        assert captured["args"].audio_track.start == 0.0
 
     def test_an_explicit_start_wins_over_where_the_source_ended(self, monkeypatch, tmp_path):
         track = self._track(tmp_path, 60.0, monkeypatch)

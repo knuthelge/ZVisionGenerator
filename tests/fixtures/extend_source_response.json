@@ -7,6 +7,7 @@
   "rotation": 0,
   "fps": 24.0,
   "frame_count": 97,
+  "video_start": 0.0,
   "duration_seconds": 4.042,
   "has_audio": true,
   "scene": "A woman in a red raincoat on a rainy street at night.",

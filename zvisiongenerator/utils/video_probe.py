@@ -59,6 +59,11 @@ class VideoProbe:
         return float(rate) if rate else 0.0
 
     @property
+    def stream_offset(self) -> float:
+        """Return how long after the container's start the video stream begins, in seconds (never negative)."""
+        return max(0.0, (self.video_start or 0.0) - (self.format_start or 0.0))
+
+    @property
     def square_pixels(self) -> bool:
         """Return whether the pixels are square: no sample aspect ratio, ``1:1`` or ``0:1`` (unset), or one that is unreadable."""
         if self.sample_aspect_ratio is None:

@@ -27,11 +27,12 @@ from tests._factories import _make_video_args, make_extend_source, video_config
 from tests.web._helpers import sse_payload, stub_request_job, wait_for_status
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
-from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
+from zvisiongenerator.core.video_types import ExtendCut, LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.upscale_runner import upscale_prompts
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils import video_cut as video_cut_module
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import job_downloads as job_downloads_module
@@ -280,6 +281,98 @@ class TestWebRunner:
         assert seen["args"].extend_source is source
         assert "upscale" not in backend.load_model.call_args.kwargs
         assert backend.load_model.call_args.kwargs["mode"] == "extend"
+
+    def _run_extend_from_a_point(self, monkeypatch, tmp_path, *, batch, status="completed"):
+        """Run an extend job with a cut through the runner with a faked batch; return what the faked ffmpeg cut, the job's status and the args."""
+        original = make_extend_source(path=Path("/clips/clip.mp4"), frame_count=97)
+        cut = ExtendCut(keep_frames=61, seconds=2.5, original=original.path)
+        save_dir = tmp_path / "new-project"
+        args = _make_video_args(extend_source=original, extend_cut=cut, extend_frames=48, width=512, height=256, num_frames=73, fps=24.0, image_path=None, upscale=None, output=str(save_dir))
+        cuts: list[Path] = []
+
+        def _fake_cut(source, point, work_dir):
+            cuts.append(work_dir)
+            (work_dir / "cut.mp4").write_bytes(b"cut")
+            return replace(source, path=work_dir / "cut.mp4", frame_count=point.keep_frames)
+
+        monkeypatch.setattr(video_cut_module, "cut_extend_source", _fake_cut)
+        monkeypatch.setattr(web_runner_module, "run_video_batch", batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            backend = stub_request_job(monkeypatch)
+            request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", width=512, height=256, num_frames=73)
+            job_id = runner.submit_video_request_job(request=request, prompts_data={"default": [("", None)]}, config={}, args=args, model_ref="model")
+            final = wait_for_status(runner, job_id, status)["status"]
+        finally:
+            runner.shutdown()
+        return SimpleNamespace(cuts=cuts, status=final, args=args, original=original, backend=backend, save_dir=save_dir)
+
+    def test_an_extend_job_from_a_point_cuts_once_runs_on_the_cut_and_removes_it(self, monkeypatch, tmp_path):
+        seen: dict[str, object] = {}
+
+        def _batch(*, args, progress_callback, **_kw):
+            seen["source"] = args.extend_source
+            seen["cut_file_exists"] = args.extend_source.path.is_file()
+            seen["cut_dir"] = args.extend_source.path.parent
+            progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+
+        run = self._run_extend_from_a_point(monkeypatch, tmp_path, batch=_batch)
+
+        assert run.status == "completed"
+        assert len(run.cuts) == 1 and run.cuts[0] == seen["cut_dir"]
+        assert seen["source"] is not run.original and seen["source"].frame_count == 61 and seen["cut_file_exists"] is True
+        assert seen["cut_dir"].parent == run.save_dir and seen["cut_dir"].name.startswith(".ziv-tmp-cut-")
+        assert not seen["cut_dir"].exists() and list(run.save_dir.iterdir()) == []
+        assert run.args.extend_source is run.original
+        assert run.backend.load_model.call_args.kwargs["mode"] == "extend"
+
+    def test_an_extend_job_from_a_point_removes_the_cut_when_the_batch_fails(self, monkeypatch, tmp_path):
+        def _batch(**_kw):
+            raise RuntimeError("the model ran out of memory")
+
+        run = self._run_extend_from_a_point(monkeypatch, tmp_path, batch=_batch, status="failed")
+
+        assert run.status == "failed"
+        assert len(run.cuts) == 1 and not run.cuts[0].exists()
+        assert run.args.extend_source is run.original
+
+    def test_a_quit_during_the_cut_cancels_the_job_before_the_model_loads_and_removes_the_cut(self, monkeypatch, tmp_path):
+        original = make_extend_source(path=Path("/clips/clip.mp4"), frame_count=97)
+        cut = ExtendCut(keep_frames=61, seconds=2.5, original=original.path)
+        save_dir = tmp_path / "new-project"
+        args = _make_video_args(extend_source=original, extend_cut=cut, extend_frames=48, width=512, height=256, num_frames=73, fps=24.0, image_path=None, upscale=None, output=str(save_dir))
+        cutting, release, cuts = threading.Event(), threading.Event(), []
+
+        def _slow_cut(source, point, work_dir):
+            cuts.append(work_dir)
+            (work_dir / "cut.mp4").write_bytes(b"cut")
+            cutting.set()
+            assert release.wait(timeout=2.0)
+            return replace(source, path=work_dir / "cut.mp4", frame_count=point.keep_frames)
+
+        batch = MagicMock(name="run_video_batch")
+        monkeypatch.setattr(video_cut_module, "cut_extend_source", _slow_cut)
+        monkeypatch.setattr(web_runner_module, "run_video_batch", batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            backend = stub_request_job(monkeypatch)
+            request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", width=512, height=256, num_frames=73)
+            job_id = runner.submit_video_request_job(request=request, prompts_data={"default": [("", None)]}, config={}, args=args, model_ref="model")
+            assert cutting.wait(timeout=2.0)
+            assert runner.queue_job_control(job_id, "quit")["status"] == "queued"
+            release.set()
+            snapshot = wait_for_status(runner, job_id, "cancelled")
+            types = [event["type"] for event in runner._get_job(job_id).history]
+        finally:
+            release.set()
+            runner.shutdown()
+
+        assert snapshot["terminal_event"] == "job_cancelled"
+        assert "model_loading" not in types
+        backend.load_model.assert_not_called()
+        batch.assert_not_called()
+        assert len(cuts) == 1 and not cuts[0].exists() and list(save_dir.iterdir()) == []
+        assert args.extend_source is original
 
     @pytest.mark.parametrize("end_image_path", ["/images/last.png", None])
     def test_an_image_to_video_job_loads_for_its_last_frame_image_only_when_it_has_one(self, monkeypatch, end_image_path):

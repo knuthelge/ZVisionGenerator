@@ -101,6 +101,7 @@ from zvisiongenerator.utils.prompt_enhance_video import EnhancePairResult, enhan
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_LTX, UPSCALE_METHOD_SEEDVR2
+from zvisiongenerator.utils.video_cut import extend_cut_point
 from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
 from zvisiongenerator.utils.lora_preview import LARGE_PREVIEW_EDGE, PREVIEW_EDGE
 from zvisiongenerator.utils.references import check_reference_count, check_reference_files, missing_reference_files
@@ -1717,6 +1718,9 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
     if source is not None:
         # An extension lands beside its source when that is an asset in the output folder; a staged or outside source uses the picked project.
         save_dir = output_source_folder(output_dir, str(source.path)) or save_dir
+    # Only checked here; the cut itself is made when the job runs, so the plan route stays free of files.
+    extend_from = _optional_float(form, "extend_from") if source is not None else None
+    extend_cut = extend_cut_point(source, extend_from) if source is not None and extend_from is not None else None
     audio_track_path = _resolve_audio_track_file(form, output_dir)
     audio_track = _audio_track_from_form(form, audio_track_path)
     # A track is the clip's sound, so it overrides the Audio switch.
@@ -1785,6 +1789,7 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         # An unreadable track is refused here, before the model loads; a short track, or a Start at past its end, is allowed (silence fills the rest).
         require_readable_track(audio_track)
     args.audio_track = audio_track
+    args.extend_cut = extend_cut
 
     args.lora_paths, args.lora_weights = _resolve_loras(form, require_file=False)
     if source is not None:

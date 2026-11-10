@@ -356,7 +356,7 @@ class TestExtendMemoryFit:
 
     def _stub_an_inspected_source(self, tmp_path, monkeypatch):
         self._stub_a_source(tmp_path, monkeypatch)
-        probe = SimpleNamespace(fps=24.0, width=768, height=448, rotation=0, frame_count=48, has_audio=False, duration=2.0)
+        probe = SimpleNamespace(fps=24.0, width=768, height=448, rotation=0, frame_count=48, has_audio=False, duration=2.0, video_start=None, format_start=None, stream_offset=0.0)
         monkeypatch.setattr(extend_api_module, "_inspect_source", lambda _path: SimpleNamespace(probe=probe, recorded=None, problems=(), source=make_extend_source()))
         monkeypatch.setattr(extend_api_module, "with_family_problems", lambda inspection, family: inspection)
 

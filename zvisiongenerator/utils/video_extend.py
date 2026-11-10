@@ -353,7 +353,7 @@ def build_extend_source(path: str | Path, probe: VideoProbe, recorded: RecordedS
         fps_text=probe.r_frame_rate,
         frame_count=probe.frame_count,
         has_audio=probe.has_audio,
-        video_start=_stream_offset(probe),
+        video_start=probe.stream_offset,
         color_space=probe.color_space,
         color_primaries=probe.color_primaries,
         color_trc=probe.color_trc,
@@ -434,13 +434,8 @@ def _tail_audio_decodes(path: Path, probe: VideoProbe) -> bool:
     """Check that the audio under the carried frames decodes; a clip without audio or a known tail passes."""
     if not probe.has_audio or probe.frame_count is None or probe.fps <= 0:
         return True
-    start = _stream_offset(probe) + max(0, probe.frame_count - CARRY_FRAMES) / probe.fps
+    start = probe.stream_offset + max(0, probe.frame_count - CARRY_FRAMES) / probe.fps
     return audio_decodes(path, start=start, duration=CARRY_FRAMES / probe.fps)
-
-
-def _stream_offset(probe: VideoProbe) -> float:
-    """Return how long after the container's start the video stream begins, in seconds (never negative)."""
-    return max(0.0, (probe.video_start or 0.0) - (probe.format_start or 0.0))
 
 
 def _high_bit_depth(probe: VideoProbe) -> bool:

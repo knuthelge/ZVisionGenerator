@@ -46,6 +46,26 @@ def tool_error(message: str, stderr: bytes | str | None, *, limit: int = 1500) -
     return RuntimeError(f"{message}: {strip_ffmpeg_banner(text)[-limit:]}")
 
 
+def capture_ffmpeg(command: list[str], *, timeout: float | None, failure: str = "ffmpeg failed") -> bytes:
+    """Run one ffmpeg call and return what it printed to stdout.
+
+    Args:
+        command: The full command line.
+        timeout: Seconds the call may run before it is stopped; ``None`` waits as long as it takes.
+        failure: The start of the error message when ffmpeg exits with an error.
+
+    Raises:
+        RuntimeError: If ffmpeg fails or runs past *timeout*.
+    """
+    try:
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"ffmpeg took longer than {timeout:g} s") from exc
+    if result.returncode != 0:
+        raise tool_error(failure, result.stderr)
+    return result.stdout
+
+
 # Prefix of the hidden temporary file an in-place rewrite writes beside its target.
 STAGING_FILE_PREFIX = ".ziv-tmp-"
 
