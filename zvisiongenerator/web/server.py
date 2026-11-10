@@ -171,6 +171,8 @@ from zvisiongenerator.web.path_browser import (
     resolve_purpose,
 )
 from zvisiongenerator.web import browse_media
+from zvisiongenerator.web.upload_folders import UPLOADS_FOLDER
+from zvisiongenerator.web.video_frame_api import frame_response
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware, is_cross_site_fetch
 from zvisiongenerator.web.upscale_api import plan_ltx_video_upscale, plan_seedvr2_upscale, plan_upscale, plan_video_upscale, upscale_json_request, upscale_size_label, video_upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
@@ -369,13 +371,20 @@ async def _browse_media_file(purpose: str, path: str, kinds: tuple[str, ...]) ->
 
 
 @app.get("/api/browse/preview", dependencies=[Depends(_refuse_cross_site_fetch)])
-async def api_browse_preview(request: Request, purpose: str, path: str, frame: Literal["tenth", "last"] = "tenth", size: Literal["small", "large"] = "small") -> Response:
-    """Return a WebP picture (at most 384 px, or 768 px with ``size=large``) of an image, or of a video's frame 10% in or, with ``frame=last``, its last frame."""
+async def api_browse_preview(request: Request, purpose: str, path: str, frame: Literal["tenth", "last"] = "tenth", size: Literal["small", "large"] = "small", at: float | None = None) -> Response:
+    """Return a WebP picture (at most 384 px, or 768 px with ``size=large``) of an image, or of a video's frame 10% in, its last frame (``frame=last``) or the frame second ``at`` lies in."""
     media = await _browse_media_file(purpose, path, browse_media.PREVIEW_KINDS)
     if frame == "last" and media.kind != "video":
         raise HTTPException(status_code=422, detail="Only a video has a last frame.")
+    if at is not None:
+        if media.kind != "video":
+            raise HTTPException(status_code=422, detail="Only a video has a frame at a time.")
+        if frame == "last":
+            raise HTTPException(status_code=422, detail="Name a time or the last frame, not both.")
+        if not math.isfinite(at) or at < 0:
+            raise HTTPException(status_code=422, detail="at must be a number of seconds, zero or more.")
     edge = LARGE_PREVIEW_EDGE if size == "large" else PREVIEW_EDGE
-    return await browse_media.serve_preview(request, media, frame=frame, cache_dir=browse_media.cache_directory(get_ziv_data_dir()), edge=edge)
+    return await browse_media.serve_preview(request, media, frame=frame, cache_dir=browse_media.cache_directory(get_ziv_data_dir()), edge=edge, at=at)
 
 
 @app.get("/api/browse/info", dependencies=[Depends(_refuse_cross_site_fetch)])
@@ -383,6 +392,13 @@ async def api_browse_info(request: Request, purpose: str, path: str) -> Response
     """Return the facts of an image, audio or video file as JSON."""
     media = await _browse_media_file(purpose, path, browse_media.INFO_KINDS)
     return await browse_media.serve_info(request, media)
+
+
+@app.get("/api/browse/sprite", dependencies=[Depends(_refuse_cross_site_fetch)])
+async def api_browse_sprite(request: Request, purpose: str, path: str) -> Response:
+    """Return a JPEG contact sheet of a video: at most 121 evenly spaced frames in an 11 x 11 grid, 160 px on the long side."""
+    media = await _browse_media_file(purpose, path, browse_media.SPRITE_KINDS)
+    return await browse_media.serve_sprite(request, media, browse_media.cache_directory(get_ziv_data_dir()))
 
 
 @app.get("/api/browse/media", dependencies=[Depends(_refuse_cross_site_fetch)])
@@ -438,6 +454,23 @@ async def api_extend_source(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/video/frame")
+async def api_video_frame(request: Request) -> dict[str, Any]:
+    """Save the frame of a host-local video that a time lies in as a PNG under the output folder's uploads, and return its path."""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
+    try:
+        return await run_in_threadpool(frame_response, payload, _media_output_root())
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/references/check")
@@ -2403,7 +2436,7 @@ def _save_upload(uploaded_file: Any, output_dir: str, *, audio: bool = False, la
         except (OSError, UnidentifiedImageError, ValueError) as exc:
             raise ValueError("Uploaded image is invalid or unreadable.") from exc
     digest = hashlib.sha256(data).hexdigest()
-    path = Path(output_dir) / ".web_uploads" / (f"{digest}/{_upload_name(uploaded_file.filename, suffix)}" if audio else f"{digest}{suffix}")
+    path = Path(output_dir) / UPLOADS_FOLDER / (f"{digest}/{_upload_name(uploaded_file.filename, suffix)}" if audio else f"{digest}{suffix}")
     if not path.is_file():
         path.parent.mkdir(parents=True, exist_ok=True)
         write_bytes_atomic(path, data)

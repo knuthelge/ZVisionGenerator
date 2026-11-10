@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 EXTEND_UNAVAILABLE_MESSAGE = "Extending a video is not available on this platform."
 
 
-def _source_video_path(value: Any, *, key: str) -> Path:
+def source_video_path(value: Any, *, key: str) -> Path:
     """Return the host-local path of a source video, checked like a reference image plus its extension.
 
     Raises:
@@ -73,7 +73,7 @@ def _source_video_path(value: Any, *, key: str) -> Path:
 def load_source_video(value: Any, *, key: str) -> ExtendSource:
     """Return the checked source of an extension for a job; every refusal, a missing file included, is a ``ValueError``."""
     try:
-        path = _source_video_path(value, key=key)
+        path = source_video_path(value, key=key)
         return require_extend_source(_inspect_source(path), path)
     except FileNotFoundError as exc:
         raise ValueError(str(exc)) from exc
@@ -148,7 +148,7 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading
     """
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object.")
-    path = _source_video_path(payload.get("path"), key="path")
+    path = source_video_path(payload.get("path"), key="path")
     requested_frames = json_field(payload, "extend_frames", int, "a positive integer", minimum=1)
     model = json_field(payload, "model", str, "a string")
     low_memory = json_field(payload, "low_memory", bool, "a boolean")

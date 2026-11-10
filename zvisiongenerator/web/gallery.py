@@ -50,6 +50,7 @@ from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.gallery_audio import audio_asset_facts, audio_asset_json, is_reusable_audio_config
 from zvisiongenerator.web.gallery_index import FactsRead, GalleryIndex, ScannedFile
 from zvisiongenerator.web.projects import NO_PROJECT_FILTER, asset_project, project_dir
+from zvisiongenerator.web.upload_folders import UPLOADS_FOLDER
 from zvisiongenerator.web.upscale_api import ltx_upscale_model
 from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canonicalize_workflow, default_workflow_for_mode, workflow_mode
 
@@ -57,7 +58,7 @@ from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canoni
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
 AUDIO_EXTENSIONS = frozenset({".flac", ".wav", ".mp3", ".m4a", ".ogg"})
 GALLERY_MEDIA_EXTENSIONS = frozenset(IMAGE_EXTENSIONS) | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
-_STAGING_DIR_NAMES = frozenset({".web_uploads"})
+_STAGING_DIR_NAMES = frozenset({UPLOADS_FOLDER})
 # Scratch names the video tools create beside the finished outputs: the splice's directories (see ``video_splice``),
 # and the hidden temp files of an in-place MP4 rewrite and the video upscale's work folders (see ``ffmpeg.staging_path``).
 _STAGING_PREFIXES = (SPLICE_DIR_PREFIX, STAGING_FILE_PREFIX)

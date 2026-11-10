@@ -14,9 +14,11 @@ from typing import Any
 
 from starlette.datastructures import FormData
 
+from zvisiongenerator.web.upload_folders import UPLOADS_FOLDER
+
 __all__ = ["PlannedUpload", "planned_form", "planned_upload_path"]
 
-_PLANNED_DIR = Path(".web_uploads") / "planned"
+_PLANNED_DIR = Path(UPLOADS_FOLDER) / "planned"
 
 
 @dataclass(frozen=True)

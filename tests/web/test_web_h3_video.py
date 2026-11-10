@@ -351,7 +351,7 @@ class TestExtendMemoryFit:
             extend_api_module.extend_source_response({"path": "clip.mp4", "model": "h3", "steps": steps}, _web_config(tmp_path))
 
     def _stub_a_source(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(extend_api_module, "_source_video_path", lambda *_a, **_k: tmp_path / "clip.mp4")
+        monkeypatch.setattr(extend_api_module, "source_video_path", lambda *_a, **_k: tmp_path / "clip.mp4")
         monkeypatch.setattr(extend_api_module, "detect_video_model", lambda path: SimpleNamespace(family="h3" if "h3" in path or "H3" in path else "ltx"))
 
     def _stub_an_inspected_source(self, tmp_path, monkeypatch):

@@ -6,6 +6,7 @@ import io
 import os
 from pathlib import Path
 import subprocess
+import threading
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -13,6 +14,7 @@ from PIL import Image, PngImagePlugin
 import pytest
 
 from tests._images import SIDEWAYS_UPRIGHT_SIZE, write_sideways_photo
+from zvisiongenerator.utils import video_frame
 from zvisiongenerator.utils.lora_preview import LARGE_PREVIEW_EDGE, PREVIEW_EDGE
 from zvisiongenerator.web import browse_media
 from zvisiongenerator.web import server as web_server
@@ -65,10 +67,12 @@ def client(data_dir):
 @pytest.fixture
 def tools(monkeypatch) -> MagicMock:
     """Mock ffprobe, the audio decode and ffmpeg; returns the ffmpeg ``subprocess.run`` mock."""
-    monkeypatch.setattr(browse_media, "ffprobe_json", MagicMock(return_value=VIDEO_PROBE))
+    probe = MagicMock(return_value=VIDEO_PROBE)
+    monkeypatch.setattr(browse_media, "ffprobe_json", probe)
+    monkeypatch.setattr(video_frame, "ffprobe_json", probe)
     monkeypatch.setattr(browse_media, "read_waveform", MagicMock(return_value=(PEAKS, 12.5)))
     run = MagicMock(return_value=subprocess.CompletedProcess([], 0, stdout=_png((640, 360)), stderr=b""))
-    monkeypatch.setattr(browse_media.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     return run
 
 
@@ -179,21 +183,17 @@ def test_a_video_preview_is_the_frame_ten_percent_in(client, media_dir, tools):
     assert browse_media.ffprobe_json.call_args.kwargs == {"count_packets": False, "timeout": browse_media.TOOL_TIMEOUT}
     command = tools.call_args.args[0]
     assert tools.call_count == 1
-    assert command[command.index("-ss") + 1] == "2.000"
-    assert command[command.index("-vf") + 1] == _STILL_SCALE
+    assert command[command.index("-ss") + 1] == "1.980000"
+    assert command[command.index("-vf") + 1] == _UNTAGGED_STILL
     assert tools.call_args.kwargs["timeout"] == browse_media.TOOL_TIMEOUT
 
 
 _STILL_SCALE = f"scale={PREVIEW_EDGE}:{PREVIEW_EDGE}:force_original_aspect_ratio=decrease"
+# A clip that names no colour matrix is converted as BT.709 first, as a player shows it and as a saved frame is read.
+_UNTAGGED_STILL = f"{video_frame.frame_color_filter(video_frame.parse_probe(VIDEO_PROBE))},{_STILL_SCALE}"
 
 
-def _write_last_frame(command, **_kwargs):
-    Path(command[-1]).write_bytes(_png((640, 360)))
-    return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
-
-
-def test_the_last_frame_is_one_ffmpeg_call_from_the_end(client, media_dir, tools):
-    tools.side_effect = _write_last_frame
+def test_the_last_frame_is_the_clips_last_frame(client, media_dir, tools):
     path = _file(media_dir, "clip.mp4")
 
     response = _get(client, "preview", "source_video", path, frame="last")
@@ -202,10 +202,32 @@ def test_the_last_frame_is_one_ffmpeg_call_from_the_end(client, media_dir, tools
     assert _webp(response).size == (384, 216)
     assert tools.call_count == 1
     command = tools.call_args.args[0]
-    assert "-sseof" in command
-    assert command[command.index("-vf") + 1] == _STILL_SCALE
+    assert command[command.index("-ss") + 1] == "19.940000"
+    assert command[command.index("-vf") + 1] == _UNTAGGED_STILL
     assert tools.call_args.kwargs["timeout"] == browse_media.TOOL_TIMEOUT
-    browse_media.ffprobe_json.assert_not_called()
+    browse_media.ffprobe_json.assert_called_once()
+
+
+def test_every_still_of_an_untagged_clip_is_converted_the_same_way(client, media_dir, tools):
+    path = _file(media_dir, "clip.mp4")
+
+    for extra in ({}, {"frame": "last"}, {"at": "2.0"}):
+        _get(client, "preview", "source_video", path, **extra)
+
+    filters = [call.args[0][call.args[0].index("-vf") + 1] for call in tools.call_args_list]
+    assert filters == [_UNTAGGED_STILL] * 3
+
+
+def test_a_tagged_clip_keeps_its_own_colour_conversion(client, media_dir, tools):
+    stream = {**VIDEO_PROBE["streams"][0], "color_space": "bt709"}
+    browse_media.ffprobe_json.return_value = {**VIDEO_PROBE, "streams": [stream]}
+    path = _file(media_dir, "clip.mp4")
+
+    for extra in ({}, {"frame": "last"}, {"at": "2.0"}):
+        _get(client, "preview", "source_video", path, **extra)
+
+    filters = [call.args[0][call.args[0].index("-vf") + 1] for call in tools.call_args_list]
+    assert filters == [_STILL_SCALE] * 3
 
 
 def test_the_last_frame_of_an_image_is_refused(client, media_dir, tools):
@@ -231,7 +253,7 @@ def test_a_large_video_still_is_scaled_by_ffmpeg_to_the_large_edge(client, media
     _get(client, "preview", "source_video", path, size="large")
 
     command = tools.call_args.args[0]
-    assert command[command.index("-vf") + 1] == f"scale={LARGE_PREVIEW_EDGE}:{LARGE_PREVIEW_EDGE}:force_original_aspect_ratio=decrease"
+    assert command[command.index("-vf") + 1].endswith(f"scale={LARGE_PREVIEW_EDGE}:{LARGE_PREVIEW_EDGE}:force_original_aspect_ratio=decrease")
 
 
 def test_an_unknown_size_is_refused(client, media_dir):
@@ -245,6 +267,110 @@ def test_the_two_sizes_of_one_file_are_cached_apart(client, media_dir, cache_dir
     _get(client, "preview", "reference_image", path, size="large")
 
     assert len(list(cache_dir.iterdir())) == 2
+
+
+def test_a_video_preview_at_a_time_is_the_frame_that_second_lies_in(client, media_dir, tools):
+    path = _file(media_dir, "clip.mp4")
+
+    response = _get(client, "preview", "source_video", path, at="2.0")
+
+    assert response.status_code == 200
+    assert _webp(response).size == (384, 216)
+    command = tools.call_args.args[0]
+    assert command[command.index("-ss") + 1] == "1.980000"
+    assert command[command.index("-vf") + 1] == _UNTAGGED_STILL
+    assert "-sseof" not in command
+
+
+def test_a_preview_at_a_time_past_the_end_is_the_last_frame(client, media_dir, tools):
+    _get(client, "preview", "source_video", _file(media_dir, "clip.mp4"), at="900")
+
+    command = tools.call_args.args[0]
+    assert command[command.index("-ss") + 1] == "19.940000"
+
+
+def test_each_time_has_its_own_cache_entry_and_etag(client, media_dir, tools, cache_dir):
+    path = _file(media_dir, "clip.mp4")
+
+    first = _get(client, "preview", "source_video", path, at="1.0")
+    second = _get(client, "preview", "source_video", path, at="2.0")
+    plain = _get(client, "preview", "source_video", path)
+    again = _get(client, "preview", "source_video", path, at="1.0")
+
+    assert len({first.headers["etag"], second.headers["etag"], plain.headers["etag"]}) == 3
+    assert again.headers["etag"] == first.headers["etag"]
+    assert tools.call_count == 3
+    assert len(list(cache_dir.iterdir())) == 3
+
+
+@pytest.mark.parametrize("at", ["-1", "nan", "inf", "soon"])
+def test_a_preview_at_a_bad_time_is_refused(client, media_dir, tools, at):
+    assert _get(client, "preview", "source_video", _file(media_dir, "clip.mp4"), at=at).status_code == 422
+    tools.assert_not_called()
+
+
+def test_a_preview_at_a_time_is_refused_for_an_image_and_with_the_last_frame(client, media_dir, tools):
+    picture = _file(media_dir, "fox.png", _png())
+
+    assert _get(client, "preview", "reference_image", picture, at="1").status_code == 422
+    assert _get(client, "preview", "source_video", _file(media_dir, "clip.mp4"), at="1", frame="last").status_code == 422
+    tools.assert_not_called()
+
+
+def test_a_preview_at_a_time_of_a_clip_without_a_frame_rate_is_not_found(client, media_dir, tools):
+    browse_media.ffprobe_json.return_value = {"streams": [{"codec_type": "video", "width": 64, "height": 64}], "format": {}}
+
+    assert _get(client, "preview", "source_video", _file(media_dir, "clip.mp4"), at="1").status_code == 404
+
+
+# A recording from a browser or a screen recorder may name no frame rate or length (WebM often has no container duration).
+_NO_DURATION_PROBE = {"streams": [{"codec_type": "video", "width": 64, "height": 64}], "format": {}}
+_NO_FRAME_FACTS_PROBE = {"streams": [{"codec_type": "video", "width": 64, "height": 64}], "format": {"duration": "10.0"}}
+
+
+def _writing_the_last_still(tools: MagicMock) -> None:
+    """Make the mocked ffmpeg write its output file when asked for one, as the last frame's ``-update`` call does."""
+
+    def _run(command, **_kwargs):
+        if "-update" in command:
+            Path(command[-1]).write_bytes(_png((640, 360)))
+            return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
+        return subprocess.CompletedProcess(command, 0, stdout=_png((640, 360)), stderr=b"")
+
+    tools.side_effect = _run
+
+
+def test_the_tenth_still_of_a_clip_without_frame_facts_seeks_by_time(client, media_dir, tools):
+    browse_media.ffprobe_json.return_value = _NO_FRAME_FACTS_PROBE
+
+    response = _get(client, "preview", "source_video", _file(media_dir, "clip.webm"))
+
+    assert response.status_code == 200
+    command = tools.call_args.args[0]
+    assert command[command.index("-ss") + 1] == "1.000000"
+    assert command[command.index("-vf") + 1] == _UNTAGGED_STILL
+
+
+def test_the_tenth_still_of_a_clip_without_a_length_is_its_start(client, media_dir, tools):
+    browse_media.ffprobe_json.return_value = _NO_DURATION_PROBE
+
+    response = _get(client, "preview", "source_video", _file(media_dir, "clip.webm"))
+
+    assert response.status_code == 200
+    assert tools.call_args.args[0][tools.call_args.args[0].index("-ss") + 1] == "0.000000"
+
+
+def test_the_last_still_of_a_clip_without_frame_facts_seeks_from_the_end(client, media_dir, tools):
+    browse_media.ffprobe_json.return_value = _NO_DURATION_PROBE
+    _writing_the_last_still(tools)
+
+    response = _get(client, "preview", "source_video", _file(media_dir, "clip.webm"), frame="last")
+
+    assert response.status_code == 200
+    assert _webp(response).size == (384, 216)
+    command = tools.call_args.args[0]
+    assert command[command.index("-sseof") + 1] == "-1"
+    assert command[command.index("-vf") + 1] == _UNTAGGED_STILL
 
 
 # ── Info ─────────────────────────────────────────────────────────────────────
@@ -303,9 +429,25 @@ def test_video_info_is_one_probe(client, media_dir, tools):
 
     payload = _get(client, "info", "source_video", path).json()
 
-    assert payload == {"width": 1920, "height": 1080, "fps": 25.0, "frames": 500, "seconds": 20.0}
+    assert payload == {"width": 1920, "height": 1080, "fps": 25.0, "frames": 500, "seconds": 20.0, "start": 0.0}
     browse_media.ffprobe_json.assert_called_once()
     assert browse_media.ffprobe_json.call_args.kwargs == {"count_packets": False, "timeout": browse_media.TOOL_TIMEOUT}
+
+
+def test_video_info_gives_the_seconds_before_the_first_frame(client, media_dir, tools):
+    stream = {**VIDEO_PROBE["streams"][0], "start_time": "0.080000"}
+    browse_media.ffprobe_json.return_value = {"streams": [stream], "format": {"duration": "20.0", "start_time": "0.040000"}}
+
+    assert _get(client, "info", "source_video", _file(media_dir, "clip.mp4")).json()["start"] == pytest.approx(0.04)
+
+
+def test_the_info_etag_is_not_the_one_of_an_answer_without_the_start(client, media_dir, tools):
+    path = _file(media_dir, "clip.mp4")
+    etag = _get(client, "info", "source_video", path).headers["etag"]
+    media = browse_media.media_file(web_server.resolve_purpose("source_video"), str(path), ("video",))
+
+    assert etag != f'"{browse_media._cache_key("info", media)}"'
+    assert client.get("/api/browse/info", params={"purpose": "source_video", "path": str(path)}, headers={"If-None-Match": etag}).status_code == 304
 
 
 def test_video_frames_fall_back_to_the_length_times_the_rate(client, media_dir, tools):
@@ -344,6 +486,78 @@ def test_media_without_a_range_sends_the_whole_file(client, media_dir):
 
     assert (response.status_code, len(response.content)) == (200, 50)
     assert response.headers["accept-ranges"] == "bytes"
+
+
+# ── The contact sheet ────────────────────────────────────────────────────────
+
+
+def _jpeg() -> bytes:
+    out = io.BytesIO()
+    Image.new("RGB", (1760, 990), (30, 120, 200)).save(out, format="JPEG")
+    return out.getvalue()
+
+
+@pytest.fixture
+def sheet_tools(tools, monkeypatch) -> MagicMock:
+    tools.return_value = subprocess.CompletedProcess([], 0, stdout=_jpeg(), stderr=b"")
+    return tools
+
+
+def test_a_contact_sheet_is_one_jpeg_from_one_ffmpeg_call(client, media_dir, sheet_tools):
+    response = _get(client, "sprite", "source_video", _file(media_dir, "clip.mp4"))
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.content == _jpeg()
+    assert sheet_tools.call_count == 1
+    command = sheet_tools.call_args.args[0]
+    assert "tile=11x11" in command[command.index("-vf") + 1]
+
+
+def test_a_contact_sheet_is_cached_and_revalidated(client, media_dir, sheet_tools, cache_dir):
+    path = _file(media_dir, "clip.mp4")
+    first = _get(client, "sprite", "source_video", path)
+
+    second = _get(client, "sprite", "source_video", path)
+    again = client.get("/api/browse/sprite", params={"purpose": "source_video", "path": str(path)}, headers={"If-None-Match": first.headers["etag"]})
+
+    assert second.content == first.content
+    assert sheet_tools.call_count == 1
+    assert again.status_code == 304
+    assert len(list(cache_dir.iterdir())) == 1
+
+
+def test_a_contact_sheet_has_its_own_etag_and_cache_entry(client, media_dir, sheet_tools, cache_dir):
+    path = _file(media_dir, "clip.mp4")
+    sheet = _get(client, "sprite", "source_video", path)
+    sheet_tools.return_value = subprocess.CompletedProcess([], 0, stdout=_png((64, 64)), stderr=b"")
+
+    still = _get(client, "preview", "source_video", path)
+
+    assert sheet.headers["etag"] != still.headers["etag"]
+    assert len(list(cache_dir.iterdir())) == 2
+
+
+def test_a_contact_sheet_that_cannot_be_built_is_not_found_and_not_cached(client, media_dir, sheet_tools, cache_dir):
+    sheet_tools.return_value = subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"Invalid data found")
+    path = _file(media_dir, "clip.mp4")
+
+    assert _get(client, "sprite", "source_video", path).status_code == 404
+    assert _get(client, "sprite", "source_video", path).status_code == 404
+    assert sheet_tools.call_count == 2
+    assert not cache_dir.exists() or not any(cache_dir.iterdir())
+
+
+@pytest.mark.parametrize(("purpose", "name"), [("reference_image", "fox.png"), ("audio_track", "song.mp3"), ("lora_file", "x.safetensors")])
+def test_only_a_video_has_a_contact_sheet(client, media_dir, sheet_tools, purpose, name):
+    assert _get(client, "sprite", purpose, _file(media_dir, name)).status_code == 422
+    sheet_tools.assert_not_called()
+
+
+def test_a_contact_sheet_request_from_another_site_is_refused(client, media_dir, sheet_tools):
+    response = client.get("/api/browse/sprite", params={"purpose": "source_video", "path": str(_file(media_dir, "clip.mp4"))}, headers={"Sec-Fetch-Site": "cross-site"})
+
+    assert response.status_code == 403
 
 
 # ── Timeouts ─────────────────────────────────────────────────────────────────
@@ -393,6 +607,93 @@ def test_the_listing_is_not_subject_to_the_check(client, media_dir):
     assert response.status_code == 200
 
 
+def _in_thread(target) -> threading.Thread:
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    return thread
+
+
+def test_a_contact_sheet_in_flight_holds_no_slot_a_preview_uses(cache_dir):
+    building, finish = threading.Event(), threading.Event()
+
+    def build() -> bytes:
+        building.set()
+        assert finish.wait(5)
+        return b"sheet"
+
+    sheet = _in_thread(lambda: browse_media._cached_or_decoded(cache_dir, "sheet", build, browse_media._sprite_slot))
+    try:
+        assert building.wait(5)
+        taken = [browse_media._decode_slots.acquire(blocking=False) for _ in range(2)]
+        for _ in filter(None, taken):
+            browse_media._decode_slots.release()
+        assert taken == [True, True]
+    finally:
+        finish.set()
+        sheet.join(5)
+
+
+def test_contact_sheets_are_built_one_at_a_time(cache_dir):
+    building, finish = threading.Event(), threading.Event()
+    started: list[str] = []
+
+    def build(name: str):
+        def run() -> bytes:
+            started.append(name)
+            building.set()
+            assert finish.wait(5)
+            return name.encode()
+
+        return run
+
+    first = _in_thread(lambda: browse_media._cached_or_decoded(cache_dir, "one", build("one"), browse_media._sprite_slot))
+    assert building.wait(5)
+    second = _in_thread(lambda: browse_media._cached_or_decoded(cache_dir, "two", build("two"), browse_media._sprite_slot))
+    second.join(0.2)
+    assert started == ["one"]
+    finish.set()
+    first.join(5)
+    second.join(5)
+    assert started == ["one", "two"]
+
+
+def test_a_request_that_waited_for_the_same_sheet_reuses_it_without_building_again(cache_dir, monkeypatch):
+    building, finish, waiter_looked = threading.Event(), threading.Event(), threading.Event()
+    builds: list[str] = []
+    answers: list[bytes | None] = []
+    real_read = browse_media._read_cached
+
+    def read(directory: Path, key: str):
+        body = real_read(directory, key)
+        if threading.current_thread().name == "waiter":
+            waiter_looked.set()
+        return body
+
+    monkeypatch.setattr(browse_media, "_read_cached", read)
+
+    def build_first() -> bytes:
+        builds.append("first")
+        building.set()
+        assert finish.wait(5)
+        return b"sheet"
+
+    def build_waiter() -> bytes:
+        builds.append("waiter")
+        return b"another"
+
+    first = _in_thread(lambda: browse_media._cached_or_decoded(cache_dir, "sheet", build_first, browse_media._sprite_slot))
+    assert building.wait(5)
+    waiter = threading.Thread(target=lambda: answers.append(browse_media._cached_or_decoded(cache_dir, "sheet", build_waiter, browse_media._sprite_slot)), name="waiter", daemon=True)
+    waiter.start()
+    assert waiter_looked.wait(5)
+    finish.set()
+    first.join(5)
+    waiter.join(5)
+
+    assert answers == [b"sheet"]
+    assert builds == ["first"]
+
+
 # ── The cache ────────────────────────────────────────────────────────────────
 
 
@@ -431,13 +732,12 @@ def test_a_changed_modification_time_reads_the_file_again(client, media_dir, dec
 def test_the_last_frame_still_calls_ffmpeg_after_the_tenth_percent_still_is_cached(client, media_dir, tools):
     path = _file(media_dir, "clip.mp4")
     assert _get(client, "preview", "source_video", path).status_code == 200
-    assert "-sseof" not in tools.call_args.args[0]
+    assert tools.call_args.args[0][tools.call_args.args[0].index("-ss") + 1] == "1.980000"
     tools.reset_mock()
-    tools.side_effect = _write_last_frame
 
     assert _get(client, "preview", "source_video", path, frame="last").status_code == 200
 
-    assert "-sseof" in tools.call_args.args[0]
+    assert tools.call_args.args[0][tools.call_args.args[0].index("-ss") + 1] == "19.940000"
 
 
 def test_a_failed_decode_leaves_no_cache_entry_and_the_next_request_decodes_again(client, media_dir, cache_dir, tools):
@@ -558,8 +858,20 @@ def test_a_gallery_video_thumbnail_is_the_frame_ten_percent_in_at_the_large_edge
 
     assert response.status_code == 200
     command = tools.call_args.args[0]
-    assert command[command.index("-ss") + 1] == "2.000"
-    assert command[command.index("-vf") + 1] == f"scale={LARGE_PREVIEW_EDGE}:{LARGE_PREVIEW_EDGE}:force_original_aspect_ratio=decrease"
+    assert command[command.index("-ss") + 1] == "1.980000"
+    assert command[command.index("-vf") + 1].endswith(f"scale={LARGE_PREVIEW_EDGE}:{LARGE_PREVIEW_EDGE}:force_original_aspect_ratio=decrease")
+
+
+def test_a_gallery_video_thumbnail_of_a_clip_without_frame_facts_is_drawn_from_its_start(client, output_root, tools):
+    browse_media.ffprobe_json.return_value = _NO_DURATION_PROBE
+    _file(output_root, "recording.webm")
+
+    response = client.get("/thumbs/recording.webm")
+
+    assert response.status_code == 200
+    command = tools.call_args.args[0]
+    assert command[command.index("-ss") + 1] == "0.000000"
+    assert command[command.index("-vf") + 1].endswith(f"scale={LARGE_PREVIEW_EDGE}:{LARGE_PREVIEW_EDGE}:force_original_aspect_ratio=decrease")
 
 
 @pytest.mark.parametrize("asset_id", ["song.mp3", "notes.json", "missing.png", "../outside.png", "%2e%2e/outside.png", ".web_uploads/fox.png", "sub/.web_uploads/fox.png"])
