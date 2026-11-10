@@ -100,9 +100,12 @@ On Windows and Linux, LTX LoRAs must be in a diffusers-compatible format. See [L
 ziv-video --extend clip.mp4 --prompt "She walks through the gate."
 ziv-video --extend clip.mp4 --extend-seconds 4 --prompt "The camera pans to the tower."
 ziv-video --extend clip.mp4 --extend-frames 96 -p prompts.yaml
+ziv-video --extend clip.mp4 --extend-from 3.2 --prompt "She turns back to the sea."
 ```
 
 `--extend` continues the clip: it writes a new file with what happens next, and leaves the source as it was. The scene, model and LoRAs default to the source's. `--extend-seconds` (default 2) or `--extend-frames` sets how much is added.
+
+`--extend-from SECONDS` continues from that point in the clip instead of from its end; at least 25 frames must come before it. See [From a point](../concepts/video.md#from-a-point).
 
 `--image`, `--end-image`, `--upscale`, `--ratio`, `--size`, `--width`, `--height` and `--frames` can't be used with `--extend`, because the extension keeps the source's size. See [Extending a video](../concepts/video.md#extending-a-video).
 

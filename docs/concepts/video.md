@@ -71,13 +71,21 @@ Describe what the image shows in Scene and what happens in Action. The enhancer 
 
 ### First and last frame
 
-Image to video can also take a **last frame** (`--end-image`): the clip runs from the first image to the last. Every video model takes one. In the Web UI, the **Last frame** group sits under the first frame; a last frame kept without a first frame is greyed out and not used until a first frame is added. As with a start image, photos are turned upright by their orientation tag and transparent areas are filled with white.
+Image to video can also take a **last frame** (`--end-image`): the clip runs from the first image to the last. Every video model takes one. In the Web UI, the **Last frame** group sits under the first frame; a last frame needs a first frame: without one the slot is greyed out and **Generate** is disabled until you add a first frame or clear the last. As with a start image, photos are turned upright by their orientation tag and transparent areas are filled with white.
 
 - **The last frame is a looser match than the first.** The clip ends close to the image, slightly softer. With MiniMax H3 the first frame is a close re-render of the image too, not the image pasted in.
 - **Use two images of the same scene,** seen from about the same place. If they show different places, the clip cuts (LTX) or dissolves (MiniMax H3) to the last image near the end.
 - **Give a big change time.** A new pose or a long camera move needs a few seconds; in a 2 s clip, LTX may cut to the last image instead of moving there.
 
 With a last frame, the enhancer writes the change that leads from one image to the other instead of inventing an ending. A clip made from two images records both, and **Reuse settings** loads both.
+
+#### A frame of a video
+
+A moment in a video you already have can be the first or the last frame of a new clip: pause the video, click its time and choose **First frame** or **Last frame** (see [Use a paused frame](../web-ui/gallery.md#use-a-paused-frame)). The frame is read at the video's full size, and **Video** opens with it in that slot.
+
+- **First frame** also puts the clip's scene in **Scene** and empties **Action**. A clip with no recorded scene leaves your text alone.
+- **Last frame** touches no text, and a frame already in the other slot stays, even one from another video.
+- **A model that can't take a last frame** greys out **Last frame** and says so.
 
 ### Keep a person, object or place in a clip
 
@@ -130,6 +138,18 @@ Extend continues a clip from where it ends: it generates what happens next, with
 **Start one** with **Extend** in the viewer (++e++) or a video's **⋯** menu, from **Video** set to **Extend** with **Browse**, or with `ziv-video --extend clip.mp4`. **Reuse settings** on an extension brings back its source, scene, prompt and length.
 
 The extension takes the source's size and frame rate, and starts from its model and LoRAs when they're still installed.
+
+### From a point
+
+Extend can also continue from a moment inside the clip instead of from its end. The frame you choose is the last one kept: what came after it is dropped from the new file, and the extension carries on from there, with sound. Your original clip is never changed.
+
+- **In the viewer or the Workspace preview,** pause the video at the frame you want, click its time and choose **Extend from**; see [Use a paused frame](../web-ui/gallery.md#use-a-paused-frame).
+- **In the Workspace,** [Source video](../web-ui/workspace.md#source-video) has a handle to move the point. **Total** follows the cut.
+- **In the CLI,** `ziv-video --extend clip.mp4 --extend-from 3.2` continues from 3.2 s; see [Extend a clip](../cli/video.md#extend-a-clip).
+- **At least 25 frames** (about one second) must come before the point, because the extension reads the last second of what is kept. A point at the end of the clip keeps all of it.
+- **A clip made from an [audio track](#extend-with-a-track)** carries the song on from the point: **Start at** moves back by the dropped frames.
+
+**Reuse settings** keeps the point, and the result records the original clip and the frame it continued from.
 
 ### Length
 

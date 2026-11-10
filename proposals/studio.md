@@ -243,10 +243,10 @@ Moving a clip that follows the audio takes it out of sync with that audio. The c
 | Takes | Gallery assets. Every output carries its settings, including its first and last frame, references and audio track with start and end, so a retake can be built from it. |
 | Queue | The existing job queue. It is held in memory, and finished jobs are dropped from its list after a while, which is why the timeline file keeps track of its own slots. |
 
-The Studio needs two proposals that aren't built yet:
+The Studio builds on two proposals that have shipped:
 
 - **[Projects](archive/projects.md):** a timeline lives in a project folder. A project can hold several timelines.
-- **[Grabbing a frame](video-frame-grab.md):** taking an exact frame out of a clip, here for use as a first or last frame as well.
+- **[Generate from a point in a video](archive/video-frame-grab.md):** taking an exact frame out of a clip for use as a first or last frame, and extending a clip from a chosen point.
 
 **Genuinely new:**
 
@@ -255,7 +255,7 @@ The Studio needs two proposals that aren't built yet:
   - Move to project renames a file, so the design must decide what Move does to a file a timeline uses: the timeline follows the file, Move is refused with the reason, or the timeline shows the item as missing.
 - **The sound under a range.** The ticked lanes for the range are mixed into one file that becomes the clip's audio track. When the range sits inside a single item on a single ticked lane, that item's file and start are used directly.
   - The mixed files and grabbed frames are saved in a hidden working folder next to the timeline, so a retake can use them again.
-  - The gallery skips that folder, so they don't show up as outputs. This differs from a frame grabbed by hand in the viewer, which is an output in its own right.
+  - The gallery skips that folder, so they don't show up as outputs.
 - **Ranges held back until the slots they depend on finish.** The queue runs jobs in order and can't reorder or defer them, so the server listens for jobs finishing and queues a waiting range once its source is done, even with no browser open. The grabbed frames and the audio mix are then made as part of its job, and its audio start is passed explicitly.
 - **Playback.** Only the visible video lane is decoded at a time, and the audio lanes are mixed in the browser.
 - **Rendering the timeline.** One MP4 from the lanes.

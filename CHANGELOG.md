@@ -13,9 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Audio helpers.** In the Web UI, **Describe it** and **Fill in** write a song's or speech's fields from one idea; **Enhance** rewrites a song's Style or a sound's prompt; Lyrics are song blocks with an **Improve lyrics** helper; and speech has an **Insert** menu and a **Script helper** that fits a script to a time or adds delivery marks. Each result is a version you can step through and undo.
 - **Clear for every text box.** A 🗑 button first in the right of the tools row empties the box (your text, the Enhanced text and its versions; Lyrics, the whole song; a video's Scene and Action together; Describe it, the idea) and the line under it offers **Undo**. **Fill in** in Describe it has its own **Fast** or **Smart** choice
 - **Every built-in model shows its licence.** An **ⓘ** beside the model picker, on the Models page and in the download dialog names the licence, what it allows and a link, and the CLIs print the same terms before a first download. YuE2 and Stable Audio 3 are non-commercial or limited, so read their terms before you use the output
+- **Extend from a point.** Pause a video in the viewer or the Workspace preview, click the time and choose **Extend from**: the new file keeps the clip up to that frame and continues from there. In the Workspace, **Source video** has a handle for the point, and the CLI takes `--extend-from SECONDS`
+- **A frame of a video as a first or last frame.** Pause a video, click the time and choose **First frame** or **Last frame** to start or end a new clip on that frame
+- **One player for video and audio.** The viewer, the Workspace preview and the file browser's preview play video and audio in the same player: click the picture to play and pause, drag the timeline to seek, and drag up to scrub one frame at a time
 - **Previews in the file browser.** The pickers for images, audio tracks and source videos show thumbnails, can switch to a grid, and have a preview (`Alt+P`) that plays audio and video. Workspace slots show the file they hold. Anyone who can open the Web UI can see and play these files, so use `--host local` only on a network you trust
 
 ### Changed
+- **A last frame needs a first frame.** With a last frame and no first frame, **Generate** is disabled and says to add a first frame
 - The prompt enhancer repeats itself less, for images, video and audio.
 - **The prompt enhancer writes about 3× faster on Windows and Linux** with an NVIDIA GPU, with the same models and nothing new to install.
 - **One header for every prompt box** (Image, Video and the Audio boxes). Marks on the **Enhanced** tab replace the status line, **✕** scratches the Enhanced text, and **Enhance again** keeps up to five versions to step through. **Use mine** and the word counts are gone
@@ -24,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **The Gallery and the Workspace strip load small thumbnails** instead of the full images and videos, so they open faster
 - **The Web UI asks before a job downloads a model**, listing what will download with its size, the free space and its terms
 - **Extend Video is now a kind in the Video tab.** The top bar is Image, Video and Audio, and **Kind** in Video switches between **New** and **Extend**
+- **Reset on Extend also clears the source video**, with its point, length and track; the model, LoRAs and prompts stay
 - **Reset acts on the open tab only**, and **Reuse settings** and **Load settings** apply a file's settings exactly: what the file didn't record takes its default instead of what the form held
 - **The file browser sorts by name, size or date**, newest first by default, shows the time with dates, and has a phone layout when held sideways
 

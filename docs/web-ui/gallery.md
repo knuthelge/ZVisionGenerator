@@ -27,7 +27,7 @@ An audio take is a tile with an icon for its kind, the words of the take, a thin
 
 ![The Gallery filtered to Audio only, with music, speech and sound tiles](../assets/screenshots/placeholder.svg "gallery-audio")
 
-The viewer shows a player: the take's waveform over the browser's own audio controls. Click or drag the waveform to seek. **Details** lists the kind, model, voice (the name of a saved voice while it exists), length, seed and format; the **Tempo · Key** of a song (*92 BPM · A minor*), the **Delivery** of a speech take in a default voice and the **Sound type** of a sound, each only when the take set it; how its text was written when it was [enhanced or filled in](../concepts/audio.md); and a **Note** when the model could not follow a setting of the take. **Reuse settings** opens the **Audio** tab on the take's kind with its settings; see [Takes and files](../concepts/audio.md#takes-and-files). **Download** and **Delete** work as for other files.
+The viewer shows a [player](#the-player): the take's waveform is its timeline, so click or drag it to seek. **Details** lists the kind, model, voice (the name of a saved voice while it exists), length, seed and format; the **Tempo · Key** of a song (*92 BPM · A minor*), the **Delivery** of a speech take in a default voice and the **Sound type** of a sound, each only when the take set it; how its text was written when it was [enhanced or filled in](../concepts/audio.md); and a **Note** when the model could not follow a setting of the take. **Reuse settings** opens the **Audio** tab on the take's kind with its settings; see [Takes and files](../concepts/audio.md#takes-and-files). **Download** and **Delete** work as for other files.
 
 An audio file without this app's settings, such as one you copied into the output folder, plays but has no **Reuse settings**.
 
@@ -85,6 +85,29 @@ Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for th
 
 Zoom into an image to see its real pixels: click it on a computer, or pinch or double-tap on a touch screen.
 
+### The player
+
+Video and audio play in the viewer, in the Workspace preview and in the file browser's preview. A video opens on its first frame and never plays by itself. Click or tap the picture to play or pause. Click or drag the timeline along the foot of the picture to seek; while dragging, move up to slow the scrub to one frame at a time. The keys are in [Shortcuts](shortcuts.md#player).
+
+### Use a paused frame
+
+Pause a video partway through to pick a frame. The time at the left of the controls becomes a button, such as **3.2 s / 5.0 s ⌃**, in the viewer and in the Workspace preview. Click it for what you can do with that frame:
+
+![A paused video with its time as a menu button and the frame menu open: Extend from 3.2 s, First frame and Last frame](../assets/screenshots/placeholder.svg "viewer-frame-menu")
+
+| Choice | Does |
+|---|---|
+| **Extend from 3.2 s** | Opens **Video** on its Extend kind with the clip as the source and the point at that frame. See [From a point](../concepts/video.md#from-a-point) |
+| **First frame** | Opens **Video** with the frame as its first frame |
+| **Last frame** | Puts the frame in **Video** as the last frame |
+
+- A video at its start or playing is not a selection: **Extend** continues from the end of the clip.
+- A video stopped at its end offers its last frame.
+- A frame less than 25 frames in can't be extended from.
+- A frame a model can't use is greyed with the reason, such as *has no last frame*.
+
+In the Workspace preview, the **⋯** menu offers the same choices. What each one does is in [A frame of a video](../concepts/video.md#a-frame-of-a-video).
+
 ### Details
 
 **Details** lists what the file records, starting with its **Project** (*No project* for a file at the top of the output folder): prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, start image, audio track with the span of it the clip used (*song.mp3 · 1:30–1:34*), references, quant, upscale and post-processing. An image with a [transparent background](../concepts/images.md#transparent-background) shows *Transparent background: On*. See [Output files](../concepts/data-folder.md#output-files).
@@ -108,7 +131,7 @@ When the prompt was enhanced, Details shows how, as one line such as *Fast · Ci
 - **Start image** opens **Image** with it as the start image and puts the prompt in the Prompt box. The text of **Video** stays as it was.
 - **Reference** adds it to **Image** as the next reference, and confirms with *Added as image 2*. The prompt and everything else stay as they are. The menu says which number it will get (*as image 2*), and the item is greyed, with the reason (*takes none*, *all 4 in use*), when the image model that **Image** opens on takes no references or has taken as many as it can.
 - **First frame** opens **Video** with it as the first frame and puts the prompt in Scene, since it describes the first frame, and leaves Action empty for what happens. The prompt of **Image** stays as it was.
-- **Last frame** opens **Video** with it as the last frame. The clip uses it once there is a first frame.
+- **Last frame** opens **Video** with it as the last frame. **Generate** needs a first frame too.
 
 A target the model it opens on can't use is greyed, with the reason beside it, such as *can't use a start image* or *has no last frame*. The arrow keys still stop on a greyed item, so you can read why; ++enter++ on it does nothing.
 

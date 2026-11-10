@@ -44,7 +44,7 @@ On the phone, Share → *Add to Home Screen* installs the Web UI as an app that 
 The preview is the screen:
 
 - **Swipe sideways** through earlier outputs, and **swipe up** for the Gallery.
-- **Tap** the preview to open the viewer. Pinch or double-tap to zoom.
+- **Tap** the preview to open the viewer. Pinch or double-tap to zoom. A video or take plays in the preview instead; open the viewer with the expand button in its corner.
 - **Press and hold** any image, in the preview, the Gallery strip, the Gallery or the viewer, for its menu.
 
 Under the preview, a strip shows one chip per setting with its value. Tap a chip to change that setting, or **All** for every setting. The first chip is the [preset](workspace.md#presets). The **Images** chip holds the images the run uses: see [Images on a phone](#images-on-a-phone).
@@ -87,8 +87,10 @@ Tapping an image grows it out of its tile into the viewer, which fills the scree
 - **Swipe sideways** and the next image follows your finger.
 - **Pull down** and the image shrinks back into its tile.
 - **Swipe up** for its details, which rise as a sheet under the image.
-- **Tap the image** to hide the bar and the strip, and tap again to bring them back.
+- **Tap the image** to hide the bar and the strip, and tap again to bring them back. On a video, a tap plays or pauses it instead.
 - **Pinch or double-tap** to zoom, and **press and hold** for the image's menu.
+
+A video plays in the page. Swipe over the picture to page, or drag the timeline to seek. Pause it partway and tap the time under it for the frame menu; see [Use a paused frame](gallery.md#use-a-paused-frame).
 
 In the Gallery, a tile shows only its **⋯** button; a tap opens the image. Tap the page's title in the top bar to scroll back to the top.
 

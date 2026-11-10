@@ -69,6 +69,19 @@ Press <kbd>?</kbd> anywhere outside a text field to see every shortcut. ++cmd++ 
 | <kbd>?</kbd> | Show the viewer's shortcuts |
 | ++esc++ | Close the shortcut list, then the viewer |
 
+## Player
+
+These work in a video or audio player, in the viewer, the Workspace preview and the file browser's preview. Click the picture or the timeline first; until then, ++left++ and ++right++ page through files.
+
+| Key | Action |
+|---|---|
+| ++space++ | Play or pause |
+| ++left++ / ++right++ | One frame while a video is paused, 1 s while it plays (always 1 s for audio) |
+| ++shift+left++ / ++shift+right++ | Five frames, or 5 s |
+| ++up++ / ++down++ | Volume, where the player has a volume slider |
+| ++home++ / ++end++ | The first frame / the last frame |
+| ++0++ to ++9++ | Jump to 0% to 90% of the clip |
+
 ## Command line
 
 `ziv-image` and `ziv-video` read keys while a batch runs. See [Controls during a run](../cli/batches.md#controls-during-a-run).

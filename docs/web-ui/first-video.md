@@ -49,7 +49,7 @@ The finished clip plays in the preview and appears in the Gallery strip.
 
 ## Start from an image
 
-In **Video**, add the first frame in the **Images** section of *Settings*: browse to a file, upload one from this device, or use one you made. The clip starts on it instead of from the prompt alone. In the [viewer](gallery.md#the-viewer), **Use as** → **First frame** loads an image and puts its prompt in Scene.
+In **Video**, add the first frame in the **Images** section of *Settings*: browse to a file, upload one from this device, or use one you made. The clip starts on it instead of from the prompt alone. In the [viewer](gallery.md#the-viewer), **Use as** → **First frame** loads an image and puts its prompt in Scene. To use a frame of a video, see [Use a paused frame](gallery.md#use-a-paused-frame).
 
 Describe in Action what happens from that frame on. The image is scaled to cover the video size and the overflow is cut from the centre, so pick a **Ratio** close to the image's shape.
 
@@ -58,6 +58,8 @@ You can add a **Last frame** under it at any time; it is used once there is a fi
 ## Make it longer
 
 Open a clip in the viewer and press **Extend** (++e++). The Workspace opens **Video** on its **Extend** kind with the clip as the source. Write what happens next in Action and generate: you get a new, longer file, and the original stays as it was. See [Extending a video](../concepts/video.md#extending-a-video).
+
+To continue from the middle of a clip instead, pause it where you want to carry on, click the time and choose **Extend from**; see [From a point](../concepts/video.md#from-a-point).
 
 ## Next
 

@@ -168,16 +168,35 @@ Gallery asset JSON carries `project` (`str` or `null`), derived from the ID.
 
 ## File browser previews
 
-Purposes with a `preview` kind (`BrowsePurpose.preview` in `web/path_browser.py`: images, audio tracks, source videos) get three routes, with the logic in `web/browse_media.py`:
+Purposes with a `preview` kind (`BrowsePurpose.preview` in `web/path_browser.py`: images, audio tracks, source videos) get four routes, with the logic in `web/browse_media.py`:
 
 | Route | Returns |
 |---|---|
-| `GET /api/browse/preview?purpose&path[&size=large][&frame=last]` | A WebP of an image or a video still, 384 px (768 with `size=large`) |
-| `GET /api/browse/info?purpose&path` | JSON facts: pixel size, length, format, waveform peaks |
+| `GET /api/browse/preview?purpose&path[&size=large][&frame=last][&at=SECONDS]` | A WebP of an image or a video still, 384 px (768 with `size=large`). `at` picks the frame a second lies in; it is video-only, never negative, and not combined with `frame=last` |
+| `GET /api/browse/info?purpose&path` | JSON facts: pixel size, length, format, waveform peaks. A video's facts are `width`, `height`, `fps`, `frames`, `seconds` and `start` |
+| `GET /api/browse/sprite?purpose&path` | A video's contact sheet: one JPEG |
 | `GET /api/browse/media?purpose&path` | The audio or video file, with range requests |
 | `GET /thumbs/{asset_id}` | The 768 px WebP of a gallery image or video, confined like `/media` |
 
 They only serve regular files with an extension the purpose accepts. Images are re-encoded without metadata. Pictures are cached in `<data dir>/cache/browse`; the picker routes refuse cross-site fetches where the browser sends `Sec-Fetch-Site`.
+
+### Video frames
+
+One rule turns a time in a clip into a frame, in `utils/video_point.py`: `frame_at(t) = clamp(floor((t - start) * fps + 1e-3), 0, frames - 1)`. `start` is the seconds from the file start to the first video frame (`VideoProbe.stream_offset`, which audio priming can make non-zero) and `frames` is the count the info route reports. `frame_seek_seconds(frame)` is half a frame before the frame, so `ffmpeg -ss` before `-i` decodes that frame first. `frontend/src/lib/state/framePoint.ts` applies the same rule; both are checked against `tests/fixtures/frame_point_cases.json`, so change them together. A clip is assumed to have a constant frame rate.
+
+- **Preview `at`.** The time is snapped as above and goes into the cache key and the ETag, so a time that is not exactly a frame's still names that frame.
+- **Sprite.** `utils/video_sprite.py` builds one JPEG per clip: an 11 x 11 grid of 160 px tiles. A clip of 121 frames or fewer has a tile per frame; a longer one has 121 evenly spaced tiles, and the tiles after the last are black. It is built on the first request and cached like a preview; a sheet that cannot be built is a 404 and is not cached.
+- **Colour.** `frame_color_filter` in `utils/video_frame.py` is the one place that decides how a frame is converted to RGB: a clip with no colour matrix tag is read as BT.709, which is what a player shows, and a tagged clip follows its tag. Every video still and the sprite use it.
+
+`POST /api/video/frame` takes `{"path": ..., "time": SECONDS}` for a host-local video and saves the frame that second lies in as a full-size, upright PNG at `.web_uploads/<sha256 of the PNG>/<clip>_<t>s.png` under the output folder, where `t` is the frame's own time to one decimal; the Gallery does not list `.web_uploads`. It answers `{"path"}`. A missing file is a 404, a bad path or time, an unreadable clip or a missing ffmpeg is a 422, and a failed ffmpeg is a 500 with ffmpeg's message. The logic is `web/video_frame_api.py`; the route shares the trust model of `/api/extend/source`.
+
+### Extending from a point
+
+An Extend job takes an optional `extend_from` form field: a time in the source clip, in seconds. `_parse_video_job` snaps it with `utils/video_cut.extend_cut_point`, which keeps the frame the time lies in as the last kept frame. A time at or past the last frame keeps the whole clip and sets no cut; a point that keeps fewer than 25 frames, or a negative, non-finite or non-numeric one, is a 422. The field is ignored for any other workflow. The parse only validates: it sets `args.extend_cut` (an `ExtendCut`) and writes no file, so `POST /api/generate/plan` stays free of files. `POST /api/extend/source` reports `video_start`, so the Extend bar can name a frame on the clip's clock.
+
+The cut is made when the job runs. `WebRunner._run_video_request` and the CLI wrap the model load and the batch in `applied_extend_cut(args)`, after preflight and downloads. On entering the block it makes one `.ziv-tmp-cut-<pid>-*` folder in the save folder (creating it if missing), cuts the kept frames into it with one ffmpeg call (picture re-encoded at crf 12 with the source's colour tags, sound cut to the kept length), and checks the cut file holds exactly the kept frames at the source's size, or the job fails before the model loads. While the block runs, `args.extend_source` is a source rebuilt from the cut file that keeps the original's recorded scene, prompt, model, LoRAs and audio track, with `audio_track_end` moved back by the removed frames. The folder is removed and the original source put back when the block ends, whether the job finished, failed or was stopped. After a hard kill, the sweep before the next cut removes a `.ziv-tmp-cut-*` folder whose process no longer exists; a folder of another running process is left. The original file is never touched.
+
+The output records `source_video` as the original clip and `extend_from` as the snapped time of the last kept frame, so `frame_at` returns the cut frame from it; `frame_count` is the kept frames plus the new ones. The Gallery reads `extend_from` at listing and adds it to an extension's Reuse parameters. When the clip followed an audio track, Start at moves back by the removed frames (`moved_track_end`): the CLI applies it itself, and a Web client sends the moved value as the track's start.
 
 ## Reference images
 

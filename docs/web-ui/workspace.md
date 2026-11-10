@@ -116,6 +116,7 @@ A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **P
 | **Size** | **Ratio**, **Resolution**, or a custom **W × H**; **Duration (s)** for video |
 | **Sampling** | **Steps**, **Guidance**, **Scheduler**, **Seed**, **Batch size** |
 | **Images** | In Image, the **Start image** with its **Strength**, and [references](#references) (FLUX.2 Klein). In Video, a **First frame** and an optional **Last frame**. See [Images](#images) |
+| **Source video** | In the Extend kind of Video, the clip to continue and the point to continue from. See [Source video](#source-video) |
 | **Audio track** | In Video, either kind, an audio file the clip follows, with **Start at**. See [Audio track](#audio-track) |
 | **Upscale** | The factor, **Denoise**, and **Review** before upscaling |
 | **Post-processing** | **Sharpen**, **Contrast**, **Saturation** and **Transparent** (images) |
@@ -155,7 +156,7 @@ Folded, the header's summary says what **Generate** will use: in Image *None*, *
 
 - **First frame:** an *Image* row, as for a start image.
 - **Last frame:** the same row, marked *Optional*, to end the clip on a second image.
-- **Last frame without a first frame:** if you remove the first frame, the last frame stays, greyed, with *Not used without a first frame*. It is used again when you add a first frame.
+- **Last frame without a first frame:** a last frame needs a first frame. Without one it is greyed with *Needs a first frame* and **Generate** is disabled; add a first frame or clear the last.
 
 **Where images stay**
 
@@ -169,7 +170,7 @@ An image the model can't use is hidden: a start image on Ideogram 4, references 
 
 **Missing images**
 
-An image that **Generate** would use but can't find shows a mark in its row and blocks **Generate**, with the reason above the button, such as *The start image is missing.* A file on the server that has moved or been deleted says *This image has moved or been deleted. Choose it again or remove it.* An upload whose file the browser can't read back says *Choose this image again.* Choose the file again or remove the image. A last frame blocks only while there is a first frame.
+An image that **Generate** would use but can't find shows a mark in its row and blocks **Generate**, with the reason above the button, such as *The start image is missing.* A file on the server that has moved or been deleted says *This image has moved or been deleted. Choose it again or remove it.* An upload whose file the browser can't read back says *Choose this image again.* Choose the file again or remove the image. A last frame with no first frame blocks **Generate** too, with *Add a first frame. A last frame needs one.*
 
 **On a phone,** one **Images** chip in the strip opens the same groups in a popover. See [Other devices](devices.md#images-on-a-phone).
 
@@ -182,11 +183,24 @@ When the model takes [references](../concepts/images.md#references), the **Image
 - **With a start image,** both apply. See [References with a start image](../concepts/images.md#references-with-a-start-image) for what to expect.
 - **Add one from an image you made:** **Use as** → **Reference** in the [Gallery or viewer](gallery.md#use-as) adds it as the next number and keeps the prompt.
 
+### Source video
+
+In the **Extend** kind of **Video**, **Source video** holds the clip to continue: choose it with **Browse**, by path, or with **Extend** in the [Gallery or viewer](gallery.md#the-viewer). The clip is shown as a strip of its frames with a **handle** that sets where the extension continues from. What a point does is in [From a point](../concepts/video.md#from-a-point).
+
+![Video on its Extend kind: the source clip as a strip of frames with the handle at 3.2 s, the dropped part shaded and the line Keeps 3.2 s of 6.0 s](../assets/screenshots/placeholder.svg "extend-video")
+
+- **Whole clip:** with the handle at the right end, the section reads *Keeps the whole clip* and the extension continues from the end.
+- **From a point:** drag the handle, or press ++left++ and ++right++ on it (one frame; ++shift++ for five), ++home++ for the earliest point and ++end++ for the whole clip. The dropped part is shaded, the section reads e.g. *Keeps 3.2 s of 6.0 s*, and **Total** shows the length of the result.
+- **The handle stops at 25 frames** and says why.
+- **The point belongs to the source:** choosing another source puts the handle back at the end. A video paused in the viewer arrives with its point set.
+
+**Copy as a command** includes `--extend-from`.
+
 ### Audio track
 
 The **Audio track** section comes after **Images** in **Video**, and after **Source video** in the **Extend** kind. Give it a file by path, **Browse**, upload or drop (WAV, MP3, M4A, FLAC or OGG), and set **Start at** in seconds. The track's length shows beside its name to help you choose **Start at**. What the track does is in [Audio track](../concepts/video.md#audio-track).
 
-In the **Extend** kind, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source. [Reset](#reset) clears the track, except one the source filled in.
+In the **Extend** kind, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source. [Reset](#reset) clears the track along with the source.
 
 A server file that can't be read is refused at **Generate** with *Can't read the audio track*. An upload lost on reload blocks **Generate** with *Choose the audio track again.* On a phone, the **Track** chip opens the same rows in a popover.
 
@@ -200,7 +214,7 @@ When you choose another model, the settings you changed are kept and the rest ta
 
 ### Reset
 
-**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the tempo, key, delivery, sound type, length, the voice, the *Enhance* options, **Batch size** and **Seed**. It keeps the model, LoRAs and quant, the prompts and the Extend source, and it never touches another tab. **Batch size** and **Seed** are shared by every tab, so each Reset puts them back.
+**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the tempo, key, delivery, sound type, length, the voice, the *Enhance* options, **Batch size** and **Seed**. On Extend it also clears the source video and the point to extend from. It keeps the model, LoRAs and quant and the prompts, and it never touches another tab. **Batch size** and **Seed** are shared by every tab, so each Reset puts them back.
 
 ### Copy as a command
 
@@ -362,7 +376,7 @@ The job card counts takes (*Take 1 of 2*) and shows the stage the model is in. T
 
 ### The result
 
-![A finished take in the player, with its waveform and the browser's audio controls](../assets/screenshots/placeholder.svg "audio-take")
+![A finished take in the player, with its waveform as the timeline](../assets/screenshots/placeholder.svg "audio-take")
 
 The preview shows the finished take as a player. Click or drag the waveform to seek; nothing plays by itself. **Reuse settings** and the **⋯** menu sit in the corner of the panel, and a take that reached YuE2's limit carries **Cut at 6:00**. Takes appear in the Gallery strip as audio tiles; see [Audio in the Gallery](gallery.md#audio). On a phone, see [Audio on a phone](devices.md#audio-on-a-phone).
 
@@ -414,6 +428,7 @@ A job keeps running when you close or reload the tab. Reopen the Workspace and i
 Finished images, videos and audio appear in the Gallery strip, newest first. It is the same list as the [Gallery](gallery.md) page, so a new output, a delete or a move shows in both. Scroll to the end and older ones load in. Click one to open the [viewer](gallery.md#the-viewer); **Show all** opens the Gallery page.
 
 - Press ++left++ and ++right++ (or use the arrows over the preview, or swipe sideways with two fingers on a trackpad) to step through earlier outputs in the preview. **Latest** goes back to the newest.
+- A finished video or take plays in the preview in the same [player](gallery.md#the-player) as the viewer. Pause a video partway to use that frame; see [Use a paused frame](gallery.md#use-a-paused-frame).
 - A strip tile's **⋯** menu has **Move to project…**; see [Move to project](gallery.md#move-to-project).
 - The **«** button next to *Compose* folds the sidebar into a narrow strip, giving the preview more room. The choice is remembered.
 

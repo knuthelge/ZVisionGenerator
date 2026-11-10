@@ -181,7 +181,7 @@ zvisiongenerator/
 │   ├── curated_loras.py           Pure loader of the curated list: frozen `CuratedLora` entries and lookups by family, size or version, id and local name
 │   ├── enhancer_models.py         The built-in prompt-enhancer models (Fast and Smart) per platform, and why Smart cannot run on a machine, read from the metadata
 │   ├── enhance_record.py          Record how a prompt was enhanced for a generated asset, and read it back
-│   ├── ffmpeg.py                  ffmpeg availability check and install, the error for a failed ffmpeg or ffprobe run, and the hidden temp path of in-place rewrites
+│   ├── ffmpeg.py                  ffmpeg availability check and install, one ffmpeg call that prints to stdout, the error for a failed ffmpeg or ffprobe run, and the hidden temp path of in-place rewrites
 │   ├── file_links.py              Hard-link model files into a new folder, copying where linking fails
 │   ├── filename.py                Output filenames ({set}_{timestamp}) and collision counters
 │   ├── h3_lora.py                 Read MiniMax H3 LoRA files of any format into diffusers' converted form
@@ -239,10 +239,14 @@ zvisiongenerator/
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling, and the write-once stored-copy routine
 │   ├── subprocess_env.py          Environment for Python child processes whose output is piped or discarded
 │   ├── upscale.py                 Upscale output sizes, size limits, SeedVR2 options (images and video), the video batch size and denoise defaults
+│   ├── video_cut.py               Cut a clip at a frame so an extension continues from there: the snapped cut, the ffmpeg command, the rebuilt source and the job's temporary cut
 │   ├── video_extend.py            Extend: source checks and problem codes, loading the source, frame and audio-sample arithmetic of the window
+│   ├── video_frame.py             One frame of a clip as a PNG, snapped to the frame a time lies in and matched to the player's colours; saving it under an upload folder
 │   ├── video_model_detect.py      Video model type detection
+│   ├── video_point.py             Pure frame arithmetic: the frame a time lies in, the time ffmpeg seeks to, a clip's frame count
 │   ├── video_probe.py             ffprobe a clip: stream facts, rotation and the checks' inputs
 │   ├── video_splice.py            Join a generated segment onto the source clip (stream copy or one re-encode) with the audio
+│   ├── video_sprite.py            The contact sheet of a clip: one JPEG of up to 121 evenly spaced frames in an 11 x 11 grid
 │   ├── video_support.py           Refuse a video request the model's family cannot do on this platform
 │   ├── video_tail.py              Read a clip's last frames, or all its frames, at their displayed size
 │   ├── video_upscale.py           LTX video file upscale (macOS): the clips it takes, its steps, menu option, progress units and time left
@@ -254,7 +258,7 @@ zvisiongenerator/
 │   ├── audio_job.py               Turn an audio generate form's fields into the request of one take, with the refusals `ziv audio` makes
 │   ├── audio_inventory.py         The audio rows of the Models page
 │   ├── audio_models.py            The audio models that run on this machine and each one's Workspace row
-│   ├── browse_media.py            Previews, facts and playback of the media files the file browser lists: the file check, the disk cache and the decode limits
+│   ├── browse_media.py            Previews, facts, contact sheets and playback of the media files the file browser lists: the file check, the disk cache and the decode limits
 │   ├── config.py                  Web UI config loading and model inventory discovery
 │   ├── config_api.py              JSON config response assembly
 │   ├── config_contract.py         Writable config semantics and path readback helpers
@@ -291,9 +295,11 @@ zvisiongenerator/
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
 │   ├── recent_prompts.py          Recent prompts component of the app database: the entry builder and the `recent_prompts_entries` store
 │   ├── request_guard.py           DNS-rebinding and cross-site request protection
+│   ├── upload_folders.py          The name of the folder under the output folder that holds the files the Web UI saves for a job
 │   ├── upscale_api.py             Plan a viewer upscale job: refinement model, carried settings, limits
 │   ├── video_clip.py              Resolve the model, steps, size and length a video job runs at, shared by the job and its memory estimate
 │   ├── video_conversion.py        Video checkpoint conversion from the Models page (LTX-2.3, LTX-2.5, MiniMax H3): inspect, then convert as a background job with progress
+│   ├── video_frame_api.py         The route that saves one frame of a video as a PNG under the output folder's uploads
 │   ├── voices.py                  The logic behind the saved-voices routes
 │   ├── web_runner.py              Background workers for generation batches
 │   ├── workspace_api.py           Shared SPA payloads for workspace and models routes; every model option and row carries its licence records
