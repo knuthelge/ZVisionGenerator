@@ -40,6 +40,13 @@ describe('FileThumb', () => {
     expect(last.querySelector('[data-testid="play-badge"]')).toBeNull();
   });
 
+  it('shows the frame at a second, without a play badge, in place of the last frame', () => {
+    mountComponent(FileThumb, { purpose: 'source_video', path: '/clips/a.mp4', kind: 'video', frame: 'last', at: 3.5 });
+
+    expect(image()?.getAttribute('src')).toBe('/preview/source_video/clips/a.mp4?at=3.5');
+    expect(thumb().querySelector('[data-testid="play-badge"]')).toBeNull();
+  });
+
   it('shows the fallback icon it was given, and the file icon otherwise, when the picture cannot load', async () => {
     mountComponent(FileThumb, { purpose: 'reference_image', path: '/pics/a.png', kind: 'image' });
     mountComponent(FileThumb, { purpose: 'source_video', path: '/clips/a.mp4', kind: 'video', frame: 'last', fallbackIcon: 'film' });

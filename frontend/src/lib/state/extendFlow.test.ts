@@ -126,6 +126,113 @@ describe('extend flows', () => {
     expect(draft.state).toMatchObject({ scene: '', prompt: '', enhancedScene: '', enhancedPrompt: '', extendSourcePath: '/clips/walk.mp4' });
   });
 
+  it("loads the server's Reuse params of an extension that continued from a point", () => {
+    draft.loadFromUrl(reuseFixture.extend_from);
+    expect(draft.state).toMatchObject({ workflow: 'extend', extendSourcePath: '/clips/walk.mp4', extendFrom: 3.208333, extendFrames: 48 });
+  });
+
+  describe('the point to extend from', () => {
+    // A 144-frame clip at 24 fps with a track that ended at 10 s.
+    const long = (overrides: Partial<ReturnType<typeof sceneSource>> = {}) =>
+      sceneSource({ path: SOURCE, frame_count: 144, fps: 24, video_start: 0, audio_track_path: '/audio/song.mp3', audio_track_end: 10, ...overrides });
+
+    it('is set by a link that names it, and read as seconds', () => {
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_from: '3.5' });
+      expect(draft.state.extendFrom).toBe(3.5);
+    });
+
+    it('is cleared by an Extend that names none', () => {
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_from: '3.5' });
+      draft.loadFromUrl(extendParams(extendAsset({ scene: 'A street.' })));
+      expect(draft.state.extendFrom).toBeNull();
+    });
+
+    it('is not read from a value that is not a number of seconds', () => {
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_from: 'soon' });
+      expect(draft.state.extendFrom).toBeNull();
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_from: '-1' });
+      expect(draft.state.extendFrom).toBeNull();
+    });
+
+    it('belongs to the source: choosing another source resets it, choosing the same one keeps it', () => {
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_from: '3.5' });
+      draft.setExtendSourcePath(SOURCE);
+      expect(draft.state.extendFrom).toBe(3.5);
+      draft.setExtendSourcePath('/clips/other.mp4');
+      expect(draft.state.extendFrom).toBeNull();
+    });
+
+    it('is kept by Retry and Load settings, which carry the recorded value', () => {
+      const { params, patch } = jobSettingsPrefill({ mode: 'video', workflow: 'extend', source_video: SOURCE, extend_frames: '48', extend_from: '3.208333', scene: 'A street.', prompt: '' });
+      draft.loadFromUrl(params);
+      draft.patch(patch);
+      expect(draft.state.extendFrom).toBe(3.208333);
+    });
+
+    it('is moved to a point the source can use when the source is described', () => {
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_from: '0.5' });
+      draft.applyExtendSource(long());
+      expect(draft.state.extendFrom).toBeCloseTo(24 / 24, 6);
+      draft.setExtendFrom(99);
+      draft.applyExtendSource(long());
+      expect(draft.state.extendFrom).toBeNull();
+    });
+
+    it('starts the first inspection\'s track at the moved Start at', () => {
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_from: String(76 / 24) });
+      draft.applyExtendSource(long());
+      expect(draft.state).toMatchObject({ extendAudioTrackPath: '/audio/song.mp3' });
+      expect(draft.state.extendAudioTrackStart).toBeCloseTo(10 - 67 / 24, 6);
+    });
+
+    it('moves Start at with the handle while the track is still the source\'s own', () => {
+      draft.loadFromUrl(extendParams(extendAsset({ scene: 'A street.' })));
+      draft.applyExtendSource(long());
+      expect(draft.state.extendAudioTrackStart).toBe(10);
+
+      draft.setExtendFrom(76 / 24);
+      expect(draft.state.extendAudioTrackStart).toBeCloseTo(10 - 67 / 24, 6);
+      draft.setExtendFrom(100 / 24);
+      expect(draft.state.extendAudioTrackStart).toBeCloseTo(10 - 43 / 24, 6);
+      draft.setExtendFrom(null);
+      expect(draft.state.extendAudioTrackStart).toBe(10);
+    });
+
+    it('floors the moved Start at at 0', () => {
+      draft.loadFromUrl(extendParams(extendAsset({ scene: 'A street.' })));
+      draft.applyExtendSource(long({ audio_track_end: 1 }));
+      draft.setExtendFrom(76 / 24);
+      expect(draft.state.extendAudioTrackStart).toBe(0);
+    });
+
+    it('leaves a track the person chose where they put it', () => {
+      draft.loadFromUrl(extendParams(extendAsset({ scene: 'A street.' })));
+      draft.applyExtendSource(long());
+      draft.patch({ extendAudioTrackStart: 42 });
+      draft.setExtendFrom(76 / 24);
+      expect(draft.state.extendAudioTrackStart).toBe(42);
+    });
+
+    it('keeps a Reset\'s Start at where the point put it', () => {
+      draft.loadFromUrl(extendParams(extendAsset({ scene: 'A street.' })));
+      draft.applyExtendSource(long());
+      draft.setExtendFrom(76 / 24);
+      expect(draft.state.extendPrefill?.audioTrack?.start).toBeCloseTo(10 - 67 / 24, 6);
+    });
+
+    it('moves Start at when an Extend from a point arrives for a source that is already described', () => {
+      draft.loadFromUrl(extendParams(extendAsset({ scene: 'A street.' })), null, { replaceSlots: true });
+      draft.applyExtendSource(long(), null, { replaceText: true });
+      expect(draft.state.extendAudioTrackStart).toBe(10);
+
+      draft.loadFromUrl({ ...extendParams(extendAsset({ scene: 'A street.' })), extend_from: String(76 / 24) }, null, { replaceSlots: true });
+      draft.applyExtendSource(long(), null, { replaceText: true });
+
+      expect(draft.state.extendAudioTrackStart).toBeCloseTo(10 - 67 / 24, 6);
+      expect(draft.state.extendPrefill?.audioTrack?.start).toBeCloseTo(10 - 67 / 24, 6);
+    });
+  });
+
   it('persists the chosen path and not the source facts', () => {
     draft.loadFromUrl(extendParams(extendAsset({ scene: 'A street.' })));
     draft.applyExtendSource(sceneSource());

@@ -10,6 +10,7 @@ import { galleryStore } from '$lib/state/gallery.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { jobStore } from '$lib/state/job.svelte';
 import { hasPendingReference, requestReference } from '$lib/state/pendingReference.svelte';
+import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { toasts } from '$lib/state/toasts.svelte';
 import { memoryUploadStore } from '$lib/state/uploadStore';
@@ -326,7 +327,7 @@ describe('WorkspacePage history viewer (REC-UX-002)', () => {
 
     (target.querySelector(`button[aria-label="View ${talk.filename}"]`) as HTMLButtonElement).click();
     await settle();
-    const player = () => document.querySelector('[data-testid="viewer-audio"] audio') as HTMLAudioElement | null;
+    const player = () => document.querySelector('[data-testid="asset-viewer"] [data-media-player] audio') as HTMLAudioElement | null;
     const opened = player();
     expect(opened?.getAttribute('src')).toBe(talk.url);
     const paused: (HTMLMediaElement | null)[] = [];
@@ -890,6 +891,53 @@ describe('WorkspacePage asset actions and settings', () => {
       expect(newer().disabled).toBe(false);
     });
 
+    describe('with a video on the stage', () => {
+      const clip = () => makeAsset({ id: 'out/clip.mp4', url: '/media/out/clip.mp4', thumbnail_url: '/thumbs/out/clip.mp4', filename: 'clip.mp4', media_type: 'video' });
+      const slider = () => target.querySelector('.latest-region [role="slider"][aria-label="Playback position"]') as HTMLElement;
+      const key = (name: string, on: EventTarget, init: KeyboardEventInit = {}) => {
+        const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...init });
+        on.dispatchEvent(event);
+        return event;
+      };
+
+      it('plays in the player, with no native controls', async () => {
+        await mountWithHistory([clip(), second()]);
+
+        expect(target.querySelector<HTMLVideoElement>('.latest-region video')?.controls).toBe(false);
+        expect(target.querySelector('.latest-region [data-media-player]')?.getAttribute('data-size')).toBe('stage');
+      });
+
+      it('leaves the arrows to the player while it has focus, and steps history again without it', async () => {
+        await mountWithHistory([clip(), second(), third()]);
+        slider().focus();
+
+        expect(key('ArrowRight', slider()).defaultPrevented).toBe(true);
+        await settle();
+        expect(stageTile().getAttribute('aria-label')).toBe('clip.mp4');
+
+        slider().blur();
+        arrow('ArrowRight');
+        await settle();
+        expect(stageTile().getAttribute('aria-label')).toBe('second.png');
+      });
+
+      it('still runs the page\'s other shortcuts with the focus in the player', async () => {
+        await mountWithHistory([clip(), second()]);
+        slider().focus();
+
+        const event = key('2', slider(), { altKey: true, code: 'Digit2' });
+
+        expect(event.defaultPrevented).toBe(true);
+      });
+
+      it('does not bind E, K, M or F on the stage', async () => {
+        await mountWithHistory([clip(), second()]);
+        slider().focus();
+
+        for (const name of ['e', 'k', 'm', 'f']) expect(key(name, slider()).defaultPrevented).toBe(false);
+      });
+    });
+
     it('ignores the arrows while typing in a field', async () => {
       await mountWithHistory([first(), second()]);
       const prompt = target.querySelector('#ws-prompt') as HTMLTextAreaElement;
@@ -1060,7 +1108,7 @@ describe('WorkspacePage extend', () => {
       expect(target.querySelector('#ws-generate-reason')).toBeNull();
     });
 
-    it('shows the server\'s last frame of the clip as its thumbnail, for a clip inside the output folder or anywhere else', async () => {
+    it('shows the last frame of the clip as its thumbnail, for a clip inside the output folder or anywhere else', async () => {
       await mountExtend();
       const thumb = () => target.querySelector('[data-section="source-video"] [data-testid="slot-thumb"] img');
       await chooseSource(sceneSource({ duration_seconds: 4.04 }));
@@ -1110,6 +1158,28 @@ describe('WorkspacePage extend', () => {
       expect(field('ws-scene').value).toBe('A woman on a rainy street.');
       expect(field('ws-prompt').value).toBe('She turns away.');
       expect(button('ws-submit').disabled).toBe(true);
+    });
+
+    it('inspects the source again when an exact Reuse brings back what a Reset cleared, so Generate is not left blocked', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      const before = draft.state;
+      expect(button('ws-submit').disabled).toBe(false);
+      const inspections = extendApiMocks.inspectExtendSource.mock.calls.length;
+
+      button('ws-reset').click();
+      await settle();
+      expect(draft.state.extendSourcePath).toBeNull();
+      expect(draft.extendSource).toBeNull();
+      expect(button('ws-submit').disabled).toBe(true);
+
+      requestJobSettings({ mode: 'video', workflow: 'extend', model: before.model, source_video: SOURCE, extend_frames: String(before.extendFrames), steps: String(before.steps), scene: 'A woman on a rainy street.', prompt_source: 'inline', prompt: 'She turns.' });
+      await settle();
+
+      expect(extendApiMocks.inspectExtendSource.mock.calls.length).toBeGreaterThan(inspections);
+      expect(draft.state.extendSourcePath).toBe(SOURCE);
+      expect(draft.extendSource).not.toBeNull();
+      expect(button('ws-submit').disabled).toBe(false);
     });
 
     it('shows the moved-file message for a Reuse whose source is gone, and gives the moved path no facts', async () => {
@@ -1269,6 +1339,32 @@ describe('WorkspacePage extend', () => {
       expect(text('[data-testid="extend-frames"]')).toBe('+48 frames');
       expect(text('[data-testid="extend-total"]')).toBe('6.04 s · 145 frames');
       expect(text('label[for="ws-extend-seconds"]')).toBe('Extend by (s)');
+    });
+
+    it('follows the point to continue from: the total counts the kept frames, and Generate sends the point', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource({ fps: 24, frame_count: 144, video_start: 0 }));
+      expect(text('[data-testid="extend-total"]')).toBe('8.00 s · 192 frames');
+
+      draft.setExtendFrom(76 / 24);
+      await settle();
+
+      expect(text('[data-testid="extend-keeps"]')).toBe('Keeps 3.2 s of 6.0 s');
+      expect(text('[data-testid="extend-total"]')).toBe('5.21 s · 125 frames');
+      expect(button('ws-submit').disabled).toBe(false);
+      expect((await submit())?.get('extend_from')).toBe(String(76 / 24));
+    });
+
+    it('sends no point for the whole clip, and keeps Generate valid at the 25-frame stop', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource({ fps: 24, frame_count: 144, video_start: 0 }));
+      expect((await submit())?.has('extend_from')).toBe(false);
+
+      draft.setExtendFrom(1);
+      await settle();
+
+      expect(text('[data-testid="extend-cut-reason"]')).toContain('25 frames');
+      expect(button('ws-submit').disabled).toBe(false);
     });
 
     it('snaps a typed length to 8-frame steps of the source frame rate', async () => {
@@ -1661,7 +1757,7 @@ describe('WorkspacePage extend', () => {
       openMenu(asset);
       const item = document.querySelector('[role="menu"] [data-action="extend"]') as HTMLElement;
       expect(item.getAttribute('aria-disabled')).toBe('true');
-      expect(item.getAttribute('title')).toBe("Upscaled videos can't be extended yet.");
+      expect(item.textContent).toContain("Upscaled videos can't be extended yet.");
       item.click();
       await settle();
       expect(draft.state.workflow).toBe('txt2vid');

@@ -150,7 +150,7 @@
           onpathchange={(path) => draft.setLastFrame(path === null ? null : { path })}
         />
         {#if last.set}
-          <p class="row-hint">{last.used ? 'The clip ends on this image; different scenes dissolve into each other.' : 'Not used without a first frame'}</p>
+          <p class="row-hint">{last.used ? 'The clip ends on this image; different scenes dissolve into each other.' : 'Needs a first frame'}</p>
         {/if}
       </div>
     {/if}

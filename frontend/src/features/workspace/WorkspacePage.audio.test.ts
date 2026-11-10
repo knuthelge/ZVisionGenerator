@@ -4301,7 +4301,9 @@ describe('the stage with an audio take', () => {
   it('plays the latest take in a player panel and captions it with its words, model, length and seed', async () => {
     await mountWith([makeAudioAsset(), image]);
 
-    expect(target.querySelector('audio')?.getAttribute('aria-label')).toBe('Play song.flac');
+    expect(target.querySelector('audio')?.getAttribute('src')).toBe('/media/out/song.flac');
+    expect(target.querySelector('audio')?.controls).toBe(false);
+    expect(target.querySelector('.latest-region [data-media-player][data-kind="audio"][data-size="stage"]')).not.toBeNull();
     expect(target.querySelector('.latest-region img')).toBeNull();
     expect(Array.from(caption()!.children).map((part) => part.textContent)).toEqual(['Dreamy synth-pop, warm analog pads', 'YuE2 3B', '2:00', 'seed 4127']);
     expect(caption()!.querySelector('.ui-badge-warning')).toBeNull();
@@ -4309,7 +4311,7 @@ describe('the stage with an audio take', () => {
 
   it('keeps a sideways drag that starts on the waveform from paging the stage, and pages on the same drag elsewhere', async () => {
     await mountWith([makeAudioAsset(), image]);
-    const wave = target.querySelector('[data-testid="audio-wave"]')!;
+    const wave = target.querySelector('[data-testid="media-timeline"]')!;
 
     touch(wave, 'touchstart', 300, 200);
     touch(wave, 'touchmove', 250, 202);

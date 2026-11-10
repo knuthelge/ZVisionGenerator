@@ -3,9 +3,14 @@ import { pushEscapeLayer } from './escapeStack';
 /** Where a popover's edge lines up with its anchor. */
 export type PopoverAlign = 'start' | 'end';
 
+/** Which side of its anchor a popover prefers: it opens on the other side when the preferred one has no room. */
+export type PopoverSide = 'below' | 'above';
+
 export interface PopoverOptions {
   anchor: HTMLElement | null;
   align?: PopoverAlign;
+  /** The side to open on when it fits; below by default. */
+  side?: PopoverSide;
   /** Called when the popover should close: outside click, Escape, or the page scrolling or resizing. */
   onclose: () => void;
   /** Where Escape puts focus; the anchor when absent. */
@@ -30,14 +35,17 @@ const GAP_PX = 6;
 const MARGIN_PX = 8;
 
 /**
- * Place a popover below its anchor, or above when it would run off the bottom of the viewport,
+ * Place a popover below its anchor, or above when it would run off the bottom of the viewport (or the other way round with `side: 'above'`),
  * aligned to the anchor's start or end edge and kept inside the viewport horizontally.
  */
-export function placePopover(anchor: Box, popover: Box, viewport: { width: number; height: number }, align: PopoverAlign): { top: number; left: number } {
+export function placePopover(anchor: Box, popover: Box, viewport: { width: number; height: number }, align: PopoverAlign, side: PopoverSide = 'below'): { top: number; left: number } {
   const below = anchor.bottom + GAP_PX;
-  const top = below + popover.height > viewport.height - MARGIN_PX
-    ? Math.max(MARGIN_PX, anchor.top - GAP_PX - popover.height)
-    : below;
+  const above = anchor.top - GAP_PX - popover.height;
+  const top = side === 'above' && above >= MARGIN_PX
+    ? above
+    : below + popover.height > viewport.height - MARGIN_PX
+      ? Math.max(MARGIN_PX, above)
+      : below;
   const preferred = align === 'end' ? anchor.right - popover.width : anchor.left;
   const left = Math.min(Math.max(MARGIN_PX, preferred), viewport.width - popover.width - MARGIN_PX);
   return { top, left };
@@ -63,7 +71,8 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
       options.anchor.getBoundingClientRect(),
       node.getBoundingClientRect(),
       { width: window.innerWidth, height: window.innerHeight },
-      options.align ?? 'start'
+      options.align ?? 'start',
+      options.side
     );
     node.style.top = `${top}px`;
     node.style.left = `${left}px`;

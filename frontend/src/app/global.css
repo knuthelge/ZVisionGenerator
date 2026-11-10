@@ -103,6 +103,24 @@
   --spacing-row: 30px;
   --spacing-bar: 36px;
   --spacing-badge: 18px;
+
+  /* The media player: glass only where it is asked for. The surfaces are the overlay colour at rising strength, so what
+     lies behind them stays readable. */
+  --color-viewer-void: color-mix(in srgb, var(--color-bg-overlay) 50%, black);
+  --color-glass-strong: color-mix(in srgb, var(--color-bg-overlay) 78%, transparent);
+  --color-viewer-fade-low: color-mix(in srgb, var(--color-viewer-void) 72%, transparent);
+  --color-viewer-fade-mid: color-mix(in srgb, var(--color-viewer-void) 50%, transparent);
+  --color-viewer-fade-soft: color-mix(in srgb, var(--color-viewer-void) 26%, transparent);
+  --color-viewer-fade-faint: color-mix(in srgb, var(--color-viewer-void) 9%, transparent);
+  --color-hairline: color-mix(in srgb, var(--color-text-primary) 26%, transparent);
+  --color-hairline-tick: color-mix(in srgb, var(--color-text-primary) 22%, transparent);
+  /* A dark line under the timeline's hairline, so it reads on a bright frame. */
+  --color-hairline-shade: color-mix(in srgb, black 55%, transparent);
+  --color-bloom-rest: color-mix(in srgb, var(--color-text-primary) 58%, transparent);
+  --color-wave-rest: color-mix(in srgb, var(--color-text-primary) 34%, transparent);
+  --ease-standard: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-soft-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --glass-blur: 16px;
 }
 
 @layer base {
@@ -406,6 +424,10 @@
   .ui-holdable { position: relative; overflow: hidden; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   .ui-holdable[data-holding]::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: currentColor; opacity: 0.55; transform-origin: left; animation: ui-hold-fill var(--hold-ms, 480ms) linear forwards; pointer-events: none; }
   @keyframes ui-hold-fill { from { transform: scaleX(0); } }
+  /* Something a Use as or an Extend has just filled (lib/arrivalFlash.ts): a ring that fades. */
+  [data-arrived] { outline: 2px solid transparent; outline-offset: -2px; animation: ui-arrived 900ms var(--ease-soft-out) both; }
+  @keyframes ui-arrived { from { outline-color: var(--color-primary-main); } to { outline-color: transparent; } }
+  @media (prefers-reduced-motion: reduce) { [data-arrived] { animation: none; } }
   /* Full-screen layers (the app, sheets, dialogs, the drawer, the viewer) cover the visible area that
      lib/state/viewport.ts measures, not the layout viewport: above an on-screen keyboard, and in step with a browser
      toolbar that comes and goes. Before the first measure, and without visualViewport, they fill 100dvh. */

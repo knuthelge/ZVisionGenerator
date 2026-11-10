@@ -1,10 +1,9 @@
 <script lang="ts">
   import { browseInfo, browseMediaUrl, browsePreviewUrl } from '$lib/api/browse';
   import { Icon } from '$lib/components/atoms';
-  import { claimPlayback, releasePlayback } from '$lib/state/nowPlaying';
   import { formatBytes, formatModifiedFull, previewFacts, type PreviewFact } from '$lib/state/pathBrowser';
   import type { BrowseEntry, BrowseInfo, BrowsePreviewKind, BrowsePurposeName } from '$lib/types';
-  import AudioPlayer from './AudioPlayer.svelte';
+  import MediaPlayer from './MediaPlayer.svelte';
 
   interface Props {
     purpose: BrowsePurposeName;
@@ -39,7 +38,6 @@
   let failedPicturePath = $state<string | null>(null);
   let failedVideoPath = $state<string | null>(null);
   let loaded = $state<{ path: string; info: BrowseInfo } | null>(null);
-  let video = $state<HTMLVideoElement | null>(null);
 
   const settled = $derived(path !== null && settledPath === path);
   const pictureFailed = $derived(path !== null && failedPicturePath === path);
@@ -70,46 +68,35 @@
       controller.abort();
     };
   });
-
-  // A file never keeps playing when the selection moves on or the preview goes.
-  $effect(() => {
-    const element = video;
-    return () => {
-      if (!element) return;
-      element.pause();
-      releasePlayback(element);
-    };
-  });
 </script>
 
 <div class="preview" class:strip={wide} class:sheet={arrangement === 'sheet'} data-testid="file-preview" data-arrangement={arrangement} data-kind={entry === null ? 'none' : entry.kind === 'directory' ? 'folder' : kind}>
   {#if entry === null}
     <p class="hint">Select a file to preview it.</p>
   {:else}
-    <div class="stage" data-testid="preview-stage" class:stage-audio={previewable && kind === 'audio'} style:background-image={standIn}>
+    <!-- A media error does not bubble, so the stage listens for it on the way down to the player's video. -->
+    <div
+      class="stage"
+      data-testid="preview-stage"
+      class:stage-audio={previewable && kind === 'audio'}
+      style:background-image={standIn}
+      onerrorcapture={(event) => { if (event.target instanceof HTMLVideoElement) failedVideoPath = path; }}
+    >
       {#if entry.kind === 'directory'}
         <span class="icon-stage" data-testid="preview-icon"><Icon name="folder" size={48} /></span>
       {:else if !previewable}
         <span class="icon-stage" data-testid="preview-icon"><Icon name="file" size={48} /></span>
       {:else if kind === 'audio'}
         {#if settled}
-          <AudioPlayer src={mediaUrl} peaks={info?.peaks ?? []} filename={entry.name} duration={info?.seconds ?? null} size="pane" class="pane-player" />
+          {#key mediaUrl}
+            <MediaPlayer kind="audio" size="pane" src={mediaUrl} label={entry.name} peaks={info?.peaks ?? []} duration={info?.seconds ?? null} />
+          {/key}
         {/if}
       {:else if kind === 'video'}
         {#if settled && !videoFailed}
-          <!-- svelte-ignore a11y_media_has_caption because a clip chosen for a source has no captions to show -->
-          <video
-            playsinline
-            bind:this={video}
-            class="still"
-            src={mediaUrl}
-            poster={stillUrl}
-            controls
-            preload="metadata"
-            aria-label="Play {entry.name}"
-            onplay={() => video && claimPlayback(video)}
-            onerror={() => { failedVideoPath = path; }}
-          ></video>
+          {#key mediaUrl}
+            <MediaPlayer kind="video" size="pane" src={mediaUrl} label={entry.name} poster={stillUrl} filePath={entry.path} />
+          {/key}
         {:else if settled && !pictureFailed}
           <img class="still" src={stillUrl} alt="" onerror={() => { failedPicturePath = path; }}>
         {/if}
@@ -123,7 +110,7 @@
     <div class="details">
       <p class="name" data-testid="preview-name">{entry.name}</p>
       {#if videoFailed}
-        <p class="note" role="status">This browser can’t play this file.</p>
+        <p class="note" role="status">This file can’t be played.</p>
       {/if}
       {#if entry.kind === 'directory'}
         <p class="kind-note">Folder</p>
@@ -149,9 +136,7 @@
   @media (max-height: 499px) { .sheet .stage { height: 220px; } }
   .stage-audio { flex: none; height: auto; min-height: 110px; background: transparent; overflow: visible; }
   .strip .stage-audio { align-self: flex-start; }
-  .stage :global(.pane-player) { width: 100%; }
   .still { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
-  video.still { width: 100%; height: 100%; }
   .icon-stage { display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); }
   .details { display: flex; flex: none; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
   .strip .details { flex: 1; }

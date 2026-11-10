@@ -5,7 +5,8 @@ import type { AssetUpscaleFactor, DraftState, GalleryAsset, SpeechAudioModel } f
 
 import { AUDIO_MODELS, makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
 import { makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
-import { assetAspect, canExtend, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, describeFallbackReason, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, saveVoiceStart, seedvr2Options, upscaleFactors, upscaleOption, useAsState, voiceParams, voiceTooLongReason, workflowLabel } from './assetActions';
+import { EXTEND_SHORT_REASON, type FramePoint } from './framePoint';
+import { assetAspect, canExtend, canUseFrame, extendLabel, extendNote, extendPointReason, frameParams, frameSetNotice, stillEndingOn, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, describeFallbackReason, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, saveVoiceStart, seedvr2Options, upscaleFactors, upscaleOption, useAsState, voiceParams, voiceTooLongReason, workflowLabel } from './assetActions';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -321,3 +322,83 @@ describe('Use as for audio takes', () => {
   });
 });
 
+
+describe('a paused video frame', () => {
+  const clip = (overrides: Partial<GalleryAsset> = {}): GalleryAsset => makeAsset({ id: 'out/clip.mp4', url: '/media/out/clip.mp4', filename: 'clip.mp4', media_type: 'video', file_path: '/outputs/out/clip.mp4', ...overrides });
+  const point = (overrides: Partial<FramePoint> = {}): FramePoint => ({ time: 3.0208, seconds: 3, tooShort: false, atEnd: false, ...overrides });
+
+  it('reads Extend from a frame before the end, Extend the clip at it, and plain Extend without one', () => {
+    expect(extendLabel(point())).toBe('Extend from 3.0 s');
+    expect(extendLabel(point({ atEnd: true }))).toBe('Extend the clip');
+    expect(extendLabel(null)).toBe('Extend');
+    expect(extendLabel(undefined)).toBe('Extend');
+  });
+
+  it('refuses only a frame that is too early, with the reason', () => {
+    expect(extendPointReason(point({ tooShort: true }))).toBe(EXTEND_SHORT_REASON);
+    expect(extendPointReason(point())).toBeNull();
+    expect(extendPointReason(null)).toBeNull();
+  });
+
+  it('notes what an Extend from a frame keeps, and that the end continues from the end', () => {
+    expect(extendNote(point(), 6)).toBe('Keeps 3.0 s of 6.0 s, drops what came after');
+    expect(extendNote(point())).toBe('Keeps 3.0 s, drops what came after');
+    expect(extendNote(point({ atEnd: true }), 6)).toBe('Continues from the end of the clip');
+    expect(extendNote(null)).toBe('Continues from the end of the clip');
+  });
+
+  it('sends extend_from for a frame before the end and nothing at the end or without a frame', () => {
+    expect(extendParams(clip(), point())).toMatchObject({ workflow: 'extend', source_video: '/outputs/out/clip.mp4', extend_from: '3.0208' });
+    expect(extendParams(clip(), point({ atEnd: true }))).not.toHaveProperty('extend_from');
+    expect(extendParams(clip(), null)).not.toHaveProperty('extend_from');
+    expect(extendParams(clip())).not.toHaveProperty('extend_from');
+  });
+
+  it('can be used as a frame only for a video file on the host with a frame selected', () => {
+    expect(canUseFrame(clip(), point())).toBe(true);
+    expect(canUseFrame(clip(), null)).toBe(false);
+    expect(canUseFrame(clip({ file_path: undefined }), point())).toBe(false);
+    expect(canUseFrame(makeAsset(), point())).toBe(false);
+  });
+
+  it('fills the first frame with the clip\'s recorded scene, which empties the Action, and leaves the text alone with none', () => {
+    expect(frameParams(clip({ scene: 'A fox on a hill' }), '/up/clip_3.0s.png', 'video')).toEqual({ workflow: 'img2vid', image_path: '/up/clip_3.0s.png', use_as: 'start', scene: 'A fox on a hill' });
+    expect(frameParams(clip({ scene: null, prompt: 'clip mp4' }), '/up/clip_3.0s.png', 'video')).toEqual({ workflow: 'img2vid', image_path: '/up/clip_3.0s.png', use_as: 'start' });
+    expect(frameParams(clip({ scene: '' }), '/up/clip_3.0s.png', 'video')).not.toHaveProperty('scene');
+  });
+
+  it('fills only the last frame slot, with no text', () => {
+    expect(frameParams(clip({ scene: 'A fox on a hill' }), '/up/clip_5.9s.png', 'last')).toEqual({ workflow: 'img2vid', end_image_path: '/up/clip_5.9s.png', use_as: 'last' });
+  });
+
+  it('names the last frame that stays, from a path, a held upload or a marker, and none when the slot is empty', () => {
+    expect(stillEndingOn({ endImagePath: '/up/other_6.0s.png', endImageUpload: null }, { lastFrame: null })).toBe('other_6.0s.png');
+    expect(stillEndingOn({ endImagePath: null, endImageUpload: 'photo.png' }, { lastFrame: null })).toBe('photo.png');
+    expect(stillEndingOn({ endImagePath: null, endImageUpload: 'photo.png' }, { lastFrame: new File([], 'held.png') })).toBe('held.png');
+    expect(stillEndingOn({ endImagePath: null, endImageUpload: null }, { lastFrame: null })).toBeNull();
+    expect(stillEndingOn({ endImagePath: '', endImageUpload: null }, { lastFrame: null })).toBeNull();
+  });
+
+  describe('frameSetNotice', () => {
+    const point = { seconds: 2.2 };
+    const empty = { endImagePath: null, endImageUpload: null, firstFramePath: null, firstFrameUpload: null };
+    const held = { lastFrame: null };
+
+    it('says where a first frame came from when no last frame is set', () => {
+      expect(frameSetNotice('video', point, empty, held)).toEqual({ message: 'First frame set from 2.2 s', type: 'success' });
+    });
+
+    it('says which last frame stays when a first frame is set', () => {
+      expect(frameSetNotice('video', point, { ...empty, endImagePath: '/up/other_6.0s.png' }, held)).toEqual({ message: 'First frame set. Still ending on other_6.0s.png.', type: 'info' });
+    });
+
+    it('says where a last frame came from when no first frame is set', () => {
+      expect(frameSetNotice('last', point, empty, held)).toEqual({ message: 'Last frame set from 2.2 s', type: 'success' });
+    });
+
+    it('says nothing for a last frame beside a first frame', () => {
+      expect(frameSetNotice('last', point, { ...empty, firstFramePath: '/pics/start.png' }, held)).toBeNull();
+      expect(frameSetNotice('last', point, { ...empty, firstFrameUpload: 'start.png' }, held)).toBeNull();
+    });
+  });
+});

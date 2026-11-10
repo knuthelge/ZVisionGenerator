@@ -801,6 +801,24 @@ describe('WorkspacePage last frame', () => {
     expect(submitted.has('image_file')).toBe(false);
   });
 
+  it('says on a phone why Generate is off for a last frame without a first frame, until a first frame is set', async () => {
+    layoutProbe.compact = true;
+    await mountLastFrame();
+    draft.setLastFrame({ path: '/in/end.png' });
+    await settle();
+
+    const submitButton = () => target.querySelector('#ws-submit-compact') as HTMLButtonElement;
+    expect(target.querySelector('#ws-generate-reason-compact')?.textContent).toMatch(/first frame/);
+    expect(submitButton().disabled).toBe(true);
+    expect(submitButton().getAttribute('aria-describedby')).toBe('ws-generate-reason-compact');
+
+    draft.setStartImage('video', { path: '/in/start.png' }, lastContext);
+    await settle();
+
+    expect(target.querySelector('#ws-generate-reason-compact')).toBeNull();
+    expect(submitButton().getAttribute('aria-describedby')).toBeNull();
+  });
+
   it('keeps an uploaded first and last frame when the page is left and comes back', async () => {
     await mountLastFrame();
     const first = image('first.png');
@@ -895,21 +913,33 @@ describe('WorkspacePage last frame', () => {
     expect(summary()).toBe('start.png → end.png');
   });
 
-  it('removing the first frame keeps the last frame and sends no end_image_path', async () => {
+  it('removing the first frame keeps the last frame and blocks Generate until a first frame is added', async () => {
     await mountLastFrame([], { first: true });
     draft.setLastFrame({ path: '/in/end.png' });
     await settle();
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(false);
 
     (target.querySelector('button[aria-label="Clear first frame"]') as HTMLButtonElement).click();
     await settle();
-    const submitted = await submit();
 
     expect(draft.state).toMatchObject({ workflow: 'txt2vid', firstFramePath: null, endImagePath: '/in/end.png' });
     expect(target.querySelector('#ws-end-image-label')).not.toBeNull();
     expect(summary()).toBe('None');
-    expect(submitted.get('workflow')).toBe('txt2vid');
-    expect(submitted.has('end_image_path')).toBe(false);
-    expect(submitted.has('end_image_file')).toBe(false);
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(true);
+    expect(target.querySelector('#ws-generate-reason')?.textContent).toMatch(/first frame/i);
+
+    draft.setStartImage('video', { path: '/in/start.png' }, lastContext);
+    await settle();
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('blocks Generate for a last frame that is an upload, with no first frame', async () => {
+    await mountLastFrame();
+    await addFiles(target, 'last', image('end.png'));
+    await settle();
+
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(true);
+    expect(target.querySelector('#ws-generate-reason')?.textContent).toMatch(/first frame/i);
   });
 
   it('clears only the last frame with its Remove button', async () => {

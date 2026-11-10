@@ -3,7 +3,7 @@ import type { DraftState, EnhancedSource, EnhanceParts, EnhanceSettings, JobSett
 import { EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
 
 /** Fields the workspace prefill path applies on top of the model's defaults (the same keys as a reuse URL). */
-const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio', 'size', 'width', 'height', 'frames', 'lora', 'image_path', 'end_image_path', 'audio_track_path', 'audio_track_start', 'source_video', 'extend_frames'] as const;
+const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio', 'size', 'width', 'height', 'frames', 'lora', 'image_path', 'end_image_path', 'audio_track_path', 'audio_track_start', 'source_video', 'extend_frames', 'extend_from'] as const;
 
 export interface JobSettingsPrefill {
   /** Applied like a reuse URL: workflow and model first, so their defaults load before the values. */

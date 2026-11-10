@@ -20,17 +20,19 @@
 
 <script lang="ts">
   import { Icon, ShortcutList, Waveform } from '$lib/components/atoms';
-  import { isTyping } from '$lib/keyboard';
+  import { inMenu, isPlainKey, isTyping } from '$lib/keyboard';
   import { canExtend, canUseAsAudioTrack, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
   import { takeWords, wordBlocks } from '$lib/state/audioAsset';
   import { audioPeaks } from '$lib/state/audioPeaks.svelte';
+  import type { FramePoint } from '$lib/state/framePoint';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { AudioModelOption, AudioSettingsVocabulary, GalleryAsset, UpscaleFactor } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
   import { assetDetailSections, fileName, type DetailFact } from './assetDetails';
   import { assetMenuEntries, audioUseEntries, referenceEntries, upscaleEntries } from './assetMenu';
   import MoveMenu from './MoveMenu.svelte';
-  import AudioPlayer from './AudioPlayer.svelte';
+  import { frameMenuEntries } from './frameMenu';
+  import MediaPlayer from './MediaPlayer.svelte';
   import { viewerShortcutsFor, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { sheetDrag } from '$lib/actions/sheetDrag';
@@ -80,6 +82,7 @@
     onreuse,
     onreference,
     onextend,
+    onuseframe,
     onupscale,
     onuseaudio,
     ondelete,
@@ -126,6 +129,7 @@
   let moveOpen = $state(false);
   let moveButton = $state<HTMLButtonElement | null>(null);
   let closeButton = $state<HTMLButtonElement | null>(null);
+  let player = $state<ReturnType<typeof MediaPlayer> | null>(null);
   let downloadLink = $state<HTMLAnchorElement | null>(null);
   let helpOpen = $state(false);
   // The shortcut list is a layer of its own: Escape closes it before the viewer.
@@ -156,6 +160,11 @@
   const showExtend = $derived(Boolean(onextend && asset?.media_type === 'video' && asset.extend));
   const extendBlocked = $derived(asset ? extendReason(asset) : null);
 
+  // The frame the shown video is paused on, which the player reports; null while it plays, at its start, or for anything but a video.
+  let point = $state<FramePoint | null>(null);
+  // The rows of the paused frame's menu: Extend from there, and the first and last frame.
+  const frameActions = $derived(asset && point ? frameMenuEntries(asset, point, { onextend, onuseframe }, useAs) : []);
+
   // A phone: one ⋯ menu holds every action (the same entries as a tile's menu, plus Reuse and Copy the prompt),
   // the details open as a sheet, and a swipe moves between assets or closes.
   const compact = $derived(layout.compact);
@@ -181,6 +190,9 @@
   // and a zoomed image pans under one finger. A mouse click shows an image at its real pixels; a drag then pans it.
   const touchLayer = $derived(compact || layout.coarse);
   let stageEl = $state<HTMLDivElement | null>(null);
+  // The stage's whole box, padding included: the pane a video's ambient light fills.
+  let stageWidth = $state(0);
+  let stageHeight = $state(0);
   let mediaEl = $state<HTMLImageElement | null>(null);
   let zoom = $state<Zoom>(FIT);
   let zoomAnimated = $state(false);
@@ -226,9 +238,9 @@
     return usableRect(rect, viewportSize()) ? rect : null;
   }
 
-  /** The shown media's box: the loaded image or the video, else the thumbnail standing in for the image. */
+  /** The shown media's box: the loaded image, else the thumbnail standing in for it. */
   function mediaRect(): Rect | null {
-    const shown = stageEl?.querySelector(mediaLoaded || asset?.media_type === 'video' ? '.viewer-media' : '.viewer-standin');
+    const shown = stageEl?.querySelector(mediaLoaded ? '.viewer-media' : '.viewer-standin');
     const rect = shown ? rectOf(shown.getBoundingClientRect()) : null;
     return usableRect(rect, viewportSize()) ? rect : null;
   }
@@ -341,6 +353,8 @@
     | { kind: 'pan'; x: number; y: number; at: number; from: Zoom }
     | { kind: 'pinch'; distance: number; mid: { x: number; y: number }; from: Zoom };
   let gesture: Gesture | null = null;
+  // The finger went down on a video's player, which answers a tap itself: the bar and the strip stay as they are.
+  let startedOnPlayer = false;
   let lastTap: { x: number; y: number; at: number } | null = null;
   let tapTimer: ReturnType<typeof setTimeout> | undefined;
   const DOUBLE_TAP_MS = 300;
@@ -394,8 +408,9 @@
   }
 
   function onStageTouchStart(event: TouchEvent): void {
-    // A video's own controls take the finger: scrubbing must not step to another asset.
-    if ((event.target as Element).closest('video, .viewer-details-scrim, [data-own-drag]') || settling || startsInScrollableWords(event.target as Element)) { gesture = null; return; }
+    // The player's own controls take the finger: scrubbing must not step to another asset. Its picture does not: a swipe over it pages.
+    if ((event.target as Element).closest('.viewer-details-scrim, [data-own-drag]') || settling || startsInScrollableWords(event.target as Element)) { gesture = null; return; }
+    startedOnPlayer = (event.target as Element).closest('[data-media-player]') !== null;
     if (event.touches.length === 2 && isImage) {
       gesture = { kind: 'pinch', ...pinchOf(event.touches), from: zoom };
       return;
@@ -458,7 +473,9 @@
     const now = Date.now();
     if (Math.abs(dx) < TAP_SLOP_PX && Math.abs(dy) < TAP_SLOP_PX && now - current.at < DOUBLE_TAP_MS) {
       drag = null;
-      onTap(touch.clientX, touch.clientY, now);
+      if (!startedOnPlayer) onTap(touch.clientX, touch.clientY, now);
+      // The player fills the pane, so a tap on its picture is the only way back to a bar and a strip a tap hid on an earlier asset.
+      else if (chromeHidden) chromeHidden = false;
       return;
     }
     lastTap = null;
@@ -640,22 +657,37 @@
     queueMicrotask(() => closeButton?.focus());
     // On the overlay stack like every layer: Escape closes it, innermost first (the shortcut list before it).
     const release = pushEscapeLayer(close);
+    // When X began waiting for its 2 or 4. Only that completing key is the viewer's; every other digit reaches the player and jumps.
     let upscaleWaitingSince: number | null = null;
+    /** Space on the viewer's Close, where a video or take opens, plays it instead of closing the viewer (the focus moves to the player, so the key's release does not click Close); Enter, Esc and a click still close it. */
+    function playsFromClose(e: KeyboardEvent): boolean {
+      return e.key === ' ' && e.target === closeButton && player !== null && !(referenceOpen || upscaleOpen || moreOpen || moveOpen || helpOpen);
+    }
+    /** Finish a waiting X with 2 or 4. It runs before the player hears the key and marks it handled, so the playhead stays; no other key is taken. */
+    function handleChordKey(e: KeyboardEvent): void {
+      if (upscaleWaitingSince === null || e.defaultPrevented || referenceOpen || upscaleOpen || moreOpen || moveOpen || isTyping(e.target) || inMenu(e.target)) return;
+      const chord = stepUpscaleChord(upscaleWaitingSince, e, Date.now());
+      if (!chord.value) return;
+      upscaleWaitingSince = null;
+      if (runUpscale(chord.value)) e.preventDefault();
+    }
     function handleKeydown(e: KeyboardEvent): void {
-      // While a menu is open, keys belong to it.
-      // A focused video keeps its own keys: arrows seek, Space plays.
-      const mediaKey = e.target instanceof HTMLMediaElement && (e.key.startsWith('Arrow') || e.key === ' ');
-      if (e.defaultPrevented || referenceOpen || upscaleOpen || moreOpen || moveOpen || isTyping(e.target) || mediaKey) {
+      if (playsFromClose(e) && !e.repeat && isPlainKey(e)) {
+        e.preventDefault();
+        player?.engage();
+        return;
+      }
+      // While a menu is open, keys belong to it: the viewer's own, and one opened from the player (the frame menu).
+      // A focused player keeps its own keys (arrows step or seek, Space plays): it handles them first and marks them, so they arrive here prevented.
+      if (e.defaultPrevented || referenceOpen || upscaleOpen || moreOpen || moveOpen || isTyping(e.target) || inMenu(e.target)) {
         upscaleWaitingSince = null;
         return;
       }
+      // Any key but a completing 2 or 4 (taken in the capture phase) ends a waiting X; an X starts one.
+      upscaleWaitingSince = null;
       if (onupscale && asset && offeredUpscaleFactors(asset).length > 0) {
-        const chord = stepUpscaleChord(upscaleWaitingSince, e, Date.now());
+        const chord = stepUpscaleChord(null, e, Date.now());
         upscaleWaitingSince = chord.waitingSince;
-        if (chord.value) {
-          if (runUpscale(chord.value)) e.preventDefault();
-          return;
-        }
         if (chord.consumed) {
           e.preventDefault();
           return;
@@ -669,8 +701,10 @@
       }
       if (action && runAction(action)) e.preventDefault();
     }
+    document.addEventListener('keydown', handleChordKey, true);
     document.addEventListener('keydown', handleKeydown);
     return () => {
+      document.removeEventListener('keydown', handleChordKey, true);
       document.removeEventListener('keydown', handleKeydown);
       release();
     };
@@ -815,9 +849,11 @@
       <!-- svelte-ignore a11y_no_static_element_interactions because the swipe and pinch duplicate the arrows, keys and click -->
       <div
         bind:this={stageEl}
+        bind:clientWidth={stageWidth}
+        bind:clientHeight={stageHeight}
         class="viewer-stage"
         data-touch={touchLayer}
-        use:hold={{ onhold: () => { contextAt = pressAt; moreOpen = true; }, ignore: 'video, button, [data-own-drag]' }}
+        use:hold={{ onhold: () => { contextAt = pressAt; moreOpen = true; }, ignore: 'button, [data-own-drag]' }}
         onpointerdown={(event) => { pressAt = { x: event.clientX, y: event.clientY }; }}
         oncontextmenu={onStageContextMenu}
         ontouchstart={onStageTouchStart}
@@ -843,7 +879,9 @@
           <div bind:this={paneEl} class="viewer-pane viewer-pane-current" style:transform={drag?.axis === 'y' ? pullTransform(drag.offset) : undefined}>
             {#if asset.media_type === 'audio'}
               <div class="viewer-audio" data-testid="viewer-audio">
-                <AudioPlayer src={asset.url} peaks={audioPeaks.of(asset)} filename={asset.filename} duration={asset.duration} size="viewer" />
+                {#key asset.url}
+                  <MediaPlayer bind:this={player} kind="audio" src={asset.url} label={asset.filename} peaks={audioPeaks.of(asset)} duration={asset.duration} size="viewer" />
+                {/key}
                 {#if words.length > 0}
                   <div class="viewer-words" data-testid="viewer-words">
                     {#each words as block (block.label)}
@@ -861,8 +899,9 @@
               <img class="viewer-standin" class:ui-checkerboard={isTransparent(asset)} data-transparent={isTransparent(asset)} src={thumbOf(asset)} alt="" aria-hidden="true">
             {/if}
             {#if asset.media_type === 'video'}
-              <!-- svelte-ignore a11y_media_has_caption because generated videos have no caption tracks -->
-              <video src={asset.url} poster={thumbOf(asset)} controls class="viewer-media"></video>
+              {#key asset.url}
+                <MediaPlayer bind:this={player} kind="video" size="viewer" naturalSize={asset.width && asset.height ? { width: asset.width, height: asset.height } : null} src={asset.url} label={asset.filename} poster={thumbOf(asset)} filePath={asset.file_path} duration={asset.duration} actions={frameActions} pane={{ width: stageWidth, height: stageHeight }} onpoint={(next) => { point = next; }} />
+              {/key}
             {:else}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions because the zoom is a closer look; the keys and buttons do the rest -->
               <img
@@ -1008,7 +1047,7 @@
     {#if helpOpen}
       <div id="asset-viewer-shortcuts" class="viewer-shortcuts ui-overlay" role="note" aria-label="Keyboard shortcuts">
         <h4 class="viewer-h ui-area-label">Keyboard shortcuts</h4>
-        <ShortcutList entries={viewerShortcutsFor(isAudio)} />
+        <ShortcutList entries={viewerShortcutsFor(asset.media_type)} />
       </div>
     {/if}
 
@@ -1106,7 +1145,7 @@
   .viewer-stage { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; padding: 20px 64px; }
   .viewer-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius-xs); transform-origin: center; user-select: none; }
   /* A finger's hold opens our menu, not iOS's image callout (Copy, Save Image); the whole stage opts out of it. */
-  .viewer-stage, .viewer-stage img, .viewer-stage video { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .viewer-stage, .viewer-stage img { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   .viewer-media.zoomable { cursor: zoom-in; }
   .viewer-media.zoomed { position: relative; z-index: 1; cursor: grab; }
   .viewer-media.animated { transition: transform 0.18s ease-out; }

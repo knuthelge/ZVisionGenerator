@@ -20,6 +20,8 @@
     description?: string;
     /** An icon before the label. */
     icon?: IconName;
+    /** The action is running: the item is marked busy for assistive technology. */
+    busy?: boolean;
     onselect?: () => void;
   }
 
@@ -34,7 +36,7 @@
 </script>
 
 <script lang="ts">
-  import { popover, type PopoverAlign } from '$lib/actions/popover';
+  import { popover, type PopoverAlign, type PopoverSide } from '$lib/actions/popover';
   import Icon from '../atoms/Icon.svelte';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
@@ -47,10 +49,16 @@
     label: string;
     /** Which edge of the anchor the menu lines up with. */
     align?: PopoverAlign;
+    /** Which side of the anchor it opens on when there is room; below by default. */
+    side?: PopoverSide;
+    /** Where Escape puts focus; the anchor when absent. */
+    returnFocus?: HTMLElement | null;
+    /** Called with a key press the menu does not use itself (it takes Tab, the up and down arrows, Home and End), for a caller whose keys work while the menu is open. */
+    onkeydown?: (event: KeyboardEvent) => void;
     onclose: () => void;
   }
 
-  let { open, anchor, items, label, align = 'end', onclose }: Props = $props();
+  let { open, anchor, items, label, align = 'end', side = 'below', returnFocus = null, onkeydown, onclose }: Props = $props();
 
   let menuEl = $state<HTMLDivElement | null>(null);
   // Groups the person toggled since the menu opened; a group not listed here follows its `defaultOpen`.
@@ -109,6 +117,7 @@
     else if (event.key === 'ArrowUp') { event.preventDefault(); list[(index - 1 + list.length) % list.length]?.focus(); }
     else if (event.key === 'Home') { event.preventDefault(); list[0]?.focus(); }
     else if (event.key === 'End') { event.preventDefault(); list[list.length - 1]?.focus(); }
+    else onkeydown?.(event);
   }
 
   // Keys start on the first item; a finger starts on the menu itself, or the first row would look chosen.
@@ -152,6 +161,7 @@
       class="action-menu-item"
       class:danger={entry.danger}
       aria-disabled={entry.disabled ? 'true' : undefined}
+      aria-busy={entry.busy ? 'true' : undefined}
       title={entry.title}
       data-action={entry.id}
       onclick={(event) => select(entry, event)}
@@ -206,7 +216,7 @@
   </Sheet>
 {:else if open}
   <div
-    use:popover={{ anchor, align, onclose }}
+    use:popover={{ anchor, align, side, onclose, returnFocus }}
     bind:this={menuEl}
     class="action-menu ui-overlay"
     role="menu"

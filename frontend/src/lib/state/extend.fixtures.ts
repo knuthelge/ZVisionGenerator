@@ -3,7 +3,7 @@ import type { ExtendSourceInfo } from '$lib/types';
 /** Test fixture: what `POST /api/extend/source` reports for a readable 24 fps clip with no recorded text. */
 export function sourceInfo(overrides: Partial<ExtendSourceInfo> = {}): ExtendSourceInfo {
   return {
-    path: '/clips/walk.mp4', filename: 'walk.mp4', width: 512, height: 288, rotation: 0, fps: 24, frame_count: 97,
+    path: '/clips/walk.mp4', filename: 'walk.mp4', width: 512, height: 288, rotation: 0, fps: 24, frame_count: 97, video_start: 0,
     duration_seconds: 4.042, has_audio: true, scene: null, prompt: null, legacy: false, model: null, lora: null, audio_track_path: null, audio_track_end: null, problems: [],
     extend_frames: 48, window_frames: 73, memory_fit: null, output_folder: null, ...overrides,
   };

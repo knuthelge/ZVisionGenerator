@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import type { AudioWorkflow, CuratedList, DownloadItem, GalleryPage, JobContext, JobDownloadPlan, JobSnapshot, MoveResult, RecentMode, RecentPrompt, RowDownloadPlan, SavedVoice, SettingsPreset, VoiceDesignState, WorkflowMode, WorkspaceContext } from '$lib/types';
-import { stubBrowseInfo, stubBrowseMediaUrl, stubBrowsePreviewUrl } from './pathBrowser';
+import { stubBrowseInfo, stubBrowseMediaUrl, stubBrowsePreviewUrl, stubBrowseSpriteUrl } from './pathBrowser';
 
 // The API mocks of the Workspace page tests. A test file wires them in with `vi.mock(path, async () => ...)`
 // factories that import this module, because `vi.mock` only hoists inside a test file.
@@ -35,6 +35,7 @@ export const browseApiMocks = {
   createFolder: vi.fn(),
   browsePreviewUrl: vi.fn(stubBrowsePreviewUrl),
   browseMediaUrl: vi.fn(stubBrowseMediaUrl),
+  browseSpriteUrl: vi.fn(stubBrowseSpriteUrl),
   browseInfo: vi.fn(stubBrowseInfo),
 };
 

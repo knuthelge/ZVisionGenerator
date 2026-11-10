@@ -254,6 +254,12 @@ describe('jobSettingsPrefill', () => {
     expect(jobSettingsPrefill({ ...video, review: 'true' }).patch.upscaleReview).toBeUndefined();
   });
 
+  it('restores the point an extension continued from', () => {
+    const { params } = jobSettingsPrefill({ mode: 'video', workflow: 'extend', source_video: '/clips/walk.mp4', extend_frames: '48', extend_from: '3.208333', scene: 'A street.' });
+    expect(params).toMatchObject({ source_video: '/clips/walk.mp4', extend_from: '3.208333' });
+    expect(jobSettingsPrefill({ mode: 'video', workflow: 'extend', source_video: '/clips/walk.mp4', scene: 'A street.' }).params).not.toHaveProperty('extend_from');
+  });
+
   it('restores an extension from its source, length and text', () => {
     const { params, patch } = jobSettingsPrefill({
       mode: 'video', workflow: 'extend', model: 'ltx', prompt_source: 'inline', source_video: '/clips/walk.mp4', extend_frames: '48',

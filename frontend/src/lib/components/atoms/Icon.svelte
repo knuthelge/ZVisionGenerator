@@ -61,6 +61,12 @@
     history: 'M4 12a8 8 0 1 0 2.35-5.65L4 8.5M4 4v4.5h4.5M12 8v4l2.5 2.5',
     braces: 'M8 4H7a2 2 0 00-2 2v4a2 2 0 01-2 2 2 2 0 012 2v4a2 2 0 002 2h1M16 4h1a2 2 0 012 2v4a2 2 0 002 2 2 2 0 00-2 2v4a2 2 0 01-2 2h-1',
     tag: 'M3 7V4a1 1 0 011-1h3l11 11-5 5L3 7zM7 7h.01',
+    volume: 'M4 10v4h3l4 3.5v-11L7 10H4zM15 9.5a4 4 0 010 5M17.5 7a7.5 7.5 0 010 10',
+    'volume-off': 'M4 10v4h3l4 3.5v-11L7 10H4zM15.5 9.5l5 5m0-5l-5 5',
+    fullscreen: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
+    'fullscreen-exit': 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5',
+    'frame-first': 'M3 6.5A1.5 1.5 0 014.5 5h8A1.5 1.5 0 0114 6.5v11a1.5 1.5 0 01-1.5 1.5h-8A1.5 1.5 0 013 17.5zM17 8v8M20.5 10v4',
+    'frame-last': 'M10 6.5A1.5 1.5 0 0111.5 5h8A1.5 1.5 0 0121 6.5v11a1.5 1.5 0 01-1.5 1.5h-8a1.5 1.5 0 01-1.5-1.5zM7 8v8M3.5 10v4',
   } as const;
 
   export type IconName = keyof typeof PATHS;
@@ -70,10 +76,12 @@
   interface Props {
     name: IconName;
     size?: number;
+    /** Filled with the current colour instead of stroked: the play glyph of the player. */
+    solid?: boolean;
     class?: string;
   }
 
-  let { name, size = 16, class: extraClass = '' }: Props = $props();
+  let { name, size = 16, solid = false, class: extraClass = '' }: Props = $props();
 </script>
 
 <svg
@@ -81,8 +89,8 @@
   width={size}
   height={size}
   viewBox="0 0 24 24"
-  fill="none"
-  stroke="currentColor"
+  fill={solid ? 'currentColor' : 'none'}
+  stroke={solid ? 'none' : 'currentColor'}
   stroke-width="2"
   stroke-linecap="round"
   stroke-linejoin="round"

@@ -1524,13 +1524,14 @@ describe('extend', () => {
   });
 
   describe('resetSelections', () => {
-    it('keeps the source and text and returns the length to two seconds at the source frame rate', () => {
+    it('clears the source and its length, and keeps the text', () => {
       const ctx = extendContext();
       draft.setExtendSourcePath(SOURCE);
       draft.applyExtendSource(sourceInfo({ fps: 30 }));
       draft.patch({ extendFrames: 96, scene: 'Kept.' });
       draft.resetSelections(ctx);
-      expect(draft.state).toMatchObject({ extendSourcePath: SOURCE, extendFrames: 64, scene: 'Kept.', fps: 30 });
+      expect(draft.state).toMatchObject({ extendSourcePath: null, extendFrom: null, extendPrefill: null, missingSourceVideo: false, extendFrames: null, scene: 'Kept.' });
+      expect(draft.extendSource).toBeNull();
     });
   });
 });
@@ -2225,7 +2226,7 @@ describe('applyPreset', () => {
     enhancedScratched: 1,
     enhanceSettings: { style: 'cinematic' } as DraftState['enhanceSettings'], enhanceSettingsVideo: { style: 'dreamy' } as DraftState['enhanceSettingsVideo'],
     enhanceAuto: true, enhanceModel: 'smart', describeTier: 'smart', enhanceFormat: 'json',
-    extendSourcePath: '/clips/source.mp4', extendFrames: 16, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
+    extendSourcePath: '/clips/source.mp4', extendFrames: 16, extendFrom: 3.208333, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
     videoUpscaleEnabled: true, videoUpscaleFactor: 2, videoUpscaleReview: true,
     videoKind: 'extend', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
     audioSeconds: 30, audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
@@ -3330,13 +3331,13 @@ describe('audio track', () => {
       expect(draft.state).toMatchObject({ extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackUpload: null, extendAudioTrackStart: 6.65 });
     });
 
-    it('brings the source\'s track back on Reset, from where its sound ended', () => {
+    it('clears the source\'s track with the source on Reset', () => {
       draft.applyExtendSource(sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }));
       draft.setAudioTrackStart('extend', 2);
 
       draft.resetSelections(trackContext());
 
-      expect(draft.state).toMatchObject({ extendSourcePath: SOURCE, extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackUpload: null, extendAudioTrackStart: 6.65 });
+      expect(draft.state).toMatchObject({ extendSourcePath: null, extendAudioTrackPath: null, extendAudioTrackUpload: null, extendAudioTrackStart: 0, extendPrefill: null });
     });
 
     it('clears a track filled in from another source when the new source has none', () => {

@@ -138,6 +138,7 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
     const source = text(settings, 'source_video');
     if (source === undefined) throw new Error('Choose a video to extend first.');
     args.push('--extend', source);
+    flag('--extend-from', text(settings, 'extend_from'));
     flag('--extend-frames', text(settings, 'extend_frames'));
   }
 

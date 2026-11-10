@@ -239,7 +239,7 @@ describe('AssetTile', () => {
 
       const item = document.querySelector('[data-action="extend"]') as HTMLElement;
       expect(item.getAttribute('aria-disabled')).toBe('true');
-      expect(item.getAttribute('title')).toBe("Upscaled videos can't be extended yet.");
+      expect(item.textContent).toContain("Upscaled videos can't be extended yet.");
       item.click();
       expect(onextend).not.toHaveBeenCalled();
     });
@@ -315,6 +315,25 @@ describe('AssetTile', () => {
       expect(target.querySelector('video')?.getAttribute('poster')).toBe('/thumbs/out/clip.mp4');
       expect(target.querySelector('img')).toBeNull();
       expect(target.querySelector('[data-testid="play-badge"]')).toBeNull();
+    });
+
+    it('plays in the app\'s player on the stage: no native controls, muted at the start, and the whole player opted out of the swipe', () => {
+      mountTile({ asset: clip(), density: 'stage' });
+      const video = target.querySelector('video')!;
+
+      expect(video.controls).toBe(false);
+      expect(video.muted).toBe(true);
+      expect(target.querySelector('[data-media-player]')?.getAttribute('data-size')).toBe('stage');
+      expect(target.querySelector('[data-media-player]')?.hasAttribute('data-own-drag')).toBe(true);
+    });
+
+    it('tells the page when the video has its first frame, so the stage can reveal it', () => {
+      const onmediaload = vi.fn();
+      mountTile({ asset: clip(), density: 'stage', onmediaload });
+
+      target.querySelector('video')!.dispatchEvent(new Event('loadeddata'));
+
+      expect(onmediaload).toHaveBeenCalledOnce();
     });
 
     it('shows an icon when its still cannot be loaded', () => {
@@ -435,8 +454,8 @@ describe('AssetTile with audio', () => {
   it('plays in the stage panel, with Reuse and the menu in its corner and no fullscreen button', () => {
     mountTile({ asset: makeAudioAsset(), density: 'stage', onpreview: vi.fn(), onreuse: vi.fn() });
 
-    expect(target.querySelector('audio')?.getAttribute('aria-label')).toBe('Play song.flac');
-    expect(target.querySelector('[data-testid="audio-player"]')).not.toBeNull();
+    expect(target.querySelector('audio')?.getAttribute('src')).toBe('/media/out/song.flac');
+    expect(target.querySelector('[data-media-player][data-kind="audio"][data-size="stage"]')).not.toBeNull();
     expect(target.querySelector('button[aria-label^="Reuse settings from"]')).not.toBeNull();
     expect(target.querySelector('button[aria-label^="More actions"]')).not.toBeNull();
     expect(target.querySelector('.asset-tile-expand')).toBeNull();

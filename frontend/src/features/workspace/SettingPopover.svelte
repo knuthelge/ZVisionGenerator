@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
-  import { FileThumb, LicenceMark, ModelStatusBadges, PathBrowser, PathInput, Segmented, Select } from '$lib/components/molecules';
+  import { LicenceMark, ModelStatusBadges, PathBrowser, PathInput, Segmented, Select } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { defaultsFor, draft, extendStepFor, maxStepsFor, offeredSizes, snapSteps, stepOptionsFor, videoTimingFor } from '$lib/state/draft.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
@@ -11,14 +11,17 @@
   import { addLoraChip, removeLoraChip } from '$lib/state/loraActions';
   import { chipDownload } from '$lib/state/loraDownloads';
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames } from '$lib/state/loras';
-  import { extendGuard, extendModelSupport, extendSourceFacts } from '$lib/state/extend';
+  import { extendGuard, extendModelSupport, extendSourceFacts, extendSourceUsable } from '$lib/state/extend';
+  import { extendCutView, extendCuttable } from '$lib/state/extendCut';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
-  import { durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
+  import { durationSpec, extendFramesFromSeconds, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
   import type { ModelOption, WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
   import { chipKeys, settingChanged } from './settingRows';
   import { randomSeed } from './seed';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
+  import ExtendCutBar from './ExtendCutBar.svelte';
+  import ExtendSourceThumb from './ExtendSourceThumb.svelte';
   import SourceVideoFeedback from './SourceVideoFeedback.svelte';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { sheetDrag } from '$lib/actions/sheetDrag';
@@ -160,7 +163,8 @@
   const extendStep = $derived(extendStepFor(context, s.model));
   const extendSecondsSpec = $derived(sourceFps ? durationSpec(sourceFps, { alignment: extendStep }) : { step: 0.1, min: 0.1 });
   const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
-  const extendLength = $derived(info && sourceFps && info.frame_count !== null && s.extendFrames !== null ? extendTotal(info.frame_count, s.extendFrames, sourceFps) : null);
+  // The finished clip is the frames the continued clip keeps plus the new ones.
+  const extendLength = $derived(info && s.extendFrames !== null ? (extendCutView(info, s.extendFrom, s.extendFrames)?.total ?? null) : null);
   const extendMemoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
   const extendTime = $derived(clipTimeNote(info?.memory_fit ?? null));
   const sourceGuard = $derived(extendGuard(s, info, extendInspection.statusFor(s.extendSourcePath), extendModelSupport(context, s.model)));
@@ -225,6 +229,8 @@
   const sourceFacts = $derived(info ? extendSourceFacts(info) : []);
   const latestVideo = $derived(galleryStore.assets.find((asset) => asset.media_type === 'video' && asset.file_path) ?? null);
   let browsingSource = $state(false);
+  // The frames the clip keeps while the handle is being dragged: the thumb shows that frame's tile of the contact sheet.
+  let dragKeep = $state<number | null>(null);
 
   let sourceText = $state(draft.state.extendSourcePath ?? '');
 
@@ -448,13 +454,16 @@
       <AudioTrackPopover track={audioTrack} />
     {:else if key === 'source'}
       <div class="pop-ref">
-        <span class="pop-thumb" data-testid="slot-thumb">{#if sourcePath}<FileThumb purpose="source_video" path={sourcePath} kind="video" frame="last" iconSize={20} fallbackIcon="film" />{:else}<Icon name="film" size={20} />{/if}</span>
+        <span class="pop-thumb" data-testid="slot-thumb">{#if sourcePath}<ExtendSourceThumb path={sourcePath} {info} extendFrom={s.extendFrom} {dragKeep} iconSize={20} />{:else}<Icon name="film" size={20} />{/if}</span>
         <span class="pop-item-text" class:muted={!sourceName} title={sourcePath ?? ''}>{sourceName ?? 'No source video yet'}</span>
         {#if sourcePath !== null && sourceGuard.kind === 'checking'}<Spinner size="sm" />{/if}
         {#if sourcePath !== null}<button type="button" class="ui-btn ui-btn-icon" aria-label="Clear source video" disabled={busy} onclick={() => chooseSource(null)}><Icon name="close" size={16} /></button>{/if}
       </div>
       {#if sourceFacts.length > 0}
         <p class="pop-facts">{#each sourceFacts as fact, index (fact.key)}{#if index > 0}{' · '}{/if}<span title={fact.title}>{fact.text}</span>{/each}</p>
+      {/if}
+      {#if sourcePath !== null && info !== null && extendSourceUsable(info) && extendCuttable(info)}
+        <ExtendCutBar {info} path={sourcePath} extendFrom={s.extendFrom} {busy} onchange={(point) => draft.setExtendFrom(point)} bind:dragKeep />
       {/if}
       <SourceVideoFeedback />
       <div class="pop-list">

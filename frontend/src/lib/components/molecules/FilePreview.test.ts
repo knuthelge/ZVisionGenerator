@@ -1,6 +1,8 @@
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { stepTarget } from '$lib/state/framePoint';
 import { formatBytes, formatModifiedFull, previewFacts } from '$lib/state/pathBrowser';
+import { videoFacts } from '$lib/state/videoFacts.svelte';
 import type { BrowseEntry } from '$lib/types';
 
 const browseApiMocks = vi.hoisted(() => ({
@@ -11,6 +13,7 @@ const browseApiMocks = vi.hoisted(() => ({
 
 vi.mock('$lib/api/browse', () => browseApiMocks);
 
+import { installFakeMedia } from '../../../test-utils/media';
 import { infoFor, stubBrowseMediaUrl, stubBrowsePreviewUrl } from '../../../test-utils/pathBrowser';
 import { mountComponent, settle } from '../../../test-utils/mount';
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
@@ -28,6 +31,7 @@ describe('FilePreview', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    videoFacts.reset();
     for (const mock of Object.values(browseApiMocks)) mock.mockReset();
     browseApiMocks.browsePreviewUrl.mockImplementation(stubBrowsePreviewUrl);
     browseApiMocks.browseMediaUrl.mockImplementation(stubBrowseMediaUrl);
@@ -221,8 +225,9 @@ describe('FilePreview', () => {
       const audio = root().querySelector<HTMLAudioElement>('audio')!;
       expect(audio.getAttribute('src')).toBe('/media/audio_track/media/take.flac');
       expect(audio.autoplay).toBe(false);
-      expect(root().querySelector('[data-testid="audio-player"]')?.getAttribute('data-size')).toBe('pane');
-      expect(root().querySelectorAll('[data-testid="wave-bar"]')).toHaveLength(100);
+      expect(audio.controls).toBe(false);
+      expect(root().querySelector('[data-media-player]')?.getAttribute('data-size')).toBe('pane');
+      expect(root().querySelector('[role="slider"][aria-label="Playback position"]')).not.toBeNull();
       expect(play).not.toHaveBeenCalled();
     });
 
@@ -267,17 +272,36 @@ describe('FilePreview', () => {
   });
 
   describe('a video', () => {
-    it('shows the browser\'s own controls over the file with the still as its poster, loading only its metadata', async () => {
+    it('plays in the app\'s player over the file with the still as its poster, loading only its metadata', async () => {
       mountPreview('source_video', file('clip.mp4'));
       await settle(150);
 
       const video = root().querySelector<HTMLVideoElement>('video')!;
-      expect(video.controls).toBe(true);
+      expect(video.controls).toBe(false);
+      expect(video.hasAttribute('playsinline')).toBe(true);
+      expect(root().querySelector('[data-media-player]')?.getAttribute('data-size')).toBe('pane');
+      expect(root().querySelector('button[aria-label="Fullscreen"]')).toBeNull();
+      expect(root().querySelector('[data-volume]')).toBeNull();
       expect(video.getAttribute('preload')).toBe('metadata');
       expect(video.getAttribute('src')).toBe('/media/source_video/media/clip.mp4');
       expect(video.getAttribute('poster')).toBe('/preview/source_video/media/clip.mp4');
       expect(video.autoplay).toBe(false);
       expect(play).not.toHaveBeenCalled();
+    });
+
+    it('steps exact frames with the arrow keys, from the clip\'s own frame facts', async () => {
+      const media = installFakeMedia();
+      browseApiMocks.browseInfo.mockImplementation(async () => infoFor('video', { start: 0 }));
+      mountPreview('source_video', file('clip.mp4'));
+      await settle(150);
+      const video = root().querySelector<HTMLVideoElement>('video')!;
+      media.load(video, 10);
+      flushSync();
+
+      root().querySelector('[data-testid="media-timeline"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+      flushSync();
+
+      expect(media.seeks(video)).toEqual([stepTarget(1, { fps: 24, frames: 240, start: 0 })]);
     });
 
     it('lists length, frames, frame rate, pixel size and file size', async () => {
@@ -287,7 +311,7 @@ describe('FilePreview', () => {
       expect(facts()).toEqual(shown('video', file('clip.mp4'), infoFor('video')));
     });
 
-    it('says the browser cannot play a format it rejects, under the still', async () => {
+    it('says the file cannot be played when the browser rejects it, under the still, without blaming the browser', async () => {
       mountPreview('source_video', file('clip.mkv'));
       await settle(150);
 
@@ -295,7 +319,7 @@ describe('FilePreview', () => {
 
       expect(root().querySelector('video')).toBeNull();
       expect(root().querySelector('img')?.getAttribute('src')).toBe('/preview/source_video/media/clip.mkv');
-      expect(root().querySelector('[role="status"]')).not.toBeNull();
+      expect(root().querySelector('[role="status"]')?.textContent).toBe('This file can’t be played.');
     });
 
     it('pauses the clip when the selection moves on, and when another thing starts playing', async () => {

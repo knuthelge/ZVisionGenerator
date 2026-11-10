@@ -59,7 +59,7 @@ const MARKED: DraftState = {
   savedText: { video: { prompt: 'an action', scene: 'a video scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [], enhancedScratched: null } },
   savedSettings: { video: { steps: 31, model: 'ltx-8' } },
   enhanceSettings: SETTINGS, enhanceSettingsVideo: { ...SETTINGS, style: 'dreamy', partsByWorkflow: {} }, enhanceAuto: true, enhanceModel: 'smart', describeTier: 'smart', enhanceFormat: 'json',
-  extendSourcePath: '/clips/source.mp4', extendFrames: 16, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
+  extendSourcePath: '/clips/source.mp4', extendFrames: 16, extendFrom: 3.208333, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
   appliedPreset: 'look', videoKind: 'new', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' },
   audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain', audioSeconds: 30,
   audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
@@ -131,7 +131,8 @@ describe('Reset on each tab', () => {
     draft.patch({ ...MARKED, ...OPEN[tab] });
     holdUploads();
     const before = { ...draft.state };
-    const expected = defaultsFor(ctx, before, draft.extendSource);
+    // An Extend Reset clears the source, so its defaults are those of a tab with none.
+    const expected = tab === 'extend' ? defaultsFor(ctx, { ...before, extendSourcePath: null, extendPrefill: null, extendFrames: null }, null) : defaultsFor(ctx, before, draft.extendSource);
 
     draft.resetSelections(ctx);
 
@@ -168,14 +169,14 @@ describe('Reset on each tab', () => {
     expect(heldUploads.voice).toBeNull();
   });
 
-  it('keeps the model, LoRAs, quantization, prompt, prompt file, extend source and layout', () => {
+  it('keeps the model, LoRAs, quantization, prompt, prompt file and layout', () => {
     draft.hydrateFromContext(ctx, null);
     draft.patch({ ...MARKED, ...OPEN.extend });
     const before = { ...draft.state };
 
     draft.resetSelections(ctx);
 
-    for (const key of ['model', 'loraString', 'quantize', 'prompt', 'scene', 'enhancedPrompt', 'promptFilePath', 'promptSource', 'extendSourcePath', 'extendPrefill', 'sidebarCollapsed', 'historyCollapsed'] as const) {
+    for (const key of ['model', 'loraString', 'quantize', 'prompt', 'scene', 'enhancedPrompt', 'promptFilePath', 'promptSource', 'sidebarCollapsed', 'historyCollapsed'] as const) {
       expect(draft.state[key], key).toStrictEqual(before[key]);
     }
   });
@@ -231,17 +232,74 @@ describe('what a Reset leaves alone (M1, P2, P3, P4)', () => {
     draft.resetSelections(ctx);
     expect(draft.state).toMatchObject({ enhanceSettings: { style: 'cinematic' }, enhanceSettingsVideo: null, enhanceAuto: true, enhanceModel: 'smart', enhanceFormat: 'json' });
   });
+});
 
-  it('returns an Extend Reset\'s length to the source\'s default and its track to the source\'s own', () => {
+describe('Reset on the Extend kind', () => {
+  const LONG = (): ReturnType<typeof sourceInfo> => sourceInfo({ path: '/clips/source.mp4', audio_track_path: '/audio/source.mp3', audio_track_end: 10 });
+  const SOURCE_KEYS = ['extendSourcePath', 'missingSourceVideo', 'extendPrefill', 'extendFrom'] as const;
+
+  function withSource(): void {
     draft.hydrateFromContext(ctx, null);
     openTab('extend');
     draft.setExtendSourcePath('/clips/source.mp4');
-    draft.applyExtendSource(sourceInfo({ path: '/clips/source.mp4', audio_track_path: '/audio/source.mp3', audio_track_end: 4 }), ctx);
-    draft.patch({ extendFrames: 16, extendAudioTrackPath: '/audio/chosen.mp3', extendAudioTrackStart: 2 });
+    draft.applyExtendSource(LONG(), ctx);
+  }
+
+  it('clears the source video with its point, its length and its track, and keeps the text and the model', () => {
+    withSource();
+    draft.setExtendFrom(3.2);
+    draft.patch({ extendFrames: 16, extendAudioTrackPath: '/audio/chosen.mp3', extendAudioTrackStart: 2, scene: 'A scene', prompt: 'An action', loraString: 'detail:0.8' });
+    const model = draft.state.model;
 
     draft.resetSelections(ctx);
 
-    expect(draft.state).toMatchObject({ extendFrames: 48, extendAudioTrackPath: '/audio/source.mp3', extendAudioTrackStart: 4 });
+    expect(draft.state).toMatchObject({
+      workflow: 'extend', extendSourcePath: null, missingSourceVideo: false, extendPrefill: null, extendFrom: null, extendFrames: null,
+      extendAudioTrackPath: null, extendAudioTrackStart: 0, scene: 'A scene', prompt: 'An action', model, loraString: 'detail:0.8',
+    });
+    expect(draft.extendSource).toBeNull();
+  });
+
+  it('clears a source that has gone missing, and one that was never described', () => {
+    draft.hydrateFromContext(ctx, null);
+    openTab('extend');
+    draft.loadFromUrl({ workflow: 'extend', source_video: '/clips/gone.mp4', missing_source_video: 'true' }, ctx, { replaceSlots: true });
+    expect(draft.state.missingSourceVideo).toBe(true);
+
+    draft.resetSelections(ctx);
+
+    expect(draft.state).toMatchObject({ extendSourcePath: null, missingSourceVideo: false, extendPrefill: null });
+  });
+
+  it('lets a Reuse or a Load settings put the source back afterwards', () => {
+    withSource();
+    draft.resetSelections(ctx);
+
+    draft.loadFromUrl({ workflow: 'extend', source_video: '/clips/source.mp4', extend_from: '3.2', reuse: 'true' }, ctx, { replaceSlots: true, exact: true });
+
+    expect(draft.state).toMatchObject({ extendSourcePath: '/clips/source.mp4', extendFrom: 3.2 });
+  });
+
+  it('leaves the Extend source of the other tabs\' Resets alone', () => {
+    withSource();
+    draft.setExtendFrom(3.2);
+    const before = Object.fromEntries(SOURCE_KEYS.map((key) => [key, draft.state[key]]));
+
+    for (const workflow of ['txt2img', 'txt2vid', 'music'] as const) {
+      openTab(workflow);
+      draft.resetSelections(ctx);
+      expect(Object.fromEntries(SOURCE_KEYS.map((key) => [key, draft.state[key]])), workflow).toStrictEqual(before);
+    }
+  });
+
+  it('puts the point back to the whole clip when only the point was moved, with the source cleared too', () => {
+    withSource();
+    draft.setExtendFrom(3.2);
+    expect(draft.state.extendAudioTrackStart).toBeLessThan(10);
+
+    draft.resetSelections(ctx);
+
+    expect(draft.state).toMatchObject({ extendFrom: null, extendSourcePath: null, extendAudioTrackPath: null });
   });
 });
 

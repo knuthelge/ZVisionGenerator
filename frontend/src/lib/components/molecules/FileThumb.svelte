@@ -12,18 +12,20 @@
     kind: BrowsePreviewKind;
     /** `last` shows a video's last frame (the Extend source) instead of the still 10% in. */
     frame?: 'last';
+    /** The second, on the video's clock, whose frame is shown (the Extend source's point); wins over `frame`. */
+    at?: number | null;
     /** The icon's size when the thumbnail is an icon. */
     iconSize?: number;
     /** The icon a file that cannot be previewed shows; a slot passes the one it showed before there were pictures. */
     fallbackIcon?: IconName;
   }
 
-  let { purpose, path, kind, frame, iconSize = 14, fallbackIcon = 'file' }: Props = $props();
+  let { purpose, path, kind, frame, at = null, iconSize = 14, fallbackIcon = 'file' }: Props = $props();
 
   // The URL that failed, so another file in the same box starts over.
   let failedUrl = $state<string | null>(null);
 
-  const url = $derived(kind === 'audio' ? '' : browsePreviewUrl(purpose, path, { frame }));
+  const url = $derived(kind === 'audio' ? '' : browsePreviewUrl(purpose, path, at === null ? { frame } : { at }));
   const failed = $derived(failedUrl === url);
 </script>
 
@@ -34,7 +36,7 @@
     <Icon name="waveform" size={iconSize} />
   {:else}
     <img src={url} alt="" loading="lazy" decoding="async" draggable="false" onerror={() => { failedUrl = url; }}>
-    {#if kind === 'video' && frame !== 'last'}
+    {#if kind === 'video' && frame !== 'last' && at === null}
       <span class="play-badge" data-testid="play-badge" aria-hidden="true"><Icon name="play" size={8} /></span>
     {/if}
   {/if}

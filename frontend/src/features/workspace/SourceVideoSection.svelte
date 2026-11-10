@@ -1,12 +1,15 @@
 <script lang="ts">
   import { draft } from '$lib/state/draft.svelte';
   import { Icon, Spinner } from '$lib/components/atoms';
-  import { FileThumb, InspectorRow, InspectorSection, PathBrowser, PathInput } from '$lib/components/molecules';
+  import { InspectorRow, InspectorSection, PathBrowser, PathInput } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
-  import { extendSourceFacts, type ExtendGuard } from '$lib/state/extend';
+  import { extendSourceFacts, extendSourceUsable, type ExtendGuard } from '$lib/state/extend';
+  import { extendCuttable } from '$lib/state/extendCut';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import type { WorkspaceContext } from '$lib/types';
+  import ExtendCutBar from './ExtendCutBar.svelte';
+  import ExtendSourceThumb from './ExtendSourceThumb.svelte';
   import SourceVideoFeedback from './SourceVideoFeedback.svelte';
 
   interface Props {
@@ -26,6 +29,11 @@
   const facts = $derived(info ? extendSourceFacts(info) : []);
   const name = $derived(info?.filename ?? (sourcePath ? fileName(sourcePath) : ''));
   const found = $derived(guard.kind === 'ok');
+  const extendFrom = $derived(draft.state.extendFrom);
+  // The bar needs a source that can be extended and is long enough to cut.
+  const cuttable = $derived(sourcePath !== null && info !== null && extendSourceUsable(info) && extendCuttable(info));
+  // The frames the clip keeps while the handle is being dragged: the thumb shows that frame's tile of the contact sheet.
+  let dragKeep = $state<number | null>(null);
   // The server reports a source it could not find, or Reuse recorded one that has since moved; both ask for another choice.
   const missing = $derived(draft.state.missingSourceVideo || sourceStatus === 'not_found');
 
@@ -79,7 +87,7 @@
   <InspectorRow label="Video">
     <div class="reference-thumb" data-testid="slot-thumb">
       {#if sourcePath}
-        <FileThumb purpose="source_video" path={sourcePath} kind="video" frame="last" iconSize={16} fallbackIcon="film" />
+        <ExtendSourceThumb path={sourcePath} {info} {extendFrom} {dragKeep} />
       {:else}
         <Icon name="film" size={16} />
       {/if}
@@ -110,6 +118,11 @@
       {#each facts as fact, index (fact.key)}{#if index > 0}{' · '}{/if}<span class="fact" title={fact.title}>{fact.text}</span>{/each}
     </p>
   {/if}
+  {#if cuttable && info && sourcePath}
+    <div class="cut-row">
+      <ExtendCutBar {info} path={sourcePath} {extendFrom} {busy} onchange={(point) => draft.setExtendFrom(point)} bind:dragKeep />
+    </div>
+  {/if}
   <InspectorRow label="Path" forId="ws-source-path">
     <PathInput
       id="ws-source-path"
@@ -138,7 +151,8 @@
   .fact { white-space: nowrap; }
   :global(#ws-source-help > *) { margin: 0 12px 6px; }
 
-  .reference-thumb { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin: 4px 0; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
+  .cut-row { margin: 2px 12px 6px; }
+  .reference-thumb { display: grid; flex: none; place-items: center; width: 76px; height: 44px; margin: 4px 0; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
   .reference-empty { color: var(--color-text-muted); }
   .reference-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); }
 </style>

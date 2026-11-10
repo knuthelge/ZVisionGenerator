@@ -78,7 +78,7 @@
         unused={!last.used}
         missing={last.gone}
         error={last.error ?? undefined}
-        help={last.set && !last.used ? 'Not used without a first frame' : 'Optional. The clip ends on this image; different scenes dissolve into each other.'}
+        help={last.set && !last.used ? 'Needs a first frame' : 'Optional. The clip ends on this image; different scenes dissolve into each other.'}
         onfile={(file) => draft.setLastFrame({ file })}
         onpath={(path) => draft.setLastFrame({ path })}
         onclear={() => draft.setLastFrame(null)}

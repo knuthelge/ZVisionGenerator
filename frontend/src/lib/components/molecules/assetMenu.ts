@@ -1,9 +1,11 @@
 import {
-  AUDIO_TRACK_HINT, SAVE_VOICE_HINT, VOICE_HINT, canExtend, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, extendReason, plainUpscaleMethod, upscaleFactors, voiceTooLongReason,
+  AUDIO_TRACK_HINT, SAVE_VOICE_HINT, VOICE_HINT, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, canUseFrame, plainUpscaleMethod, upscaleFactors, voiceTooLongReason,
   type AssetActionHandlers, type ReferenceTarget, type UseAsState,
 } from '$lib/state/assetActions';
+import type { FramePoint } from '$lib/state/framePoint';
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 import type { ActionMenuEntry } from './ActionMenu.svelte';
+import { extendEntry, frameEntries } from './frameMenu';
 
 /**
  * Build the actions for an asset's menu: reuse, use as, extend, upscale, move, download, delete.
@@ -12,16 +14,21 @@ import type { ActionMenuEntry } from './ActionMenu.svelte';
  *
  * Reuse leads when offered: on a touch screen a grid tile shows only the menu button, so the menu is where the
  * tile's quick action lives.
+ *
+ * *point* is the frame a paused video is on: Use as then offers it as a first or last frame, and Extend reads
+ * `Extend from 3.2 s`, or is refused with the reason when the frame is too early; the rows are `frameMenu`'s, as in the
+ * menu of the player's time chip. A menu without a player has no point.
  */
 export function assetMenuEntries(
   asset: GalleryAsset,
   handlers: AssetActionHandlers,
   deleting = false,
   useAs: UseAsState = {},
-  openMove?: () => void
+  openMove?: () => void,
+  point: FramePoint | null = null
 ): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
-  const { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete } = handlers;
+  const { onreuse, onreference, onextend, onuseframe, onupscale, onuseaudio, ondelete } = handlers;
   if (onreuse) {
     const reusable = asset.has_reusable_config === true;
     entries.push(
@@ -40,13 +47,13 @@ export function assetMenuEntries(
     const audioItems = audioUseEntries(asset, onuseaudio, useAs);
     if (audioItems.length > 0) entries.push({ kind: 'heading', label: 'Use as' }, ...audioItems, { kind: 'separator' });
   }
-  // A video that offers extending lists it, disabled with the reason when it can't be extended right now.
-  if (onextend && asset.media_type === 'video' && asset.extend) {
-    entries.push(
-      { kind: 'item', id: 'extend', label: 'Extend', disabled: !canExtend(asset), title: extendReason(asset) ?? undefined, onselect: () => onextend(asset) },
-      { kind: 'separator' }
-    );
+  if (onuseframe && canUseFrame(asset, point) && point) {
+    entries.push({ kind: 'heading', label: 'Use as' }, ...frameEntries(asset, point, onuseframe, useAs), { kind: 'separator' });
   }
+  // A video that offers extending lists it, disabled with the reason when it can't be extended right now. On a paused
+  // frame it continues from there, and a frame too early says why it can't.
+  const extend = extendEntry(asset, point, onextend);
+  if (extend) entries.push(extend, { kind: 'separator' });
   const upscaleItems = onupscale ? upscaleEntries(asset, onupscale) : [];
   if (upscaleItems.length > 0) {
     entries.push({ kind: 'heading', label: 'Upscale' }, ...upscaleItems, { kind: 'separator' });

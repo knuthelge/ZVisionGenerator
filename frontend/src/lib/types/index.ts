@@ -248,6 +248,8 @@ export interface ExtendSourceInfo {
   rotation: number | null;
   fps: number | null;
   frame_count: number | null;
+  /** Seconds from the file's start to its first video frame, the offset of the clock a point to extend from is on; null when the file could not be read. */
+  video_start: number | null;
   duration_seconds: number | null;
   has_audio: boolean | null;
   /** The scene recorded in the video, or null. */
@@ -1026,6 +1028,8 @@ export interface BrowseInfo {
   channels?: number | null;
   fps?: number | null;
   frames?: number | null;
+  /** Video only: seconds from the file start to the first frame. */
+  start?: number | null;
   /** Audio only: 100 waveform peaks. */
   peaks?: number[];
 }
@@ -1360,6 +1364,8 @@ export interface DraftState {
   extendSourcePath: string | null;
   /** Extend: the new frames, a multiple of 8; null until a source sets the 2 s default. Never aligned to 8k+1. */
   extendFrames: number | null;
+  /** Extend: where in the source to continue from, in seconds on its clock (the last frame kept); null continues from the end. The source owns it: another source resets it. */
+  extendFrom: number | null;
   /** Extend: the source could not be found where Reuse recorded it, so it must be chosen again. */
   missingSourceVideo: boolean;
   /** Extend: the source whose Scene and Prompt were settled, and the text its prefill put there (to tell edits from prefill). */

@@ -18,6 +18,14 @@ describe('placePopover', () => {
     expect(placePopover(box(100, 700, 80, 26), box(0, 0, 320, 300), viewport, 'start')).toEqual({ top: 394, left: 100 });
   });
 
+  it('opens above the anchor when it prefers that side and there is room', () => {
+    expect(placePopover(box(100, 400, 80, 26), box(0, 0, 320, 200), viewport, 'start', 'above')).toEqual({ top: 194, left: 100 });
+  });
+
+  it('opens below, as it would, when it prefers above but has no room there', () => {
+    expect(placePopover(box(100, 100, 80, 26), box(0, 0, 320, 200), viewport, 'start', 'above')).toEqual({ top: 132, left: 100 });
+  });
+
   it('stays inside the viewport horizontally', () => {
     expect(placePopover(box(900, 100, 80, 26), box(0, 0, 320, 200), viewport, 'start').left).toBe(672);
     expect(placePopover(box(10, 100, 28, 28), box(0, 0, 220, 200), viewport, 'end').left).toBe(8);

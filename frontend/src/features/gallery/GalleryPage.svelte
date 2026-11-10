@@ -15,7 +15,10 @@
   import { belongsToView } from '$lib/state/viewMoves';
   import { jobStore } from '$lib/state/job.svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { audioTrackParams, extendParams, referenceParams, reuseParams, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
+  import { audioTrackParams, extendParams, frameParams, referenceParams, reuseParams, frameSetNotice, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type FrameTarget, type ReferenceTarget } from '$lib/state/assetActions';
+  import type { FramePoint } from '$lib/state/framePoint';
+  import { runFrameGrab } from '$lib/state/frameGrab.svelte';
+  import { heldUploads } from '$lib/state/heldUploads.svelte';
   import { requestReference } from '$lib/state/pendingReference.svelte';
   import { startUpscale } from '$lib/state/upscale';
   import type { GalleryAsset, MoveResult, UpscaleFactor, UpscaleMethod, WorkspaceContext } from '$lib/types';
@@ -577,9 +580,21 @@
     router.navigate('workspace', target === 'audio_track' ? audioTrackParams(asset) : voiceParams(asset));
   }
 
-  function extendAsset(asset: GalleryAsset): void {
-    router.navigate('workspace', extendParams(asset));
+  /** Extend a video in the Workspace, from the paused frame when the viewer has one; a frame too early is refused. */
+  function extendAsset(asset: GalleryAsset, point?: FramePoint): void {
+    if (point?.tooShort) return;
+    router.navigate('workspace', extendParams(asset, point));
     addToast(`${asset.filename} is now the source video`, 'success');
+  }
+
+  /** The paused frame of a video becomes the Video tab's first or last frame: it is extracted, then the Workspace opens with it in the slot. */
+  function useFrame(asset: GalleryAsset, point: FramePoint, target: FrameTarget): void {
+    if (!asset.file_path || useAs[target]?.disabled) return;
+    void runFrameGrab(asset, point, target, (saved) => {
+      const notice = frameSetNotice(target, point, draft.state, heldUploads);
+      router.navigate('workspace', frameParams(asset, saved.path, target));
+      if (notice) addToast(notice.message, notice.type);
+    });
   }
 
   async function upscaleAsset(asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod): Promise<void> {
@@ -792,6 +807,7 @@
   audioModels={context?.audio_models}
   audioVocabulary={context?.audio_settings}
   onextend={extendAsset}
+  onuseframe={useFrame}
   onupscale={upscaleAsset}
   ondelete={deleteSingle}
   onmove={moveSingle}

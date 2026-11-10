@@ -24,7 +24,10 @@
   import { deleteAsset } from '$lib/api/gallery';
   import { completionToast } from '$lib/state/completionToast';
   import { moveAndReconcile } from '$lib/state/moveAndReconcile';
-  import { audioTrackParams, canExtend, extendParams, referenceParams, reuseParams, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
+  import { audioTrackParams, canExtend, extendParams, frameParams, referenceParams, reuseParams, frameSetNotice, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type FrameTarget, type ReferenceTarget } from '$lib/state/assetActions';
+  import { arrivalFor, flashArrival } from '$lib/arrivalFlash';
+  import type { FramePoint } from '$lib/state/framePoint';
+  import { runFrameGrab } from '$lib/state/frameGrab.svelte';
   import { audioModelLabel, cutNote } from '$lib/state/audioAsset';
   import { formatClock } from '$lib/state/clock';
   import { Badge, Icon, MascotSpot, Tooltip } from '$lib/components/atoms';
@@ -325,8 +328,8 @@
   // What the Audio tab sends and why Generate is off on it: the kind's text, the voice and the speaker's tick.
   const audio = $derived(context === null ? null : currentAudioView(context));
   const audioReason = $derived(audio?.reason ?? null);
-  // The one reason on the phone's composer: the Audio tab's own, else a run that is writing the text Generate sends.
-  const composerReason = $derived(audio?.active ? audioReason : textWriting.reason);
+  // The one reason on the phone's composer: the Audio tab's own, else a run that is writing the text Generate sends, else a gone or unpaired image.
+  const composerReason = $derived(audio?.active ? audioReason : (textWriting.reason ?? imageBlock));
   // A voice recording's length is read once it is chosen: it must be within what the model follows.
   $effect(() => {
     if (audio?.voice.recording && audio.voice.set) trackLengths.ensure(audio.voice.path, audio.voice.file);
@@ -968,10 +971,13 @@
     closeLightbox();
   }
 
-  /** Make a video the source of an extension; its recorded scene and prompt fill the boxes once the server has described it. */
-  function extendAsset(asset: GalleryAsset): void {
-    if (!asset.file_path || !canExtend(asset)) return;
-    const params = extendParams(asset);
+  /**
+   * Make a video the source of an extension; its recorded scene and prompt fill the boxes once the server has described it.
+   * With a *point*, the handle starts there; a point too early to cut is refused (the surface that offered it said why).
+   */
+  function extendAsset(asset: GalleryAsset, point?: FramePoint): void {
+    if (!asset.file_path || !canExtend(asset) || point?.tooShort) return;
+    const params = extendParams(asset, point);
     if (draft.state.workflow === params.workflow) {
       // The new source brings its own track (or none), so the held one goes with the draft's.
       draft.loadFromUrl(params, context, { replaceSlots: true });
@@ -981,6 +987,31 @@
     closeLightbox();
     addToast(`${asset.filename} is now the source video`, 'success');
     void extendInspection.inspect(context, { replaceText: true });
+    void tick().then(() => flashArrival('source-video'));
+  }
+
+  /**
+   * Make the paused frame of a video the Video tab's first or last frame: the frame is extracted as a PNG, then fills the slot
+   * like any Use as. The other frame stays. A first frame says so when a last frame stays, and a frame set with no other frame
+   * says where it came from. The viewer closes only if it is still showing that video when the extraction ends.
+   */
+  function useFrame(asset: GalleryAsset, point: FramePoint, target: FrameTarget): void {
+    if (!asset.file_path || useAs[target]?.disabled) return;
+    void runFrameGrab(asset, point, target, async (saved) => {
+      const notice = frameSetNotice(target, point, draft.state, heldUploads);
+      const params = frameParams(asset, saved.path, target);
+      // The slot sits on the Video tab: within it the frame just goes in place, and the opened tab shows it without a toast.
+      if (workspaceTab(draft.state.workflow) === workspaceTab(params.workflow as Workflow)) {
+        draft.loadFromUrl(params, context);
+        dropHeldUploads(params);
+        draft.saveDraft();
+        void recheckImages();
+      } else applyPrefill(params, { keepSettings: true });
+      if (lightboxOpen && viewerAssetId === asset.id) closeLightbox();
+      if (notice) addToast(notice.message, notice.type);
+      await tick();
+      flashArrival(target === 'last' ? 'last-frame' : 'first-frame');
+    });
   }
 
   // Tried in order: the visible prompt field (the Scene box sits above it), else any text field, else any control in the pane.
@@ -1179,6 +1210,9 @@
         // A link into the workspace loads a source's settings; a saved draft keeps its own unless the link names a model.
         // The server's context check follows right after, so the prefill does not ask for the paths too.
         applyPrefill(urlParams, { keepSettings: !urlParams.model, recheck: false });
+        // A frame or an Extend the Gallery sent: the slot or section it filled flashes once the page has drawn it.
+        const arrival = arrivalFor(urlParams);
+        if (arrival) void tick().then(() => flashArrival(arrival));
         // The prefill is in the draft now; drop it from the address so a reload or Back keeps the user's edits.
         router.replace('workspace');
       } else {
@@ -1245,8 +1279,8 @@
         e.preventDefault();
         if (e.shiftKey) togglePane(e.code);
         else void focusPane(e.code);
-      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && canStepStage && previewView !== 'empty' && acceptsPageShortcut(e) && !(e.target instanceof HTMLMediaElement)) {
-        // ← → step the preview through history; → goes back in time, like the strip reads. A focused video seeks instead.
+      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && canStepStage && previewView !== 'empty' && acceptsPageShortcut(e)) {
+        // ← → step the preview through history; → goes back in time, like the strip reads. With focus in the player they step or seek it instead, which marks the key handled before it reaches here.
         e.preventDefault();
         stepStage(e.key === 'ArrowRight' ? 1 : -1);
       }
@@ -1853,6 +1887,7 @@
                   onreference={useAsReference}
                   onuseaudio={useAudio}
                   onextend={extendAsset}
+                  onuseframe={useFrame}
                   onupscale={upscaleAsset}
                   {useAs}
                   ondelete={deleteWorkspaceAsset}
@@ -1905,6 +1940,7 @@
                       onreference={useAsReference}
                       onuseaudio={useAudio}
                       onextend={extendAsset}
+                      onuseframe={useFrame}
                       onupscale={upscaleAsset}
                       {useAs}
                       ondelete={deleteWorkspaceAsset}
@@ -1982,6 +2018,7 @@
               onreference={useAsReference}
               onuseaudio={useAudio}
               onextend={extendAsset}
+              onuseframe={useFrame}
               onupscale={upscaleAsset}
               {useAs}
               ondelete={deleteWorkspaceAsset}
@@ -2246,6 +2283,7 @@
   onreference={useAsReference}
   onuseaudio={useAudio}
   onextend={extendAsset}
+  onuseframe={useFrame}
   {useAs}
   audioModels={context?.audio_models}
   audioVocabulary={context?.audio_settings}

@@ -173,11 +173,34 @@ describe('imagesView block', () => {
     expect(view('img2img', { referenceImageUpload: 'a.png' }, { restored: false }).block).toBeNull();
   });
 
+  it('blocks a last frame without a first frame, whatever the last frame is', () => {
+    const reason = view('txt2vid', { endImagePath: '/in/z.png' }).block;
+
+    expect(reason).toMatch(/first frame/i);
+    expect(view('txt2vid', { endImageUpload: 'z.png' }, { files: { lastFrame: file('z.png') } }).block).toBe(reason);
+    // A last frame that is gone too still names the empty first frame, not the missing file.
+    expect(view('txt2vid', { endImagePath: '/in/z.png', missingReferencePaths: ['/in/z.png'] }).block).toBe(reason);
+  });
+
+  it('stops blocking once a first frame is added or the last frame is removed', () => {
+    expect(view('img2vid', { firstFramePath: '/in/a.png', endImagePath: '/in/z.png' }).block).toBeNull();
+    expect(view('img2vid', { firstFrameUpload: 'a.png', endImageUpload: 'z.png' }, { files: { firstFrame: file('a.png'), lastFrame: file('z.png') } }).block).toBeNull();
+    expect(view('txt2vid').block).toBeNull();
+  });
+
+  it('does not block a last frame on a model that takes none or one that cannot start from an image', () => {
+    expect(view('txt2vid', { endImagePath: '/in/z.png' }, { caps: { takesLastFrame: false } }).block).toBeNull();
+    expect(view('txt2vid', { endImagePath: '/in/z.png' }, { caps: { showRefImage: false, takesLastFrame: false } }).block).toBeNull();
+  });
+
+  it('does not block the other tab for a last frame left in the draft', () => {
+    expect(view('txt2img', { endImagePath: '/in/z.png' }).block).toBeNull();
+  });
+
   it('a hidden or unused image never blocks', () => {
     const missing = ['/in/a.png', '/in/b.png'];
 
-    // A last frame kept without a first frame, and one on a model that takes none.
-    expect(view('txt2vid', { endImagePath: '/in/b.png', missingReferencePaths: missing }).block).toBeNull();
+    // A last frame on a model that takes none.
     expect(view('img2vid', { firstFramePath: '/in/a.png', endImagePath: '/in/b.png', missingReferencePaths: ['/in/b.png'] }, { caps: { takesLastFrame: false } }).block).toBeNull();
     // A start image the model cannot use, and the other tab's first frame.
     expect(view('txt2img', { referenceImagePath: '/in/a.png', missingReferencePaths: missing }, { caps: { showRefImage: false } }).block).toBeNull();

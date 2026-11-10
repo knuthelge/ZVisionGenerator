@@ -52,7 +52,7 @@ export function extendSourceUsable(info: ExtendSourceInfo | null): boolean {
  * Set the Extend-specific fields of a Workspace submission and settle its `scene` field.
  *
  * An extension always sends `scene`, even blank: absent means "the source's recorded scene" and blank means "no scene".
- * It sends the source and the new frames, and none of the fields that choose a size or length. Other workflows
+ * It sends the source, the point to continue from when there is one, and the new frames, and none of the fields that choose a size or length. Other workflows
  * leave a blank scene out of the form, which is today's form data.
  */
 export function finalizeSceneFields(form: FormData, state: DraftState): void {
@@ -64,6 +64,8 @@ export function finalizeSceneFields(form: FormData, state: DraftState): void {
   for (const field of ['video_upscale_enabled', 'video_upscale_factor', 'upscale']) form.delete(field);
   if (state.extendSourcePath) form.set('source_video', state.extendSourcePath);
   if (state.extendFrames !== null) form.set('extend_frames', String(state.extendFrames));
+  // A point sends its seconds; none is absent, which keeps the whole clip.
+  if (state.extendFrom !== null) form.set('extend_from', String(state.extendFrom));
   if (!form.has('scene')) form.set('scene', submittedPair(state).scene);
 }
 

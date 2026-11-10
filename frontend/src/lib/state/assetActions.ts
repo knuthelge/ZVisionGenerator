@@ -1,6 +1,8 @@
 import { parseQuery } from '$lib/prefillParams';
 import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
-import { imageSupport } from '$lib/state/imageSlots';
+import { fileName } from '$lib/components/molecules/assetDetails';
+import { EXTEND_SHORT_REASON, pointLabel, type FramePoint } from '$lib/state/framePoint';
+import { hasPath, imageSupport, slotSet } from '$lib/state/imageSlots';
 import { workflowMode } from '$lib/state/promptEnhance';
 import { stripMarks } from '$lib/state/speechDelivery';
 import type { AssetUpscaleFactor, DraftState, GalleryAsset, JobWorkflow, PrefillParams, SpeechAudioModel, UpscaleFactor, UpscaleMethod, Workflow, WorkspaceContext } from '$lib/types';
@@ -10,6 +12,9 @@ export type ReferenceTarget = 'image' | 'reference' | 'video' | 'last';
 
 /** The targets that fill a single slot of a tab; a reference joins the list instead. */
 export type SlotTarget = Exclude<ReferenceTarget, 'reference'>;
+
+/** Where a paused video frame goes: the Video tab's first frame, or its last frame. */
+export type FrameTarget = Extract<SlotTarget, 'video' | 'last'>;
 
 /** Where an audio take goes: the Video tab's audio track, the Speech tab's voice, or the library of saved voices. */
 export type AudioUseTarget = 'audio_track' | 'voice' | 'save_voice';
@@ -30,7 +35,10 @@ export interface AssetActionHandlers {
   onpreview?: (asset: GalleryAsset, trigger: HTMLElement) => void;
   onreuse?: (asset: GalleryAsset) => void;
   onreference?: (asset: GalleryAsset, target: ReferenceTarget) => void;
-  onextend?: (asset: GalleryAsset) => void;
+  /** Extend a video; with a point, from that frame of it. */
+  onextend?: (asset: GalleryAsset, point?: FramePoint) => void;
+  /** A paused video frame becomes the Video tab's first or last frame. */
+  onuseframe?: (asset: GalleryAsset, point: FramePoint, target: FrameTarget) => void;
   /** An audio take becomes the Video tab's audio track or the Speech tab's voice. */
   onuseaudio?: (asset: GalleryAsset, target: AudioUseTarget) => void;
   onupscale?: (asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod) => void;
@@ -283,19 +291,81 @@ export function extendReason(asset: GalleryAsset): string | null {
   return asset.extend && !asset.extend.available ? asset.extend.reason : null;
 }
 
+/** Return what Extend reads for a video at *point*: `Extend from 3.2 s` on a frame before the end, `Extend the clip` at it, else `Extend`. */
+export function extendLabel(point: FramePoint | null | undefined): string {
+  if (!point) return 'Extend';
+  return point.atEnd ? 'Extend the clip' : `Extend from ${pointLabel(point)}`;
+}
+
+/** Return why Extend is refused at *point* (a frame too early to cut), or null when the point allows it. */
+export function extendPointReason(point: FramePoint | null | undefined): string | null {
+  return point?.tooShort ? EXTEND_SHORT_REASON : null;
+}
+
+/** Return the note of Extend at *point*: what it keeps, or that it continues from the end. *clipSeconds* is the clip's length, when known. */
+export function extendNote(point: FramePoint | null | undefined, clipSeconds: number | null = null): string {
+  if (!point || point.atEnd) return 'Continues from the end of the clip';
+  const kept = pointLabel(point);
+  return clipSeconds === null ? `Keeps ${kept}, drops what came after` : `Keeps ${kept} of ${clipSeconds.toFixed(1)} s, drops what came after`;
+}
+
 /**
  * Return the workspace prefill params that make a video the source of an extension.
  *
  * The text is left out on purpose: the server describes the source when the Workspace inspects it, and that answer fills
  * Scene (a recorded scene) or Prompt (a single recorded prompt) or leaves both empty. The gallery's own prompt may be only
  * a display fallback such as the file name, and must never reach the boxes.
+ *
+ * With a *point* before the end, `extend_from` carries the player's time on the frame, which the server reads as a frame;
+ * a point at the end, or none, extends the whole clip and sends no `extend_from`.
  */
-export function extendParams(asset: GalleryAsset): Record<string, string> {
+export function extendParams(asset: GalleryAsset, point?: FramePoint | null): Record<string, string> {
   const params: Record<string, string> = { workflow: 'extend', source_video: asset.file_path ?? '' };
   const model = asset.reuse_state?.resolved_model;
   if (model) params.model = model;
   params.lora = asset.lora ?? '';
+  if (point && !point.atEnd) params.extend_from = String(point.time);
   return params;
+}
+
+/** Return whether a paused frame of a video can be used as a first or last frame: it is a file on the host and a frame is selected. */
+export function canUseFrame(asset: GalleryAsset, point: FramePoint | null | undefined): boolean {
+  return asset.media_type === 'video' && Boolean(asset.file_path) && point != null;
+}
+
+/**
+ * Return the workspace prefill params that make an extracted frame (a PNG at *path*) the Video tab's first or last frame.
+ *
+ * A first frame carries the clip's recorded Scene, which empties the Action as a Reuse does; a clip with none recorded
+ * leaves the text alone, and never a file name. A last frame carries no text. `use_as` names the slot, as for `referenceParams`.
+ */
+export function frameParams(asset: GalleryAsset, path: string, target: FrameTarget): Record<string, string> {
+  if (target === 'last') return { workflow: REFERENCE_WORKFLOWS.last, end_image_path: path, use_as: 'last' };
+  const params: Record<string, string> = { workflow: REFERENCE_WORKFLOWS.video, image_path: path, use_as: 'start' };
+  if (asset.scene) params.scene = asset.scene;
+  return params;
+}
+
+/** Return the name of the last frame that stays when a first frame is set, or null when the draft holds none. *held* is the last frame picked from this device. */
+export function stillEndingOn(state: Pick<DraftState, 'endImagePath' | 'endImageUpload'>, held: { lastFrame: File | null }): string | null {
+  if (!slotSet(state.endImagePath, state.endImageUpload)) return null;
+  return held.lastFrame?.name ?? (hasPath(state.endImagePath) ? fileName(state.endImagePath) : state.endImageUpload);
+}
+
+/**
+ * Return what to tell the user once a frame of a clip is set, or null when the draft says enough by itself.
+ * A first frame says which last frame stays, and else where it came from; a last frame with no first frame says where it came from;
+ * a last frame beside a first frame needs no words. *state* is the draft before the frame goes in.
+ */
+export function frameSetNotice(
+  target: FrameTarget,
+  point: Pick<FramePoint, 'seconds'>,
+  state: Pick<DraftState, 'endImagePath' | 'endImageUpload' | 'firstFramePath' | 'firstFrameUpload'>,
+  held: { lastFrame: File | null }
+): { message: string; type: 'info' | 'success' } | null {
+  if (target === 'last') return slotSet(state.firstFramePath, state.firstFrameUpload) ? null : { message: `Last frame set from ${pointLabel(point)}`, type: 'success' };
+  const ending = stillEndingOn(state, held);
+  return ending ? { message: `First frame set. Still ending on ${ending}.`, type: 'info' } : { message: `First frame set from ${pointLabel(point)}`, type: 'success' };
 }
 
 /** Ask the user to approve deleting one asset; resolves true when they confirm. */

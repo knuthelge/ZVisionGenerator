@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
+import { sceneSource } from '$lib/state/extend.fixtures';
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { memoryUploadStore } from '$lib/state/uploadStore';
@@ -492,6 +493,26 @@ describe('SettingPopover thumbnails', () => {
     const thumb = target.querySelector('[data-testid="slot-thumb"]')!;
     expect(asked(thumb.querySelector('img'))).toEqual({ route: '/api/browse/preview', purpose: 'source_video', path: '/mnt/clips/walk.mp4', frame: 'last' });
     expect(thumb.querySelector('video')).toBeNull();
+  });
+
+  it('shows the Extend bar and the frame at the point once the source is described', () => {
+    draft.setExtendSourcePath('/mnt/clips/walk.mp4');
+    draft.applyExtendSource(sceneSource({ path: '/mnt/clips/walk.mp4', fps: 24, frame_count: 144, video_start: 0 }));
+    draft.setExtendFrom(76 / 24);
+    open('source', makeContext());
+
+    expect(target.querySelector('[data-testid="extend-keeps"]')?.textContent).toBe('Keeps 3.2 s of 6.0 s');
+    const thumb = target.querySelector('[data-testid="slot-thumb"]')!;
+    expect(new URL(thumb.querySelector('img')!.getAttribute('src')!, 'http://localhost').searchParams.get('at')).toBe('3.166667');
+  });
+
+  it('shows the Total of the length setting from the frames the point keeps', () => {
+    draft.setExtendSourcePath('/mnt/clips/walk.mp4');
+    draft.applyExtendSource(sceneSource({ path: '/mnt/clips/walk.mp4', fps: 24, frame_count: 144, video_start: 0, extend_frames: 48 }));
+    draft.setExtendFrom(76 / 24);
+    open('extendSeconds', makeContext());
+
+    expect(target.textContent).toContain('Total 5.21 s · 125 frames · +48 new');
   });
 
   it('keeps the film icon while no source video is chosen', () => {

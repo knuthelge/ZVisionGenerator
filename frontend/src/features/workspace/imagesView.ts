@@ -45,7 +45,7 @@ export interface ImagesView {
   visible: boolean;
   /** The tab's start image (the first frame in Video); null when the model takes none. */
   start: SlotView | null;
-  /** The last frame (Video, on a model that takes one); `used` is false without a first frame, when it is kept but not sent. */
+  /** The last frame (Video, on a model that takes one); `used` is false without a first frame, when it is not sent and Generate is blocked. */
   last: SlotView | null;
   /** The Strength row: the start image is set and an image-to-image run uses it. */
   strength: boolean;
@@ -56,7 +56,7 @@ export interface ImagesView {
     max: number;
     hasRoom: boolean;
   } | null;
-  /** Generate's reason when an image the run uses is gone, the start image or the frames before a reference; null before the held uploads are read back. */
+  /** Generate's reason when an image the run uses is gone (the start image or the frames before a reference) or a last frame has no first frame; null before the held uploads are read back. */
   block: string | null;
   /** The images a Generate sends besides the references: an upload wins over a path. A kept last frame is not sent without a first frame. */
   sent: { image: string | File | null; strength: number | null; end: string | File | null };
@@ -99,10 +99,14 @@ function _reference(row: ReferenceRow, state: SlotState, restored: boolean): Ref
   return { ...row, gone, error: gone ? _missingReason(upload) : null, name: row.file?.name ?? (upload ? '' : fileName(row.path)) };
 }
 
+/** Generate's reason when a last frame is set and the first frame is not. */
+const LAST_NEEDS_FIRST = 'Add a first frame. A last frame needs one.';
+
 function _block(view: Pick<ImagesView, 'tab' | 'start' | 'last' | 'references'>, restored: boolean): string | null {
   if (!restored) return null;
   if (view.start?.gone) return view.tab === 'video' ? 'The first frame is missing.' : 'The start image is missing.';
   if (view.last?.gone) return 'The last frame is missing.';
+  if (view.last?.set && view.start !== null && !view.start.set) return LAST_NEEDS_FIRST;
   const first = view.references?.rows.findIndex((row) => row.gone) ?? -1;
   return first === -1 ? null : `Reference ${first + 1} is missing.`;
 }

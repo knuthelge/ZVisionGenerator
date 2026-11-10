@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { browseInfo, browseMediaUrl, browsePreviewUrl } from './browse';
+import { browseInfo, browseMediaUrl, browsePreviewUrl, browseSpriteUrl } from './browse';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -24,9 +24,22 @@ describe('browse media URLs', () => {
     expect(query(browsePreviewUrl('source_video', '/v.mp4', { frame: 'last' })).params.get('frame')).toBe('last');
   });
 
+  it('asks for the frame at a second only when told to', () => {
+    expect(query(browsePreviewUrl('source_video', '/v.mp4')).params.has('at')).toBe(false);
+    expect(query(browsePreviewUrl('source_video', '/v.mp4', { at: 3.208333 })).params.get('at')).toBe('3.208333');
+    expect(query(browsePreviewUrl('source_video', '/v.mp4', { at: 0 })).params.get('at')).toBe('0');
+  });
+
   it('asks for the large picture only when told to', () => {
     expect(query(browsePreviewUrl('reference_image', '/a.png')).params.has('size')).toBe(false);
     expect(query(browsePreviewUrl('reference_image', '/a.png', { size: 'large' })).params.get('size')).toBe('large');
+  });
+
+  it('builds the contact sheet URL with the purpose and the path', () => {
+    const { pathname, params } = query(browseSpriteUrl('source_video', '/home/user/a&b.mp4'));
+
+    expect(pathname).toBe('/api/browse/sprite');
+    expect(Object.fromEntries(params)).toEqual({ purpose: 'source_video', path: '/home/user/a&b.mp4' });
   });
 
   it('encodes Windows paths and odd characters in the query', () => {

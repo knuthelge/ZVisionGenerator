@@ -83,6 +83,15 @@ describe('finalizeSceneFields', () => {
     expect(form.get('extend_frames')).toBe('48');
   });
 
+  it('sends the point to continue from when there is one, and nothing for the whole clip', () => {
+    const point = formWith({ scene: '' });
+    finalizeSceneFields(point, draftState({ extendFrom: 3.208333 }));
+    expect(point.get('extend_from')).toBe('3.208333');
+    const whole = formWith({ scene: '' });
+    finalizeSceneFields(whole, draftState({ extendFrom: null }));
+    expect(whole.has('extend_from')).toBe(false);
+  });
+
   it('adds the scene field when the form has none', () => {
     const form = formWith({ mode: 'video', workflow: 'extend' });
     finalizeSceneFields(form, draftState({ scene: 'A street.' }));

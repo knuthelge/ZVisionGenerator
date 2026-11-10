@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 
 import { makeAudioAsset, makeSpeechAsset } from '../../../test-utils/audio';
+import { EXTEND_SHORT_REASON, type FramePoint } from '$lib/state/framePoint';
 import { assetMenuEntries, audioUseEntries, referenceEntries, upscaleEntries } from './assetMenu';
 
 function option(factor: 2 | 4, overrides: Partial<AssetUpscaleFactor> = {}): AssetUpscaleFactor {
@@ -220,5 +221,74 @@ describe('assetMenuEntries Move', () => {
 
     const [busy] = assetMenuEntries(makeAsset(undefined), {}, true, {}, openMove);
     expect(busy).toMatchObject({ id: 'move', disabled: true });
+  });
+});
+
+describe('assetMenuEntries for a paused video frame', () => {
+  const video = (overrides: Partial<GalleryAsset> = {}): GalleryAsset => ({
+    ...makeAsset(undefined), id: 'out/c.mp4', url: '/media/out/c.mp4', filename: 'c.mp4', media_type: 'video', file_path: '/outputs/out/c.mp4', extend: { available: true, reason: null }, ...overrides,
+  });
+  const point = (overrides: Partial<FramePoint> = {}): FramePoint => ({ time: 3.02, seconds: 3, tooShort: false, atEnd: false, ...overrides });
+  const handlers = () => ({ onextend: vi.fn(), onuseframe: vi.fn() });
+  const labels = (entries: ReturnType<typeof assetMenuEntries>) => entries.map((entry) => (entry.kind === 'item' ? entry.label : entry.kind === 'heading' ? `# ${entry.label}` : '-'));
+  const item = (entries: ReturnType<typeof assetMenuEntries>, id: string) => entries.find((entry) => entry.kind === 'item' && entry.id === id);
+
+  it('lists Use as with the first and last frame before Extend, which continues from the frame', () => {
+    const entries = assetMenuEntries(video(), handlers(), false, {}, undefined, point());
+
+    expect(labels(entries).slice(0, 5)).toEqual(['# Use as', 'First frame', 'Last frame', '-', 'Extend from 3.0 s']);
+  });
+
+  it('offers no Use as without a frame, and plain Extend, as on a tile', () => {
+    const entries = assetMenuEntries(video(), handlers());
+
+    expect(labels(entries)).not.toContain('# Use as');
+    expect(labels(entries)[0]).toBe('Extend');
+  });
+
+  it('offers no Use as without the handler', () => {
+    const entries = assetMenuEntries(video(), { onextend: vi.fn() }, false, {}, undefined, point());
+
+    expect(item(entries, 'frame-first')).toBeUndefined();
+    expect(item(entries, 'extend')).toMatchObject({ label: 'Extend from 3.0 s' });
+  });
+
+  it('runs Extend with the frame, and Use as with the frame and the target', () => {
+    const on = handlers();
+    const frame = point();
+    const entries = assetMenuEntries(video(), on, false, {}, undefined, frame);
+
+    for (const id of ['extend', 'frame-first', 'frame-last']) (item(entries, id) as { onselect: () => void }).onselect();
+
+    expect(on.onextend).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/c.mp4' }), frame);
+    expect(on.onuseframe).toHaveBeenNthCalledWith(1, expect.anything(), frame, 'video');
+    expect(on.onuseframe).toHaveBeenNthCalledWith(2, expect.anything(), frame, 'last');
+  });
+
+  it('runs Extend without a frame argument when there is none', () => {
+    const on = handlers();
+    (item(assetMenuEntries(video(), on), 'extend') as { onselect: () => void }).onselect();
+
+    expect(on.onextend.mock.calls[0]).toHaveLength(1);
+  });
+
+  it('reads the end as Extend the clip, with the frame to use', () => {
+    const entries = assetMenuEntries(video(), handlers(), false, {}, undefined, point({ atEnd: true }));
+
+    expect(item(entries, 'extend')).toMatchObject({ label: 'Extend the clip', disabled: false });
+    expect(item(entries, 'frame-first')).toBeDefined();
+  });
+
+  it('disables Extend on a frame too early, with the reason beside it', () => {
+    const entries = assetMenuEntries(video(), handlers(), false, {}, undefined, point({ tooShort: true, seconds: 0.4 }));
+
+    expect(item(entries, 'extend')).toMatchObject({ label: 'Extend from 0.4 s', disabled: true, hint: EXTEND_SHORT_REASON });
+    expect(item(entries, 'frame-first')).toMatchObject({ disabled: false });
+  });
+
+  it('keeps Extend disabled with its reason when the clip can not be extended, and never reads from', () => {
+    const entries = assetMenuEntries(video({ extend: { available: false, reason: 'Upscaled videos can\'t be extended' } }), handlers(), false, {}, undefined, point());
+
+    expect(item(entries, 'extend')).toMatchObject({ label: 'Extend', disabled: true, hint: 'Upscaled videos can\'t be extended' });
   });
 });

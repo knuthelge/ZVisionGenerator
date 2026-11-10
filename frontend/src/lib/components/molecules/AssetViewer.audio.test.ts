@@ -56,6 +56,71 @@ describe('AssetViewer with audio', () => {
     expect(blocks).toEqual([['Style', 'Dreamy synth-pop, warm analog pads'], ['Lyrics', LYRICS]]);
   });
 
+  describe('the take\'s player', () => {
+    const player = () => document.querySelector<HTMLAudioElement>('audio')!;
+    const song2 = makeAudioAsset({ id: 'out/song-2.flac', url: '/media/out/song-2.flac', filename: 'song-2.flac' });
+
+    it('is the app\'s player with no native controls, and never autoplays', () => {
+      mountViewer();
+
+      expect(player().controls).toBe(false);
+      expect(player().autoplay).toBe(false);
+      expect(document.querySelector('[data-media-player]')?.getAttribute('data-kind')).toBe('audio');
+      expect(document.querySelector('[data-media-player]')?.getAttribute('data-size')).toBe('viewer');
+      expect(document.querySelector('[data-media-player]')?.getAttribute('aria-label')).toBe('song.flac');
+    });
+
+    it('pauses when another take is shown and when the viewer goes', async () => {
+      const props = reactiveProps({ assets: [song, song2], currentId: song.id, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+      const page = mountComponent(AssetViewer, props);
+      flushSync();
+      pause.mockClear();
+
+      props.currentId = song2.id;
+      flushSync();
+      expect(pause).toHaveBeenCalledTimes(1);
+
+      await page.unmount();
+      expect(pause).toHaveBeenCalledTimes(2);
+    });
+
+    it('shows a stopped player, not the playing one, when another take is shown while one plays', () => {
+      // A real element is paused or not; one that is playing when its source changes goes back to paused without a `pause` event.
+      const playing = new WeakSet<HTMLMediaElement>();
+      vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(function (this: HTMLMediaElement) { return !playing.has(this); });
+      vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) { playing.delete(this); });
+      const props = reactiveProps({ assets: [song, song2], currentId: song.id, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+      mountComponent(AssetViewer, props);
+      flushSync();
+      const first = player();
+      playing.add(first);
+      first.dispatchEvent(new Event('play'));
+
+      props.currentId = song2.id;
+      flushSync();
+
+      expect(player().getAttribute('src')).toBe('/media/out/song-2.flac');
+      expect(player()).not.toBe(first);
+      expect(player().paused).toBe(true);
+      expect(first.paused).toBe(true);
+      expect(document.querySelectorAll('audio')).toHaveLength(1);
+    });
+
+    it('keeps the same player when a fresh copy of the same take arrives', () => {
+      const props = reactiveProps({ assets: [song, talk], currentId: song.id, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+      mountComponent(AssetViewer, props);
+      flushSync();
+      const first = player();
+      pause.mockClear();
+
+      props.assets = [{ ...song }, talk];
+      flushSync();
+
+      expect(player()).toBe(first);
+      expect(pause).not.toHaveBeenCalled();
+    });
+  });
+
   it('shows a file without settings with a player and no words', () => {
     mountViewer({ assets: [makeImportedAudio()] });
 
@@ -211,7 +276,7 @@ describe('AssetViewer with audio', () => {
     touchLayer.coarse = true;
     const onnavigate = vi.fn();
     mountViewer({ onnavigate });
-    const wave = document.querySelector('[data-testid="audio-wave"]')!;
+    const wave = document.querySelector('[data-testid="media-timeline"]')!;
 
     touch(wave, 'touchstart', 300, 200);
     touch(wave, 'touchmove', 220, 202);

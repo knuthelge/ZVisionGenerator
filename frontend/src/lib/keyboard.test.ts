@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { APP_SHORTCUTS, CHORD_TIMEOUT_MS, hasOpenModal, isPlainKey, isTyping, stepChord, stepGoChord } from './keyboard';
+import { acceptsPageShortcut, APP_SHORTCUTS, CHORD_TIMEOUT_MS, hasOpenModal, inMenu, isPlainKey, isTyping, isUnfocusedTarget, stepChord, stepGoChord } from './keyboard';
 
 function el(html: string): HTMLElement {
   const host = document.createElement('div');
@@ -23,12 +23,54 @@ describe('keyboard', () => {
     expect(isTyping(el(html))).toBe(expected);
   });
 
+  it.each([
+    ['<button></button>', false],
+    ['<a href="#top"></a>', false],
+    ['<input type="checkbox" role="switch">', false],
+    ['<input type="checkbox">', false],
+    ['<input type="radio">', false],
+    ['<div role="slider" tabindex="0"></div>', false],
+    ['<div tabindex="-1"></div>', true],
+  ])('treats %s as a target with no tab stop: %s', (html, expected) => {
+    const node = el(html);
+    document.body.appendChild(node);
+    expect(isUnfocusedTarget(node)).toBe(expected);
+  });
+
+  it('treats the page body as no target at all', () => {
+    expect(isUnfocusedTarget(document.body)).toBe(true);
+    expect(isUnfocusedTarget(document)).toBe(false);
+    expect(isUnfocusedTarget(null)).toBe(false);
+  });
+
   it('allows Shift but not ⌘, Ctrl or Alt in plain keys', () => {
     const base = { key: '?', metaKey: false, ctrlKey: false, altKey: false };
     expect(isPlainKey(base)).toBe(true);
     expect(isPlainKey({ ...base, ctrlKey: true })).toBe(false);
     expect(isPlainKey({ ...base, metaKey: true })).toBe(false);
     expect(isPlainKey({ ...base, altKey: true })).toBe(false);
+  });
+
+  describe('menus', () => {
+    it('sees a key from inside a menu, which sits outside the page it was opened from', () => {
+      document.body.innerHTML = '<div role="menu"><button role="menuitem">Extend</button></div><button id="outside">Close</button>';
+
+      expect(inMenu(document.querySelector('[role="menuitem"]'))).toBe(true);
+      expect(inMenu(document.getElementById('outside'))).toBe(false);
+      expect(inMenu(document)).toBe(false);
+    });
+
+    it('lets no page shortcut run from a menu', () => {
+      document.body.innerHTML = '<div role="menu"><button role="menuitem">Extend</button></div><button id="outside">Close</button>';
+      const from = (selector: string) => {
+        const event = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+        document.querySelector(selector)!.dispatchEvent(event);
+        return event;
+      };
+
+      expect(acceptsPageShortcut(from('#outside'))).toBe(true);
+      expect(acceptsPageShortcut(from('[role="menuitem"]'))).toBe(false);
+    });
   });
 
   it('detects an open modal dialog', () => {

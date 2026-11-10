@@ -4,6 +4,7 @@
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
   import { ActionBar, InspectorRow, InspectorSection, LicenceMark, Select } from '$lib/components/molecules';
   import { extendGuard, extendModelSupport } from '$lib/state/extend';
+  import { extendCutView } from '$lib/state/extendCut';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { MEMORY_FIT_CONSEQUENCES, clipTimeNote, memoryFitNote, type MemoryNote } from '$lib/state/memoryFit';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
@@ -27,7 +28,7 @@
   import type { ImagesView } from './imagesView';
   import SourceVideoSection from './SourceVideoSection.svelte';
   import WaitingLabel from './WaitingLabel.svelte';
-  import { durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
+  import { durationSpec, extendFramesFromSeconds, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
 
   interface Props {
     context: WorkspaceContext;
@@ -98,7 +99,8 @@
   const extendStep = $derived(extendStepFor(context, model));
   const extendSecondsSpec = $derived(sourceFps ? durationSpec(sourceFps, { alignment: extendStep }) : { step: 0.1, min: 0.1 });
   const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
-  const extendLength = $derived(info && sourceFps && info.frame_count !== null && s.extendFrames !== null ? extendTotal(info.frame_count, s.extendFrames, sourceFps) : null);
+  // The finished clip is the frames the continued clip keeps plus the new ones.
+  const extendLength = $derived(info && s.extendFrames !== null ? (extendCutView(info, s.extendFrom, s.extendFrames)?.total ?? null) : null);
   const memoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
   const clipNote = $derived(memoryFitNote(clipMemory.fit, 'clip'));
   const clipTime = $derived(clipTimeNote(clipMemory.fit));
@@ -186,6 +188,8 @@
 
   function resetAll(): void {
     draft.resetSelections(context);
+    // A Reset that cleared the Extend source clears what was learned about it too, so choosing the same source again is inspected anew.
+    if (draft.state.extendSourcePath === null) extendInspection.reset();
   }
 
   function scrubber(value: number | null, spec: NumberSpec, onchange: (value: number) => void, disabled = false): ScrubOptions {

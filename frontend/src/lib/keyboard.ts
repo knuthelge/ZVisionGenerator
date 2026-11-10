@@ -13,6 +13,13 @@ export function isTyping(target: EventTarget | null): boolean {
   return target.isContentEditable || ['TEXTAREA', 'SELECT'].includes(target.tagName) || target.getAttribute('role') === 'combobox';
 }
 
+/** Return whether a key press comes from nowhere that takes the keyboard: the page's body (a tap on an iPad leaves the focus there), or an element a user cannot Tab to (`tabIndex` below 0). A button, link, switch, checkbox, radio, slider or field is a tab stop and keeps its own Space; an editable element is never nowhere. */
+export function isUnfocusedTarget(target: EventTarget | null): boolean {
+  if (target === document.body || target === document.documentElement) return true;
+  if (!(target instanceof HTMLElement)) return false;
+  return target.tabIndex < 0 && !target.isContentEditable;
+}
+
 /** Return whether a key press carries no ⌘, Ctrl or Alt modifier; Shift is allowed (it makes `?`). */
 export function isPlainKey(event: KeyInput): boolean {
   return !event.metaKey && !event.ctrlKey && !event.altKey;
@@ -23,14 +30,19 @@ export function isCommandKey(event: KeyInput): boolean {
   return event.metaKey || event.ctrlKey;
 }
 
+/** Return whether a key press comes from inside an open menu, whose keys belong to it: a menu opened from a player sits in `<body>`, outside the player, so the page's shortcuts would otherwise hear them. */
+export function inMenu(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[role="menu"]') !== null;
+}
+
 /** Return whether a modal dialog (asset viewer, Modal) currently owns the keyboard. */
 export function hasOpenModal(root: ParentNode = document): boolean {
   return root.querySelector('[aria-modal="true"]') !== null;
 }
 
-/** Return whether a page-level single-key shortcut may run for this event. */
+/** Return whether a page-level single-key shortcut may run for this event: not from a text field or a menu, and not behind a modal. */
 export function acceptsPageShortcut(event: KeyboardEvent): boolean {
-  return !event.defaultPrevented && isPlainKey(event) && !isTyping(event.target) && !hasOpenModal();
+  return !event.defaultPrevented && isPlainKey(event) && !isTyping(event.target) && !inMenu(event.target) && !hasOpenModal();
 }
 
 /** Where `G` then a key goes: a page, or the job log drawer. */

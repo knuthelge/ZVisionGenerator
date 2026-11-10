@@ -1,5 +1,6 @@
 import { AUDIO_FIELD_DEFAULTS, AUDIO_KIND_SETTINGS, audioPrefill, availableKinds, hydrateAudio, isAudioModelId } from './audioDraft';
 import { extendPrefillFor } from './extend';
+import { extendCutView, settledExtendFrom } from './extendCut';
 import { downloadStore } from './downloads.svelte';
 import { heldUploads } from './heldUploads.svelte';
 import { isPrefilledTrack, trackOf, trackPatch, trackSet, trackStartPatch, type TrackTab } from './audioTrack';
@@ -107,6 +108,7 @@ const DEFAULT_DRAFT: DraftState = {
   enhanceFormat: 'text',
   extendSourcePath: null,
   extendFrames: null,
+  extendFrom: null,
   missingSourceVideo: false,
   extendPrefill: null,
   appliedPreset: null,
@@ -640,7 +642,7 @@ export function defaultsFor(ctx: WorkspaceContext, state: DraftState, extendSour
   const modelled = _withModelDefaults(ctx, { ...DEFAULT_DRAFT, promptSource: ctx.default_prompt_source, workflow: _TEXT_WORKFLOW[tab], model: state.model });
   const defaults = _applyCapabilityGates(ctx, modelled, tab === 'extend' ? sourceFps : null);
   if (tab !== 'extend') return defaults;
-  // The source stays across a Reset, so the track it filled in comes back with it, from where the source's sound ended.
+  // While the draft holds a source, the track it filled in is part of the defaults, from where the source's sound ended; a Reset that clears the source passes none.
   const sourceTrack = state.extendPrefill?.path === state.extendSourcePath ? (state.extendPrefill?.audioTrack ?? null) : null;
   return {
     ...defaults,
@@ -683,6 +685,20 @@ let _draft = $state<DraftState>(loadFromStorage());
 let _authorityReady = $state(false);
 // What the server last reported about the extend source; fetched again on load, so it is not saved with the draft.
 let _extendSource = $state<ExtendSourceInfo | null>(null);
+
+/**
+ * Return the fields that move the Extend track's Start at to follow a cut at *point*. Only a track that is still what the source's prefill
+ * put there follows (the same rule as the text): Start at is where the source's sound ended, moved back by the removed frames.
+ * Nothing moves before the source has been described, which then starts the track at the moved position itself.
+ */
+function _trackFollowingCut(state: DraftState, point: number | null): Partial<DraftState> {
+  const prefill = state.extendPrefill;
+  const track = prefill?.audioTrack ?? null;
+  if (!_extendSource || !prefill || !track || prefill.path !== (state.extendSourcePath ?? '') || !isPrefilledTrack(state, track)) return {};
+  const start = extendCutView(_extendSource, point)?.trackStart ?? null;
+  if (start === null || start === track.start) return {};
+  return { ...trackStartPatch('extend', start), extendPrefill: { ...prefill, audioTrack: { ...track, start } } };
+}
 
 /** The frame rate an extension runs at: its source's, once known. */
 function _sourceFps(workflow: WorkspaceWorkflow): number | null {
@@ -760,6 +776,9 @@ export const draft = {
       prefill.extendSourcePath = params.source_video || null;
       prefill.missingSourceVideo = params.missing_source_video === 'true';
       if (prefill.extendSourcePath !== _draft.extendSourcePath) _extendSource = null;
+      // The point belongs to the source the URL names: one that names none continues from the end.
+      const point = params.extend_from === undefined || params.extend_from === '' ? NaN : Number(params.extend_from);
+      prefill.extendFrom = canApply('extend_from') && Number.isFinite(point) && point >= 0 ? point : null;
     }
     if (params.extend_frames && canApply('extend_frames')) {
       const frames = Number(params.extend_frames);
@@ -1091,17 +1110,19 @@ export const draft = {
   /**
    * Reset the open tab to its defaults: the fields of the scopes `RESET_SCOPE` lists for the tab take the values `defaultsFor`
    * resolves, and everything else stays. The tab's images and audio track (Image: the start image and references; Video: the
-   * first and last frame and the track; Extend: its track, which returns to the source's own) clear with their upload markers
-   * and held files, so its workflow falls back to text. The Audio tab puts back its length and voice (the held recording
+   * first and last frame and the track; Extend: its source video, the point to continue from and its track) clear with their
+   * upload markers and held files, so its workflow falls back to text. The Audio tab puts back its length and voice (the held recording
    * and the tick with it). The batch and the seed are shared by every tab and reset on each. The applied preset clears.
-   * Nothing of another tab or of the other mode changes, and the model, LoRAs, quantization, text, prompt file, extend
-   * source and layout stay.
+   * Nothing of another tab or of the other mode changes, and the model, LoRAs, quantization, text, prompt file and layout stay.
    */
   resetSelections(ctx: WorkspaceContext): void {
     const s = _draft;
     const scopes = RESET_SCOPE[workspaceTab(s.workflow)];
-    const defaults = defaultsFor(ctx, s, _extendSource);
+    // A Reset that clears the Extend source takes what it brought with it (the length, the track) and starts from a tab with none.
+    const clearsSource = scopes.includes('extendSource');
+    const defaults = clearsSource ? defaultsFor(ctx, { ...s, extendSourcePath: null, extendPrefill: null, extendFrames: null }, null) : defaultsFor(ctx, s, _extendSource);
     _clearHeldUploads(scopes);
+    if (clearsSource) _extendSource = null;
     const reset = { ...s, ...pickScopes(defaults, scopes) };
     const kept = new Set(slotPaths(reset));
     _draft = _withDerivedWorkflow(ctx, { ...reset, missingReferencePaths: s.missingReferencePaths.filter((path) => kept.has(path)) });
@@ -1178,7 +1199,18 @@ export const draft = {
     const changed = path !== _draft.extendSourcePath;
     if (changed) _extendSource = null;
     // A newly chosen source brings its own settings, so the form no longer starts from a preset.
-    _draft = { ..._draft, extendSourcePath: path, missingSourceVideo: false, ...(changed && path !== null ? { appliedPreset: null } : {}) };
+    // The point to extend from belongs to the source, so another source starts from its end.
+    _draft = { ..._draft, extendSourcePath: path, missingSourceVideo: false, ...(changed ? { extendFrom: null } : {}), ...(changed && path !== null ? { appliedPreset: null } : {}) };
+    this.saveDraft();
+  },
+
+  /**
+   * Set where in the extend source the clip continues from: seconds on the source's clock, or null for the whole clip. While the
+   * track is still the source's own prefill, its Start at moves back by the removed frames.
+   */
+  setExtendFrom(seconds: number | null): void {
+    _draft = { ..._draft, extendFrom: seconds };
+    _draft = { ..._draft, ..._trackFollowingCut(_draft, seconds) };
     this.saveDraft();
   },
 
@@ -1246,7 +1278,9 @@ export const draft = {
     const previous = _draft.extendPrefill;
     const sourceKey = _draft.extendSourcePath ?? '';
     const settled = previous !== null && previous.path === sourceKey;
-    const updates: Partial<DraftState> = { missingSourceVideo: false };
+    // A point the source cannot use is moved to one it can: the whole clip, or the 25th frame.
+    const point = settledExtendFrom(info, _draft.extendFrom);
+    const updates: Partial<DraftState> = { missingSourceVideo: false, ...(point !== _draft.extendFrom ? { extendFrom: point } : {}) };
     if (info.fps) updates.fps = info.fps;
     if (_draft.extendFrames === null && info.extend_frames !== null) updates.extendFrames = info.extend_frames;
     if (!settled || options.replaceText) {
@@ -1276,6 +1310,7 @@ export const draft = {
       };
     }
     _draft = { ..._draft, ...updates };
+    _draft = { ..._draft, ..._trackFollowingCut(_draft, _draft.extendFrom) };
     if (!settled || options.replaceText) {
       if (info.model && info.model !== _draft.model) {
         if (ctx) this.hydrateFromContext(ctx, info.model);

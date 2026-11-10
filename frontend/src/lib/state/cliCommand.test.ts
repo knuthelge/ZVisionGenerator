@@ -327,6 +327,11 @@ describe('cliCommand', () => {
       expect(command).toBe("ziv video --extend '/clips/walk one.mp4' --extend-frames 48 --model ltx --prompt 'She turns and waves.' --scene 'A rainy street.' --steps 8 --no-audio");
     });
 
+    it('continues from a point when one is set, and from the end when none is', () => {
+      expect(cliCommand({ ...extend, extend_from: '3.208333', prompt: 'She waves.' }).command).toContain("--extend '/clips/walk one.mp4' --extend-from 3.208333 --extend-frames 48");
+      expect(cliCommand({ ...extend, prompt: 'She waves.' }).command).not.toContain('--extend-from');
+    });
+
     it('leaves --prompt out when the prompt is empty and still runs without any text', () => {
       expect(cliCommand({ ...extend, prompt: '', scene: '' }).command).toBe("ziv video --extend '/clips/walk one.mp4' --extend-frames 48 --model ltx --steps 8");
       expect(cliCommand({ ...extend, prompt: '', scene: 'A rainy street.' }).command).toContain("--scene 'A rainy street.'");

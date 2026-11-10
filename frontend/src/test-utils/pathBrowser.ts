@@ -18,13 +18,19 @@ export function placesFor(purpose: BrowsePurposeName): BrowsePlaces {
 }
 
 /** The stand-in for `browsePreviewUrl`: a recognisable URL carrying the purpose, path and frame. */
-export function stubBrowsePreviewUrl(purpose: BrowsePurposeName, path: string, options: { frame?: 'last'; size?: 'large' } = {}): string {
-  return `/preview/${purpose}${path}${options.frame ? '?frame=last' : ''}`;
+export function stubBrowsePreviewUrl(purpose: BrowsePurposeName, path: string, options: { frame?: 'last'; at?: number; size?: 'large' } = {}): string {
+  const query = options.frame ? '?frame=last' : options.at !== undefined ? `?at=${options.at}` : '';
+  return `/preview/${purpose}${path}${query}`;
 }
 
 /** The stand-in for `browseMediaUrl`. */
 export function stubBrowseMediaUrl(purpose: BrowsePurposeName, path: string): string {
   return `/media/${purpose}${path}`;
+}
+
+/** The stand-in for `browseSpriteUrl`. */
+export function stubBrowseSpriteUrl(purpose: BrowsePurposeName, path: string): string {
+  return `/sprite/${purpose}${path}`;
 }
 
 /** Return the facts `browseInfo` answers for a file of *kind*, with *overrides* on top. */

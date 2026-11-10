@@ -12,7 +12,7 @@ import type { DraftState, WorkspaceTab } from '$lib/types';
  * - `text`: the open mode's typed text, its Enhanced text and its prompt source.
  * - `promptFile`: the prompts file and the prompts chosen from it.
  * - `enhanceImage`, `enhanceVideo`, `enhanceAudio`: the enhancement options of each mode (Audio keeps one set per task).
- * - `extendSource`: the video an extension continues.
+ * - `extendSource`: the video an extension continues and the point in it the extension continues from (a Reset puts both back).
  * - `audioText`, `audioSettings`, `audioDelivery`, `voice`: the four texts of the Audio tab with the Enhanced text of its boxes, its settings (the lengths, the Tempo and
  *   Key, the Sound Type), the Speech delivery and the Speech voice.
  * - `memory`: what the draft remembers for coming back to a tab or a mode.
@@ -104,6 +104,7 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   enhanceSettingsVideo: 'enhanceVideo',
 
   extendSourcePath: 'extendSource',
+  extendFrom: 'extendSource',
   missingSourceVideo: 'extendSource',
   extendPrefill: 'extendSource',
 
@@ -154,7 +155,7 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
 export const RESET_SCOPE: Record<WorkspaceTab, readonly Scope[]> = {
   image: ['slotsImage', 'settings', 'shared', 'enhanceImage', 'preset'],
   video: ['slotsVideo', 'settings', 'shared', 'enhanceVideo', 'preset'],
-  extend: ['slotsExtend', 'extendSettings', 'settings', 'shared', 'enhanceVideo', 'preset'],
+  extend: ['slotsExtend', 'extendSettings', 'extendSource', 'settings', 'shared', 'enhanceVideo', 'preset'],
   audio: ['audioSettings', 'audioDelivery', 'voice', 'enhanceAudio', 'shared', 'preset'],
 };
 
@@ -167,7 +168,7 @@ export const RESET_SCOPE: Record<WorkspaceTab, readonly Scope[]> = {
 export const REUSE_SCOPE: Record<WorkspaceTab, readonly Scope[]> = {
   image: [...RESET_SCOPE.image, 'text', 'model'],
   video: [...RESET_SCOPE.video, 'text', 'model'],
-  extend: [...RESET_SCOPE.extend, 'text', 'model', 'extendSource'],
+  extend: [...RESET_SCOPE.extend, 'text', 'model'],
   audio: ['shared', 'audioSettings', 'audioDelivery'],
 };
 

@@ -1,15 +1,18 @@
 <script lang="ts">
-  import { Icon, Waveform } from '$lib/components/atoms';
+  import { Icon, Spinner, Waveform } from '$lib/components/atoms';
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import type { AssetActionHandlers, UseAsState } from '$lib/state/assetActions';
   import { audioFoot, hasNoWords, tileWords } from '$lib/state/audioAsset';
   import { audioPeaks } from '$lib/state/audioPeaks.svelte';
   import { formatClock } from '$lib/state/clock';
+  import type { FramePoint } from '$lib/state/framePoint';
+  import { busyFor } from '$lib/state/frameGrab.svelte';
   import type { GalleryAsset } from '$lib/types';
   import { hold } from '$lib/actions/hold';
   import ActionMenu from './ActionMenu.svelte';
-  import AudioPlayer from './AudioPlayer.svelte';
+  import MediaPlayer from './MediaPlayer.svelte';
   import { assetMenuEntries } from './assetMenu';
+  import { frameMenuEntries } from './frameMenu';
   import MoveMenu from './MoveMenu.svelte';
 
   interface Props extends AssetActionHandlers {
@@ -43,6 +46,7 @@
     onreuse,
     onreference,
     onextend,
+    onuseframe,
     onupscale,
     onuseaudio,
     ondelete,
@@ -71,7 +75,11 @@
   const length = $derived(asset.duration != null ? formatClock(asset.duration) : null);
   const transparent = $derived(asset.transparent === true && !isVideo);
   const canReuse = $derived(asset.has_reusable_config === true);
-  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined));
+  // The frame the stage's video is paused on, which its player reports; the time chip's menu and the ⋯ menu offer it as a first or last frame and extend from it.
+  let point = $state<FramePoint | null>(null);
+  const extracting = $derived(busyFor(asset.id) !== null);
+  const frameActions = $derived(point ? frameMenuEntries(asset, point, { onextend, onuseframe }, useAs) : []);
+  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onuseframe, onupscale, onuseaudio, ondelete }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined, point));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   const thumbnail = $derived(asset.thumbnail_url || asset.url);
@@ -141,7 +149,13 @@
     {#if isAudio}
       {@render audioCover()}
     {:else if inlineVideo}
-      <video src={asset.url} poster={asset.thumbnail_url} class="asset-tile-img" muted controls preload="metadata" onloadeddata={onmediaload}></video>
+      <!-- `loadeddata` does not bubble, so the tile listens for it on the way down to the player's video. -->
+      <div class="player-host" onloadeddatacapture={onmediaload}>
+        <!-- A new video is a new player, so the frame the last one was paused on is gone with it. -->
+        {#key asset.id}
+          <MediaPlayer kind="video" size="stage" naturalSize={asset.width && asset.height ? { width: asset.width, height: asset.height } : null} src={asset.url} label={asset.filename} poster={asset.thumbnail_url} filePath={asset.file_path} duration={asset.duration} muted actions={frameActions} onpoint={(next) => { point = next; }} />
+        {/key}
+      </div>
     {:else if isVideo && thumbnailFailed}
       <span class="video-fallback" data-testid="video-fallback"><Icon name="film" size={28} /></span>
     {:else if isVideo}
@@ -169,7 +183,11 @@
   {/snippet}
 
   {#if audioPlayer}
-    <div class="asset-tile-media audio-stage"><AudioPlayer src={asset.url} {peaks} filename={asset.filename} duration={asset.duration} size="stage" /></div>
+    <div class="asset-tile-media audio-stage">
+      {#key asset.url}
+        <MediaPlayer kind="audio" src={asset.url} label={asset.filename} {peaks} duration={asset.duration} size="stage" />
+      {/key}
+    </div>
   {:else if inlineVideo}
     <div class="asset-tile-media">{@render media()}</div>
   {:else}
@@ -219,8 +237,9 @@
       aria-label="More actions for {asset.filename}"
       aria-haspopup="menu"
       aria-expanded={menuOpen}
+      aria-busy={extracting && !menuOpen}
       onclick={() => { contextAt = null; menuOpen = !menuOpen; }}
-    ><Icon name="more" size={14} /></button>
+    >{#if extracting && !menuOpen}<Spinner size="sm" />{:else}<Icon name="more" size={14} />{/if}</button>
   </div>
 
   {#if density === 'card'}
@@ -275,6 +294,7 @@
   .asset-tile-media { position: relative; display: block; flex: 1; min-height: 0; width: 100%; padding: 0; cursor: zoom-in; }
   .asset-tile-media:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }
   .asset-tile-img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .player-host { width: 100%; height: 100%; }
   .asset-tile[data-density='card'] .asset-tile-media { flex: none; aspect-ratio: 1; }
   /* Never enlarge: small outputs stay at their own size, large ones shrink to fit. */
   .asset-tile[data-density='stage'] .asset-tile-img { object-fit: scale-down; }

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PEAKS } from '../../../test-utils/audio';
 import { mountComponent } from '../../../test-utils/mount';
-import AudioPlayer from './AudioPlayer.svelte';
+import MediaPlayer from './MediaPlayer.svelte';
 import VoicePlay from './VoicePlay.svelte';
 
 describe('VoicePlay', () => {
@@ -61,7 +61,7 @@ describe('VoicePlay', () => {
     const paused: HTMLAudioElement[] = [];
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) { paused.push(this as HTMLAudioElement); });
     const button = mountButton();
-    const other = mountComponent(AudioPlayer, { src: '/media/out/a.flac', peaks: PEAKS, filename: 'a.flac', duration: 100 });
+    const other = mountComponent(MediaPlayer, { src: '/media/out/a.flac', kind: 'audio', size: 'viewer', label: 'a.flac', peaks: PEAKS, duration: 100 });
     const otherAudio = other.target.querySelector<HTMLAudioElement>('audio')!;
     otherAudio.dispatchEvent(new Event('play'));
     paused.length = 0;
