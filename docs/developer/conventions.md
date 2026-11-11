@@ -1,6 +1,6 @@
 # Conventions
 
-The rules every change follows. `AGENTS.md` in the repository holds the same rules for coding agents.
+The code rules every change follows. `AGENTS.md` in the repository holds the same rules for coding agents; repository, commit and release rules are on the [Developer](index.md#repository-rules) page.
 
 ## Design: atomic units
 
@@ -25,7 +25,7 @@ Every module, function and class should be a single, self-contained unit of resp
 
 ## Platform and backends
 
-Backend and accelerator selection happens only in `backends/__init__.py`. Other code never branches on `sys.platform` to pick a backend; it asks a capability function such as `supports_video_extend()`. OS-level checks unrelated to backends (drive listings, ffmpeg install hints, terminal handling) are fine where they're needed. See [Backends](backends.md).
+Backend and accelerator selection happens only in `backends/__init__.py`; other code asks a capability function such as `supports_video_extend()`. What else is fine, and the two platform key schemes (`darwin`/`win32`/`linux` and `cuda`/`mps`), are in the [platform rule](architecture.md#invariants). See [Backends](backends.md).
 
 ## Data types
 
@@ -33,39 +33,17 @@ Backend and accelerator selection happens only in `backends/__init__.py`. Other 
 
 ## Config
 
-Config is a plain `dict` loaded from YAML, not a dataclass. Precedence: CLI flags, then the model preset's variant, then the model preset's family, then global defaults. See [Configuration](../concepts/configuration.md).
+Config is a plain `dict` loaded from YAML, not a dataclass. Precedence: CLI flags, then the model preset's variant, then the model preset's family, then global defaults. See [Configuration](../reference/configuration.md).
 
 ## Errors
 
 Raise `ValueError`, `FileNotFoundError` or `RuntimeError` with a descriptive message. Use `warnings.warn(..., stacklevel=2)` for non-fatal conditions. Add a custom exception only when callers must catch it distinctly, such as `JobConflictError` in `web/web_runner.py`, or as a private sentinel.
 
+Treat the wording of an error a user can see as part of the interface. `tests/common/test_docs_troubleshooting.py` fails when a quoted heading of the [Troubleshooting](../reference/troubleshooting.md) page no longer matches a message in the code, so rewording an error means updating that heading in the same change.
+
 ## Tests
 
-- Tests live in `tests/<area>/test_<module>.py`, with functions named `test_<behavior>`. Group related tests in `Test`-prefixed classes. Frontend tests sit next to their source as `*.test.ts`.
-- **Test areas are layers, not features.** The folders are `web`, `video`, `image`, `prompts`, `downloads`, `converters`, `contracts` (the pins on vendored and upstream code), `backends` (with `cuda` and `mac`, mirroring the package), `audio` (the pure helpers and presets of the audio models), and `common` for cross-cutting modules. Run a layer with `pytest tests/web`, the macOS gate with `pytest tests/backends/mac`. A feature such as H3 or MOSS spans several layers, so select it with `-k` (`pytest tests -k h3`). Put a new file in the folder of the layer its subject module lives in; a folder needs at least four files, so anything smaller goes to `common`.
-- **Imports.** `tests` and every area folder are packages. Import shared code as `tests.<module>`; never `from conftest import ...` and never import one test module from another. `conftest.py` holds only autouse guards and fixtures. Plain builders used in more than one area live in `tests/_factories.py`, other cross-area helpers in `tests/_*.py` modules at the root, and a helper used by one area in `tests/<area>/_helpers.py`. Paths to the repo and to `tests/fixtures/` come from `tests/_paths.py`.
-- **Fixtures for the packaged config.** `packaged_config` is a private copy a test may change, and `packaged_config_shared` is a read-only session copy; outside a fixture, `tests._factories.load_packaged_config()` returns the same copy.
-- **Never load real backends or models.** Use `unittest.mock.MagicMock` with controlled return values, for example a backend whose `.text_to_image.return_value` is `Image.new("RGB", (64, 64))` (see `_make_mock_backend()` in `tests/image/test_workflow.py`).
-- Build CLI arguments with `tests/_factories.py::_make_args(**overrides)`.
-- Use the `tmp_path` fixture for files, and `@pytest.mark.parametrize` for many input/output pairs.
-- **The suite hides the GPU.** `tests/conftest.py` sets `CUDA_VISIBLE_DEVICES=""` for the whole run, workers included, so `torch.cuda.is_available()` is `False` and no test opens a CUDA context; mock `is_available` when a test needs it to be true. `tests/common/test_gpu_hidden.py` fails if the GPU becomes visible.
-- Skip heavy dependencies with `pytest.importorskip("torch")`, and platform-specific tests with `@pytest.mark.skipif(sys.platform == ...)`.
-- **Test behavior and machine-readable contracts**: routes, config keys, storage keys, parser options, event names, file names, enum values, statuses, and accessible names a control needs. Not prose, help text, CSS classes, source text or incidental selectors.
-
-### Fixtures that protect your data
-
-- `_isolated_app_db` (autouse) points the app database at a per-test folder, so no test touches the real `ziv.sqlite3`, the job log included. Files a test creates are under 2 seconds old, and the gallery index never persists those; to test caching, backdate them with `os.utime` (or pass `clock=` to `GalleryIndex`) and count reader calls.
-- `_presets_in_tmp` (autouse) points the presets folder at a temporary data folder, so no test reads or writes the real `~/.ziv/presets`.
-- Never run the real memory cleanup: patch `zvisiongenerator.preflight.release_accelerator_memory` (and `zvisiongenerator.web.web_runner.release_accelerator_memory` for web jobs), or pass `release_memory=` to `run_preflight`.
-
-### Mocking heavy dependencies
-
-- Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, upsampler download and loading, export helpers and image loading, so the suite never instantiates a model, downloads weights or needs a GPU.
-- Platform dispatch, alias resolution and Web inventory tests assert behavior through config and protocol boundaries, not backend internals.
-- Download tests never use the network: `check_target` and the worker take a fake `snapshot_download`, `run_in_child` takes a fake `popen`, and `ensure_downloaded` and `DownloadLane` take fake `present`, `check`, `run` and `ensure` callables and a fake clock.
-- Pattern pins that need mflux, mlx-lm or diffusers skip themselves where those aren't installed.
-- An autouse guard fails any test that reaches `huggingface_hub.hf_hub_download` or `snapshot_download` unmocked, even when the code under test swallows the error. Use the `hub_offline` fixture for a test whose subject is "nothing cached, no network", or mock the function in the test.
-- No test runs `ffmpeg` or `ffprobe`. An autouse guard hides both from `shutil.which` and fails any test that starts either, so every machine behaves like CI, which has no ffmpeg. Mock the seam instead: `tests/_fake_media.py` has fake processes and PCM and frame bytes, and `tests/_fake_audio.py` stands in for saving, probing and reading takes. Test the commands we build, how we parse given output, and the error paths, not what ffmpeg makes of them.
+Every change comes with tests, in `tests/<area>/test_<module>.py`. Never load a real backend or model: use `MagicMock` and `tests/_factories.py::_make_args(**overrides)`. Test behavior and machine-readable contracts (routes, config keys, event names, enum values, statuses), not prose, help text, CSS classes or source text. See [Testing](testing.md) for the areas, the guards every test runs under and which check to run when.
 
 ## Web UI
 

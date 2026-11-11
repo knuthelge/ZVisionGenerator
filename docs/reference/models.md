@@ -1,6 +1,18 @@
-# Models
+# Models and licences
 
-A model is what turns a prompt into an image, a video or a sound. The app has built-in models that download on first use, and you can add your own.
+A model is what turns a prompt into an image, a video or a sound. The built-in models download the first time you use them, and you can add your own. Error? See [Troubleshooting](troubleshooting.md).
+
+## Which model to start with { #which-model-to-start-with }
+
+- **Images:** FLUX.2 Klein 4B (`klein4b`) is the lightest and the first-run pick on machines with less than 32 GB of memory. FLUX.2 Klein 9B (`klein9b`) is the pick from 32 GB of unified memory on a Mac or of GPU memory on a graphics card. On a 16 GB Mac, Klein and Z-Image Turbo need `q8` or `q4`: see [Memory](../concepts/memory.md#what-fits).
+- **Video:** the Video tab starts on `ltx-8`, which comes closest to the full model. On a 16 GB Mac, or a card with 8 to 12 GB, start with **LTX-2.3 4-bit** (`ltx-4`): it needs the least memory of the LTX models. That advice comes from the app's memory estimate, not from a test on those machines. See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
+- **Audio:** `qwen3_tts` reads text aloud and is the smallest download. `yue2` makes songs and `sa3` makes sounds.
+
+All built-in models download without a Hugging Face account. Where the original repository needs a login, the alias points to an ungated mirror whose weights match the original.
+
+## Download size and memory { #download-size-and-memory }
+
+The **Download** column is the one-time size, kept in the Hugging Face cache (see [Data folder](data-folder.md#models-and-the-hugging-face-cache)). Where a size is missing, such as `ltx-4` and `ltx-8` on Windows and Linux, the Web UI's download dialog shows it, with the free space on the drive, before anything downloads. Memory is another figure: what a model needs while it runs depends on your machine and its [quant](../concepts/memory.md#quantization). The Web UI's badges show what fits. See [Memory](../concepts/memory.md).
 
 ## Image models
 
@@ -14,15 +26,11 @@ A model is what turns a prompt into an image, a video or a sound. The app has bu
 | MOSS-Image Turbo | `moss` | 28 GB | 4 | No | Apache-2.0 |
 | MOSS-Image SFT | `moss-sft` | 27 GB | 50 | Yes | Apache-2.0 |
 
-Klein 4B is the lightest and the first-run pick on machines with less than 32 GB of memory; Klein 9B is the pick from 32 GB.
-
-The download is the one-time size. Memory needs depend on your machine and the [quant](quantization.md); the Web UI's badges show what fits. See [Memory](memory.md).
-
-The License column names each model's licence; [Licences](#licences) has the terms and links. All built-in models download without a Hugging Face account. Where the original repository needs a login, the alias points to an ungated mirror whose weights match the original.
+The License column names each model's licence; [Licences](#licences) has the terms and links.
 
 ### FLUX.2 Klein
 
-`klein4b` and `klein9b` are distilled to 4 steps. They don't use a negative prompt. They also take up to four [references](images.md#references): images of a person, object, place or style the result should keep.
+`klein4b` and `klein9b` are distilled to 4 steps. They don't use a negative prompt. They also take up to four [references](../guides/images.md#references): images of a person, object, place or style the result should keep.
 
 ### Z-Image Turbo
 
@@ -30,15 +38,19 @@ The License column names each model's licence; [Licences](#licences) has the ter
 
 ### Krea 2 Turbo
 
-`krea2` defaults to 8 steps and guidance 1.0, which turns classifier-free guidance off. Guidance above 1.0 turns it on, and each step then takes about twice as long. It doesn't use a negative prompt. Only Krea 2 Turbo and its fine-tunes are supported, not Krea 2 Raw.
+`krea2` defaults to 8 steps and guidance 1.0, which turns classifier-free guidance off. Guidance above 1.0 turns it on, and each step then takes about twice as long. It doesn't use a negative prompt. Only Krea 2 Turbo and its fine-tunes are supported, not Krea 2 Raw. Like `zit`, it uses the `beta` scheduler by default on every platform, which draws more skin texture than the evenly spaced one.
 
-The weights are large, about 26 GB for the transformer plus a 9 GB text encoder, so run it [quantized](quantization.md) on smaller machines:
+The weights are large, about 26 GB for the transformer plus a 9 GB text encoder, so run it [quantized](../concepts/memory.md#quantization) on smaller machines:
 
 === "macOS"
 
     Use `q8` or `q4`. The text encoder isn't quantized, so it adds about 9 GB at any level.
 
-=== "Windows and Linux"
+=== "Windows"
+
+    `q8` needs about 18 GB of system memory, and `q4` fits 10–12 GB GPUs. Unquantized, Krea 2 needs about 35 GB of system memory and is very slow on machines with less.
+
+=== "Linux"
 
     `q8` needs about 18 GB of system memory, and `q4` fits 10–12 GB GPUs. Unquantized, Krea 2 needs about 35 GB of system memory and is very slow on machines with less.
 
@@ -47,20 +59,20 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
 `ideo` is Ideogram 4 Instant, fal's distilled Ideogram 4. It makes an image in 8 steps, and its guidance is built in, so a guidance setting is ignored.
 
 - **Sizes** must be 256–2048 pixels, in steps of 16. Presets beyond that, such as `xl` at `16:9`, are refused before the model loads.
-- **No start image, references or upscale while generating**, and no negative prompt. The [plain upscale](upscaling.md#plain-upscale) of a finished image works.
+- **No start image, references or upscale while generating**, and no negative prompt. The [plain upscale](../concepts/upscaling.md#plain-upscale) of a finished image works.
 - **LoRAs** work. Ones made for Ideogram 4 load onto Instant, but they were trained on the base model, so check the results. On Windows and Linux a LoRA adds about 1 GB of GPU memory.
 
-**Captions.** Ideogram 4 reads structured JSON captions. A plain prompt is wrapped into one for you, but such a sparse caption often comes out as a flat cut-out on a checkerboard background, especially for posters and product shots. For a fuller caption, let the [prompt enhancer](prompt-enhancer.md#json-captions-ideogram-4) write one (Smart writes better ones than Fast), or write your own with `--json-prompt` or the Web UI's JSON mode.
+**Captions.** Ideogram 4 reads structured JSON captions. A plain prompt is wrapped into one for you, but such a sparse caption often comes out as a flat cut-out on a checkerboard background, especially for posters and product shots. For a fuller caption, let the [prompt enhancer](../concepts/prompt-enhancer.md#json-captions-ideogram-4) write one (Smart writes better ones than Fast), or write your own with `--json-prompt` or the Web UI's JSON mode.
 
 **The grey frame.** Ideogram 4 sometimes returns a grey "Image blocked by safety filter" frame for harmless prompts. The app nudges the first denoising step slightly (a first-step sigma of `1.004`), which makes this rarer without changing your prompt, seed or size. If a harmless prompt is still blocked, try **First sigma** `1.005` or `1.006`. This is not a way around the filter: prompts it actually objects to are still blocked.
 
-**The first job builds the model** in `~/.ziv/models/ideo`. It downloads Instant's 18.6 GB transformer and converts it for your platform (FP8 on macOS, BF16 on Windows and Linux), takes the text encoder, VAE and tokenizer from an ungated mirror of the base model, and then deletes the download. An interrupted download resumes on the next run. The Web UI shows the downloads on the job card, then **Build model**.
+**The first job builds the model** in `models/ideo` in the data folder (`~/.ziv` by default). It downloads Instant's 18.6 GB transformer and converts it for your platform (FP8 on macOS, BF16 on Windows and Linux), takes the text encoder, VAE and tokenizer from an ungated mirror of the base model, and then deletes the download. An interrupted download resumes on the next run. The Web UI shows the downloads on the job card, then **Build model**.
 
 ??? info "Memory and speed"
 
     `ideo` takes `q4` (NF4 on Windows and Linux) and `q8` (FP8), saved once as `ideo@q4` and `ideo@q8`. On macOS the unquantized model is the FP8 build.
 
-    - **macOS:** at 1024×1024, unquantized and `q8` peak at about 33 GB and `q4` at about 25 GB, mostly briefly while the image is decoded at the end. On an M5 all three take about 15 s per step at that size; `q4` is faster at smaller sizes.
+    - **macOS:** at 1024×1024, unquantized and `q8` peak at about 33 GB and `q4` at about 25 GB, mostly briefly while the image is decoded at the end. On an Apple silicon Mac all three take about 15 s per step at that size; `q4` is faster at smaller sizes.
     - **Windows and Linux:** the transformer streams to the GPU block by block. On a 10 GB GPU with 32 GB of system memory, `q4` and `q8` both take about 3.5 s per step at 1024×1024, about a minute per image (`q8` peaks at about 17 GB of system memory, `q4` at 14 GB). Unquantized it takes about 15 s per step and peaks at about 26 GB, so pick `q4` or `q8`.
 
     Every source is pinned to a checked revision, and the folder is rebuilt when a pin changes. The model is under the Ideogram Non-Commercial Model Agreement, which applies as soon as you download or use it: see `LICENSE.md` in the folder.
@@ -80,47 +92,67 @@ Two models share one set of weights:
 
 Start with `moss`. Pick `moss-sft` when you want a negative prompt or the model as released.
 
-=== "Windows and Linux"
-
-    `moss` takes about 13 s per image at 1024×1024 on a 10 GB GPU, quantized; `moss-sft` about 2 minutes at 50 steps. Both run on a 10 GB card at every level; run them [quantized](quantization.md), as unquantized Turbo takes about a minute per image. The figures are in [Memory](memory.md#moss-image).
-
 === "macOS"
 
     `moss` takes about 30 s per image at 1024×1024 on a 32 GB Mac, quantized; `moss-sft` about 15 minutes at 50 steps. Both fit a 32 GB Mac at every level.
 
+=== "Windows"
+
+    `moss` takes about 13 s per image at 1024×1024 on a 10 GB GPU, quantized; `moss-sft` about 2 minutes at 50 steps. Both run on a 10 GB card at every level; run them [quantized](../concepts/memory.md#quantization), as unquantized Turbo takes about a minute per image.
+
+=== "Linux"
+
+    `moss` takes about 13 s per image at 1024×1024 on a 10 GB GPU, quantized; `moss-sft` about 2 minutes at 50 steps. Both run on a 10 GB card at every level; run them [quantized](../concepts/memory.md#quantization), as unquantized Turbo takes about a minute per image.
+
+Memory, as peaks for Turbo images from 1024×1024 up to 4 megapixels, on a 10 GB GPU with 32 GB of system memory (Windows and Linux):
+
+| Level | GPU memory | System memory |
+|---|---|---|
+| `q4` | about 9 GB | about 15 GB |
+| `q8` | about 9 GB | about 17 GB |
+| None | about 7 GB | about 17 GB |
+
+For **4× creative** upscales of a MOSS-Image picture on a 10 GB GPU, results up to about 8 megapixels fit (576×864 to 2304×3456 takes about a minute at `q8`); a 16-megapixel result runs out of memory, so use **2× creative** or the plain **4×** for a larger one.
+
 - **Sizes** are multiples of 16, from about 0.25 to 4 megapixels. The model is made for about 1–2 megapixels; above that, Turbo's 4 steps look softer, so use 6–8 steps.
 - **Text.** Put the words you want in the image in quotes in the prompt.
-- **Start image, upscale, LoRAs and live previews** work. LoRAs must be MOSS-Image LoRAs: see [LoRAs](loras.md). The Turbo LoRA stays on, and a LoRA of your own is added on top.
+- **Start image, upscale, LoRAs and live previews** work. LoRAs must be MOSS-Image LoRAs: see [LoRAs](../concepts/loras.md). The Turbo LoRA stays on, and a LoRA of your own is added on top.
 - **No JSON captions.** MOSS-Image takes plain prompts, so `--json-prompt` and the enhancer's JSON format don't apply.
 
-**The first job builds the model** in `~/.ziv/models/moss` or `~/.ziv/models/moss-sft` from the shared download, which takes a moment. The community Turbo LoRA comes from `akhaliq/MOSS-Image-SFT-4-steps`, pinned to a checked revision.
+**The first job builds the model** in `models/moss` or `models/moss-sft` in the data folder from the shared download, which takes a moment. The community Turbo LoRA comes from `akhaliq/MOSS-Image-SFT-4-steps`, pinned to a checked revision.
 
 ## Video models
 
 | Model | Alias | Download | Needs | Can do | License |
 |---|---|---|---|---|---|
-| LTX-2.3 4-bit | `ltx-4` | 28.6 GB (macOS) | The least memory. About 20 GB of system memory on Windows and Linux. | Text or image to video, Extend, upscale | LTX-2 Community License Agreement and Gemma Terms of Use |
+| LTX-2.3 4-bit | `ltx-4` | 28.6 GB (macOS) | The least memory of the LTX models. About 20 GB of system memory on Windows and Linux. | Text or image to video, Extend, upscale | LTX-2 Community License Agreement and Gemma Terms of Use |
 | LTX-2.3 8-bit | `ltx-8` | 37.8 GB (macOS) | Closer to the full model. About 27 GB of system memory on Windows and Linux; a Mac with 32 GB or more. | The same | LTX-2 Community License Agreement and Gemma Terms of Use |
 | LTX-2.5 4-bit | `ltx25-4` | 71 GB (Windows, Linux), 28.8 GB (macOS) | The newer LTX, with the memory need of `ltx-4`: about 21 GB of system memory on Windows and Linux. | The same | LTX-2.x Community License Agreement |
 | MiniMax H3 | `h3` | 98 GB (Windows, Linux), 107 GB (macOS) | Much larger and slower than LTX. About 18 GB of free system memory on Windows and Linux; a Mac with 32 GB. | 4 or 8 steps. No upscale on macOS | MiniMax H3 Community License Agreement |
 
-All of them make video with sound, from a prompt or a starting image (with an optional [last frame](video.md#first-and-last-frame)), and can [extend](video.md#extending-a-video) a clip. The first run of each downloads it and, on Windows and Linux, prepares it for your GPU, which takes a while. See [Video](video.md).
+All of them make video with sound, from a prompt or a starting image (with an optional [last frame](../guides/video.md#first-and-last-frame)), and can [extend](../guides/video.md#extend-a-clip) a clip. The first run of each downloads it and, on Windows and Linux, prepares it for your GPU, which takes a while. See [Video](../guides/video.md).
 
-You can also convert an [LTX-2.3 or LTX-2.5 fine-tune](../cli/models.md#ltx-23-and-ltx-25-video-fine-tunes) or a [MiniMax H3 fine-tune](../cli/models.md#minimax-h3-video-fine-tunes) into a model you pick by name.
+On a 10 GB GPU with 32 GB of system memory, `ltx-4` fits clips up to 20 s at `m`, 15 s at `l` and 10 s at `xl`, with or without upscaling. On a 32 GB Mac, the estimate was measured with `ltx-4` for clips up to about 10 s at 704×448 and is extrapolated beyond that; Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. A clip's memory depends on the size and length of what is generated, so an extension costs the same however long its source is.
+
+You can also convert an [LTX-2.3 or LTX-2.5 fine-tune](../guides/models.md#ltx-23-and-ltx-25-video-fine-tunes) or a [MiniMax H3 fine-tune](../guides/models.md#minimax-h3-video-fine-tunes) into a model you pick by name.
 
 On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed revisions, from ungated repositories, so no Hugging Face account is needed. Each figure includes the 8.1 GB Gemma 3 text encoder, which the two share, and nothing is prepared afterwards.
 
 ### LTX-2.5
 
-`ltx25-4` is LTX-2.5, the newer LTX model, at 4 bits. It fits the same machines as `ltx-4`: a Mac with 32 GB of memory, or a 10 GB GPU with 30 GB of system memory. It downloads without a Hugging Face account.
+`ltx25-4` is LTX-2.5, the newer LTX model, at 4 bits. It needs about as much memory as `ltx-4`: a PC with a 10 GB GPU and about 21 GB of system memory, or a Mac with 32 GB. It downloads without a Hugging Face account.
 
 === "macOS"
 
     The download is about 28.8 GB and holds the model with its own Gemma 4 text encoder; nothing is prepared afterwards. A 5 s clip at `s` with **Low memory** is estimated at about 15 GiB.
 
-=== "Windows and Linux"
+=== "Windows"
 
-    The download is about 71 GB. The first run prepares a 4-bit transformer and an FP8 text encoder from it, about 22 GiB more on disk, and later runs reuse them. As a typical figure, a 5 s clip with sound at 1280×704, upscaled 2×, took about 200 s on an RTX 3080 10 GB with 30 GB of system memory, the same as `ltx-4` on that machine.
+    The download is about 71 GB. The first run prepares a 4-bit transformer and an FP8 text encoder from it, about 22 GiB more on disk, and later runs reuse them. As a typical figure, a 5 s clip with sound at 1280×704, upscaled 2×, took about 200 s on a 10 GB NVIDIA card with 32 GB of system memory, the same as `ltx-4` with that setup. It needs about 21 GB of system memory.
+
+=== "Linux"
+
+    The download is about 71 GB. The first run prepares a 4-bit transformer and an FP8 text encoder from it, about 22 GiB more on disk, and later runs reuse them. As a typical figure, a 5 s clip with sound at 1280×704, upscaled 2×, took about 200 s on a 10 GB NVIDIA card with 32 GB of system memory, the same as `ltx-4` with that setup. It needs about 21 GB of system memory.
 
 - **Sampler.** Text and image to video use LTX-2.5's own distilled sampler, which adds fresh noise at every step; a repeated seed still gives the same video. **Extend** uses the plain deterministic sampler, as `ltx-4` does.
 - **No 8-bit level** for `ltx25-4` itself. LTX-2.5 fine-tunes convert at q4 or q8 and run with LTX-2.5's settings.
@@ -132,26 +164,41 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 - **Steps:** 4 or 8, with 8 the default. Four steps take about a quarter less time and give the same scene, slightly softer; fast motion can blur.
 - **Length:** clips are 17n+5 frames long (22, 39 … 124, 141 …), and a count in between moves up to the next. The default is 5 s (124 frames at 24 fps). The model was trained on 4 to 15 s clips; outside that range quality isn't guaranteed.
 - **Sizes:** the same presets as LTX, in multiples of 32 (64 with upscaling). `xl` is above the size the model was trained on.
-- **Extend** works from 24 fps clips whose size is a multiple of 32. See [Extending a video](video.md#extending-a-video).
-- **LoRAs** must be MiniMax H3 LoRAs. See [LoRAs](loras.md).
+- **Extend** works from 24 fps clips whose size is a multiple of 32. See [Extending a video](../guides/video.md#extend-a-clip).
+- **LoRAs** must be MiniMax H3 LoRAs. See [LoRAs](../concepts/loras.md).
 - **Some H3 checkpoints don't follow the start image.** A few community checkpoints ignore the start image in image to video, first and last frame and Extend. If a converted model does, use stock `h3` for those modes.
 
 === "macOS"
 
-    MiniMax H3 on macOS does everything above except upscale. It is built on a port to MLX. Image to video, first and last frame and Extend run in stages, with one component in memory at a time, and their figures were measured on a Mac with 32 GB of memory; the other figures are estimates.
+    MiniMax H3 on macOS does everything above except upscale. It is built on a port to MLX. Image to video, first and last frame and Extend run in stages, with one component in memory at a time, and their figures were measured on an Apple silicon Mac with 32 GB of memory; the other figures are estimates.
 
     - **Download and first use:** about 107 GB. The first run converts the text encoder once into a 4-bit copy of about 15 GB (`h3@mlx-te4`).
     - **Memory and time:** a 5 s clip at `s` is estimated at about 15 GiB and 23 minutes with 8 steps, 14 minutes with 4. At `l` it is about 18 GiB and 77 minutes. The image modes need about the same as text to video: a 3 s image-to-video clip at `s` with 8 steps took about 10 minutes and peaked at about 14 GiB with no swapping, and is estimated at about 14 minutes. First and last frame and Extend peak at about the same, and a LoRA adds about 1.5 GiB. A Mac with 32 GB is the target.
     - **Extend** continues from the source's last frame alone, so the seam is weaker than on Windows and Linux.
-    - **No upscale or review.** Image to video, first and last frame and Extend show a step counter and stop at a step boundary; text to video shows its phases but no step counter, and **Next** and **Quit** take effect when the clip finishes ([Controls while a video runs](video.md#controls-while-a-video-runs)).
-    - **A local folder** given to `-m` can carry its own INT8 transformer in the MLX port's layout. A folder with a bf16 transformer is refused; [convert](../cli/models.md#minimax-h3-video-fine-tunes) a fine-tune instead.
+    - **No upscale or review.** Image to video, first and last frame and Extend show a step counter and stop at a step boundary; text to video shows its phases but no step counter, and **Skip** and **Quit** take effect when the clip finishes ([While a job runs](../web-ui/workspace.md#while-a-job-runs)).
+    - **A local folder** given to `-m` can carry its own INT8 transformer in the MLX port's layout. A folder with a bf16 transformer is refused; [convert](../guides/models.md#minimax-h3-video-fine-tunes) a fine-tune instead.
 
-=== "Windows and Linux"
+=== "Windows"
 
     - **Download and first use:** about 98 GB. The first run builds a 4-bit copy of the transformer, about 12 GB, as `h3@q4`; it took about 4 minutes, and later runs reuse it. A fine-tune gets a copy of its own, named after it.
     - **Memory:** a 5 s clip at 864×480 uses about 6.3 GiB of GPU memory and about 17 GiB of system memory; plan for about 18 GB free. 1280×736 clips and 14 s clips at 864×480 fit a 10 GB GPU.
     - **Upscale:** a 2× upscale renders at half size, enlarges the result in latent space with H3's own upscaler (0.69 GB, downloaded on first use) and refines it at full size in 2 more steps. The clip keeps the sound of the half-size render and looks like a native full-size render.
-    - **Time:** the CLI prints an estimate when a job starts, and the Workspace shows one under **Duration (s)**, such as *About 5 min (estimated)*. On an RTX 3080 10 GB, a 5 s clip with sound:
+    - **Time:** the CLI prints an estimate when a job starts, and the Workspace shows one under **Duration (s)**, such as *About 5 min (estimated)*. On a 10 GB NVIDIA card, a 5 s clip with sound:
+
+    | Size (16:9) | 8 steps | 4 steps |
+    |---|---|---|
+    | `s` 768×448 | about 4 min | about 3 min |
+    | `m` 1024×576 | about 6 min | about 4 min |
+    | `l` 1280×704 | about 9 min | about 6 min |
+
+    Longer clips take longer: 10 s at 864×480 took about 9 minutes, 14 s about 13. An upscaled `l` clip is estimated at about 5½ minutes. The estimate leaves out the one-time preparation.
+
+=== "Linux"
+
+    - **Download and first use:** about 98 GB. The first run builds a 4-bit copy of the transformer, about 12 GB, as `h3@q4`; it took about 4 minutes, and later runs reuse it. A fine-tune gets a copy of its own, named after it.
+    - **Memory:** a 5 s clip at 864×480 uses about 6.3 GiB of GPU memory and about 17 GiB of system memory; plan for about 18 GB free. 1280×736 clips and 14 s clips at 864×480 fit a 10 GB GPU.
+    - **Upscale:** a 2× upscale renders at half size, enlarges the result in latent space with H3's own upscaler (0.69 GB, downloaded on first use) and refines it at full size in 2 more steps. The clip keeps the sound of the half-size render and looks like a native full-size render.
+    - **Time:** the CLI prints an estimate when a job starts, and the Workspace shows one under **Duration (s)**, such as *About 5 min (estimated)*. On a 10 GB NVIDIA card, a 5 s clip with sound:
 
     | Size (16:9) | 8 steps | 4 steps |
     |---|---|---|
@@ -171,7 +218,36 @@ MiniMax H3 is released under the MiniMax H3 Community License Agreement, publish
 | Qwen3-TTS 1.7B | `qwen3_tts` | Speech | about 4.5 GB, and about 4.5 GB more for cloning a voice and again for designing one, each the first time it is used | Apache License 2.0 |
 | Stable Audio 3 Medium | `sa3` | Ambience and sound effects, and instrumental music | about 10 GB | Stability AI Community License and Gemma Terms of Use |
 
-The alias is what you pass to `ziv audio -m`. What each kind does, and how long a take can be, is in [Audio](audio.md); what they need is in [Memory](memory.md#audio). YuE2 and Stable Audio 3 Medium are restricted in some way: read their [Licences](#licences) before you use the output.
+The alias is what you pass to `ziv audio -m`. What each kind does, and how long a take can be, is in [Audio](../guides/music.md); what they need is under [Audio memory](#audio-memory). YuE2 and Stable Audio 3 Medium are restricted in some way: read their [Licences](#licences) before you use the output.
+
+### Audio memory { #audio-memory }
+
+The audio models fit a 10 GB GPU on Windows and Linux, and a Mac with 32 GB of unified memory. Figures are peak GPU memory.
+
+| Model | macOS, 32 GB | Windows and Linux, 10 GB card | Measured at |
+|---|---|---|---|
+| YuE2 3B (`yue2`) | about 10.5 GiB | about 6.7 GiB | A take of the full 6:00 |
+| Qwen3-TTS 1.7B (`qwen3_tts`) | about 12.0 GiB | about 6.0 GiB | A text read in parts, in a default voice or a recording |
+| Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | about 6.1 GiB | A sound of the full 380 s |
+
+Designing a voice loads its own checkpoint and needs no more than the Qwen3-TTS row on Windows and Linux.
+
+On Windows and Linux, system memory matters too: YuE2 peaks at about 11 GiB while it loads or runs, which leaves a computer with 16 GB of RAM little to spare. YuE2 keeps its weights in system memory and moves the part it needs to the GPU, which is how it fits a 10 GB card.
+
+## LoRA formats { #lora-formats }
+
+A LoRA must be made for the model it is used with. What each model reads:
+
+| Models | Formats | Notes |
+|---|---|---|
+| Z-Image, FLUX.2 Klein, Krea 2 | Standard LoRAs and LyCORIS LoKr, on every platform and quant level, and combinable | Other LyCORIS formats are skipped with a warning |
+| Ideogram 4 | Ideogram 4 LoRAs, loaded onto Instant | Trained on the base model, so check the results |
+| MOSS-Image (`moss`, `moss-sft`) | kohya, ai-toolkit and diffusers/PEFT, and LyCORIS LoKr | Applied unmerged at any quant level; LyCORIS LoHa and full `diff` weights are skipped with a warning. On `moss` the Turbo LoRA stays on and yours is added on top |
+| LTX, macOS | LTX LoRAs as MLX loads them | |
+| LTX, Windows and Linux | LTX LoRAs in a diffusers-compatible format | An unsupported file or scale fails before generation with a message saying why |
+| MiniMax H3 | PEFT, ai-toolkit, kohya and ComfyUI formats | A LoRA that changes the model's timestep embedding is refused, and on macOS so is one that changes its AdaLN projections or anything outside its transformer blocks and text refiner. A LoRA adds a few percent to the time, and can break the seam of an extension |
+
+LoRAs from other trainers, such as PEFT adapter names or Kohya names, are renamed to the names the model reads when they load; your file isn't changed. See [LoRAs](../concepts/loras.md).
 
 ## Licences
 
@@ -191,12 +267,14 @@ Every built-in model comes with terms. The Web UI shows them in the download dia
 | Apache License 2.0 | Tongyi-MAI | `zit` | Free to use, also commercially | [Model page](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) |
 | Apache License 2.0 | Black Forest Labs | `klein4b` | Free to use, also commercially | [Licence](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/blob/e7b7dc27f91deacad38e78976d1f2b499d76a294/LICENSE.md) |
 | Apache License 2.0 | OpenMOSS | `moss`, `moss-sft` | Free to use, also commercially | [Licence](https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT/blob/f972bd4b4b9e3852133cc5da954d87bc32cd8fb9/LICENSE) |
-| Apache License 2.0 | Qwen | The Fast and Smart [prompt enhancer](prompt-enhancer.md) models | Free to use, also commercially | [Licence](https://huggingface.co/Qwen/Qwen3.5-9B/blob/c202236235762e1c871ad0ccb60c8ee5ba337b9a/LICENSE) |
+| Apache License 2.0 | Qwen | The Fast and Smart [prompt enhancer](../concepts/prompt-enhancer.md) models | Free to use, also commercially | [Licence](https://huggingface.co/Qwen/Qwen3.5-9B/blob/c202236235762e1c871ad0ccb60c8ee5ba337b9a/LICENSE) |
 | Apache License 2.0 | Qwen | `qwen3_tts` | Free to use, also commercially | [Licence](https://github.com/QwenLM/Qwen3-TTS/blob/022e286b98fbec7e1e916cb940cdf532cd9f488e/LICENSE) |
 | Apache License 2.0 | ByteDance Seed | The SeedVR2 upscale models | Free to use, also commercially | [Model page](https://huggingface.co/ByteDance-Seed/SeedVR2-7B) |
 | Research-only training data | BiRefNet and ViTMatte authors | Background removal | Non-commercial: ViTMatte was trained on Adobe's Deep Image Matting dataset, whose agreement allows models trained on it only for non-commercial use, and BiRefNet (MIT) partly on DIS5K, which is research-only | [Dataset terms](https://github.com/xuebinqin/DIS/blob/e6455bae3892b3a7d8cf59ca91011a220d1ed606/DIS5K-Dataset-Terms-of-Use.pdf) |
 
 LTX-2.3 and Stable Audio 3 Medium come with Gemma's terms as well as their own, because a Gemma model is their text encoder.
+
+`ltx25-4` carries no Gemma terms: its text encoder is Gemma 4, which is under Apache 2.0, and so are the text encoder and upscaler of `h3`.
 
 **FLUX.2 Klein 9B.** The licence limits the model and anything built from it to non-commercial use, but the images it makes may be used for any purpose, commercial ones included (section 2.d). They may not be used to train a model that competes with FLUX.
 
@@ -206,29 +284,41 @@ LTX-2.3 and Stable Audio 3 Medium come with Gemma's terms as well as their own, 
 
 ## Your own models
 
-- **Convert a checkpoint.** A `.safetensors` fine-tune of Z-Image, FLUX.2 Klein, Krea 2, LTX-2.3, LTX-2.5 or MiniMax H3 becomes a model in `~/.ziv/models/`. See [Manage models](../cli/models.md#convert-a-checkpoint) or the [Models page](../web-ui/models.md#convert-a-checkpoint).
-- **Copy a model folder.** A model in diffusers format can go straight into `~/.ziv/models/<name>/`.
-- **Use a Hugging Face repo.** `-m Tongyi-MAI/Z-Image-Turbo` downloads it on first use.
-- **Add an alias.** Give a repo a short name in your [configuration](configuration.md); a name the app already uses is taken:
-
-    ```yaml title="~/.ziv/config.yaml"
-    model_aliases:
-      mymodel: "my-org/my-model"
-    ```
+Converted fine-tunes, model folders, Hugging Face repositories and aliases all work as models. How to add each is in [Use your own models](../guides/models.md#your-own-models); how a name is found is in the next section.
 
 ## How a name is found
 
 When you pass `-m <name>`, or pick a model in the Web UI, the app looks in this order:
 
 1. **A local path**, such as `./my-model` or `~/models/my-model`, or **a Hugging Face repo**, such as `Tongyi-MAI/Z-Image-Turbo`, is used as is. A repo downloads on first use.
-2. **A folder** `~/.ziv/models/<name>/` is used if it exists.
+2. **A folder** `models/<name>/` in the data folder is used if it exists.
 3. **An alias**, built in or your own.
 4. **Otherwise** the name is used as given, and the job stops if no model is found under it.
 
-A folder in `~/.ziv/models/` wins over an alias of the same name. `ziv-model list` shows every model and alias.
+A folder in `models/` wins over an alias of the same name. `ziv-model list` shows every model and alias.
 
 For video, a name is accepted when it is `ltx-4`, `ltx-8`, `ltx25-4` or `h3`, a converted LTX or MiniMax H3 model, a known LTX repo (`dgrauet/ltx*`, `Lightricks/LTX-Video*`, `unsloth/LTX-2.5*`) or MiniMax H3 repo (`MiniMaxAI/MiniMax-H3*`, `unsloth/MiniMax-H3*`), a folder laid out like a MiniMax H3 repository, or a local path containing `ltx`.
 
-## Names in the Web UI
+### Built-in aliases
 
-The Web UI shows a built-in model by its name, such as FLUX.2 Klein 9B, and the Models page lists the alias under it. The alias is what you use with `-m`, in prompt files and in the configuration. An alias of your own shows as its alias.
+| Alias | Model | Makes |
+|---|---|---|
+| `klein4b` | FLUX.2 Klein 4B | Images |
+| `klein9b` | FLUX.2 Klein 9B | Images |
+| `zit` | Z-Image Turbo | Images |
+| `krea2` | Krea 2 Turbo | Images |
+| `ideo` | Ideogram 4 Instant | Images |
+| `moss` | MOSS-Image Turbo | Images |
+| `moss-sft` | MOSS-Image SFT | Images |
+| `ltx-4` | LTX-2.3 4-bit | Video |
+| `ltx-8` | LTX-2.3 8-bit | Video |
+| `ltx25-4` | LTX-2.5 4-bit | Video |
+| `h3` | MiniMax H3 | Video |
+| `yue2` | YuE2 3B | Music |
+| `qwen3_tts` | Qwen3-TTS 1.7B | Speech |
+| `sa3` | Stable Audio 3 Medium | Sound and music |
+
+Sizes and memory needs of each are in their sections above, and their terms in [Licences](#licences).
+
+The Web UI shows a built-in model by its name and lists the alias under it on the [Models page](../web-ui/models.md#names-and-aliases).
+

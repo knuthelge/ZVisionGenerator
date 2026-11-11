@@ -1,473 +1,245 @@
 # Workspace
 
-The Workspace is where you make things. Pick **Image**, **Video** or [**Audio**](#the-audio-tab) in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, model, settings and preset, and each comes back as you left it.
-
-**Video** has two kinds, chosen with **Kind** at the start of the toolbar: **New** makes a clip from text or a first frame, and **Extend** continues a clip you already have (see [Extending a video](../concepts/video.md#extending-a-video)). Extend keeps its own prompt, model, settings, **Batch size** and **Seed**, and nothing you do in one kind changes the other. **Kind** is hidden on a computer that can't extend.
-
-**Image** has two kinds as well: **New** generates a picture, and **Edit** changes part of one you already have, or gives it more room (see [Edit an image](#edit-an-image)). Edit keeps its own prompt, model, settings, **Batch size** and **Seed** in the same way.
+The Workspace is where you make images and videos. A toolbar picks the model, the sidebar holds *Compose* and *Settings* with **Generate** at its foot, the middle shows the running job and the latest result, and the Gallery strip runs under it. [Audio](audio.md) has its own page. How to make things is in [Make images](../guides/images.md) and [Make video](../guides/video.md).
 
 ![The Workspace: Compose and Settings on the left, the preview in the middle and the Gallery strip below](../assets/screenshots/workspace.webp)
 
+## The top bar and tabs { #the-top-bar }
+
+On the Workspace the top bar has the **Image**, **Video** and [**Audio**](audio.md) tabs. **Image** and **Video** each keep their own prompt, model, settings and preset, and each comes back as you left it. **Audio** is hidden on a computer that can't run an audio model.
+
+**Video** has two kinds, chosen with **Kind** at the start of the toolbar: **New** makes a clip from text or a first frame, and **Extend** continues a clip you already have. Extend keeps its own prompt, model, settings, **Batch size** and **Seed**, and nothing you do in one kind changes the other. **Kind** is hidden on a computer that can't extend. See [Make video](../guides/video.md#extend-a-clip).
+
+**Image** has two kinds as well: **New** generates a picture, and **Edit** changes part of one you already have, or gives it more room (see [Edit an image](#edit-an-image)). Edit keeps its own prompt, model, settings, **Batch size** and **Seed** in the same way.
+
+**On a phone:** the tabs are the workflow menu in the top strip, and the pages are in the menu at the top left. See [Phones, tablets and other computers](devices.md#on-a-phone).
+
 ## Project
 
-The project picker is the button after the logo in the top bar, showing the project's name or **All files**; [on a phone](devices.md#on-a-phone) it is in the menu. With a project picked, the preview, the Gallery strip and the latest image and video that **Images** offers show only its files, new work is saved into its folder, and a project with nothing in it says *Nothing in Night Bus yet* in the preview. See [Projects](../concepts/projects.md) for how projects work.
-
-The job card, and each job under **Up next**, names the project it saves into. A result saved in another project doesn't appear in the preview or the strip; a notice says where it went.
+The project picked in the top bar decides which files the preview, the Gallery strip and the latest image and video that **Images** offers show, and where new work is saved. A [notice](#notices) says where a result went when it is in another project. See [Projects](../concepts/projects.md).
 
 ## Model and LoRAs
 
-The top of the sidebar picks the **Model** for the current tab, its quantization (**Quant**) and its **LoRAs**.
+The toolbar above the sidebar and the preview picks the **Model** for the current tab, its quantization (**Quant**, for models that have one) and its **LoRAs**. On a phone it heads the **All** sheet.
 
-Each model shows whether it is downloaded and a memory badge:
+Each model carries a memory badge; see [The memory badges](../concepts/memory.md#the-memory-badges).
 
-| Badge | Means |
-|---|---|
-| **Fits** | The model fits comfortably. |
-| **Tight** | It runs, but your computer may slow down while it works. |
-| **Too large** | Expect heavy swapping or an out-of-memory error. Try a lower quant. |
-
-The badge follows the quant you pick, so you can see whether `q8` or `q4` brings a large model within reach. Hover it for the estimate. See [Memory](../concepts/memory.md) for how it's worked out.
-
-Every built-in model has an **ⓘ** beside the picker. Hover or press it to read the model's licence (see [Licences](../concepts/models.md#licences)). A model of your own has none.
-
-A model that isn't downloaded yet shows *not downloaded*. When a job would download it, **Generate** first asks: the dialog lists what will download (the model, the prompt enhancer, the background removal models) with its size, the free space and its terms. **Download** starts the job and the download; **Cancel** queues nothing. A model that is already downloading isn't asked about again, and its picker shows its progress.
-
-The **Add LoRA** menu lists the LoRAs made for the selected model first, with the ones you used with it recently on top, and folds the rest under **Other models (n)**. Its last item, **Discover LoRAs…**, opens [Discover LoRAs](#discover-loras). LoRAs are remembered per model family, and per size for FLUX.2 Klein (4B and 9B keep separate LoRAs): switch to another family and you get the LoRAs you last used with it. See [LoRAs](../concepts/loras.md).
+Which LoRAs are offered, and how they are remembered per model, is in [LoRAs](../concepts/loras.md#use-one).
 
 ### Discover LoRAs
 
-**Discover LoRAs…** is the last item of **Add LoRA** (on a phone, in the LoRAs menu under **All**), and **Add LoRA** opens it straight away when you have no LoRAs yet. What Curated and Hugging Face are is in [LoRAs](../concepts/loras.md#discover-loras).
-
-- The **Installed**, **Curated** and **Hugging Face** tabs each have a search. The first time you open **Hugging Face**, you confirm that you want its results.
-- Pick a LoRA to see its details. **Download** gets the file, and **Use in LoRAs** adds it to your chips, downloading it first if needed.
-
-While a LoRA downloads, **Generate** waits for it. If the download fails, the chip turns red and **Retry** appears above Generate.
+**Discover LoRAs…**, the last item of **Add LoRA**, searches your installed LoRAs, the curated list and Hugging Face; the first use of **Hugging Face** asks you to confirm its results. See [LoRAs](../concepts/loras.md#discover-loras).
 
 ## Presets
 
-A **preset** saves your whole setup under a name, so you can bring it back in one step. The **Preset** control is the first item of the Workspace toolbar, before the model.
+A **preset** saves a setup under a name. The **Preset** control is in the toolbar on **Image** and **Video**, each with its own list, and comes after **Kind**. **Audio** and the **Edit** kind of **Image** have none. A dot on the control shows when the form differs from the applied preset.
 
 ![The Preset menu open in the Workspace toolbar](../assets/screenshots/preset-menu.webp){ width="540" }
 
-- **What it keeps:** the model, quant, LoRAs and their weights, size, number of runs, steps, guidance, image strength, scheduler, post-processing and upscale settings including review. For video: the length, audio, low memory and upscale.
-- **What it leaves alone:** the prompt, seed and images.
-- **The menu** has **Update** (write the current settings into the preset), **Save as…**, **Rename…** and **Delete**. A dot on the control shows when the form differs from the applied preset.
-- Image and video have their own presets; only the ones for the current kind are listed.
-- A model or LoRA that isn't installed is skipped.
-- **Reset**, starting an extend, and reusing a job's settings deselect the preset. Pick it again afterwards. Switching between Image and Video, or between New and Extend, leaves each one's preset as it was.
+What a preset keeps and leaves alone, and where the files live, is in [Save a setup as a preset](../guides/better-results.md#save-a-setup-as-a-preset). Switching between **Image** and **Video**, or between **New** and **Extend**, leaves each one's preset as it was.
 
-Presets are kept as files in `presets` in the [data folder](../concepts/data-folder.md), so they follow you to every browser. The CLI doesn't use them.
+**On a phone:** the preset is a chip in the strip under the preview, after **Kind**.
 
 ## Compose
 
+*Compose* is the top of the sidebar: where the prompt comes from, the prompt box and its tools. Writing prompts is covered in [Write a clearer prompt](../guides/better-results.md#write-a-clearer-prompt).
+
 ### Prompt source
 
-**Prompt source** chooses where the prompt comes from:
-
-- **Inline**: the prompt you type in the box.
-- **Prompt file**: prompts from a YAML file on the machine running the server.
-
-With a prompt file, *Compose* summarizes the prompts you chose. Click **Prompts…** to open the chooser, where you filter prompts, select whole sets with **All** and **None**, and confirm with **Use N prompts**. **Edit** opens the file on the [Prompts](prompts.md) page. See [Prompts and prompt files](../concepts/prompts.md).
+**Prompt source** chooses between **Inline**, the prompt you type, and **Prompt file**, prompts from a YAML file on the machine running the server. With a prompt file, **Prompts…** chooses which sets and prompts run, and **Edit** opens the file on the [Prompts](prompts.md) page. See [Run batches from prompt files](../guides/batches.md#pick-a-prompt-set-and-run-it).
 
 ### The prompt box
 
-The box has a header, the text and a tools row. Messages from the last run appear in one line under the box.
+For video, *Compose* has a **Scene** box above the **Action** box. A **Negative prompt** box appears for models that use one.
 
-**The header** says which text you are looking at, and what Generate sends:
+**Generate** sends, for each part of the prompt, the [prompt enhancer](../concepts/prompt-enhancer.md)'s **Enhanced** text when there is any, and your own text otherwise. A video has one header and one stepper for its Scene and Action together.
 
-- **Prompt** is what you wrote.
-- **Enhanced** is the [prompt enhancer](../concepts/prompt-enhancer.md)'s rewrite. When it has text, Generate uses it.
+- A **⚠** on the **Enhanced** tab means the Enhanced text is out of date, because your text or the model changed since it was written. It is still sent until you scratch it or enhance again.
+- **✕** after the tab scratches the Enhanced text, so **Generate** sends your text again, and **‹** brings it back.
+- `‹ 2 of 3 ›` steps through the last five versions. **Generate** sends the version shown, and typing edits that version. Versions are kept in the browser, not on the server.
 
-A mark on the **Enhanced** tab tells you when Generate sends it: a dot while you look at your own text, ⚠ when it is out of date, and a small spinner while Enhance runs. With the **Enhanced** tab open, **✕** after the tab scratches the Enhanced text, so Generate sends your text again, and while Enhance runs a stop ring takes its place. At the right end, `‹ 2 of 3 ›` steps through the last five versions of the Enhanced text. No mark anywhere means Generate sends your own text. What the marks mean, and how versions work, is in [Prompt enhancer](../concepts/prompt-enhancer.md#in-the-web-ui).
+With the JSON box on, or with **Enhance each image when generating** on, the header is a single **Prompt** heading with no tabs: **Generate** sends the text in the box (or, for each image, your prompt rewritten as the job runs), and nothing is out of date.
 
-With the JSON box on, or with **Enhance each image when generating** on, the header is a single **Prompt** heading with no tabs and no marks: the text Generate sends is the one in the box (or, for each image, your prompt, rewritten as the job runs).
+**The tools row** under the box holds **Enhance**, **JSON caption** (Ideogram 4), **Clear**, **Triggers**, **Recent prompts** and **Save**.
 
-**The tools row** under the box holds what you can do with the text. With the JSON box on, **Enhance** and **Save** are hidden:
+- **Enhance** opens [the Enhance panel](#the-enhance-panel).
+- **JSON caption** swaps the prompt for a structured caption in a **Prompt (JSON)** box, and hides **Enhance** and **Save** while it is on.
+- **Clear** empties your text, the Enhanced text and its versions (with JSON on, the JSON prompt), and a video's Scene and Action together. **Undo** in the line under the box brings it back until your next edit or run there.
+- **Triggers** puts a trigger word of a LoRA in use into the prompt. See [LoRAs](../concepts/loras.md#trigger-words).
+- **Save** appends the prompt to a prompt file, with **Inline** only. See [Save a Workspace prompt](prompts.md#save-a-workspace-prompt).
 
-- ✨ **Enhance**: rewrite the prompt now, or with **Enhance each image when generating**, rewrite every image's prompt as the job runs. When the Enhanced text is out of date the icon is ⚠ and the panel opens on **Enhance again**, with the reason beside it; with **Enhance each image when generating** on there is no ⚠. See [Prompt enhancer](../concepts/prompt-enhancer.md#in-the-web-ui).
-- **{ }** (*JSON caption*, Ideogram 4): swap the prompt for a structured caption. It is teal while on.
-- 🗑 **Clear**: empty the box. It clears your text, the Enhanced text and its versions (with JSON on, the JSON prompt), and a video's Scene and Action together. It shows only while the box holds something, and the line under the box then reads **Cleared. Undo** until your next edit or run there. There is no confirmation.
-- 🏷 **Triggers**: put a trigger word of a LoRA in use into the prompt. The number beside the tag counts the words the prompt does not hold yet. See [LoRAs](../concepts/loras.md).
-- 🕘 **Recent prompts**: bring back a prompt you generated before. See below.
-- **Save**: append the prompt to a prompt file. See [Save a Workspace prompt](prompts.md#save-a-workspace-prompt). It is a button with the file icon and the name *Save to prompt file…*.
+### The Enhance panel
+
+The ✨ button opens a popover (a sheet on a tablet or phone) with the choices that steer the rewrite. What each choice does is in [Prompt enhancer](../concepts/prompt-enhancer.md#options), and how to use the enhancer is in [Let the enhancer add detail](../guides/better-results.md#let-the-enhancer-add-detail). **Reset** puts every choice back to **Keep**; image and video remember their own choices.
 
 ![The Enhance popover with Shot, Angle and Palette set under Framing and Color](../assets/screenshots/enhance-popover.webp){ width="420" }
 
-For video, *Compose* has a **Scene** box above the **Action** box. See [Scene and action](../concepts/video.md#scene-and-action).
+**Generate** waits while **Enhance**, a helper or **Fill in** is writing. While jobs run or are queued, the panel is unavailable, because the enhancer needs the same memory; enhancing inside each job still works. The first use downloads the enhancer.
 
 ### Recent prompts
 
-The 🕘 button in the tools row lists the prompts you generated in the current mode, newest first: image prompts in **Image**, video prompts (a scene and an action together) in **Video**, whichever kind. Each row shows up to two lines of the prompt (or of the scene), how long ago, and a **{ } JSON** badge for a JSON caption. Hover a row to read the whole prompt. A line below shows a video's scene, or an image prompt's **Negative:** prompt when it has one. Type in the filter to search all of that mode's prompts, not only the ones shown. The list shows up to 50 matches.
+The 🕘 button lists the prompts you generated in the current mode, newest first: image prompts in **Image**, video prompts (a scene and an action together) in **Video**, whichever kind. The filter searches all of that mode's prompts, not only the ones shown.
 
-- **Pick a row** to bring the prompt back: the prompt, a video's scene and the negative prompt go into their boxes, and any Enhanced text and its versions are dropped. A JSON caption turns on the **{ }** JSON caption and fills its box. JSON rows are greyed out, with the reason, on a model that takes no JSON captions. Settings, model and tab don't change.
-- **From the keyboard:** press ++alt+up++ in an empty prompt to open the list with the filter ready. ++up++ and ++down++ move, ++enter++ picks and ++esc++ closes and puts the cursor back in the prompt box (or on the button, if you opened the list with it).
-- **Clear recents** at the bottom of the list removes the prompts of the list you are in, after asking. Every other list stays.
-
-![Recent prompts menu open over the prompt box](../assets/screenshots/placeholder.svg "recent-prompts")
+- **Pick a row** to bring the prompt back: the prompt, a video's scene and the negative prompt go into their boxes, and any Enhanced text and its versions are dropped. Settings, model and tab don't change. JSON rows are greyed out, with the reason, on a model that takes no JSON captions.
+- **Clear recents** removes the prompts of the list you are in, after asking. Every other list stays.
 
 Recents are kept in the app database on the server, not in the browser, so they are the same on every device you open the Web UI from. Prompts that come from a prompt file are not recorded, and neither are refused or blank submits.
 
-A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **Prompt (JSON)** mode for a structured caption.
-
 ## Settings
 
-*Settings* holds everything else, grouped:
+*Settings* holds everything else, grouped, with **Copy CLI command** in its header (see [Copy as a command](#copy-as-a-command)) and **Reset** and **Generate** at its foot. On a phone, a strip of chips under the preview opens each setting in a sheet; see [Phones, tablets and other computers](devices.md#on-a-phone).
 
-| Group | Has |
-|---|---|
-| **Size** | **Ratio**, **Resolution**, or a custom **W × H**; **Duration (s)** for video |
-| **Sampling** | **Steps**, **Guidance**, **Scheduler**, **Seed**, **Batch size** |
-| **Images** | In Image, the **Start image** with its **Strength**, and [references](#references) (FLUX.2 Klein). In Video, a **First frame** and an optional **Last frame**. See [Images](#images) |
-| **Source video** | In the Extend kind of Video, the clip to continue and the point to continue from. See [Source video](#source-video) |
-| **Audio track** | In Video, either kind, an audio file the clip follows, with **Start at**. See [Audio track](#audio-track) |
-| **Upscale** | The factor, **Denoise**, and **Review** before upscaling |
-| **Post-processing** | **Sharpen**, **Contrast**, **Saturation** and **Transparent** (images) |
-| **Video** | **Audio**, **Low memory** |
+| Group | Has | How to use it |
+|---|---|---|
+| **Size** | **Ratio**, **Resolution**, or a custom **W × H** | [Pick a size](../guides/images.md#pick-a-size) |
+| **Sampling** | **Steps**, **Guidance**, **Scheduler**, **Seed**, **Batch size**; in Video, **Duration (s)**, and in the Extend kind **Extend by (s)** and **Total** | [Set steps, guidance and seed](../guides/images.md#set-steps-guidance-and-seed) |
+| **Images** | The start image, [references](#references), or a video's first and last frame. See [Images](#images) | [Start from an image](../guides/images.md#start-from-an-image) |
+| **Image to edit** | In the Edit kind of Image, the picture to change and its paint. See [Edit an image](#edit-an-image) | [Edit a picture](../guides/images.md#edit) |
+| **Source video** | In the Extend kind of Video, the clip to continue. See [Source video](#source-video) | [Extend a clip](../guides/video.md#extend-a-clip) |
+| **Audio track** | In Video, an audio file the clip follows. See [Audio track](#audio-track) | [Follow an audio track](../guides/video.md#audio-track) |
+| **Upscale** | Images only: the factor, **Denoise**, and **Review** before upscaling | [Get a larger image](../guides/images.md#upscale-while-generating) |
+| **Post-processing** | **Sharpen**, **Contrast**, **Saturation** and **Transparent** (images) | [Sharpen and adjust contrast and saturation](../guides/images.md#sharpen-and-adjust-contrast-and-saturation) |
+| **Video** | **Audio**, **Low memory**, and the clip's own **Upscale** with its factor and **Review** | [Add sound or an audio track](../guides/video.md#sound), [Video as it's made](../concepts/upscaling.md#video-upscale) |
 
 Groups and rows only show when the model and tab use them.
 
-- **Change a number** by typing it, or by dragging its label sideways. On a touch screen, numbers have − and + buttons instead (hold to repeat).
-- **Put one setting back** with the reset mark next to it. **Reset** in the *Settings* header puts the open tab [back to its defaults](#reset). The number beside it counts the settings that differ from their defaults, and a phone shows the same number on its *All* sheet.
-- **Seed** is random for every run unless you type one. The dice button picks a new one.
+- **Change a number** by typing it, or by dragging its label sideways.
+- **Batch size** is the number of runs. Every tab and kind keeps its own.
 
-What each setting does is in [Images](../concepts/images.md), [Video](../concepts/video.md) and [Upscaling](../concepts/upscaling.md).
+### Seed
+
+The **Seed** field reads *Random each run* until you type a number. **Lock seed** reuses one seed every run, starting from the seed of the newest output in the Gallery (or a random one if there is none), so the next run starts from the last one. **New random seed** fills in a new number and locks it. Making variations with a seed is covered in [Make variations with Reuse and a new seed](../guides/better-results.md#make-variations-with-reuse-and-a-new-seed).
 
 ### Transparent background
 
-**Transparent** in **Post-processing** switches on [Transparent background](../concepts/images.md#transparent-background). The **Non-commercial** button beside it opens the cut-out models' terms.
-
-![The Transparent switch in Post-processing, with its Non-commercial button](../assets/screenshots/placeholder.svg "transparent-background")
-
-On a phone, the switch is in the **Post-processing** section of **All**.
+**Transparent** in **Post-processing** switches on [Transparent background](../guides/images.md#transparent-background). The **Non-commercial** button beside it opens the cut-out models' terms.
 
 ### Images
 
-The **Images** section holds every image the run uses, in **Image** and in **Video**. What an image is for, and how it changes the result, is in [Images](../concepts/images.md) and [Video](../concepts/video.md#first-and-last-frame).
+The **Images** section holds every image the run uses: in **Image**, the start image and, on FLUX.2 Klein, [references](#references); in **Video**, a first frame and an optional last frame. With none, **Generate** works from the prompt alone. What each is for is in [Start from an image](../guides/images.md#start-from-an-image) and [First and last frame](../guides/video.md#first-and-last-frame).
 
-With no image, **Generate** makes the picture or clip from the prompt. With a start image or a first frame, it starts from that image. The [Gallery](gallery.md) and the [Job log](job-log.md) label each job by what ran, such as *Image to image* or *Text to video*.
+- An image stays until you press its **×** or **Reset**, also after a reload. **Image** and **Video** each keep their own, and switching tabs, kinds or models clears none of them.
+- An image the model can't use is hidden: not shown, not sent, not counted. It stays in the draft and comes back on a model that can use it.
+- An image that **Generate** would use but can't find blocks **Generate**, with the reason above the button. See [Generate is greyed out](../reference/troubleshooting.md#generate-is-greyed-out).
 
-Folded, the header's summary says what **Generate** will use: in Image *None*, *pond.png*, *pond.png · 2 references* or *2 references*; in Video *None*, *dawn.png* or *dawn.png → dusk.png*. It turns red when an image the run uses is missing.
-
-**In Image**
-
-- **Start image:** an *Image* row with a thumbnail, the name, buttons to browse the server and to upload from your device, and × while an image is set. The empty row reads *Browse or drop*: drop an image on it to set it.
-- **Strength** is a row under the start image's, shown only while a start image is set.
-- **[References](#references)** follow, for models that take them (FLUX.2 Klein only).
-
-**In Video**
-
-- **First frame:** an *Image* row, as for a start image.
-- **Last frame:** the same row, marked *Optional*, to end the clip on a second image.
-- **Last frame without a first frame:** a last frame needs a first frame. Without one it is greyed with *Needs a first frame* and **Generate** is disabled; add a first frame or clear the last.
-
-**Where images stay**
-
-- An image stays until you press its × or **Reset**, also after a reload.
-- **Image** and **Video** each keep their own images; switching tabs, kinds or models clears none of them.
-- **Reuse settings** and **Load settings** replace the open tab's images with the ones the job used.
-
-**Images a model can't use**
-
-An image the model can't use is hidden: a start image on Ideogram 4, references on a model without them, a first frame on a video model that can't start from an image, a last frame on a video model without one. It is not shown, not sent and not counted in the summary, but it stays in the draft and comes back on a model that can use it. When the model can use no image at all, the **Images** section is hidden.
-
-**Missing images**
-
-An image that **Generate** would use but can't find shows a mark in its row and blocks **Generate**, with the reason above the button, such as *The start image is missing.* A file on the server that has moved or been deleted says *This image has moved or been deleted. Choose it again or remove it.* An upload whose file the browser can't read back says *Choose this image again.* Choose the file again or remove the image. A last frame with no first frame blocks **Generate** too, with *Add a first frame. A last frame needs one.*
-
-**On a phone,** one **Images** chip in the strip opens the same groups in a popover. See [Other devices](devices.md#images-on-a-phone).
+**On a phone:** one **Images** chip opens the same groups in a popover. See [Images on a phone](devices.md#images-on-a-phone).
 
 #### References
 
-When the model takes [references](../concepts/images.md#references), the **Images** section has a **References** group of up to four rows, each like the start image's row. The empty row after them, *Add reference*, adds the next one. You can also drop several images on it at once, or drop one on a filled row to replace it. On a phone, **Replace** on a row whose image is gone swaps the next image you choose into that row and keeps its number.
-
-- **Number:** a row's position is its number in the prompt: *Reference 1* is "image 1". Removing a row renumbers the rest, and a line under the rows reminds you to refer to them that way.
-- **Fewer references than you set:** the Video tab uses none, and a model that takes fewer shows and sends the first ones. The rest come back with a model that takes more.
-- **With a start image,** both apply. See [References with a start image](../concepts/images.md#references-with-a-start-image) for what to expect.
-- **Add one from an image you made:** **Use as** → **Reference** in the [Gallery or viewer](gallery.md#use-as) adds it as the next number and keeps the prompt.
+Models that take [references](../guides/images.md#references) offer up to four. A row's position is its number in the prompt: *Reference 1* is "image 1". Removing a row renumbers the rest. **Use as** → **Reference** in the [Gallery or viewer](gallery.md#use-as) adds an image as the next number and keeps the prompt.
 
 ### Source video
 
-In the **Extend** kind of **Video**, **Source video** holds the clip to continue: choose it with **Browse**, by path, or with **Extend** in the [Gallery or viewer](gallery.md#the-viewer). The clip is shown as a strip of its frames with a **handle** that sets where the extension continues from. What a point does is in [From a point](../concepts/video.md#from-a-point).
+In the **Extend** kind of **Video**, **Source video** holds the clip to continue, chosen with **Browse**, by path, or with **Extend** in the [Gallery or viewer](gallery.md#the-viewer). A **handle** on the strip of its frames sets where the extension continues from; it stops at frame 25. What a point does is in [Extend from a point](../guides/video.md#from-a-point).
 
-![Video on its Extend kind: the source clip as a strip of frames with the handle at 3.2 s, the dropped part shaded and the line Keeps 3.2 s of 6.0 s](../assets/screenshots/placeholder.svg "extend-video")
+![Video on its Extend kind: the source clip as a strip of frames with the handle at 3.2 s, the dropped part shaded and the line Keeps 3.2 s of 6.0 s](../assets/screenshots/extend-video.webp)
 
-- **Whole clip:** with the handle at the right end, the section reads *Keeps the whole clip* and the extension continues from the end.
-- **From a point:** drag the handle, or press ++left++ and ++right++ on it (one frame; ++shift++ for five), ++home++ for the earliest point and ++end++ for the whole clip. The dropped part is shaded, the section reads e.g. *Keeps 3.2 s of 6.0 s*, and **Total** shows the length of the result.
-- **The handle stops at 25 frames** and says why.
-- **The point belongs to the source:** choosing another source puts the handle back at the end. A video paused in the viewer arrives with its point set.
-
-**Copy as a command** includes `--extend-from`.
+The point belongs to the source: choosing another source puts the handle back at the end, and a video paused in the viewer arrives with its point set.
 
 ### Audio track
 
-The **Audio track** section comes after **Images** in **Video**, and after **Source video** in the **Extend** kind. Give it a file by path, **Browse**, upload or drop (WAV, MP3, M4A, FLAC or OGG), and set **Start at** in seconds. The track's length shows beside its name to help you choose **Start at**. What the track does is in [Audio track](../concepts/video.md#audio-track).
+In **Video**, either kind, the **Audio track** section takes an audio file the clip follows, with **Start at** in seconds. See [Follow an audio track](../guides/video.md#audio-track). In the **Extend** kind, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source.
 
-In the **Extend** kind, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source. [Reset](#reset) clears the track along with the source.
+### Image to edit { #edit-an-image }
 
-A server file that can't be read is refused at **Generate** with *Can't read the audio track*. An upload lost on reload blocks **Generate** with *Choose the audio track again.* On a phone, the **Track** chip opens the same rows in a popover.
+**Edit** is a kind of the **Image** tab, chosen with **Kind**. It shows only the controls an edit uses, with a prompt box of its own; it has no preset, prompt file or **Enhance**, and offers only the models that can edit. What an edit does, and how to make one, is in [Edit a picture](../guides/images.md#edit).
 
-### Settings are remembered
+*Image to edit* in *Settings* holds the picture. Empty, it is a drop zone with **Browse**, **Upload** and **Latest output**. With a picture chosen it shows the name and size with a **×** to clear it, **Open painter**, and one line that says what will be sent:
 
-Your settings stay in the browser between visits, as long as the Web UI starts on the same port.
+- **Paint** and the painted share of the picture, or *Whole picture, from the prompt* when nothing is painted;
+- **Extend**, the side, the amount and the new size, or *No side chosen yet*;
+- *Paint the area again*, after **Reuse settings** on a painted edit, because the paint isn't saved.
 
-When you choose another model, the settings you changed are kept and the rest take the new model's defaults. A size the new model doesn't offer becomes its largest preset.
+![Image to edit in Settings, with the painted share shown and the Edit kind chosen in the toolbar](../assets/screenshots/edit-image-to-edit.webp)
 
-**Reuse settings** and **Load settings** apply a take's settings exactly: what the take did not record takes its default instead of what the form held. They replace the open tab's settings, images, prompts, LoRAs, quant and *Enhance* options and leave the other tabs and kinds alone. **Use as** changes only what it names.
+The prompt box asks *What should be here?* for a painted area or a new strip, and *What should change?* for a whole-picture edit. **Generate** is off with its reason shown: *Choose an image to edit*, *Choose a side to extend*, or *Paint the area to change* for a picture with transparent parts. **Edit** on a finished picture in the [viewer](gallery.md#the-viewer) (++m++) or a tile's **⋯** menu opens it here with an empty prompt.
 
-### Reset
+#### The painter { #the-painter }
 
-**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the tempo, key, delivery, sound type, length, the voice, the *Enhance* options, **Batch size** and **Seed**. On Extend it also clears the source video and the point to extend from. It keeps the model, LoRAs and quant and the prompts, and it never touches another tab or kind. Every tab and kind keeps its own **Batch size** and **Seed**, and a Reset puts the open one's back.
+The painter fills the screen, opened with **Open painter**. The **Paint** / **Extend** switch sits at the top, with **Cancel** and **Done**. **Done** keeps the work; **Cancel** puts it back as it was when the painter opened, asking first if something changed.
 
-### Copy as a command
+**One mode at a time.** Only the active mode's work is sent. Switching removes the work of the mode you leave: the painter asks first, and **Undo** brings it back. ++1++ switches to Paint and ++2++ to Extend. With nothing painted and no side chosen, the prompt changes the whole picture. How to use each mode is in [Edit a picture](../guides/images.md#edit).
 
-The terminal button in the *Settings* header copies a `ziv image`, `ziv video` or `ziv audio` command with the current model, prompt, LoRAs and settings, writing to the folder the job would save to: the Web UI's output folder, or the picked [project's](../concepts/projects.md) folder. Paste it in a terminal to run the same job from the [CLI](../cli/index.md).
-
-!!! note "When the command differs"
-    The CLI has no inline negative prompt, and runs every prompt in a prompt file rather than only the ones you selected. A notice says when the copied command would do something different. An uploaded start image or reference is named by its file name: replace it with the file's path. An edit's command names the image with `--edit`, and a painted one names `--mask mask.png`, a placeholder for the painted area saved as a PNG with the shape of the image.
-
-### Paths on the server
-
-Fields that take a path on the server's machine (prompt files, the output folder, checkpoints, LoRAs, images, audio tracks, source videos) have a folder button. It opens a file browser inside the Web UI, so it works the same on every system and from a phone.
-
-- It opens at the field's current path or the matching folder, and lists only the files the field accepts. With a [project](#project) picked, an empty image, audio track or source video field opens in the project's folder. **Show all** lists the rest; **Hidden files** shows names that start with a dot.
-- Your last five choices are under **Recent**.
-- Click the path bar or press ++slash++ to type a path.
-- Click **Name**, **Size** or **Modified** to sort, and again to reverse. The order is remembered, starting with newest first.
-- For images, audio tracks and source videos it shows thumbnails, can switch to a grid, and has a preview (**Preview** or ++alt+p++) that plays audio and video when you press play. Once chosen, the slot shows the file too.
-
-Typing in a path field suggests matching folders and files: ++tab++ takes the first, the arrow keys and ++enter++ pick another, and ++down++ in an empty field suggests recent paths and the usual folders.
-
-## Edit an image
-
-**Edit** is a kind of the **Image** tab, chosen with **Kind**. It changes part of a picture you already have, or gives it more room; what it does is in [Edit a picture](../concepts/images.md#edit).
-
-1. **Choose the image** in *Image to edit* in *Settings*: **Browse**, **Upload** or **Latest output**, or drop one on it. **Edit** in the [viewer](gallery.md#the-viewer) (++m++) and in a tile's **⋯** menu opens it here with an empty prompt.
-2. **Paint or extend.** **Open painter**, work in one mode and press **Done**. *Image to edit* then says what will be sent.
-3. **Write the prompt and press Generate.** The prompt is Edit's own and starts empty. It runs as an ordinary job; [where the result is saved](../concepts/images.md#edit) depends on where the picture came from.
-
-![Image to edit in Settings with the painted share shown, and the Edit kind chosen in the toolbar](../assets/screenshots/placeholder.svg "edit-image-to-edit")
-
-Press **Generate** again to try again; the image and paint stay. **Edit** on a result loads it with no paint. **Reset**, or choosing another image, clears the paint. Edit offers only models that can edit and has no prompt file. **Generate** is off with its reason shown: *Choose an image to edit*, or *Paint the area to change* for a picture with transparent parts.
-
-### The painter
-
-The painter fills the screen. The **Paint** / **Extend** switch sits at the top, with **Cancel** and **Done**. Your work stays until you press **Done**, **Clear** or choose another image.
-
-**One mode at a time.** Only the active mode's work is sent. Switching removes the work of the mode you leave: the painter asks first, and **Undo** brings it back. ++1++ switches to Paint and ++2++ to Extend. With nothing painted and no side chosen, the prompt changes the whole picture.
-
-![The painter on Paint, with a painted area over the picture and the brush controls](../assets/screenshots/placeholder.svg "edit-painter-paint")
+![The painter on Paint, with the left moon painted and the brush controls below](../assets/screenshots/edit-painter-paint.webp)
 
 - **Paint:** **Brush** and **Erase**, a size slider, **Undo**, **Clear** and zoom. The painted area shows as a teal fill. Keys are in [Shortcuts](shortcuts.md#painter).
 - **Extend:** **+ Top**, **+ Right**, **+ Bottom** and **+ Left** on the picture's edges grow one side, by **Extend by** 128 to 512 pixels, with the new size shown. Extend is off for a picture with transparent parts; hover the button to see why.
 - **Mouse and pen** paint. **On a touch screen** one finger paints and two fingers zoom and pan.
 
-![The painter on Extend, with the + Right pill and the new size shown](../assets/screenshots/placeholder.svg "edit-painter-extend")
+![The painter on Extend, with + Right chosen and the new size shown](../assets/screenshots/edit-painter-extend.webp)
 
-On a phone, *Image to edit* is a card above the settings chips that opens the painter, and the painter's controls sit at the foot of the screen.
+**On a phone:** see [Edit on a phone](devices.md#edit-on-a-phone).
 
-**Reuse settings** on an edited file returns to Edit with the same image, prompt and settings; the paint isn't saved, so it shows *Paint the area again*.
+### Settings are remembered
 
-## The Audio tab
+Your settings stay in the browser between visits, as long as the Web UI starts on the same port.
 
-**Audio** is the last tab in the top bar. It makes music, speech and sound; what each kind is, the models and the limits are in [Audio](../concepts/audio.md). The tab is hidden on a machine that can't run an audio model.
+When you choose another model, the settings you changed are kept and the rest take the new model's defaults. A size the new model doesn't offer becomes its largest preset. **Reuse settings** and **Load settings** replace the open tab's settings instead, and leave the other tabs and kinds alone; see [Reuse settings](gallery.md#reuse-settings).
 
-![The Audio tab on Music, with Style and Lyrics under Compose and the status line saying Song](../assets/screenshots/placeholder.svg "audio-music")
+### Reset
 
-To make a take, pick the **Kind** (**Music**, **Speech** or **Sound**) and the **Model** in the toolbar, write the **Style**, the **Text** or the **Prompt** in Compose, and press **Generate**. The helpers below are optional. A model that isn't downloaded yet is asked for when you press **Generate**, as for [images](#model-and-loras). The kind decides what *Compose* and *Settings* show; presets, **Quant** and LoRAs aren't used.
+**Reset** at the foot of *Settings* puts the open tab or kind back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Extend it also clears the source video and the point, and on Edit the image and its paint. It keeps the model, LoRAs, quant and prompts, and never touches another tab or kind. Every tab and kind keeps its own **Batch size** and **Seed**, and a Reset puts the open one's back. What **Reset** puts back on Audio is in [Audio tab](audio.md#settings).
 
-| Kind | Compose | Settings |
-|---|---|---|
-| **Music** | [**Describe it**](#describe-it), then **Style** (required), with an **Enhanced** tab, above **Lyrics**; a model without lyrics has only the Style | The [Music](#music) section, then **Batch size** and **Seed** |
-| **Speech** | [**Describe it**](#describe-it), then **Text**, with a **Written** tab, an [Insert](#insert-into-the-text) menu, a [Script helper](#script-helper) and a count of the characters and the time it takes to read | **Voice** and [Delivery](#delivery), then **Batch size** and **Seed** |
-| **Sound** | **Prompt**, what you hear, with an **Enhanced** tab | The [Sound](#sound) section, then **Batch size** and **Seed** |
+### Copy as a command
 
-Every box has a 🗑 **Clear** first in the right of its tools row, as in [the prompt box](#the-prompt-box): it empties your text, the Enhanced (Written) text and its versions, or for Lyrics the whole song and its versions, and **Undo** in the line under the box brings it all back until your next edit or run there.
+The terminal button in the *Settings* header copies a `ziv image`, `ziv video` or `ziv audio` command with the current model, prompt, LoRAs and settings, writing to the folder the job would save to (the Web UI's output folder, or the picked [project's](../concepts/projects.md)). Paste it in a terminal to run the same job. A notice says when the command would do something different; an uploaded start image or reference is named by its file name, so replace it with the file's path. An edit's command names the image with `--edit`, and a painted one names `--mask mask.png`, a placeholder for the painted area saved as a PNG with the shape of the image. See [Copy a command from the Web UI](../cli/index.md#copy-a-command-from-the-web-ui).
 
-See [Music](../concepts/audio.md#music), [Speech](../concepts/audio.md#speech) and [Sound](../concepts/audio.md#sound) for what each kind does. The Style and Prompt boxes enhance as in [Music Enhance](#music-enhance) and [Sound Enhance](#sound-enhance); the Lyrics and the Speech text have the [Lyrics helper](#lyrics-helper) and the [Script helper](#script-helper). There is no JSON mode or negative prompt.
+### Paths on the server
 
-### Describe it
-
-**Describe it** is a box at the top of Compose for Music and Speech, shown wherever the prompt enhancer is set up. Write the idea in it (*a sad folk song about leaving the coast*) and press **Fill in**, or <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (<kbd>⌘</kbd>+<kbd>Enter</kbd>) in the box. What it writes and keeps is in [Describe it and Fill in](../concepts/prompt-enhancer.md#describe-it-and-fill-in).
-
-- **Fill in** writes only the fields that are empty. A line under the box says which, and the button is off with the reason in that line when there is nothing to write.
-- **Fast** or **Smart** beside **Fill in** is the enhancer it uses. It is remembered apart from the one in Enhance and the helpers, and a helper's **Fill in from Describe it** uses it. The line under the box adds the first-use download when the enhancer is not on this machine yet.
-- 🗑 **Clear** empties the idea, in the open box and on the folded line. What Fill in wrote stays, with its **Undo fill**.
-- **✦** marks the Tempo, Key and Vibe it wrote until you edit them. **Fill in again** rewrites only the empty and still marked fields.
-- **Undo fill** puts back what the fill replaced, for the fields still marked. The Style it wrote lands in your own **Style** tab, like Speech's Text.
-- The box folds to one line after a fill, and starts folded when you begin with your own lyrics or text.
-- The lyrics helper on a song with no words and the Script helper on an empty script offer **Fill in from Describe it**.
-
-![Describe it above the Style and Lyrics of a song, folded to one line after Fill in, with the filled fields marked](../assets/screenshots/placeholder.svg "audio-describe-it")
-
-### Song blocks
-
-The Lyrics box shows a song as one block per section (**Verse**, **Chorus**, **Pre-Chorus**…), each with its words in a box. A section with no words is an instrumental section, so a list of empty blocks makes an [instrumental](../concepts/audio.md#music) of those sections.
-
-- **Add** at the foot adds a section: **Verse**, **Chorus**, **Bridge** and **Outro** directly, and **More** for the whole list.
-- The **⋯** button of a block opens **Improve this section…** (or **Write**, on a section with no words) when the prompt enhancer is set up, then **Move up**, **Move down**, **Duplicate**, **Add a section below** and **Remove**. **Remove** on a block with words offers **Undo** until the next change.
-- The block's name opens the list of section names, and **Other name…** types one of your own.
-- **Edit as text** shows the whole lyrics as one text with its `[section]` tags, and back. Pasted or reused lyrics show exactly as written.
-
-![The Lyrics box as blocks: an Intro with no words, a Verse and a Chorus with theirs, and the Add row under them](../assets/screenshots/placeholder.svg "audio-song-blocks")
-
-### Lyrics helper
-
-**Improve lyrics** in the Lyrics tools row opens a popover beside the button (a sheet on a tablet or phone) for the whole song. Each block's **Improve** button, or **Write** on a section with no words, opens it for that section. What it writes and keeps is in [Lyrics helper](../concepts/prompt-enhancer.md#lyrics-helper).
-
-- **Improve lyrics** offers **Tighten**, **Fit the sections**, **Smooth rhymes** and **Simpler words**, pick any, and a **Direction** such as *make it more hopeful*, with the **Fast** or **Smart** enhancer. **Tighten** is picked when the panel opens; clear every pick for a general polish.
-- **Improve a section** has the same choices without **Fit the sections**.
-- **Write** has only the **Direction**. It fills the section to fit the rest of the song.
-
-Each result is a version of the lyrics: ‹ **2 of 3** › in the Lyrics head steps through up to five, yours first, and a ✦ after **Lyrics** marks a version a helper wrote. Typing in a version makes it yours. Generate uses the lyrics shown.
-
-![The Lyrics box with the Improve lyrics popover open: Tighten and Smooth rhymes picked, a Direction typed and the Fast enhancer chosen](../assets/screenshots/placeholder.svg "audio-lyrics-helper")
-
-### Music
-
-The **Music** section comes first in Music's *Settings*. Its header shows what is set: *Auto*, or *92 BPM · A minor*.
-
-- **Tempo** is a number from 40 to 220 beats per minute. Empty reads **Auto**, where the model picks.
-- **Key** opens a list: **Auto**, then the twelve major keys and the twelve minor keys.
-- **Length (s)** is only there for a model that sets its own length, Stable Audio: 1 to 380 seconds, 30 to begin with.
-
-A changed row has a dot, and its reset puts it back to Auto (or to 30 seconds). What each setting does is in [Tempo and Key](../concepts/audio.md#tempo-and-key).
-
-**Stable Audio 3 Medium** is offered under **Music** next to YuE2 and under **Sound**. On it, Music has no **Lyrics** box and the section adds **Length (s)**. See [Stable Audio under Music](../concepts/audio.md#stable-audio-under-music).
-
-### Sound
-
-The **Sound** section comes first in Sound's *Settings*. Its header shows the type and the length the take will have: *Ambience · ≈ 12 s*.
-
-- **Type** is **Auto**, **Ambience**, **Effect** or **One-shot**.
-- **Length (s)** is empty on Auto, and the field shows the number Auto will use. Typing a number from 1 to 380 locks it, whatever the type, and emptying the field goes back to Auto.
-
-A changed row has a dot, and its reset puts it back to Auto. What each type does is in [Sound](../concepts/audio.md#sound).
-
-### Sound Enhance
-
-**Enhance** under the Sound prompt rewrites it into the shape Stable Audio follows; what it writes is in [Audio](../concepts/prompt-enhancer.md#audio). The header, marks and versions work as in [the prompt box](#the-prompt-box). The panel opens as a popover on a computer and as a sheet on a tablet or phone.
-
-- **Space**, **Distance**, **Over time** and **Movement** each start on **Keep**. **Direction** takes your own words, such as *keep the thunder far off*. **Reset** puts every choice back to Keep and clears the direction.
-- **Enhancer** (Fast or Smart) sits beside **Enhance prompt**, which starts the rewrite. The **Type** and **Length** go along.
-
-**Reuse settings**, **Retry** and **Load settings** of an enhanced sound put your text in **Prompt** and the rewrite in **Enhanced**.
-
-### Music Enhance
-
-**Enhance** under the Style rewrites it for the open model, as a line of descriptors for YuE2 or a sentence for Stable Audio 3; what it writes is in [Audio](../concepts/prompt-enhancer.md#audio). It never touches Lyrics. It works as [Sound Enhance](#sound-enhance) does, with these options:
-
-- **Genre** (grouped), **Mood** and **Production** each start on **Keep**; **Instruments** and **Without** are pick-any chips. **Direction** takes your own words, such as *keep the guitar fingerpicked*.
-- **Singer** is there only when the song has words to sing.
-- Your lyrics' first lines, whether the song is instrumental, and any Tempo and Key go along; Length never does.
-
-**Reuse settings**, **Retry** and **Load settings** of an enhanced song put your style in **Style** and the rewrite in **Enhanced**.
-
-### Insert into the text
-
-**Insert** in the Speech tools row (or <kbd>Alt</kbd>+<kbd>Enter</kbd> in the text) opens a menu that puts something readable into the text at the caret. A selection is replaced. While the **Written** tab is shown, it edits the Written text. Under the box, the count reads *1,180 / 10,000 characters · about 1:24*.
-
-- **Pause** puts `…` and **Laugh** puts `haha`.
-- **Delivery from here** offers the emotions in four groups, **Whisper**, **Shout** and **As set**. Your pick goes in as a `[mark]` at the start of the sentence the caret is in; a mark that already opens the sentence is replaced. It is hidden while the voice follows a recording.
-
-What a mark does, and the pause and the laugh, are in [Marks](../concepts/audio.md#marks) and [Pauses and laughs](../concepts/audio.md#pauses-and-laughs).
-
-### Script helper
-
-**Script helper** in the Speech tools row opens a popover beside the button (a sheet on a tablet or a phone). It always starts from your **Text**. What it writes and keeps is in [Script helper](../concepts/prompt-enhancer.md#script-helper).
-
-- **Fit to time** and **Add delivery** are checkboxes, any of them. The run button names the picks. With both, one run fits the Text and then adds delivery, as one Written version with one **Stop**. **Add delivery** is left out while the voice follows a recording.
-- **Fit to** takes a number of seconds (3 to 600) and shows while **Fit to time** is picked.
-- The **Fast** or **Smart** enhancer is chosen beside the run button.
-
-A result lands in the **Written** tab beside your **Text**; ‹ **2 of 3** › steps through up to five. Generate sends the Written text. You can edit it by hand.
-
-![The Speech text with the Script helper popover open on Fit to time, 0:30 typed](../assets/screenshots/placeholder.svg "audio-script-helper")
-
-### Voice
-
-**Voice** is the first group in Speech's *Settings*. Its dropdown lists **Your voices** (left out while you have none) above the nine **Default voices**, each shown with its language (*Ryan · English*). Ryan is the default.
-
-The **Voices** window, opened from the buttons under the dropdown, is where you make and manage voices; see [Voices](../concepts/audio.md#voices). A speech take can also be kept as a voice from the Gallery: see [Use as](gallery.md#use-as-an-audio-track-or-a-voice).
-
-### Delivery
-
-**Delivery** comes after Voice in Speech's *Settings* and sets how a default voice says the text. Pick one of the six **Vibe** tiles to fill the five rows below it, and edit any row:
-
-- **Emotion**: **Neutral**, or one of the emotions in four groups.
-- **Manner**: **Natural**, **Whisper** or **Shout**.
-- **Pace**: a slider from *Very slow* to *Very fast*.
-- **Pitch** and **Expressiveness**: **Low**, **Normal** or **High**.
-
-A changed row has a dot and its own reset; the reset beside **Vibe** puts all five back. With a saved voice or a recording chosen in Voice, the section only says that the voice reads as it was made. What each setting does and the Vibes' values are in [Delivery](../concepts/audio.md#delivery).
-
-![The Delivery section with the Calm narrator Vibe picked and its five values under it](../assets/screenshots/placeholder.svg "audio-delivery")
-
-### While a take is made
-
-The job card counts takes (*Take 1 of 2*) and shows the stage the model is in. The preview strip shows the take forming and settles into its waveform when it is ready. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs).
-
-### The result
-
-![A finished take in the player, with its waveform as the timeline](../assets/screenshots/placeholder.svg "audio-take")
-
-The preview shows the finished take as a player. Click or drag the waveform to seek; nothing plays by itself. **Reuse settings** and the **⋯** menu sit in the corner of the panel, and a take that reached YuE2's limit carries **Cut at 6:00**. Takes appear in the Gallery strip as audio tiles; see [Audio in the Gallery](gallery.md#audio). On a phone, see [Audio on a phone](devices.md#audio-on-a-phone).
+Fields that take a path on the server's machine (prompt files, the output folder, checkpoints, LoRAs, images, audio tracks, source videos) have a folder button that opens a file browser inside the Web UI, so it works the same on every system and from a phone. With a [project](#project) picked, an empty image, audio track or source video field opens in the project's folder. Keys are in [Keyboard shortcuts](shortcuts.md#file-browser-and-paths).
 
 ## Generate
 
-Press **Generate**, or ++ctrl+enter++ (++cmd+enter++ on a Mac). ++ctrl+shift+enter++ generates with a new seed, even when the seed is locked.
+**Generate** is at the foot of *Settings*; its keys are in [Keyboard shortcuts](shortcuts.md#workspace). **On a phone,** press and hold **Generate**, or tap the arrow beside it, for **Generate with a new seed**.
 
-If the job can't start with the current settings, for example because the start image is missing, the reason shows above the button. It goes away when you change a setting.
+While a job runs, **Generate** reads **Add to queue**; see [The queue](#the-queue).
+
+- **When it can't start,** the reason shows above the button. See [Generate is greyed out](../reference/troubleshooting.md#generate-is-greyed-out).
+- **While a model or LoRA downloads,** it waits for the file and starts the job when the download ends.
+- **When the model isn't downloaded,** it asks before the download starts; **Cancel** queues nothing.
 
 ### While a job runs
 
 ![The job card at step 3 of 4, with Pause, Cancel and Repeat](../assets/screenshots/job-card.webp){ width="420" }
 
-The **live preview** shows the current image taking shape after every step ([Live preview](../concepts/images.md#live-preview)), so you can skip a bad one early. It has the image's own shape, a custom size included. It is a preview only and never saved.
+The **live preview** shows the current image taking shape after every step, so you can skip a bad one early. It is never saved, and a video shows none while it is made. Jobs already in the queue don't ask about downloads; they download when their turn comes. If a job fails, the card says why, and the [Job log](job-log.md) keeps the reason.
 
-The **job card** beside it shows the progress, the time left and each phase with its timing. When a model isn't downloaded yet, the load step shows the download first, with its size, speed and time left. Jobs that are already in the queue don't ask; they download when their turn comes.
+- **Pause** waits after the current image or video, until you resume.
+- **Skip** stops the current image or video at its next step and moves on.
+- **Repeat** makes the current image or video again with a new seed, once it finishes.
+- **Cancel** stops the job at its next step. On a touch screen it asks first.
 
-| Control | Does | Key |
-|---|---|---|
-| **Pause** | Waits after the current image or video, until you resume | ++p++ |
-| **Cancel** | Stops the job at its next step | ++esc++ ++esc++ |
-| **Skip** | Stops the current image or video and moves to the next | ++n++ |
-| **Repeat** | Makes the current image or video again with a new seed, after it finishes | ++r++ |
+Keys are in [Keyboard shortcuts](shortcuts.md#workspace); the same controls work in a terminal, see [Pause, skip or stop a run](../guides/batches.md#keys-during-a-run). On a phone they are on the bar over the preview and in the job sheet under **⋯**.
 
-Video jobs have the same controls; see [Controls while a video runs](../concepts/video.md#controls-while-a-video-runs). With [review before upscaling](../concepts/upscaling.md#review-before-upscaling) on, the card also offers **Approve** (++y++) and **Discard** (++n++).
-
-!!! note "Cancelling during a download"
-    Cancel stops a download at once. Finished files are kept and the file in progress starts over next time. A job that only waits for a download started from the Models page is cancelled, and the download keeps going.
-
-If a job fails, the card says why. The [Job log](job-log.md) keeps the reason.
+- **Video:** **Skip** and **Cancel** act on the video being made. Nothing is saved for it unless it was on its final step, in which case it is saved first. On a Mac, MiniMax H3 text to video can't stop in the middle of a clip, so **Skip** and **Cancel** take effect when the clip finishes, and the clip is kept.
+- **While prompts are rewritten:** a job with **Enhance each image when generating** rewrites every prompt before the model loads. **Skip** skips the current rewrite, and that image uses your own prompt. **Cancel** stops the job before the model loads.
+- **Review before upscaling:** with [review](../concepts/upscaling.md#review-before-upscaling) on, the job waits for you to **Approve** or **Discard** the small render. A **Review** badge on the **Workspace** button shows it from the other pages.
+- **Cancelling a download:** **Cancel** stops a download at once. Finished files are kept and the file in progress starts over next time. A job that only waits for a download started from the [Models](models.md) page is cancelled, and the download keeps going.
+- **Lost connection:** the job keeps running, and the controls come back when the page reconnects. See [Troubleshooting](../reference/troubleshooting.md#web-ui-messages).
 
 ### The queue
 
-You can keep working while a job runs. Change the prompt or settings and press **Add to queue** (the Generate button while jobs are active).
+You can keep working while a job runs. Change the prompt or settings and press **Add to queue**.
 
 - Queued jobs run one after another, in order, each with the settings it had when you added it.
-- They are listed under the job card as **Up next**, each with its prompt, size and steps, such as `1600x896 · 8 steps`. Each can be removed, or its settings copied back into the form with **Load settings**.
-- **Clear queue** removes them all after asking. It never stops the running job.
+- Each job under **Up next** can be removed, or its settings copied back into the form with **Load settings**. **Clear queue** removes them all after asking and never stops the running job.
 - If a job fails, the next one starts anyway.
 
-The queue is shared by every open tab, and lives in the server's memory: stopping the server clears it.
-
-While jobs are running or queued, the manual **Enhance prompt** button is unavailable, because the enhancer needs the same memory. Enhancing inside each job still works.
-
-A job keeps running when you close or reload the tab. Reopen the Workspace and it reconnects.
+The queue is shared by every open tab, and lives in the server's memory: stopping the server clears it. A job keeps running when you close or reload the tab; reopen the Workspace and it reconnects. Batches and the queue are covered in [Set runs and batch size](../guides/batches.md#set-runs-and-batch-size).
 
 ## The preview and the Gallery strip
 
-Finished images, videos and audio appear in the Gallery strip, newest first. It is the same list as the [Gallery](gallery.md) page, so a new output, a delete or a move shows in both. Scroll to the end and older ones load in. Click one to open the [viewer](gallery.md#the-viewer); **Show all** opens the Gallery page.
+With no job running, the preview shows your latest output; step through earlier ones with the arrows or a swipe, and **Latest** goes back.
 
-- Press ++left++ and ++right++ (or use the arrows over the preview, or swipe sideways with two fingers on a trackpad) to step through earlier outputs in the preview. **Latest** goes back to the newest.
-- A finished video or take plays in the preview in the same [player](gallery.md#the-player) as the viewer. Pause a video partway to use that frame; see [Use a paused frame](gallery.md#use-a-paused-frame).
-- A strip tile's **⋯** menu has **Move to project…**; see [Move to project](gallery.md#move-to-project).
-- The **«** button next to *Compose* folds the sidebar into a narrow strip, giving the preview more room. The choice is remembered.
+- **The batch grid.** When a job that made several outputs finishes, all of them fill the preview as a grid until you step away. A batch of takes shows each as a player, one under another. Each tile has the same **⋯** menu as the Gallery. A phone goes straight back to the latest output.
+- **Video and takes** play in the preview in the same [player](gallery.md#the-player) as the viewer. Pause a video partway to use that frame; see [Use a paused frame](gallery.md#use-a-paused-frame).
+
+Finished images, videos and audio appear in the **Gallery strip**, newest first. It is the same list as the [Gallery](gallery.md) page, so a new output, a delete or a move shows in both. A strip tile's **⋯** menu has **Move to project…**; see [Move to project](gallery.md#move-to-project). On a phone, swipe up for the Gallery.
+
+### Notices
+
+Saves, moves and errors appear as short notices, one at a time; the next appears when you dismiss one or its time runs out. Pointing at a notice keeps it on screen.
 
 ## Model-specific controls
 
-Some models change what the Workspace offers:
-
-- **Ideogram 4 Instant** adds a JSON caption mode and a **First sigma** setting. It has no start image or upscale, so the **Images** section is hidden, and its width and height are limited to 256–2048 in steps of 16. See [Ideogram 4](../concepts/models.md#ideogram-4-instant).
-- **Video** adds **Duration (s)**, **Audio**, **Low memory** and, on models that follow one, an [**Audio track**](#audio-track).
-- **Audio** replaces the prompt box and settings with those of its [kind](#the-audio-tab).
+**Ideogram 4 Instant** adds a JSON caption mode and a **First sigma** setting. It has no start image or upscale, so the **Images** section is hidden, and its width and height are limited to 256–2048 in steps of 16. See [Ideogram 4](../reference/models.md#ideogram-4-instant) and [Use Ideogram 4's controls](../guides/images.md#use-ideogram-4s-controls).

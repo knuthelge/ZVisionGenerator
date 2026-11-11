@@ -288,7 +288,7 @@ class TestConfigurationDocExample:
     """The example in the configuration docs is the three presets' settings, so it is parsed and checked like the config."""
 
     def _example(self) -> dict:
-        text = (REPO_ROOT / "docs" / "concepts" / "configuration.md").read_text(encoding="utf-8")
+        text = (REPO_ROOT / "docs" / "reference" / "configuration.md").read_text(encoding="utf-8")
         section = text.split("## `audio_model_presets`", 1)[1].split("\n## ", 1)[0]
         block = re.search(r"```yaml\n(.*?)```", section, re.DOTALL)
         assert block, "the audio_model_presets section needs a yaml example"

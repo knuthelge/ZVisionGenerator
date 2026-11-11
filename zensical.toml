@@ -5,92 +5,92 @@ repo_url = "https://github.com/knuthelge/ZVisionGenerator"
 repo_name = "knuthelge/ZVisionGenerator"
 
 extra_css = ["stylesheets/brand.css", "stylesheets/home.css"]
-extra_javascript = ["javascripts/banner.js"]
 
 nav = [
-  { "Home" = [
-    "index.md",
-    { "Install" = "install.md" },
+  { "Home" = "index.md" },
+  { "Get started" = [
+    { "Install" = "get-started/install.md" },
+    { "Your first image" = "get-started/first-image.md" },
+    { "Your first video" = "get-started/first-video.md" },
+    { "Your first audio" = "get-started/first-audio.md" },
   ] },
-  { "Web UI" = [
-    "web-ui/index.md",
-    { "Get started" = [
-      { "Your first image" = "web-ui/first-image.md" },
-      { "Your first video" = "web-ui/first-video.md" },
-    ] },
-    { "Pages" = [
-      { "Workspace" = "web-ui/workspace.md" },
-      { "Gallery and viewer" = "web-ui/gallery.md" },
-      { "Prompts" = "web-ui/prompts.md" },
-      { "Models" = "web-ui/models.md" },
-      { "Config" = "web-ui/config.md" },
-      { "Job log" = "web-ui/job-log.md" },
-    ] },
-    { "More" = [
-      { "Phones, tablets and other computers" = "web-ui/devices.md" },
-      { "Keyboard shortcuts" = "web-ui/shortcuts.md" },
-    ] },
-  ] },
-  { "CLI" = [
-    "cli/index.md",
-    { "How-to" = [
-      { "Generate images" = "cli/images.md" },
-      { "Generate videos" = "cli/video.md" },
-      { "Generate audio" = "cli/audio.md" },
-      { "Batches and prompt files" = "cli/batches.md" },
-      { "Enhance prompts" = "cli/enhance.md" },
-      { "Manage models and LoRAs" = "cli/models.md" },
-    ] },
-    { "Reference" = [
-      { "Command reference" = "cli/reference.md" },
-    ] },
+  { "Guides" = [
+    "guides/index.md",
+    { "Make images" = "guides/images.md" },
+    { "Make video" = "guides/video.md" },
+    { "Make music" = "guides/music.md" },
+    { "Make speech and sound" = "guides/speech-and-sound.md" },
+    { "Get better results" = "guides/better-results.md" },
+    { "Run batches from prompt files" = "guides/batches.md" },
+    { "Download, delete and convert models" = "guides/models.md" },
   ] },
   { "Concepts" = [
     "concepts/index.md",
-    { "Making things" = [
-      { "Models" = "concepts/models.md" },
-      { "Prompts and prompt files" = "concepts/prompts.md" },
-      { "Prompt enhancer" = "concepts/prompt-enhancer.md" },
-      { "Images" = "concepts/images.md" },
-      { "Video" = "concepts/video.md" },
-      { "Audio" = "concepts/audio.md" },
-      { "Upscaling" = "concepts/upscaling.md" },
-      { "Projects" = "concepts/projects.md" },
-      { "LoRAs" = "concepts/loras.md" },
-    ] },
-    { "Your machine" = [
-      { "Memory" = "concepts/memory.md" },
-      { "Quantization" = "concepts/quantization.md" },
-      { "Data folder" = "concepts/data-folder.md" },
-      { "Configuration" = "concepts/configuration.md" },
-      { "Troubleshooting" = "concepts/troubleshooting.md" },
-    ] },
+    { "Prompt syntax" = "concepts/prompt-syntax.md" },
+    { "Prompt enhancer" = "concepts/prompt-enhancer.md" },
+    { "LoRAs" = "concepts/loras.md" },
+    { "Upscaling" = "concepts/upscaling.md" },
+    { "Projects" = "concepts/projects.md" },
+    { "Memory and quantization" = "concepts/memory.md" },
+  ] },
+  { "Web UI" = [
+    "web-ui/index.md",
+    { "Workspace" = "web-ui/workspace.md" },
+    { "Audio tab" = "web-ui/audio.md" },
+    { "Gallery and viewer" = "web-ui/gallery.md" },
+    { "Prompts page" = "web-ui/prompts.md" },
+    { "Models page" = "web-ui/models.md" },
+    { "Config page" = "web-ui/config.md" },
+    { "Job log" = "web-ui/job-log.md" },
+    { "Phones, tablets and other computers" = "web-ui/devices.md" },
+    { "Keyboard shortcuts" = "web-ui/shortcuts.md" },
+  ] },
+  { "CLI" = [
+    "cli/index.md",
+    { "Make images" = "cli/images.md" },
+    { "Make video" = "cli/video.md" },
+    { "Make audio" = "cli/audio.md" },
+    { "Batches and prompt files" = "cli/batches.md" },
+    { "Models and LoRAs" = "cli/models.md" },
+    { "Command reference" = "cli/reference.md" },
+  ] },
+  { "Reference" = [
+    "reference/index.md",
+    { "Troubleshooting" = "reference/troubleshooting.md" },
+    { "Configuration" = "reference/configuration.md" },
+    { "Models and licences" = "reference/models.md" },
+    { "Data folder" = "reference/data-folder.md" },
   ] },
   { "Developer" = [
     "developer/index.md",
-    { "Working on the code" = [
+    { "Start here" = [
       { "Conventions" = "developer/conventions.md" },
-      { "Project structure" = "developer/project-structure.md" },
-      { "How-to" = "developer/how-to.md" },
+      { "Testing" = "developer/testing.md" },
       { "Writing docs" = "developer/docs.md" },
     ] },
-    { "Architecture" = [
-      { "Overview" = "developer/architecture.md" },
+    { "How it works" = [
+      { "Architecture" = "developer/architecture.md" },
       { "Backends" = "developer/backends.md" },
       { "Jobs and workflows" = "developer/workflows.md" },
       { "Web server" = "developer/web-server.md" },
       { "Model downloads" = "developer/downloads.md" },
       { "App database" = "developer/app-database.md" },
       { "Frontend" = "developer/frontend.md" },
-      { "Curated LoRA list" = "developer/curated-loras.md" },
+    ] },
+    { "Recipes" = [
+      { "How-to" = "developer/how-to.md" },
     ] },
     { "Maintenance" = [
-      { "Prompt-enhancer bench" = "developer/enhancer-bench.md" },
       { "Vendored packages" = "developer/vendored.md" },
+      { "Curated LoRA list" = "developer/curated-loras.md" },
+      { "Prompt-enhancer bench" = "developer/enhancer-bench.md" },
       { "Releasing" = "developer/releasing.md" },
     ] },
   ] },
 ]
+
+[project.plugins.glightbox]
+skip_classes = ["zh__logo"]
 
 [project.theme]
 logo = "assets/ziv-icon.svg"

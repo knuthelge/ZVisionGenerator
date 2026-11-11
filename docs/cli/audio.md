@@ -1,141 +1,170 @@
-# Generate audio
+# Make audio
 
-`ziv-audio` makes songs and instrumentals, speech and sound. Every option is in the [command reference](reference.md#ziv-audio); this page shows the common tasks. `--enhance` rewrites a sound's description or a song's style; Describe it and the lyrics and script helpers are Web UI only. What each kind does, the voice rules and the limits are in [Audio](../concepts/audio.md).
+`ziv-audio` makes music, speech and sound. The model you pick with `-m` decides what is made: `yue2` and `sa3` (with `--kind music`) make songs and instrumentals, `qwen3_tts` reads speech, and `sa3` makes sound. It needs [ffmpeg](reference.md#ffmpeg). The guides [Make music](../guides/music.md) and [Make speech and sound](../guides/speech-and-sound.md) say what each setting does and why.
 
-The model you pick with `-m` decides what is made: `yue2` music, `qwen3_tts` speech, `sa3` sound or music. `--kind music`, `--kind speech` or `--kind sound` names the kind; a model that makes one kind needs none (`sa3` makes two, and is a sound unless you say `--kind music`), and a kind the model doesn't make is refused with the kinds it does.
+Takes are saved as FLAC, named `music_`, `speech_` or `sound_` plus the date and time, in the current folder or the one you give with `-o`, with their settings inside. `-r` makes several takes with one model load, each with its own random seed unless you set `--seed`. While a run goes, press ++n++ to skip the take, ++r++ to repeat it with a new seed, ++p++ to pause or ++q++ to quit.
 
-## A song
+`ziv-audio` takes no prompt file; to make many takes from a list, use a [shell loop](#speech-from-a-text-file).
+
+## Music { #music }
+
+### Make a song with lyrics
 
 ```bash
-ziv-audio -m yue2 --prompt "upbeat synth-pop, female vocal" --lyrics-file song.txt
+ziv-audio -m yue2 --prompt "upbeat synth-pop, female vocal" --lyrics-file song.txt --tempo 96 --key F#m
 ```
 
-`--prompt` is the style. The lyrics come from `--lyrics` or a file, and are written in sections:
-
-```text
+```text title="song.txt"
 [verse]
 Streetlights hum along the avenue
 [chorus]
 Take me home tonight
 ```
 
-The song is as long as its lyrics make it, up to six minutes.
+`--prompt` is the style, and the lyrics come from the file, or from `--lyrics "..."` in the command. You get a song; its length follows the lyrics. `--tempo` is beats per minute (40 to 220) and `--key` is `C`, `F#`, `Dm`, `F#m`… Leave either out and the model chooses. See [Write the style and lyrics](../guides/music.md#music).
 
-### Tempo and key
-
-```bash
-ziv-audio -m yue2 --prompt "upbeat synth-pop, female vocal" --lyrics-file song.txt --tempo 96 --key F#m
-```
-
-`--tempo` is in beats per minute, 40 to 220; `--key` is one of the 24 keys, with an `m` for minor (`ziv-audio --help` lists them). Leave either out and the model chooses. See [Tempo and Key](../concepts/audio.md#tempo-and-key).
-
-## An instrumental
-
-Leave the lyrics out, or give only section tags:
+### Make an instrumental
 
 ```bash
-ziv-audio -m yue2 --prompt "calm piano, slow"
 ziv-audio -m yue2 --prompt "calm piano, slow" --lyrics "[Intro] [Instrumental] [Solo] [Outro]"
 ```
 
-With no lyrics the instrumental has eight sections. Each tag is a section, so adding or removing tags makes the piece longer or shorter. See [Music](../concepts/audio.md#music).
+Lyrics with only `[section]` tags, or none, make an instrumental, and the tags set its length. The command says whether it is making a song or an instrumental before it starts.
 
-Stable Audio makes an instrumental of a length you choose, 30 seconds when you give none:
+### Make music with Stable Audio
 
 ```bash
 ziv-audio -m sa3 --kind music --prompt "warm lo-fi beat, soft keys" --tempo 80 --key Dm --seconds 90
 ```
 
-See [Stable Audio under Music](../concepts/audio.md#stable-audio-under-music).
+Stable Audio takes no lyrics. `--seconds` sets the length, and left out it is 30 seconds. See [Make music with Stable Audio](../guides/music.md#stable-audio-under-music).
 
-## Speech
-
-```bash
-ziv-audio -m qwen3_tts --prompt "Welcome back. It's good to see you again."
-```
-
-Without a voice option, the model reads in its default voice, Ryan. The text can be up to 10,000 characters; see [Speech](../concepts/audio.md#speech).
-
-### A default voice
+### Polish the style and make four takes
 
 ```bash
-ziv-audio -m qwen3_tts --prompt "Welcome back." --speaker aiden
+ziv-audio -m yue2 --prompt "sad folk" --lyrics-file song.txt --enhance genre=folk,instruments=guitar+violin,singer=female -r 4
 ```
 
-`--speaker` takes the id of one of the model's nine default voices; `ziv-audio --help` lists them, and [Voices](../concepts/audio.md#voices) names them with their languages.
+`--enhance` rewrites the style into a fuller description once, before the model loads, and all four takes use it. Put `+` between several values. The keys and values are in [the audio enhance spec](reference.md#the-audio-spec). `--enhance-note "..."` is your own direction in words. See [Polish the style with the enhancer](../guides/music.md#enhance-the-prompt).
 
-### Delivery
+## Speech { #speech }
+
+Without a voice option, the model reads in its default voice, `ryan`.
+
+### Speak in a built-in voice
 
 ```bash
-ziv-audio -m qwen3_tts --prompt "I thought we were friends. [sad] You never even called." \
-  --pace slow --expressiveness high
-ziv-audio -m qwen3_tts --prompt "Don't tell anyone." --manner whisper --emotion afraid
+ziv-audio -m qwen3_tts --prompt "I thought we were friends. [sad] You never even called." --speaker aiden --pace slow --expressiveness high
 ```
 
-`--emotion`, `--manner`, `--pace`, `--pitch` and `--expressiveness` set how a default voice says the text, and marks such as `[sad]` in the text change it from there on. `--vibe` starts all five from a named style (`calm-narrator`, `storyteller`, `excited-host`, `announcer`, `sad-confession` or `whispered-secret`), and the options then change one. They are refused with `--voice`: a saved voice or a recording reads as it was made. See [Delivery](../concepts/audio.md#delivery).
+`--speaker` picks the voice: `ryan`, `aiden`, `vivian`, `serena`, `uncle_fu`, `dylan`, `eric`, `ono_anna` or `sohee`. The delivery options are `--emotion`, `--manner` (`natural`, `whisper`, `shout`), `--pace`, `--pitch` and `--expressiveness`. A mark such as `[sad]` in the text changes the delivery from there on; see [Delivery marks](../guides/speech-and-sound.md#marks).
 
-### A voice from a recording
+To start all five delivery options from a named style, use `--vibe`, then change one:
 
 ```bash
-ziv-audio -m qwen3_tts --prompt "Welcome back." \
-  --voice me.wav --voice-text "Hello, this is me." --voice-consent
+ziv-audio -m qwen3_tts --prompt "Good evening, and welcome to the show." --vibe announcer --pitch low
 ```
 
-The recording is 3 to 30 seconds long, and `--voice-text` is what it says. `--voice-consent` confirms the speaker allows their voice to be cloned; without it the command stops. The first time a take follows a recording or a saved voice, the cloning files (about 4.5 GB) download; the usual download prompt lists them first. See [Follow a recording](../concepts/audio.md#follow-a-recording).
+The styles are `calm-narrator`, `storyteller`, `excited-host`, `announcer`, `sad-confession` and `whispered-secret`. The delivery options work only with a built-in voice: they are refused with `--voice`, because a saved voice or a recording reads as it was made.
 
-A speech take made in a default voice can be the voice of another take without `--voice-consent`. Its text is what `--voice-text` says:
-
-```bash
-ziv-audio -m qwen3_tts --prompt "And then it rained." --voice speech_2026-11-01_10-00-00.flac --voice-text "Welcome back."
-```
-
-### A saved voice
+### Speak in a saved voice
 
 ```bash
 ziv-audio -m qwen3_tts --prompt "And then it rained." --voice Morgan
 ```
 
-`--voice` also takes the name of a voice saved in the Web UI, in any case, or its file slug. A file by that name in the current folder is used as a recording first. A saved voice brings its own transcript and consent, so `--voice-text` and `--voice-consent` are refused with it.
+`--voice` takes the name of a voice you saved in the Web UI, in any case, or its file slug. A saved voice brings its own transcript and consent, so `--voice-text` and `--voice-consent` are refused with it. A file by that name in the current folder is used as a recording first.
 
-The CLI cannot save or design voices; see [Your voices](../concepts/audio.md#your-voices).
-
-## Sound
+### Speak in the voice of a recording
 
 ```bash
-ziv-audio -m sa3 --prompt "rain on a tin roof, distant thunder" --seconds 30
+ziv-audio -m qwen3_tts --prompt "Welcome back." --voice me.wav --voice-text "Hello, this is me." --voice-consent
 ```
 
-`--seconds` is the length, 1 second up to the model's limit. Left out, it is 12 seconds, or the length of the sound's type:
+The recording is 3 to 30 seconds long, and `--voice-text` is exactly what it says. `--voice-consent` confirms that the speaker allows their voice to be cloned; without it the command stops. A speech take made in a built-in voice can be the voice of another take without `--voice-consent`: give its file as `--voice` and its text as `--voice-text`.
+
+The first time a take follows a recording or a saved voice, the cloning files (about 4.5 GB) download after the model's own. The command asks nothing before it downloads. A progress line shows the download, ++q++ stops it, and the licence terms it prints first name only the model's own files. See [Clone a voice from a recording](../guides/speech-and-sound.md#clone-a-voice-from-a-recording).
+
+### Read several lines from a text file { #speech-from-a-text-file }
+
+Put one line of speech on each line of a file:
+
+```text title="lines.txt"
+Welcome back. It's good to see you again.
+The doors open at nine.
+Please keep your tickets with you.
+```
+
+A loop makes one take per line, in a folder `lines`:
+
+=== "macOS"
+
+    ```bash
+    while IFS= read -r -u 3 line; do
+      [ -n "$line" ] || continue
+      ziv-audio -m qwen3_tts --prompt "$line" --speaker aiden -o lines || break
+    done 3< lines.txt
+    ```
+
+=== "Windows"
+
+    ```powershell
+    foreach ($line in Get-Content lines.txt) {
+      if (-not $line.Trim()) { continue }
+      ziv-audio -m qwen3_tts --prompt $line --speaker aiden -o lines
+      if ($LASTEXITCODE -ne 0) { break }
+    }
+    ```
+
+=== "Linux"
+
+    ```bash
+    while IFS= read -r -u 3 line; do
+      [ -n "$line" ] || continue
+      ziv-audio -m qwen3_tts --prompt "$line" --speaker aiden -o lines || break
+    done 3< lines.txt
+    ```
+
+You get one `speech_<date>_<time>.flac` per line. Each line loads the model again, so it is slower than `-r`, which makes several takes of one text. The loop reads the file through a separate input (`3<`), so the command keeps the terminal and its keys. Press ++ctrl+c++ to stop the loop; a take that fails stops it too, because `ziv-audio` then exits with `2`. See [Run commands in a loop and in scripts](index.md#loops-and-scripts).
+
+## Sound { #sound }
+
+### Make a sound effect
 
 ```bash
-ziv-audio -m sa3 --prompt "a door slamming" --sound-type effect      # 5 s
-ziv-audio -m sa3 --prompt "a single drum hit" --sound-type one-shot  # 2 s
+ziv-audio -m sa3 --prompt "a heavy wooden door slams shut in a stone hall" --sound-type effect --seconds 4
 ```
 
-`--sound-type` is `auto`, `ambience`, `effect` or `one-shot`. See [Sound](../concepts/audio.md#sound).
+`--sound-type` is `auto`, `ambience`, `effect` or `one-shot`, and sets the length when you give no `--seconds`: 12 s for `auto` and `ambience`, 5 s for `effect` and 2 s for `one-shot`. A length you give is used as it is, from 1 second up to 380.
 
-## Enhance the prompt
+### Make a sound of an exact length
 
 ```bash
-ziv-audio -m sa3 --prompt "rain on a tin roof" --enhance space=forest,movement=receding
-ziv-audio -m yue2 --prompt "sad folk" --lyrics-file song.txt --enhance genre=folk,instruments=guitar+violin,singer=female
+ziv-audio -m sa3 --prompt "wind in the pines, a woodpecker tapping" --seconds 30 --enhance space=forest,distance=far
 ```
 
-`--enhance` rewrites a sound's description or a song's style into the shape the model was trained on, and is written the same way as for [images](enhance.md#the-spec). Speech is read as written. See [Audio](../concepts/prompt-enhancer.md#audio).
+A sound takes `space`, `distance`, `over_time` and `movement` in `--enhance`, with the values in [the audio enhance spec](reference.md#the-audio-spec). Speech refuses `--seconds` and `--enhance`: its length follows the text, and it is read as written. See [Polish the prompt with the enhancer](../guides/speech-and-sound.md#polish-the-prompt-with-the-enhancer).
 
-## Several takes
+## Flags
 
-```bash
-ziv-audio -m sa3 --prompt "a busy market" --seconds 20 --runs 4
-ziv-audio -m yue2 --prompt "lo-fi hip hop" --seed 42
-```
+Every flag, with its default and limits, is in the [command reference](reference.md#ziv-audio).
 
-`--runs` makes several takes with one model load, each with its own random seed unless you set `--seed`. While it runs, press ++n++ to skip the take, ++r++ to repeat it with a new seed, ++p++ to pause or ++q++ to quit.
-
-## Files
-
-Takes are saved as FLAC in the current folder, or the one you give with `-o`, with their settings inside. See [Takes and files](../concepts/audio.md#takes-and-files).
-
-## Copying from the Web UI
-
-The terminal button in the Web UI's *Settings* header copies the same command for the settings on screen.
+| Flag | Does | In the Web UI |
+|---|---|---|
+| `-m` | The model: `yue2`, `qwen3_tts` or `sa3` | **Model** |
+| `--kind` | `music`, `speech` or `sound`, for a model that makes several | **Kind** |
+| `--prompt` | The style of a song, the text to read, or the description of a sound | **Style**, **Text**, **Prompt** |
+| `--lyrics`, `--lyrics-file` | Lyrics of a song (`yue2` only) | **Lyrics** |
+| `--tempo`, `--key` | Tempo and key of a song | **Tempo**, **Key** |
+| `--seconds` | Length in seconds (music from `sa3`, and sound) | **Length (s)** |
+| `--sound-type` | The type of a sound | **Type** |
+| `--speaker` | A built-in voice | **Voice** |
+| `--voice` | A saved voice, or a recording | **Voice** |
+| `--voice-text`, `--voice-consent` | What a recording says, and the speaker's permission | **What it says**, the consent tick |
+| `--vibe` | A named delivery style | **Vibe** |
+| `--emotion`, `--manner`, `--pace`, `--pitch`, `--expressiveness` | Delivery of a built-in voice | **Emotion**, **Manner**, **Pace**, **Pitch**, **Expressiveness** |
+| `--enhance`, `--enhance-note`, `--no-enhance` | Rewrite a song's style or a sound's description first | **Enhance**, **Direction** |
+| `--enhance-model` | The enhancer model | **Prompt enhancer model** (Config page) |
+| `-r` | How many takes to make | **Batch size** |
+| `--seed` | The seed, used for every take | **Seed** |
+| `-o` | The output folder | **Output folder** (Config page) |

@@ -1,4 +1,4 @@
-/* Home page hero: the logo and the product screenshot on a blurred backdrop of a generated image. */
+/* Home page hero: the logo, the pitch, the two buttons and the product screenshot on a blurred backdrop of a generated image. */
 
 .zh {
   position: relative;
@@ -6,7 +6,7 @@
   margin-left: calc(50% - 50vw);
   margin-top: -2.6rem;
   margin-bottom: 2.5rem;
-  padding: 4.5rem 1.5rem 0;
+  padding: 2.6rem 1.5rem 0;
   overflow: hidden;
   text-align: center;
   color: #fff;
@@ -28,15 +28,15 @@
 
 .zh__logo {
   display: block;
-  width: min(22rem, 78vw);
+  width: min(14rem, 60vw);
   height: auto;
-  margin: 0 auto 2.2rem;
+  margin: 0 auto 1.4rem;
 }
 
 .zh h1 {
   max-width: 42rem;
   margin: 0 auto 0.8rem;
-  font-size: 2.7rem;
+  font-size: 2.5rem;
   font-weight: 800;
   letter-spacing: -0.02em;
   line-height: 1.08;
@@ -50,16 +50,27 @@
   color: rgba(255, 255, 255, 0.8);
 }
 
-.zh__buttons {
+
+.md-typeset .zh a:not(.md-button) {
+  color: #5eead4;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.zh__buttons > p {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.7rem;
+  max-width: none;
+  margin: 0 auto 1rem;
 }
 
 .md-typeset .zh__btn {
   display: inline-block;
+  margin: 0;
   padding: 0.65rem 1.3rem;
+  border: 0;
   border-radius: 0.5rem;
   font-weight: 700;
   text-decoration: none;
@@ -75,18 +86,25 @@
 
 @media (hover: hover) {
   .md-typeset .zh__btn:hover {
+    color: #fff;
     background: rgba(255, 255, 255, 0.2);
   }
 
   .md-typeset .zh__btn--primary:hover {
+    color: #062a26;
     background: #5eead4;
   }
+}
+
+.zh .zh__terminal {
+  margin-bottom: 0;
+  font-size: 0.9rem;
 }
 
 .zh__shot {
   display: block;
   width: min(62rem, 92vw);
-  margin: 3rem auto;
+  margin: 2.2rem auto 3rem;
   border-radius: 0.6rem;
   box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.15);
 }
@@ -104,17 +122,45 @@
   animation-delay: 0.2s;
 }
 
-@media (max-width: 760px) {
+/* Phone: the header already carries the logo, the buttons stack at full width, and the screenshot spans the width. */
+
+@media (max-width: 600px) {
   .zh {
-    padding-top: 3rem;
+    padding-top: 1.8rem;
   }
 
   .zh__logo {
-    margin-bottom: 1.6rem;
+    display: none;
   }
 
   .zh h1 {
-    font-size: 2rem;
+    margin-bottom: 0.6rem;
+    font-size: 1.9rem;
+  }
+
+  .zh p {
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+
+  .zh__buttons > p {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .md-typeset .zh__btn {
+    text-align: center;
+  }
+
+  .zh__shot {
+    width: 100%;
+    margin: 1.6rem auto 2rem;
+  }
+
+  .md-typeset .zhome .grid.cards,
+  .md-typeset .zhome .grid.cards > ul {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -142,7 +188,7 @@
   }
 }
 
-/* Home page body: one centred column under the hero, sections marked in teal, the feature list as cards. */
+/* Home page body: one centred column under the hero, with what you can make as cards. */
 
 .zhome {
   --zhome-surface: #f3f5f6;
@@ -181,47 +227,13 @@
   max-width: 38rem;
 }
 
-.md-typeset .zhome > .highlight {
-  max-width: 28rem;
-}
-
-.md-typeset .zhome > .highlight code {
-  font-size: 0.75rem;
-}
-
-.md-typeset .zhome__features ul,
-.md-typeset .zhome__next ul {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
-  margin: 0 0 1.2rem;
-  padding: 0;
-  list-style: none;
-}
-
-.md-typeset .zhome__features ul {
-  gap: 0.8rem;
-}
-
-.md-typeset .zhome__features ul > li {
-  margin: 0;
-  padding: 0.9rem 1.1rem;
-  border-radius: 0.6rem;
-  line-height: 1.55;
-  background: var(--zhome-surface);
-}
-
-.md-typeset .zhome__next ul {
-  column-gap: 2rem;
-}
-
-.md-typeset .zhome__next ul > li {
-  margin: 0;
-  padding: 0.7rem 0;
-  border-top: 1px solid var(--md-default-fg-color--lightest);
-}
-
 .md-typeset .zhome .grid {
   gap: 0.8rem;
+}
+
+.md-typeset .zhome .grid.cards,
+.md-typeset .zhome .grid.cards > ul {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
 }
 
 .md-typeset .zhome .grid.cards > ul > li {
@@ -236,78 +248,3 @@
     font-size: 1.25rem;
   }
 }
-
-/* Section banners: the hero's treatment at the top of each section's start page. */
-
-.zb.zb {
-  position: relative;
-  margin: 0 0 2rem;
-  padding: 3.2rem 2rem 2.6rem;
-  overflow: hidden;
-  border-radius: 0.8rem;
-  text-align: center;
-  color: #fff;
-  background: #0b0d12;
-}
-
-.zb.zb::before {
-  content: "";
-  position: absolute;
-  inset: -1.5rem;
-  background: var(--zb-image) center / cover;
-  filter: blur(8px) saturate(1.2);
-  opacity: 0.6;
-}
-
-.zb.zb > * {
-  position: relative;
-}
-
-.zb.zb h1 {
-  margin: 0 0 0.6rem;
-  font-size: 2.4rem;
-  color: #fff;
-}
-
-.zb.zb p {
-  max-width: 34rem;
-  margin: 0 auto;
-  font-size: 0.95rem;
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.zb.zb a {
-  color: #5eead4;
-}
-
-.zb.zb .headerlink {
-  display: none;
-}
-
-/* Moved above the columns by banner.js: full width, square edges, the hero's height. */
-
-.zb.zb--wide {
-  margin: 0;
-  padding: 4rem 1.5rem 3.4rem;
-  border-radius: 0;
-}
-
-.zb.zb--wide::before {
-  inset: -2rem;
-  filter: blur(14px) saturate(1.25);
-  opacity: 0.55;
-}
-
-.zb.zb--wide h1 {
-  font-size: 2.9rem;
-}
-
-.zb.zb--wide p {
-  max-width: 38rem;
-  font-size: 1.05rem;
-}
-
-.zb--web-ui { --zb-image: url("../assets/sections/web-ui.webp"); }
-.zb--cli { --zb-image: url("../assets/sections/cli.webp"); }
-.zb--concepts { --zb-image: url("../assets/sections/concepts.webp"); }
-.zb--developer { --zb-image: url("../assets/sections/developer.webp"); }

@@ -1,31 +1,10 @@
-<div class="zb zb--concepts" markdown>
-
 # Concepts
 
-How the app works, whichever way you use it. The [Web UI](../web-ui/index.md) and [CLI](../cli/index.md) sections show where to click and what to type; these pages explain what happens and why.
+These are the ideas that several tasks share, explained once; the guides link here when a task needs one.
 
-</div>
-
-## Making things
-
-| Page | Covers |
-|---|---|
-| [Models](models.md) | The built-in models, what each is good at, and how a model name is found |
-| [Prompts and prompt files](prompts.md) | Random choices, snippets, structured prompts, negative prompts and video scenes |
-| [Prompt enhancer](prompt-enhancer.md) | The local model that rewrites your prompts, and its options |
-| [Images](images.md) | Sizes, start image, references and post-processing |
-| [Video](video.md) | Scene and action, sizes, sound and extending a clip |
-| [Audio](audio.md) | Songs, instrumentals, speech and sound effects, voices and the files they make |
-| [Upscaling](upscaling.md) | Upscaling new images, existing images and video |
-| [LoRAs](loras.md) | Adding styles and subjects to a model |
-| [Projects](projects.md) | Keeping a piece of work together: the picker, All files and moving files between projects |
-
-## Your machine
-
-| Page | Covers |
-|---|---|
-| [Memory](memory.md) | What fits, the memory badges and warnings |
-| [Quantization](quantization.md) | Running models at 8 or 4 bits, and stored copies |
-| [Data folder](data-folder.md) | Where models, LoRAs, outputs, logs and settings live |
-| [Configuration](configuration.md) | Every setting in `config.yaml` |
-| [Troubleshooting](troubleshooting.md) | Common problems and what to do |
+- [Prompt syntax](prompt-syntax.md): random choices, snippets, structured and negative prompts, and the prompt-file format.
+- [Prompt enhancer](prompt-enhancer.md): the local model that rewrites image and video prompts, and its options.
+- [LoRAs](loras.md): add-on files for a style or a subject, how to get them, and which models take which.
+- [Upscaling](upscaling.md): the ways to upscale images and video.
+- [Projects](projects.md): keeping a piece of work together, and moving files between projects.
+- [Memory and quantization](memory.md): what fits on your machine, the memory warnings, and running models at 8 or 4 bits.

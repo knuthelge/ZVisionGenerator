@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Prompt-enhancer bench
 
 The unit tests mock the enhancer, so they cover how a rewrite is asked for and parsed, not what a real model writes. The bench in `bench/enhance/` runs the real enhancer over fixed cases and counts how well the rewrites follow the request. Run it before and after changing the enhancer's wording (rules, option instructions, length plans) or a pinned enhancer model, and put the compare summary in the commit body or PR.
@@ -8,6 +13,7 @@ make enhance-bench ARGS="run --label main-smart --model smart"
 make enhance-bench ARGS="run --label try --tags quotes,short --seeds 1"   # tags include audio, lyrics, script and fill
 make enhance-bench ARGS="compare main-fast try"                  # writes bench/enhance/runs/compare-main-fast-try.md
 make enhance-bench ARGS="rescore main-fast try"                  # recompute checks from stored outputs, no model
+make enhance-bench ARGS="sheet main-fast try --label look --tags quotes"   # render the rewrites of image cases as a picture sheet
 ```
 
 - **Cases** live in `bench/enhance/cases.yaml`: a prompt (and a scene for video), the `enhance:` settings, the job context (ratio, frames, fps, audio, reference image, the extend source's prompt) and optional expectations (`keep`, `count`, `forbid`). Seeds come from the case id, so a run repeats with the same model, platform and settings.
@@ -28,5 +34,13 @@ make enhance-bench ARGS="rescore main-fast try"                  # recompute che
 - **`keep`** items match case-insensitively, each word as a stem ("river" finds "riverbank"), with up to two words in between ("green lamp" finds "green desk lamp"); `|` lists alternatives ("old man|elderly man"). **`count`** accepts a number word or digit with up to two words before the noun ("three fluffy cats").
 - **Rescore** recomputes the checks of stored runs from their outputs, after a check or a case's expectations change. A video's format result is kept, since the stored text can't show whether the pair needed the fallback.
 - **Compare** reports each check overall and per tag, speed, and the ten cases that changed most, side by side with a diff of their system prompts.
+- **Sheet** answers what the checks cannot: whether a different rewrite makes a different picture. Given the labels of one or more runs, it renders every image case's rewrites through the image CLI (`--model`, default `zit`; this loads that model, so it needs the hardware) and lays the pictures out in `index.html` in `bench/enhance/runs/<label>/`, one row per case and one column per run after the user's own prompt. One seed, ratio and size apply to every image (`--seed`, `--ratio`, `--size`), so only the prompt differs.
 
-The bench loads one enhancer model and nothing else. `tests/prompts/test_enhance_bench.py` covers its checks and plumbing with a fake model.
+The bench loads one enhancer model (and, for `sheet`, one image model). `tests/prompts/test_enhance_bench.py` covers its checks and plumbing with a fake model.
+
+## Other benches
+
+Two more benches in `bench/` are spikes for one decision each, run by hand and not part of any check:
+
+- `bench/transparent/` measures background-removal methods on rendered cases. Its `render` steps drive the image CLI in the app's environment; its `matte` and `sheet` steps need matting libraries and run in a separate environment, so the app's dependencies stay as they are. Its module docstring lists the commands.
+- `bench/video_upscale/` (macOS) renders source clips, upscales them with LTX's stage 2 against a bicubic baseline and records time and peak memory per phase; `sheet` and `review` write a blind comparison page. Its module docstring lists the commands.

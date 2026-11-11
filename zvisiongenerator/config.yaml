@@ -210,7 +210,7 @@ video_model_presets:
 
 # Settings of the audio models (music, speech, sound), keyed by model id. A platforms entry (cuda | mps) overrides settings
 # for that accelerator.
-# docs/concepts/configuration.md describes every key.
+# docs/reference/configuration.md describes every key.
 audio_model_presets:
   yue2:
     settings:

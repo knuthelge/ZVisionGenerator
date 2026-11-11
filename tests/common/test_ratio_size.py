@@ -23,7 +23,7 @@ from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.prompts import PromptFileInspection
 
 
-_IMAGES_DOC = REPO_ROOT / "docs" / "concepts" / "images.md"
+_IMAGES_DOC = REPO_ROOT / "docs" / "guides" / "images.md"
 
 # The few presets the runner and default-resolution tests look up, as (width, height).
 _SIZES_UNDER_TEST = {
@@ -40,7 +40,7 @@ def _sizes_config() -> dict:
 
 
 def _documented_sizes() -> dict[str, dict[str, tuple[int, int]]]:
-    """Parse the size table in docs/concepts/images.md into ``{ratio: {size: (width, height)}}``."""
+    """Parse the size table in docs/guides/images.md into ``{ratio: {size: (width, height)}}``."""
     rows: list[str] = []
     for line in _IMAGES_DOC.read_text(encoding="utf-8").splitlines():
         if line.startswith("|"):

@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Edit images.** A new **Edit** kind in the Image tab changes part of a picture you already have, or gives it more room. Paint the part to change, or extend a side, in a full-screen painter, then describe what should be there. It works on FLUX.2 Klein, on every platform. With nothing painted, FLUX.2 Klein changes the whole picture from the prompt. In the CLI, `ziv-image --edit` takes `--mask` and `--extend`.
 
 ### Changed
+- **The documentation is reorganised around what you want to do.** **Get started** takes you through Install to your first image, video and audio; **Guides** cover making images, video, music, speech and sound, getting better results, batches and models; **Concepts** explain the ideas several tasks share; **Web UI** describes each screen; **CLI** has its own tab with worked commands for each task and every flag; and **Reference** holds every setting, models and licences, the data folder and Troubleshooting, which lists problems by what you see and by the exact message. Pages moved, so old links to them no longer work. `cli/` and `cli/reference/` keep their URLs. Install and Your first image, video and audio are under `get-started/`; Images and Video under `guides/`; the CLI how-tos are `cli/images/`, `cli/video/`, `cli/audio/`, `cli/batches/` and `cli/models/`; Prompts is `concepts/prompt-syntax/` and Quantization is part of `concepts/memory/`; Models, Configuration, Data folder and Troubleshooting are under `reference/`. The Enhance page is gone: its values are in `cli/reference/`
 - **A last frame needs a first frame.** With a last frame and no first frame, **Generate** is disabled and says to add a first frame
 - The prompt enhancer repeats itself less, for images, video and audio.
 - **The prompt enhancer writes about 3× faster on Windows and Linux** with an NVIDIA GPU, with the same models and nothing new to install.
@@ -74,7 +75,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Upgrading from 0.13
 - **macOS needs macOS 14 Sonoma or newer**
-- **Windows: install again with the command in [Install](https://knuthelge.github.io/ZVisionGenerator/install/)** to move to PyTorch's CUDA 13.2 build
+- **Windows: install again with the command in [Install](https://knuthelge.github.io/ZVisionGenerator/get-started/install/)** to move to PyTorch's CUDA 13.2 build
 - **Windows/Linux: the first `ltx-4` or `ltx-8` job needs a connection once** to pin the LTX-2.3 files; nothing downloads again
 - **Stored q4 and q8 image copies are made again once**
 - **macOS: the same seed can give a slightly different image**, and a diffusers-format LoRA can apply at a different strength

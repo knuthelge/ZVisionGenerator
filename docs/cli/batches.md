@@ -1,8 +1,10 @@
 # Batches and prompt files
 
-A prompt file holds many prompts, grouped in named sets. Run a file and every active prompt is generated; add `-r` to run the whole file several times.
+A prompt file holds many prompts, and `ziv-image` and `ziv-video` make every active one, one after another, with one model load. The guide [Run batches from prompt files](../guides/batches.md) says how the file works and what happens when a prompt fails.
 
-## Run a prompt file
+## Write a prompt file
+
+A prompt file is YAML. Each top-level key is a set, holding a list of prompts, and `{a|b}` picks one option at random every time a prompt runs:
 
 ```yaml title="prompts.yaml"
 fox:
@@ -11,49 +13,94 @@ fox:
 
 lighthouse:
   - prompt: A lighthouse in a storm, waves crashing
+  - active: false
+    prompt: A lighthouse at calm sunset
+```
+
+`active: false` parks a prompt without deleting it. The full syntax, with snippets, negative prompts and the `enhance:` key, is in [Prompt syntax](../concepts/prompt-syntax.md#prompt-files).
+
+## Run a prompt file
+
+```bash
+ziv-image -m klein9b -p prompts.yaml
+```
+
+Every active prompt runs once: two fox images and one lighthouse. Without `-p`, the command looks for `prompts.yaml` in the current folder. `--prompt` on the command line replaces the file for that run.
+
+## Pick which prompts run
+
+The command line has no set picker. To run one set, put it in a file of its own, or switch the others off with `active: false`:
+
+```bash
+ziv-image -m klein9b -p fox.yaml
+```
+
+To try one prompt before a whole file, give it with `--prompt`; the file is then not read.
+
+## Run it more than once
+
+```bash
+ziv-image -m klein9b -p prompts.yaml -r 3
+```
+
+`-r 3` runs the whole file three times, in order: every prompt of run 1, then every prompt of run 2, and so on. Each run picks the `{a|b}` choices again and uses a new random seed, so the three fox-in-a-forest images differ. A fixed `--seed` is used for every run, which would make the same image each time for a prompt with no choices. All runs share one model load.
+
+## Make a video from a prompt file
+
+A video prompt can hold a `scene:` (who and where, the look, the camera) beside its `prompt:` (what happens):
+
+```yaml title="clips.yaml"
+snippets:
+  courtyard: A knight in a grey castle courtyard, overcast, handheld camera.
+
+castle:
+  - scene: $courtyard
+    prompt: She draws her sword and turns to the gate.
+  - scene: $courtyard
+    prompt: She sheathes the sword and walks toward the tower.
+  - prompt: A raven lands on the wall.
 ```
 
 ```bash
-ziv-image -m klein9b -p prompts.yaml        # every prompt once
-ziv-image -m klein9b -p prompts.yaml -r 3   # the whole file three times
-ziv-video -m ltx-4 -p clips.yaml            # video takes the same files
+ziv-video -m ltx-4 -p clips.yaml
+ziv-video -m ltx-4 -p clips.yaml --scene "A knight in a grey castle courtyard, overcast."
 ```
 
-- `-p` defaults to `prompts.yaml` in the current folder.
-- `--prompt` overrides `-p`.
-- Each run picks the `{a|b}` choices anew and uses a new seed, so `-r 3` gives three different images per prompt.
-- The set name starts the file name: `fox_2026-10-04_14-03-22.png`.
+Each entry makes a clip. In the second command, `--scene` fills in the entries that have no `scene:` of their own, here the raven. An image run ignores `scene:`, so one file can serve both commands. See [Scenes for video](../concepts/prompt-syntax.md#scenes-for-video).
 
-The full format, with snippets, structured prompts, negative prompts and video scenes, is in [Prompts and prompt files](../concepts/prompts.md). The Web UI's [Prompts page](../web-ui/prompts.md) edits the same files without YAML.
+A prompt file also works with `--extend`: every prompt continues the same clip and makes a file of its own. See [Continue a clip](video.md#extend).
 
-## Turn prompts on and off
-
-```yaml
-fox:
-  - prompt: A red fox sitting in fresh snow
-  - active: false
-    prompt: A red fox at the beach   # skipped
-```
-
-## Controls during a run
-
-While `ziv-image` or `ziv-video` runs a batch, single keys control it:
-
-| Key | Action | What happens |
-|---|---|---|
-| ++n++ | Skip | Stops the current image or video and moves to the next prompt |
-| ++q++ | Quit | Stops the current image or video and ends the batch |
-| ++p++ | Pause | Finishes the current image or video, then waits for a key |
-| ++r++ | Repeat | Finishes the current image or video, then makes it again with a new seed (same random choices and enhanced prompt) |
-
-The keys also work while prompts are enhanced and while the model loads. During enhancement, ++n++ skips the current rewrite (that image uses your original prompt), ++q++ stops before the model loads, ++p++ pauses, and ++r++ does nothing.
-
-`ziv-video` reads the keys in an interactive terminal, with or without `--review`. See [Controls while a video runs](../concepts/video.md#controls-while-a-video-runs).
-
-## Enhance a batch
+## Enhance every prompt
 
 ```bash
 ziv-image -m klein9b -p prompts.yaml --enhance style=photo,length=longer
+ziv-image -m klein9b -p prompts.yaml --no-enhance
 ```
 
-Every prompt is rewritten before the model loads. Prompt files can also set enhancement per entry with `enhance:`. See [Enhance prompts](enhance.md).
+`--enhance` rewrites every prompt of the file, with its `{a|b}` choices already picked, before the model loads, and overrides the `enhance:` entries of the file. `--no-enhance` turns them all off. The values are in [the enhance spec](reference.md#enhance-spec).
+
+## Where the files go
+
+Each file starts with the name of its set and then the date and time, such as `fox_2026-10-04_14-03-22.png` or `castle_2026-10-04_14-03-22.mp4`. A name that is taken gets `_2`, `_3`… so nothing is overwritten. `-o folder` saves them in another folder; see [Where files go](index.md#where-files-go). Each file records the prompt it was made from, with its choices picked.
+
+## Steer a run from the keyboard
+
+In a terminal, ++n++ skips to the next prompt, ++q++ ends the batch, ++p++ pauses after the current one and ++r++ repeats it with a new seed. See [Pause, skip or stop a run](../guides/batches.md#keys-during-a-run). A prompt that fails is skipped with a warning and the run goes on.
+
+## Many takes of audio
+
+`ziv-audio` takes no prompt file. `-r` makes several takes of one prompt, and to make one take for each of many texts, loop over a text file in the shell: see [Read several lines from a text file](audio.md#speech-from-a-text-file).
+
+## Flags
+
+Every flag is in the [command reference](reference.md#ziv-image).
+
+| Flag | Does | In the Web UI |
+|---|---|---|
+| `-p` | The prompt file; `prompts.yaml` when left out | **Prompt source** → **Prompt file** |
+| `--prompt` | One prompt, instead of the file | **Prompt source** → **Inline** |
+| `--scene` | `ziv-video`: a scene for entries that have none | **Default scene** |
+| `-r` | How many times to run the whole file | **Batch size** |
+| `--seed` | The seed, used for every run | **Seed** |
+| `--enhance`, `--no-enhance` | Rewrite every prompt, or none | **Enhance each image when generating** |
+| `-o` | The output folder | **Output folder** (Config page) |

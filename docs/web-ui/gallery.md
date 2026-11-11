@@ -1,152 +1,103 @@
 # Gallery and viewer
 
-The **Gallery** (++g++ ++g++) shows every image, video and audio file in your output folder, including ones the CLI made there, or just those of the [project](#projects) you have picked. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both.
+The **Gallery** (++g++ ++g++) shows every image, video and audio file in your output folder, including ones the command line made there, or just those of the [project](#projects) you have picked. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both. A click on a tile opens the viewer.
 
-![The Gallery page with a grid of images](../assets/screenshots/gallery-page.webp)
+![The Gallery page: a grid of images, a video and audio takes, newest first](../assets/screenshots/gallery-page.webp)
 
 ## Browse
 
-- **Filter** with **All media**, **Images only**, **Videos only** or **Audio only**, and sort **Newest first** or **Oldest first**. With **All files** picked, the filter also offers **Not in a project**.
-- Scroll down and more load in.
-- Click a tile, or press ++enter++ on it, to open the viewer.
-- Each tile's **⋯** menu has the same actions as the viewer, led by **Reuse settings**. Right-click a tile with a mouse, or press and hold it on a touch screen, for the same menu.
-- When you come back to the Gallery, it shows what it had, scrolled to the same place, and fetches anything new.
-- Transparent images show over a checkerboard. It is only a display aid; the file holds real transparency.
+Filter by kind and sort by date; with **All files** picked, the filter also offers **Not in a project**. More files load as you scroll, and coming back to the Gallery restores your place.
 
-## Projects
+Each tile's **⋯** menu has the same actions as the viewer, led by **Reuse settings**. Right-click a tile with a mouse, or press and hold it on a touch screen, for the same menu. Transparent images show over a checkerboard, which is only a display aid; the file holds real transparency.
 
-Pick a project with the picker in the top bar, as on every page. What a project is and what it shares with the rest of the app is in [Projects](../concepts/projects.md).
+**On a phone:** see [Viewer and Gallery on a phone](devices.md#the-viewer-on-a-phone).
 
-- With a project picked, the Gallery shows only its files, and the line under the title starts with its name. A project with nothing in it says *Nothing in Night Bus yet*.
-- Changing the picked project clears the selection, closes the viewer and scrolls back to the top. The filter and sort stay as they are.
-- With **All files**, each tile's line leads with its project, such as *Night Bus · 11/8/2026*.
+### Projects
 
-## Audio
-
-An audio take is a tile with an icon for its kind, the words of the take, a thin waveform and its length. A tile doesn't play; open it for that.
-
-![The Gallery filtered to Audio only, with music, speech and sound tiles](../assets/screenshots/placeholder.svg "gallery-audio")
-
-The viewer shows a [player](#the-player): the take's waveform is its timeline, so click or drag it to seek. **Details** lists the kind, model, voice (the name of a saved voice while it exists), length, seed and format; the **Tempo · Key** of a song (*92 BPM · A minor*), the **Delivery** of a speech take in a default voice and the **Sound type** of a sound, each only when the take set it; how its text was written when it was [enhanced or filled in](../concepts/audio.md); and a **Note** when the model could not follow a setting of the take. **Reuse settings** opens the **Audio** tab on the take's kind with its settings; see [Takes and files](../concepts/audio.md#takes-and-files). **Download** and **Delete** work as for other files.
-
-An audio file without this app's settings, such as one you copied into the output folder, plays but has no **Reuse settings**.
-
-### Use as an audio track or a voice
-
-**Use as** on an audio take offers:
-
-- **Audio track** opens **Video** with the file as the clip's [audio track](workspace.md#audio-track). It is greyed, with the reason, when the video model can't follow a track.
-- **Voice** (speech takes) opens **Audio** on Speech with the take as a one-off recording and its text as **What it says**.
-- **Saved voice** (speech takes) saves the take as a voice in **Your voices**. A take that followed a recording or a saved voice also asks for the consent tick. See [Voices](../concepts/audio.md#voices).
-
-Both are greyed for a take longer than 30 seconds.
+The Gallery shows the files of the picked [project](../concepts/projects.md). Changing the project clears the selection, closes the viewer and scrolls back to the top; the filter and sort stay.
 
 ## Select, move and delete
 
-- ++space++ or ++x++ selects the focused tile; ++ctrl+a++ selects everything loaded.
-- **Move selected** moves the selection to a project; see [Move to project](#move-to-project). The button reads **Move** in a narrower window and in a phone's select bar.
-- ++delete++ deletes the selection, or the focused tile, after asking.
-- ++esc++ clears the selection.
+Select several tiles to move or delete them together; the keys are in [Keyboard shortcuts](shortcuts.md#gallery). Deleting removes the file from the output folder, after asking, and a file that can't be deleted stays selected.
 
-Deleting removes the file from the output folder.
+### Move to project { #move-to-project }
 
-## Move to project
-
-Move puts existing files into a project, or takes them out of one. The rules are in [Move a file to another project](../concepts/projects.md#move-a-file-to-another-project).
-
-- **One file:** **Move to project…** in its **⋯** menu, which a Gallery tile, the Workspace strip, the preview and the viewer all have. On a computer or tablet the viewer's toolbar also has a **Move** button.
-- **Several files:** select them, then **Move selected**.
-
-Choose the target in the list. The place the file is in now is checked and greyed out; for several files from different places nothing is checked. **New project…** asks for a name, then **Create and move** makes the project and moves the files into it.
-
-After the move a notice says where the files went. If some files couldn't be moved it says how many and why, and those stay selected. If none could be moved, the notice gives the reason.
-
-In **All files** a moved tile stays in the list, under its new project. In a project, or in **Not in a project**, a file that no longer belongs leaves the list, and the viewer steps to a neighbouring file.
+**Move to project…** is in the **⋯** menu of a Gallery tile, a Workspace strip tile, the preview and the viewer, and in the viewer's toolbar as **Move**. The rules are in [Move a file to another project](../concepts/projects.md#move-a-file-to-another-project).
 
 ## The viewer
 
-Clicking an image grows it out of its tile into the viewer. On a computer or iPad the viewer is a panel over the page, as wide as the window less a narrow margin, with the details beside the image; click outside it, or press ++esc++, to close it. On a phone it fills the screen; see [The viewer on a phone](devices.md#the-viewer-on-a-phone).
-
-Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for the first and last. Right-click the image for its menu.
+Clicking a tile grows it into the viewer. On a computer or iPad the viewer is a panel over the page with the details beside the image; on a phone it fills the screen, see [The viewer on a phone](devices.md#the-viewer-on-a-phone). Step through the set with the arrow keys. Zoom into an image to see its real pixels: click it on a computer, or pinch or double-tap on a touch screen.
 
 ![The viewer with the Details panel open, showing how the prompt was enhanced](../assets/screenshots/viewer-details.webp)
 
-| Action | Does | Key |
-|---|---|---|
-| **Details** | Shows the settings the file was made with | ++i++ |
-| **Reuse settings** | Loads those settings into the Workspace | ++r++ |
-| **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video; opens audio as a video's audio track, a speech voice or a saved voice | ++e++ |
-| **Extend** | Opens a video in Video, on its Extend kind | ++e++ |
-| **Edit** | Opens an image in Image, on its Edit kind, with an empty prompt and no paint. See [Edit an image](workspace.md#edit-an-image) | ++m++ |
-| **Upscale** | Upscales an image 2× or 4×, or a video 2× | ++x++ then ++2++ or ++4++ |
-| **Move** | Moves the file to a project. On a phone it is **Move to project…** in the **⋯** menu | |
-| **Download** | Saves the file to this device | ++d++ |
-| Copy prompt | Copies the prompt to the clipboard | ++c++ |
-| Delete | Deletes the file, after asking (++shift+delete++ skips asking) | ++delete++ |
+The toolbar offers **Reuse settings**, **Use as**, **Extend** (videos), **Edit** (images), **Upscale**, **Move**, **Download**, **Delete** and **Details**, described below. **Delete** asks first. The keys are in [Keyboard shortcuts](shortcuts.md#viewer).
 
-Zoom into an image to see its real pixels: click it on a computer, or pinch or double-tap on a touch screen.
+**Edit** (++m++) opens an image in **Image** on its **Edit** kind, with an empty prompt and no paint. What to do next is in [Edit a picture](../guides/images.md#edit), and the screen is described in [Edit an image](workspace.md#edit-an-image).
 
 ### The player
 
-Video and audio play in the viewer, in the Workspace preview and in the file browser's preview. A video opens on its first frame and never plays by itself. Click or tap the picture to play or pause. Click or drag the timeline along the foot of the picture to seek; while dragging, move up to slow the scrub to one frame at a time. The keys are in [Shortcuts](shortcuts.md#player).
+Video and audio play in the viewer, in the Workspace preview and in the file browser's preview. A video opens on its first frame and never plays by itself. Click or drag the timeline to seek; while dragging, move up to slow the scrub to one frame at a time. The player's keys are in [Keyboard shortcuts](shortcuts.md#player).
 
 ### Use a paused frame
 
-Pause a video partway through to pick a frame. The time at the left of the controls becomes a button, such as **3.2 s / 5.0 s ⌃**, in the viewer and in the Workspace preview. Click it for what you can do with that frame:
+Pause a video partway through to pick a frame. The time at the left of the controls becomes a menu button, such as **3.2 s / 5.0 s ⌃**, in the viewer and in the Workspace preview (where the **⋯** menu offers the same choices).
 
-![A paused video with its time as a menu button and the frame menu open: Extend from 3.2 s, First frame and Last frame](../assets/screenshots/placeholder.svg "viewer-frame-menu")
+![A paused video with its time as a menu button and the frame menu open: Extend from 3.2 s, First frame and Last frame](../assets/screenshots/viewer-frame-menu.webp)
 
-| Choice | Does |
-|---|---|
-| **Extend from 3.2 s** | Opens **Video** on its Extend kind with the clip as the source and the point at that frame. See [From a point](../concepts/video.md#from-a-point) |
-| **First frame** | Opens **Video** with the frame as its first frame |
-| **Last frame** | Puts the frame in **Video** as the last frame |
+**Extend from 3.2 s** opens **Video** on its Extend kind with the clip as the source and the point at that frame. **First frame** and **Last frame** put the frame into **Video** as that image.
 
 - A video at its start or playing is not a selection: **Extend** continues from the end of the clip.
 - A video stopped at its end offers its last frame.
 - A frame less than 25 frames in can't be extended from.
-- A frame a model can't use is greyed with the reason, such as *has no last frame*.
+- A frame a model can't use is greyed with the reason.
 
-In the Workspace preview, the **⋯** menu offers the same choices. What each one does is in [A frame of a video](../concepts/video.md#a-frame-of-a-video).
+What each one does is in [Use a frame of a video](../guides/video.md#a-frame-of-a-video) and [Extend from a point](../guides/video.md#from-a-point).
 
-### Details
+## Details
 
-**Details** lists what the file records, starting with its **Project** (*No project* for a file at the top of the output folder): prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, start image, audio track with the span of it the clip used (*song.mp3 · 1:30–1:34*), references, quant, upscale and post-processing. An edited or upscaled image also shows **Made from**, the image it came from. An image with a [transparent background](../concepts/images.md#transparent-background) shows *Transparent background: On*. See [Output files](../concepts/data-folder.md#output-files).
+**Details** shows how the file was made, starting with its **Project**. The fields are in [Output files](../reference/data-folder.md#output-files). **Enhanced with** shows how an enhanced prompt was made, with **Your prompt** under it, and **Made from** names the image an edit or an upscale was made from. **Reuse notice** lists what **Reuse settings** would have to change, such as an original model that isn't set up here (the default model is used instead).
 
-When the prompt was enhanced, Details shows how, as one line such as *Fast · Cinematic, Melancholic, Longer*, with **Your prompt** under it. An audio take shows the same for its Style, Text or Prompt, for example *Fast · Style · Folk*.
+### Audio takes { #audio }
 
-### Reuse settings
+A tile doesn't play; open it, and the viewer shows a [player](#the-player) whose waveform is the timeline.
 
-**Reuse settings** loads the file's settings into the Workspace: model, LoRAs, quant, size, seed, references and the rest.
+![The Gallery filtered to Audio only, with music, speech and sound tiles](../assets/screenshots/gallery-audio.webp)
 
-- Post-processing (**Sharpen**, **Contrast**, **Saturation**, **Transparent**), the upscale settings and **Strength** come back too. For an image upscaled in the viewer, only **Transparent** does.
+An audio file without this app's settings, such as one you copied into the output folder, plays but has no **Reuse settings**. What a take is and where it is saved is in [Find your takes](../guides/music.md#takes-and-files).
 
+## Reuse settings
+
+**Reuse settings** loads the file's settings into the Workspace tab that made it: model, LoRAs, quant, size, seed, references and the rest. A setting the file did not record takes its default, and the open tab's settings, images, prompts, LoRAs, quant and enhance options are replaced; the other tabs and kinds stay as they are. How to use it for variations is in [Make variations with Reuse](../guides/better-results.md#make-variations-with-reuse-and-a-new-seed).
+
+- Post-processing, the upscale settings and **Strength** come back too. For an image upscaled in the viewer, only **Transparent** does.
 - For an enhanced prompt, **Prompt** gets what you typed, **Enhanced** gets the rewrite, and the enhance options come back too.
 - For a video, Scene and Action are filled. A video that was itself an extension comes back with its source.
-- For audio, the settings the take was made with come back: the **Tempo** and **Key** of a song, the length, the **Delivery** of a speech take in a default voice, the saved voice of a take that followed one and the **Type** of a sound. A setting the take did not set, such as a song made without a Tempo, comes back on **Auto**.
+- An edit comes back on the **Edit** kind with the same image, prompt and settings. The paint isn't saved, so the Workspace says *Paint the area again*.
+- For audio, it opens the **Audio** tab on the take's kind with the settings it was made with. A setting the take did not set, such as a song made without a Tempo, comes back on **Auto**.
 
-### Use as
+## Use as
 
-**Use as** opens an image in the **Images** section of the Workspace, in the slot you choose:
+**Use as** changes only what it names. For an image it opens the **Images** section of the Workspace in the slot you choose; how each slot is used is in [Start from an image](../guides/images.md#start-from-an-image), [references](../guides/images.md#references) and [First and last frame](../guides/video.md#first-and-last-frame).
 
-- **Start image** opens **Image** with it as the start image and puts the prompt in the Prompt box. The text of **Video** stays as it was.
-- **Reference** adds it to **Image** as the next reference, and confirms with *Added as image 2*. The prompt and everything else stay as they are. The menu says which number it will get (*as image 2*), and the item is greyed, with the reason (*takes none*, *all 4 in use*), when the image model that **Image** opens on takes no references or has taken as many as it can.
-- **First frame** opens **Video** with it as the first frame and puts the prompt in Scene, since it describes the first frame, and leaves Action empty for what happens. The prompt of **Image** stays as it was.
-- **Last frame** opens **Video** with it as the last frame. **Generate** needs a first frame too.
+- **Start image** puts the prompt in the Prompt box. The text of **Video** stays as it was.
+- **Reference** adds the image as the next reference; the prompt and everything else stay as they are.
+- **First frame** puts the prompt in Scene, since it describes the first frame, leaving Action empty.
+- **Last frame** needs a first frame too before **Generate** works.
 
-A target the model it opens on can't use is greyed, with the reason beside it, such as *can't use a start image* or *has no last frame*. The arrow keys still stop on a greyed item, so you can read why; ++enter++ on it does nothing.
+A target the model it opens on can't use is greyed, with the reason beside it. The arrow keys still stop on a greyed item so you can read why.
 
-### Upscale a video
+### Use as an audio track or a voice { #use-as-an-audio-track-or-a-voice }
 
-**Upscale** on a video offers one item, such as **2× → 1536×896**, and makes `<name>_2x.mp4`, keeping the frames, frame rate and sound. Windows and Linux use SeedVR2, and mark a size that has to go one frame at a time **· very slow**. macOS uses LTX and offers the item for LTX clips. A size that may not fit memory is marked **· high memory**. See [Upscaling an existing video](../concepts/upscaling.md#upscaling-an-existing-video).
+On an audio take, **Use as** offers **Audio track**, which opens **Video** with the file as the clip's audio track (see [Follow an audio track](../guides/video.md#audio-track)), and, for speech takes, **Voice**, a one-off recording in **Audio** on Speech, and **Saved voice**, which saves the take in **Your voices**. A take that followed a recording or a saved voice also asks for the consent tick. Both voice items are greyed for a take longer than 30 seconds. See [Use a take as a voice](../guides/speech-and-sound.md#use-a-take-as-a-voice).
 
-### Upscale an image
+## Upscale menu
 
-The **Upscale** menu offers:
+**Upscale** is in the viewer's toolbar and in a tile's **⋯** menu. Each item starts a job that runs in the Workspace or joins its queue. What the options do, when one is missing and what they cost in memory is in [Upscaling](../concepts/upscaling.md).
 
-- **2×** and **4×**: a plain upscale that enlarges faithfully and adds fine detail. Works for any image.
-- **2× creative** and **4× creative**: the image model redraws the enlarged image with the image's own settings.
+### An image { #upscale-an-image }
 
-Each item shows the output size, for example `2× → 1664×2432`. The job runs in the Workspace, or joins the queue. The result is saved next to the original as `<name>_2x.png` or `<name>_4x.png`.
+The menu offers **2×** and **4×**, and **2× creative** and **4× creative** where the image's model can refine. What each does and where the result is saved is in [Upscaling a finished image](../concepts/upscaling.md#upscaling-an-existing-image).
 
-How the two kinds differ, and when an option is unavailable, is in [Upscaling an existing image](../concepts/upscaling.md#upscaling-an-existing-image).
+### A video { #upscale-a-video }
+
+The menu offers one item, which makes a 2× copy. Which clips have it, what the markers beside a size mean and how it differs between macOS and Windows or Linux is in [Upscaling a finished video](../concepts/upscaling.md#upscaling-an-existing-video).

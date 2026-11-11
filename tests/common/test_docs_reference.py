@@ -21,7 +21,7 @@ from zvisiongenerator.web import _build_parser as _build_ui_parser
 
 _DOCS = REPO_ROOT / "docs"
 _CLI_REFERENCE = _DOCS / "cli" / "reference.md"
-_CONFIG_REFERENCE = _DOCS / "concepts" / "configuration.md"
+_CONFIG_REFERENCE = _DOCS / "reference" / "configuration.md"
 
 # Sections whose keys users set; each key must appear under the section's own heading.
 _KEYED_SECTIONS = (

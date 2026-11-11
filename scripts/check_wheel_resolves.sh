@@ -5,7 +5,7 @@
 # resolves inside the repository fails here, before a release is published.
 #
 # Usage: scripts/check_wheel_resolves.sh
-#   Resolves the same three targets from any host, as docs/install.md tells users to install:
+#   Resolves the same three targets from any host, as docs/get-started/install.md tells users to install:
 #     linux    x86_64-unknown-linux-gnu, PyPI only (Linux gets its CUDA PyTorch build from PyPI)
 #     windows  x86_64-pc-windows-msvc, with PyTorch's CUDA index and --index-strategy unsafe-best-match
 #     macos    aarch64-apple-darwin at macOS 14 (uv assumes macOS 13 for that target, while mlx only ships macOS 14+ wheels)

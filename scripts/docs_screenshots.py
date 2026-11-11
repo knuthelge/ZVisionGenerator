@@ -468,6 +468,61 @@ async def _fill_video(page: Page) -> None:
     await _blur(page)
 
 
+async def _open_edit(browser: Browser, url: str) -> Page:
+    """Open the hero on the Image tab's Edit kind from the viewer, with nothing painted."""
+    page = await _page(browser, f"{url}/#/gallery")
+    await page.locator(f'[aria-label="View {_HERO}"]').first.click(force=True)
+    await page.wait_for_timeout(1200)
+    await page.keyboard.press("m")
+    await page.wait_for_timeout(2500)
+    return page
+
+
+async def _paint_moon(page: Page) -> None:
+    """Open the painter and paint over the left moon in overlapping strokes, then move the pointer off the picture."""
+    await page.get_by_test_id("edit-open-painter").first.click()
+    await page.wait_for_timeout(1500)
+    cx, cy, r = 500, 290, 140
+    for y in range(cy - r + 10, cy + r - 9, 20):
+        half = (r * r - (y - cy) ** 2) ** 0.5
+        await page.mouse.move(cx - half, y)
+        await page.mouse.down()
+        await page.mouse.move(cx + half, y, steps=12)
+        await page.mouse.up()
+    await page.mouse.move(4, 4)
+
+
+async def shot_edit_painter_paint(browser: Browser, url: str) -> None:
+    """Capture the painter on Paint with the left moon painted. No job runs."""
+    page = await _open_edit(browser, url)
+    await _paint_moon(page)
+    await _save(page, "edit-painter-paint")
+
+
+async def shot_edit_painter_extend(browser: Browser, url: str) -> None:
+    """Capture the painter on Extend with the right side grown. No job runs."""
+    page = await _open_edit(browser, url)
+    await page.get_by_test_id("edit-open-painter").first.click()
+    await page.wait_for_timeout(1500)
+    await page.get_by_test_id("painter-mode").get_by_role("button", name="Extend").click()
+    await page.wait_for_timeout(600)
+    await page.get_by_role("button", name="+ Right").click()
+    await page.wait_for_timeout(800)
+    await _save(page, "edit-painter-extend")
+
+
+async def shot_edit_image_to_edit(browser: Browser, url: str) -> None:
+    """Capture Image to edit after painting, with the Edit kind chosen and the prompt written. No job runs."""
+    page = await _open_edit(browser, url)
+    await _paint_moon(page)
+    await page.get_by_role("button", name="Done").first.click()
+    await page.wait_for_timeout(1200)
+    await page.get_by_placeholder("What should be here?").fill("a ringed gas giant, pale blue, in the same evening light")
+    await _blur(page)
+    await _dismiss_toasts(page)
+    await _save(page, "edit-image-to-edit", {"x": 0, "y": 0, "width": 1000, "height": 620})
+
+
 async def shot_first_audio(browser: Browser, url: str) -> None:
     """Capture the Audio tab on Speech with the text written, the Voice in Settings and a speech take in the preview."""
     _order_outputs(_newest(url, "speech"))
@@ -518,6 +573,9 @@ SHOTS: dict[str, Callable[[Browser, str], Awaitable[None]]] = {
     "gallery-audio": shot_gallery_audio,
     "viewer-frame-menu": shot_viewer_frame_menu,
     "extend-video": shot_extend_video,
+    "edit-image-to-edit": shot_edit_image_to_edit,
+    "edit-painter-paint": shot_edit_painter_paint,
+    "edit-painter-extend": shot_edit_painter_extend,
     "job-running": shot_job_running,
     "job-log": shot_job_log,
 }

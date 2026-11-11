@@ -1,82 +1,67 @@
 # Prompts page
 
-The **Prompts** page (++g++ ++p++) builds [prompt files](../concepts/prompts.md) without typing YAML. It reads and writes the same files the CLI uses, and keeps their comments, quoting and `|` blocks.
+The **Prompts** page (++g++ ++p++) builds [prompt files](../concepts/prompt-syntax.md#prompt-files) without typing YAML. It reads and writes the same files the command line uses, and keeps their comments, quoting and `|` blocks. How to write a file, pick a set and run it is in [Run batches from prompt files](../guides/batches.md#write-a-prompt-file).
 
 ![The Prompts page: snippets on the left, sets of prompts in the middle, the preview on the right](../assets/screenshots/prompts-page.webp)
 
-## Open or create a file
+## The file menu
 
-Use the file menu to open a prompt file on the server's machine, or **New file…** to create an empty one in a folder you choose.
+The button at the top left opens a recent prompt file, browses for one on the server's machine, creates a new one, or reloads the open file from disk and drops unsaved changes, after asking.
 
-A file that isn't valid YAML, or isn't shaped like a prompt file, opens in a repair view with the error and the raw text to fix.
+A file that isn't valid YAML, or isn't shaped like a prompt file, opens in a repair view with its raw text to fix, instead of the builder.
 
 ## The three columns
 
+**On a phone:** one column shows at a time, chosen with the **Snippets**, **Sets** and **Preview** switch above them. In a window narrower than about 1100 px the **Preview** column is left out.
+
 ### Snippets
 
-Snippets are reusable pieces of text you put in prompts as `$name`.
+Snippets are reusable pieces of text you put in prompts as `$name`; see [Snippets](../concepts/prompt-syntax.md#snippets).
 
-- Each is listed with how often it's used; unused ones are dimmed.
-- Click one to edit it, **＋** to add one.
-- Drag one onto a prompt to add a `$reference`.
-- Renaming a snippet updates every reference to it.
+Drag a snippet onto a prompt to add a `$reference`. Renaming a snippet updates every reference to it, and deleting one that is used warns first.
 
 ### Sets and prompts
 
-Sets are panels of prompts, one row each. A set's name starts the file names of what it makes.
+Sets are panels of prompts, one card each. A set's name starts the file names of what it makes.
 
-- Rename a set in place, and add prompts with **＋**.
-- A set's **⋯** menu duplicates, moves, turns all its prompts on or off, or deletes it.
-- Drag a set or a prompt by its ⠿ grip to reorder it; drop a prompt on another set's header to move it there.
+Drag a set or a prompt by its ⠿ grip to reorder it; drop a prompt on another set's header to move it there.
 
-Each prompt has:
+A prompt card's **active** switch decides whether the prompt runs: inactive prompts are skipped when the file runs. Its ✨ **Enhance** is off, the default rewrite, or chosen [enhance options](../concepts/prompt-enhancer.md#options). **Text** and **Fields** on the card switch a prompt between plain text and named fields.
 
-- an **active** switch: inactive prompts are skipped when the file runs;
-- ✨ **Enhance**: off, the default rewrite, or chosen [enhance options](../concepts/prompt-enhancer.md#options);
-- a **⋯** menu to add or remove a negative prompt, and to duplicate, move or delete it.
+### Edit a prompt
 
-**Text / Fields** switches a prompt between plain text and named fields (a structured prompt).
+`$snippets` show as chips, red when undefined. `{a|b}` random choices show as pills; click one to edit its options, one per line, where an empty line is an empty option. The keys for editing and for random choices are in [Keyboard shortcuts](shortcuts.md#prompts-page).
+
+### Fields
+
+A prompt written as **Fields** is a list of named values, such as **Subjects**, **Setting** and **Style**, that the model receives as one text, each as `name: value`. A prompt that holds lists or nested fields shows them flattened and keeps them as written; **Convert to text** turns them into one line of text, after asking, and the prompt the model receives stays the same. See [Structured prompts](../concepts/prompt-syntax.md#structured-prompts).
+
+### Scenes
+
+A video prompt can have a **Scene** that describes who and where, the look and the camera, above the **Prompt**, which says what happens. **Add scene** in a prompt's **⋯** menu adds the Scene field and **Remove scene** takes it away. See [Scenes for video](../concepts/prompt-syntax.md#scenes-for-video).
 
 ### Preview
 
-The preview shows the selected prompt as the model receives it, with snippets filled in and fields flattened, plus its enhancement and any problems. **🎲 Roll** picks one option of every random choice, as a run would.
-
-## Edit a prompt
-
-Click the text, or press ++enter++ on it, to edit. In the text:
-
-- `$snippets` show as chips, red when undefined. Typing `$` suggests snippet names.
-- `{a|b}` random choices show as pills. Click one to edit its options, one per line; an empty line is an empty option.
-
-While typing, ++alt+enter++ works on random choices:
-
-- with the caret in a choice, it edits that choice;
-- with words selected, it turns them into a choice;
-- anywhere else, it starts a new choice at the caret.
-
-The options box takes focus; ++ctrl+enter++ applies and ++esc++ cancels. ++esc++ or ++ctrl+enter++ also finishes editing the prompt.
+The preview shows the selected prompt as the model receives it: snippets filled in, fields flattened, with the **Scene**, **Prompt** and **Negative** boxes, its settings (whether it runs, its enhance options) and any problems. **🎲 Roll** picks one option of every random choice, as a run would; **Show choices** goes back.
 
 ## Generate from here
 
-- **▶** on a prompt saves the file, then queues that one prompt with the current Workspace settings.
-- **Use in Workspace** saves the file and selects it in the Workspace as the prompt source. A prompt file belongs to New, so an Image tab left on Edit opens on New; Edit's image and paint stay.
+**▶ Generate this one** on a prompt saves the file, then queues that one prompt with the current Workspace settings (it is greyed while the prompt is off). **Use in Workspace** saves the file and selects it in the Workspace as the prompt source. A prompt file belongs to **New**, so an **Image** tab left on **Edit** opens on **New**; Edit's image and paint stay. See [Pick a prompt set and run it](../guides/batches.md#pick-a-prompt-set-and-run-it).
 
 ## Save
 
-Press **Save** or ++ctrl+s++.
+**Save** writes the file.
 
-- Saving is blocked while the file has errors that would stop it from loading: an undefined snippet in an active prompt, an empty prompt, or two sets with the same name. The Save button says what to fix. Warnings, such as an invalid `enhance:` block, don't block saving.
+- Saving is blocked while the file has errors that would stop it from loading: an undefined snippet in an active prompt, an empty prompt, or two sets with the same name. Warnings, such as an invalid `enhance:` block, don't block saving.
 - If the file changed on disk since you opened it, for example in another editor, saving asks before overwriting it.
 - Prompts selected in the Workspace keep pointing at the same entries, even after you reorder, move or rename them.
 
-++ctrl+z++ undoes changes back to the last save. Unsaved changes are kept in the browser, so leaving the page or reloading doesn't lose them; reopening the file offers to restore them.
+Undo goes back to the last save. Unsaved changes are kept in the browser, so leaving the page or reloading doesn't lose them; reopening the file offers **Restore** or **Discard**.
 
 ## Save a Workspace prompt
 
-You can also add a prompt to a file from the Workspace. The save button (file icon, named *Save to prompt file…*) in the prompt box's tools row appends the prompt you are looking at to a prompt file. It shows when the prompt source is **Inline**.
+**Save** in the Workspace prompt box's tools row appends the prompt you are looking at to a prompt file. It shows when the prompt source is **Inline**.
 
 - **What is saved:** the text in the box. In the **Prompt** tab that's your own text; in the **Enhanced** tab it's the rewrite. Video also saves the scene, and the negative prompt is saved when it's shown.
-- **Where it goes:** the end of the set named `prompts`, added at the end of the file when missing. Choose a **Recent** file, **Browse…** for one, or **New file…**.
+- **Where it goes:** the end of the set named `prompts`, added at the end of the file when missing. You choose the file, or make a new one.
 - **The file:** comments are kept. A file with errors, such as an undefined `$snippet`, is left unchanged and the message says what to fix.
-
-The confirmation has **Open in Prompts**, which opens the file here.

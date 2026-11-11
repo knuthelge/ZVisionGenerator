@@ -1,8 +1,10 @@
 # Configuration
 
-The app's defaults ship in a `config.yaml` inside the package. To change one, put just that setting in your own `config.yaml` in the [data folder](data-folder.md), `~/.ziv/config.yaml`:
+Every setting of the app's `config.yaml`, with its default. Settings that the app reads from the shell, such as `ZIV_DATA_DIR`, are [environment variables](../cli/reference.md#environment-variables). Error? See [Troubleshooting](troubleshooting.md#configuration-file).
 
-```yaml title="~/.ziv/config.yaml"
+The app's defaults ship in a `config.yaml` inside the package. To change one, put just that setting in your own `config.yaml` in the [data folder](data-folder.md) (`~/.ziv` by default):
+
+```yaml title="config.yaml"
 generation:
   default_size: l
 
@@ -12,7 +14,7 @@ sharpening:
 
 Your file is merged over the default settings, key by key, so you only list what you change. It holds settings only: which models the app offers, where they download from and the terms they come with are part of the app, and a key for them in your file has no effect. The [Config page](../web-ui/config.md) writes the most common settings to the same file. Most changes apply from the next job; restart the Web UI if one doesn't.
 
-## Which value wins
+## Which value wins { #which-value-wins }
 
 For a setting that exists at several levels, the most specific wins:
 
@@ -35,7 +37,7 @@ Defaults for images.
 
 ## `sizes`
 
-The pixel size of each image preset, per ratio: `sizes.<ratio>.<preset>` with `width` and `height`. See [Images](images.md#sizes) for the defaults.
+The pixel size of each image preset, per ratio: `sizes.<ratio>.<preset>` with `width` and `height`. See [Images](../guides/images.md#pick-a-size) for the defaults.
 
 ## `video_generation` and `video_sizes`
 
@@ -44,7 +46,7 @@ The pixel size of each image preset, per ratio: `sizes.<ratio>.<preset>` with `w
 | `video_generation.default_ratio` | `"16:9"` | Aspect ratio of videos |
 | `video_generation.default_size` | `s` | Size preset of videos |
 
-`video_sizes.<ratio>.<preset>` sets `width`, `height` and `frames` of each video preset. Keep widths and heights multiples of 64 and frames `8k+1`. See [Video](video.md#sizes).
+`video_sizes.<ratio>.<preset>` sets `width`, `height` and `frames` of each video preset. Keep widths and heights multiples of 64 and frames `8k+1`. See [Video](../guides/video.md#sizes).
 
 ## `sharpening`
 
@@ -78,7 +80,7 @@ The CAS sharpening amounts used when no amount is given.
 
 ## `seedvr2`
 
-The plain upscale of existing images. See [Plain upscale](upscaling.md#plain-upscale).
+The plain upscale of existing images. See [Plain upscale](../concepts/upscaling.md#plain-upscale).
 
 | Key | Default | Description |
 |---|---|---|
@@ -98,7 +100,7 @@ model_aliases:
   mymodel: "my-org/my-model"
 ```
 
-A name the app already uses, such as `zit` or `ltx-4`, is taken: the built-in model keeps it. A folder `~/.ziv/models/<alias>/` wins over an alias of the same name. An alias is shown by its name in the Web UI. See [Models](models.md#how-a-name-is-found).
+A name the app already uses, such as `zit` or `ltx-4`, is taken: the built-in model keeps it. A folder `models/<alias>/` in the data folder wins over an alias of the same name. An alias is shown by its name in the Web UI. See [Models](models.md#how-a-name-is-found).
 
 ## `first_run`
 
@@ -123,7 +125,7 @@ The Web UI.
 | `gallery_page_size` | `12` | How many items the Gallery loads at a time |
 | `first_run_skipped` | `false` | Set when the first-run dialog is skipped |
 | `discover_huggingface` | `false` | Set by **Show Hugging Face results** in Discover LoRAs; **Turn off** sets it back to `false` |
-| `discover_content_filter` | `on` | The Discover LoRAs [content filter](loras.md#content-filter). Set `off` if it hides a LoRA you want to use; repos tagged as adult stay hidden |
+| `discover_content_filter` | `on` | The Discover LoRAs [content filter](../concepts/loras.md#content-filter). Set `off` if it hides a LoRA you want to use; repos tagged as adult stay hidden |
 
 ## `prompt_enhancer`
 
@@ -137,11 +139,40 @@ The Web UI.
 | `length.floor_words` | 12 / 25 / 40 / 80 | The fewest words each length aims for |
 | `length.max_words` | `300` | The most words any rewrite aims for |
 
+Which Length is picked when you pick none is **Same**; no setting changes that. The `length` keys change the numbers each choice aims for, and a key you leave out keeps its default. To make rewrites shorter overall, lower the floor of Same, so a short prompt doesn't grow to 25 words, the target of Shorter, and the cap:
+
+```yaml title="config.yaml"
+prompt_enhancer:
+  length:
+    percent:
+      shorter: 30     # Shorter aims for 30% of your prompt's length
+    floor_words:
+      same: 12        # a short prompt grows to about 12 words
+    max_words: 120    # no rewrite aims for more than 120 words
+```
+
+To pick a Length for one run, use [`--enhance length=shorter`](../cli/reference.md#the-spec) or the Web UI's **Length**. See [Length](../concepts/prompt-enhancer.md#length).
+
 ## `model_presets` and `video_model_presets`
 
 Per-family defaults for the steps, guidance and scheduler of a model. What a family can do (the sizes it accepts, whether it takes a negative prompt, a start image or reference images, and the rules for a video's frames) is part of the app.
 
-`model_presets.<family>` sets `default_steps`, `default_guidance`, `default_scheduler` (a scheduler per backend, `mflux` and `diffusers`, where `null` is the model's own) and `upscale.default_upscale_steps`. A family can split into variants (`variants.<name>`), such as FLUX.2 Klein distilled and base, or MOSS-Image Turbo and SFT; a variant sets its own steps, guidance and upscale steps, and they win over the family's.
+`model_presets.<family>` sets `default_steps`, `default_guidance`, `default_scheduler` (a scheduler per backend, `mflux` and `diffusers`, where `null` is the model's own), `upscale.default_upscale_steps` and `upscale.default_sharpen`. A family can split into variants (`variants.<name>`), such as FLUX.2 Klein distilled and base, or MOSS-Image Turbo and SFT; a variant sets its own steps, guidance and upscale steps, and they win over the family's.
+
+| Family | Steps and guidance | Also |
+|---|---|---|
+| `zimage` | `10`, `0.0` | Scheduler `beta`; upscale steps `3` |
+| `flux2_klein` | `distilled`: `4`, `1.0`; `base`: `50`, `1.5` | The model's own scheduler |
+| `flux2` | `20`, `3.5` | The model's own scheduler |
+| `flux1` | `20`, `3.5` | The model's own scheduler |
+| `ideogram4` | `8`, `1.0` | Guidance is built in, so other values are ignored |
+| `krea2` | `8`, `1.0` | Scheduler `beta`; upscale steps `5`; upscale sharpen off |
+| `moss` | `turbo`: `4`, `1.0`; `sft`: `50`, `3.0` | Upscale steps `2` and `12` |
+| `unknown` | `10`, `3.5` | For a model whose family isn't recognised |
+
+### `model_presets.<family>.upscale.default_sharpen`
+
+Whether sharpening before the refine pass of an upscale is on when you give neither `--upscale-sharpen` nor `--no-upscale-sharpen`. Unset means on; `krea2` sets `false`, because pre-sharpening can leave coloured specks in fabric.
 
 `video_model_presets` holds these settings:
 
@@ -149,7 +180,7 @@ Per-family defaults for the steps, guidance and scheduler of a model. What a fam
 |---|---|---|
 | `ltx.default_steps` | `8` | Steps of an LTX video |
 | `ltx.upscale.default_upscale_steps` | `8` | Steps when a video is upscaled and no steps are given; without it, the family's `default_steps` |
-| `ltx.upscale.existing_video_steps` | `2` | Refine steps, from `1` to `3`, of [upscaling an existing video](upscaling.md#macos-ltx) on macOS |
+| `ltx.upscale.existing_video_steps` | `2` | Refine steps, from `1` to `3`, of [upscaling an existing video](../concepts/upscaling.md#macos-ltx) on macOS |
 | `h3.default_steps` | `8` | Steps of a MiniMax H3 video: `4` or `8` |
 | `h3.default_frames` | `124` | Frames of a MiniMax H3 video, 5 s at 24 fps; it replaces the frame count of the size presets |
 | `h3.diffusers.ffn_chunk_tokens` | `4096` | Windows and Linux: rows per feed-forward call. Smaller values lower the peak memory of long and large clips |
@@ -180,7 +211,16 @@ audio_model_presets:
 | Setting | Model | Description |
 |---|---|---|
 | `instrumental_sections` | `yue2` | The section list an empty Lyrics box stands for, which makes an instrumental. YuE2 needs it |
+| `abc_max_tokens` | `yue2` | The most tokens the model may use to plan a song's score |
+| `cfg` | `yue2` | Guidance of that planning step |
+| `ode_steps` | `yue2` | Steps of the synthesis stage, which turns the plan into sound |
+| `memory_budget_gib` | `yue2` | The accelerator memory in GiB the model plans its work within |
+| `vae_core_frames` | `yue2` | How many frames the decoder handles at a time; fewer frames use less memory |
+| `fade_seconds` | `yue2` | Length of the fade-out when a song is cut off at the model's length limit |
 | `language` | `qwen3_tts` | `auto` lets the model detect the language of the text, or name one it supports to fix it |
 | `join_pause_ms`, `join_fade_ms`, `part_level_match_db`, `edge_silence_max_ms` | `qwen3_tts` | How the parts of a long text are joined |
+| `steps` | `sa3` | Steps of a take |
+| `cfg_scale` | `sa3` | How closely a take follows the description |
+| `sample_size` | `sa3` | The audio window the model works in, in samples; the shipped value is its longest take, 380 s |
 
 An entry can also hold `platforms.cuda.settings` and `platforms.mps.settings`, which win over `settings` on that accelerator.

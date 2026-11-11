@@ -1,6 +1,6 @@
 # Project Guidelines
 
-Architecture, project structure, and full conventions live in the developer docs in [docs/developer/](docs/developer/index.md). Read [Project structure](docs/developer/project-structure.md), [Architecture overview](docs/developer/architecture.md) and [How-to](docs/developer/how-to.md) before adding a module, backend, workflow stage, CLI flag or config key. This file holds the rules every change must follow.
+Architecture, testing and full conventions live in the developer docs in [docs/developer/](docs/developer/index.md). Read [Architecture](docs/developer/architecture.md) (the codemap: where things are and the invariants), [How-to](docs/developer/how-to.md) and [Testing](docs/developer/testing.md) before adding a module, backend, workflow stage, CLI flag or config key. This file holds the rules every change must follow.
 
 ## Design Philosophy — Atomic Code Design
 
@@ -26,10 +26,10 @@ Every module, function, and class should be **atomic**: a single, self-contained
 
 ## Repository Rules
 
-- `packages/ltx_*`, `packages/seedvr2_torch`, `packages/minimax_h3_mlx`, `packages/moss_image`, `packages/yue2`, `packages/stable_audio_3`, `packages/qwen_tts` and `packages/faster_qwen3_tts` are vendored. Never edit them by hand; update them with `make update-ltx`, `make update-seedvr2`, `make update-h3-mlx`, `make update-moss`, `make update-yue2`, `make update-sa3` and `make update-qwen3-tts`.
+- `packages/ltx_*`, `packages/seedvr2_torch`, `packages/birefnet`, `packages/minimax_h3_mlx`, `packages/moss_image`, `packages/yue2`, `packages/stable_audio_3`, `packages/qwen_tts` and `packages/faster_qwen3_tts` are vendored. Never edit them by hand; update them with `make update-ltx`, `make update-seedvr2`, `make update-birefnet`, `make update-h3-mlx`, `make update-moss`, `make update-yue2`, `make update-sa3` and `make update-qwen3-tts`.
 - The Web UI is built from `frontend/` (Svelte 5, TypeScript, pnpm) into `zvisiongenerator/web/static/app/`, which is committed. After any frontend change, run `make frontend-build` and commit the rebuilt files.
 - Future work is written up as proposals in `proposals/` (see its README). Check there before larger work. When a proposal ships or is rejected, update its status and move it to `proposals/archive/`. Files in `docs/` never link to proposals.
-- User-facing changes get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs in `docs/`. Explain a feature once in Concepts; the Web UI and CLI pages show how to use it and link there. New settings go in `docs/concepts/configuration.md` and new flags in `docs/cli/reference.md`. See [Writing docs](docs/developer/docs.md).
+- User-facing changes get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs in `docs/`. Explain a feature once: a task's own explanation and steps go in its guide (`docs/guides/`), ideas several tasks share in `docs/concepts/`, screens in `docs/web-ui/`, command-line recipes and flags in `docs/cli/`, and settings and error messages in `docs/reference/`. New settings go in `docs/reference/configuration.md`, new flags in `docs/cli/reference.md`, and new user-facing errors in `docs/reference/troubleshooting.md`. See [Writing docs](docs/developer/docs.md).
 - Commits follow Conventional Commits: `type(scope): imperative summary` (types: feat, fix, perf, refactor, docs, test, build, ci, chore; scope is the product area, e.g. web, image, video, enhance). Add a body with a short list of high-level changes, not file-by-file detail. Mark breaking changes with `!` and a `BREAKING CHANGE:` line. Release commits are `chore(release): v<version>`.
 - Work happens on a branch as a series of commits, and is rebased onto the newest main before it lands. Never create merge commits. On a fork, the branch goes in as a pull request. In this repository itself, fast-forward main to the branch (`git merge --ff-only`).
 - Never create or push `v*` tags or cut a release unless the user explicitly asks; a tag push publishes to PyPI and cannot be undone (see [Releasing](docs/developer/releasing.md)).

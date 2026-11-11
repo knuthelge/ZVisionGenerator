@@ -7,14 +7,14 @@ import re
 from tests._paths import REPO_ROOT
 from zvisiongenerator.utils.licences import load_licences
 
-_MODELS_PAGE = REPO_ROOT / "docs" / "concepts" / "models.md"
+_MODELS_PAGE = REPO_ROOT / "docs" / "reference" / "models.md"
 
 
 def _licences_section() -> str:
     """Return the text of the ``## Licences`` section of the models page, up to the next ``##`` heading."""
     text = _MODELS_PAGE.read_text(encoding="utf-8")
     match = re.search(r"^## Licences\n(.*?)(?=^## |\Z)", text, flags=re.MULTILINE | re.DOTALL)
-    assert match is not None, "docs/concepts/models.md has no '## Licences' section"
+    assert match is not None, "docs/reference/models.md has no '## Licences' section"
     return match.group(1)
 
 
