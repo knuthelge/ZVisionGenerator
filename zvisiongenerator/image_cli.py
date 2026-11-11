@@ -218,12 +218,12 @@ def main(*, prog: str = "ziv-image") -> None:
     if args.size not in sizes[args.ratio]:
         parser.error(f"Unknown size '{args.size}'. Valid: {list(sizes[args.ratio].keys())}")
 
-    # Expand ~ in filesystem-only path arguments. Model/LoRA tokens are resolved by shared helpers.
+    # Expand ~ in filesystem-only path arguments; the edit's picture and mask are made absolute, since the saved file records the source's path. Model/LoRA tokens are resolved by shared helpers.
     if args.image_path:
         args.image_path = str(Path(args.image_path).expanduser())
     for edit_option in ("edit_source", "edit_mask"):
         if getattr(args, edit_option):
-            setattr(args, edit_option, str(Path(getattr(args, edit_option)).expanduser()))
+            setattr(args, edit_option, str(Path(getattr(args, edit_option)).expanduser().absolute()))
     if args.output:
         args.output = str(Path(args.output).expanduser())
     args.output = edit_output_folder(args)

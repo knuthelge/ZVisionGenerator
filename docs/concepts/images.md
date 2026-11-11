@@ -68,29 +68,23 @@ An upscale made while generating refines with the same references, so what they 
 
 ## Edit a picture { #edit }
 
-Edit changes part of a picture you already have, or gives it more room, and leaves everything else as it was. You describe what should be there, the model draws it, and the result is saved as a new file beside the original.
+Edit changes part of a picture you already have, or gives it more room, and saves the result as a new file. It works on FLUX.2 Klein only, which sees the picture while it draws, so what it adds fits what is around it.
 
-There are three ways to edit, chosen by what you give it:
+| You give | The result |
+|---|---|
+| **Paint**: the area to change | That area is redrawn from your prompt |
+| **Extend**: one side to grow, by 128 to 512 pixels | The picture grows on that side, and the new area is drawn from your prompt |
+| **Neither** | The prompt changes the whole picture ("make it night") |
 
-| You give | Models | The result |
-|---|---|---|
-| **Paint**: the area to change | FLUX.2 Klein, Z-Image, Krea 2 | The painted area is redrawn from your prompt |
-| **Extend**: one side to grow | FLUX.2 Klein, Z-Image, Krea 2 | The picture grows on that side, and the new area is drawn from your prompt |
-| **Neither** | FLUX.2 Klein | The prompt changes the whole picture ("make it night") |
+Paint and Extend are one at a time. Write what should be there ("a glass vase of red tulips"), or, with nothing marked, what should change. Removing an object can be unreliable: try again, or describe what should be there instead. Extend works best on backgrounds, textures, interiors and streets; on a close-up it may not complete the subject. On a large photo the new strip is drawn at about one megapixel, so it comes out softer than the photo beside it, most visibly on textured content such as foliage or stone.
 
-Paint and Extend can be used together. Z-Image and Krea 2 need one of them: without paint or an Extend, **Generate** is off and says *Paint the area to change*.
+The rest of the picture stays as it was. The new drawing fades into it over a few pixels around the paint.
 
-**The prompt says what should be there.** With paint or an Extend, write what the area should show ("a glass vase of red tulips"). With neither, write what should change ("make it night"). Paint redraws the area from your description, so it isn't the tool for removing an object.
+A picture with transparent parts (a cut-out) keeps its transparency, so anything drawn outside its outline disappears. It can't be extended, and needs paint.
 
-**The rest of the picture stays as it was.** The model works on a crop around the painted area at about one megapixel. The painted area is fully the model's drawing, and the result fades into the original over about 12 pixels around it, so the join is gradual. Everything further away is untouched, pixel for pixel. A painted area that covers more than half the picture is drawn on the whole picture at that size. An Extend is always drawn on the whole picture, new area included, at its own size up to about two megapixels, so the new area keeps its detail on a large photo. A picture of one megapixel or less is drawn at about one megapixel.
+An edit uses the prompt, the model, **Quant**, LoRAs, **Steps**, **Seed** and **Batch size**, and none of the size, **Strength**, **Guidance**, upscale, Enhance or post-processing options. The result keeps the picture's size, or grows by the Extend amount; larger pictures take longer.
 
-**What an edit uses.** The prompt, the model, **Quant**, LoRAs, **Steps**, **Seed** and **Batch size**, with a new random seed for each try unless you set one. An edit takes no size, **Strength**, **Guidance**, upscale, Enhance, sharpening, contrast or saturation. The result keeps the picture's size, or grows by the Extend amount. A whole-picture Klein edit is drawn at about one megapixel at most, so a large picture comes back smaller; [upscale](upscaling.md) it afterwards. Upscaling an edit refines it without the edit's prompt, which says what to change and not what the picture shows.
-
-**Cut-outs.** A picture with transparent parts keeps them: a painted edit gives back the original transparency exactly, and the result counts as a transparent background in the gallery and when you upscale it. Extend is off for such a picture, and a whole-picture edit of it isn't possible, so it needs paint.
-
-**Extend** grows one side at a time by 128 to 512 pixels in steps of 16. The new area counts as painted, and the model's picture fills it right up to the original's edge.
-
-**Where it is saved.** An edit is saved as `<name>_edit.png` (`_edit_2` when that exists) beside the original, and editing an edit again only counts up (`photo_edit.png` becomes `photo_edit_2.png`) (a picture you upload from this device is named after the uploaded file), and the file records the original it was made from, which the viewer shows as **Made from**. The paint itself isn't saved, so **Reuse settings** on an edit brings back the original, the prompt and the settings, and asks you to paint the area again.
+An edit is saved as `<name>_edit.png`, with a counter when that exists. In the CLI it goes in the picture's folder, or in `-o`. In the Web UI it goes beside the original when that is a picture in the output folder, and into the chosen [project](projects.md) (the output folder when none is chosen) when the picture was uploaded or lives elsewhere. The file records the picture it was made from, shown as **Made from** in the viewer, but not the paint, so **Reuse settings** asks you to paint again.
 
 The Web UI paints in a full-screen painter; see [Edit an image](../web-ui/workspace.md#edit-an-image). The CLI takes a mask file; see [Edit a picture](../cli/images.md#edit-a-picture).
 

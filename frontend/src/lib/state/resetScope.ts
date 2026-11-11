@@ -7,11 +7,11 @@ import type { DraftState, WorkspaceTab } from '$lib/types';
  * - `slotsImage`, `slotsEdit`, `slotsVideo`, `slotsExtend`: the images, upload markers and audio track of one tab or kind (Image's also holds Strength; Edit's is the image to edit with its paint and extension).
  * - `settings`: the open mode's (image or video) values for the Settings pane; the Audio tab keeps none of these.
  * - `extendSettings`: the Extend kind's length.
- * - `shared`: Batch and Seed, one pair for New image, New video and Audio; Edit and Extend have their own.
+ * - `shared`: Batch and Seed of the open tab.
  * - `model`: the model, its LoRAs and the quantization.
  * - `text`: the open mode's typed text, its Enhanced text and its prompt source.
- * - `promptFile`: the prompts file and the prompts chosen from it (New image and New video share them; Extend has its own).
- * - `enhanceImage`, `enhanceVideo`, `enhanceAudio`: the enhancement options of each mode (Audio keeps one set per task; New video and Extend each keep their own video set).
+ * - `promptFile`: the prompts file and the prompts chosen from it.
+ * - `enhanceImage`, `enhanceVideo`, `enhanceAudio`: the enhancement options of each mode (Audio keeps one set per task).
  * - `extendSource`: the video an extension continues and the point in it the extension continues from (a Reset puts both back).
  * - `audioText`, `audioSettings`, `audioDelivery`, `voice`: the four texts of the Audio tab with the Enhanced text of its boxes, its settings (the lengths, the Tempo and
  *   Key, the Sound Type), the Speech delivery and the Speech voice.
@@ -36,6 +36,7 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   referenceImagePaths: 'slotsImage',
   editSourcePath: 'slotsEdit',
   editSourceUpload: 'slotsEdit',
+  editMode: 'slotsEdit',
   editMaskUpload: 'slotsEdit',
   editPaintedShare: 'slotsEdit',
   editExtendSide: 'slotsEdit',
@@ -142,7 +143,6 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   lorasByFamily: 'memory',
   savedText: 'memory',
   savedSettings: 'memory',
-  savedShared: 'memory',
   enhanceAuto: 'memory',
   enhanceModel: 'memory',
   describeTier: 'memory',

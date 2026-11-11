@@ -21,14 +21,14 @@ from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.image_types import EditWork, ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.processing.edit_region import PAINT_FADE, TARGET_MP, Plan, combined_paint, composite, extend_canvas, extend_megapixels, plan_region, target_size
+from zvisiongenerator.processing.edit_region import PAINT_FADE, Plan, blurred_canvas, extend_canvas, extend_draw_size, grid_size, paste_paint, paste_strip, plan_region
 from zvisiongenerator.processing.matte import on_backdrop
 from zvisiongenerator.utils.alignment import round_to_alignment
-from zvisiongenerator.utils.edit_request import check_edit_inputs, edit_mode, image_is_cutout
+from zvisiongenerator.utils.edit_request import image_is_cutout
 from zvisiongenerator.utils.filename import unique_output_path
 from zvisiongenerator.utils.provenance import EXIF_IMAGE_DESCRIPTION, build_image_config_payload, embed_png_config
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
-from zvisiongenerator.utils.input_images import open_image_upright
+from zvisiongenerator.utils.input_images import open_image_upright, to_srgb
 from zvisiongenerator.utils.references import check_reference_count, load_reference_image
 from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
 from zvisiongenerator.workflows.generation_prompt import conditioning_prompt, generation_negative, generation_prompt
@@ -166,7 +166,7 @@ def load_source_stage(request: ImageGenerationRequest, artifacts: ImageWorkingAr
 def load_edit_source_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
     """Load the image an edit job changes, upright, and name the output after it.
 
-    A source with a transparent background (a cut-out) goes on the grey matte backdrop for the model, and its alpha and
+    A source with a colour profile is converted to sRGB first. A source with a transparent background (a cut-out) goes on the grey matte backdrop for the model, and its alpha and
     own colours are kept, so the result gets them back. The output is ``artifacts.filename`` (the batch names it after the
     source) in ``request.output_dir``, with a counter when taken.
 
@@ -181,11 +181,11 @@ def load_edit_source_stage(request: ImageGenerationRequest, artifacts: ImageWork
         raise FileNotFoundError(f"Image to edit not found: {source}")
 
     with Image.open(source) as opened:
-        upright = ImageOps.exif_transpose(opened)
+        upright = to_srgb(ImageOps.exif_transpose(opened))
         upright.load()
     if image_is_cutout(upright):
         rgba = upright.convert("RGBA")
-        work = EditWork(on_backdrop(rgba), alpha=np.asarray(rgba.getchannel("A")).copy(), colours=np.asarray(rgba.convert("RGB")).copy())
+        work = EditWork(on_backdrop(rgba), cutout=rgba)
     else:
         work = EditWork(upright.convert("RGB"))
     artifacts.edit = work
@@ -201,62 +201,79 @@ def _crop_for_model(canvas: Image.Image, plan: Plan) -> Image.Image:
     return canvas.crop(plan.box).resize(plan.target, Image.Resampling.LANCZOS)
 
 
-def _paint_for_crop(paint: np.ndarray, plan: Plan) -> np.ndarray:
-    """Return *paint* cut to the plan's box and scaled to the model's size (bilinear, then above half)."""
-    x0, y0, x1, y1 = plan.box
-    scaled = Image.fromarray(paint[y0:y1, x0:x1].astype(np.uint8) * 255).resize(plan.target, Image.Resampling.BILINEAR)
+def _resize_paint(paint: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """Return *paint* scaled to *size* (bilinear, then above half)."""
+    scaled = Image.fromarray(paint.astype(np.uint8) * 255).resize(size, Image.Resampling.BILINEAR)
     return np.asarray(scaled) > 127
+
+
+def _prepare_extend(edit: EditWork, extend: tuple[str, int]) -> None:
+    """Set up an Extend: the canvas the result is pasted onto, and what the model draws.
+
+    The model draws the source scaled first (:func:`extend_draw_size`) and padded after, so the new strip and the source
+    both sit on whole 16 px cells. Its reference is the same canvas with the strip blurred (:func:`blurred_canvas`). The
+    canvas is the source at its real size with the strip at the real amount; the result is pasted onto it strip and
+    source apart.
+    """
+    side, amount = extend
+    source = edit.canvas
+    drawn_size, strip = extend_draw_size(source.size, side, amount)
+    edit.canvas, _, offset = extend_canvas(source, side, amount)
+    edit.source_box = (offset[0], offset[1], offset[0] + source.width, offset[1] + source.height)
+    scaled = source.resize(drawn_size, Image.Resampling.LANCZOS)
+    edit.crop, edit.crop_paint, drawn_offset = extend_canvas(scaled, side, strip)
+    edit.drawn_source_box = (drawn_offset[0], drawn_offset[1], drawn_offset[0] + drawn_size[0], drawn_offset[1] + drawn_size[1])
+    edit.reference = blurred_canvas(scaled, side, strip)
 
 
 def prepare_edit_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
     """Turn the source, the painted mask and the Extend request into what the model works on.
 
-    The mask is read at the source's size before any Extend. An Extend puts the source on a larger canvas whose new area
-    is painted, and the whole canvas is the crop; Paint plus Extend is one mask. With paint the model gets the crop
-    around it and the paint at the crop's size; with none (whole picture) it gets the picture at about one megapixel. An
-    Extend is drawn at the canvas's own size up to about 2 MP.
+    The mask is read at the source's size before any Extend. With paint the model gets a crop around it and the paint at
+    the crop's size; with none (whole picture) it gets the picture at its own size on the 16 px grid. An Extend is drawn on the
+    scaled source with a new strip beside it (see :func:`_prepare_extend`). The model's
+    reference is the crop, or for an Extend the drawn canvas with a blurred strip, so the strip's edge-pixel fill is never
+    shown to it.
+
+    The inputs were checked where the job was made (the CLI and the Web server), before it was queued: the mask is the
+    source's size and the edit can run on this model.
 
     Raises:
-        ValueError: The edit cannot run (Extend on a cut-out, no paint where paint is needed), or the mask is not the source's size.
+        ValueError: The source image was not loaded.
     """
     edit = artifacts.edit
     if edit is None:
         raise ValueError("The source image must be loaded before the edit is prepared")
-    extend = request.edit_extend
-    source_paint = request.edit_paint
-    if source_paint is not None and source_paint.shape != (edit.canvas.height, edit.canvas.width):
-        raise ValueError(f"The mask is {source_paint.shape[1]}x{source_paint.shape[0]} but the image is {edit.canvas.width}x{edit.canvas.height}; they must be the same size.")
-    mode = edit_mode(source_paint is not None, extend)
-    check_edit_inputs(mode, extend, edit.alpha is not None, request.max_reference_images)
-
-    paint = source_paint
-    if extend is not None:
-        source_width, source_height = edit.canvas.size
-        edit.canvas, extend_paint, offset = extend_canvas(edit.canvas, *extend)
-        paint = extend_paint if source_paint is None else combined_paint(source_paint, extend_paint, offset)
-        edit.source_box = (offset[0], offset[1], offset[0] + source_width, offset[1] + source_height)
-    edit.paint = paint
+    if request.edit_extend is not None:
+        _prepare_extend(edit, request.edit_extend)
+        return StageOutcome.success
+    edit.paint = request.edit_paint
     width, height = edit.canvas.size
-    if paint is None:
-        edit.plan = Plan((0, 0, width, height), target_size(width, height))
-        edit.crop, edit.crop_paint = _crop_for_model(edit.canvas, edit.plan), None
+    if edit.paint is None:
+        edit.plan = Plan((0, 0, width, height), grid_size(width, height))
+        edit.crop = _crop_for_model(edit.canvas, edit.plan)
     else:
-        megapixels = extend_megapixels(width, height) if extend is not None else TARGET_MP
-        edit.plan = plan_region(paint, whole=extend is not None, whole_megapixels=megapixels)
-        edit.crop, edit.crop_paint = _crop_for_model(edit.canvas, edit.plan), _paint_for_crop(paint, edit.plan)
+        edit.plan = plan_region(edit.paint)
+        x0, y0, x1, y1 = edit.plan.box
+        edit.crop = _crop_for_model(edit.canvas, edit.plan)
+        edit.crop_paint = _resize_paint(edit.paint[y0:y1, x0:x1], edit.plan.target)
+    edit.reference = edit.crop
     return StageOutcome.success
 
 
 def edit_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
     """Have the model redraw the painted area of the crop, or, with no paint, redraw the whole picture from the crop as its reference.
 
-    The prompt is the one the generation stage would send. Returns ``skipped`` when the backend was stopped by Next or Stop.
+    The prompt is the one the generation stage would send; an Extend sends it behind the Extend instruction (:func:`conditioning_prompt`), the same text the batch pre-encoded. Returns ``skipped`` when the backend was stopped by Next or Stop.
     """
     edit = artifacts.edit
-    if edit is None or edit.crop is None or edit.plan is None:
+    if edit is None or edit.crop is None or edit.reference is None:
         raise ValueError("The edit must be prepared before the model runs")
     prompt = generation_prompt(request.prompt, artifacts.resolved_prompt)
     print(f"Prompt: \n{' '.join(prompt.split())}\n")
+    # Every edit path sends the text from this one function, as the batch pre-encoded it (`_job_prompts`).
+    extend = request.edit_extend is not None
+    sent = conditioning_prompt(prompt, extend=extend)
     step_callback = emit_step_progress(request.step_callback, phase="image_generate", total_steps=request.steps)
 
     start = time.perf_counter()
@@ -264,8 +281,10 @@ def edit_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts
         image = request.backend.edit_region(
             model=request.model,
             image=edit.crop,
+            reference=edit.reference,
             paint=edit.crop_paint,
-            prompt=prompt,
+            prompt=sent,
+            fix_join=extend,
             seed=request.seed,
             steps=request.steps,
             guidance=request.guidance,
@@ -274,22 +293,20 @@ def edit_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts
             step_callback=step_callback,
         )
     else:
-        width, height = edit.plan.target
+        width, height = edit.crop.size
         image = request.backend.text_to_image(
             model=request.model,
-            prompt=prompt,
+            prompt=sent,
             width=width,
             height=height,
             seed=request.seed,
             steps=request.steps,
             guidance=request.guidance,
             scheduler=request.scheduler,
-            negative_prompt=generation_negative(request.negative_prompt, supports_negative=request.supports_negative_prompt),
             skip_signal=request.skip_signal,
             step_callback=step_callback,
             steps_explicit=request.steps_explicit,
             guidance_explicit=request.guidance_explicit,
-            first_sigma=request.first_sigma,
             reference_images=[edit.crop],
         )
     elapsed = time.perf_counter() - start
@@ -308,16 +325,22 @@ def composite_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArti
     The paint is replaced whole and fades into the picture around it; an Extend's new area is replaced whole too.
 
     A cut-out is pasted onto its own colours, not the grey backdrop the model saw, and gets its alpha back everywhere. A
-    whole-picture edit has no paint and keeps the model's picture as it is.
+    whole-picture edit has no paint: its picture is scaled back to the source's size when the 16 px grid changed it.
     """
     edit = artifacts.edit
-    if edit is None or artifacts.image is None or edit.paint is None or edit.plan is None:
+    if edit is None or artifacts.image is None:
         return StageOutcome.success
-    cutout = edit.alpha is not None and edit.colours is not None
-    base = Image.fromarray(edit.colours) if cutout else edit.canvas
-    image = composite(base, artifacts.image, edit.plan, edit.paint, PAINT_FADE, edit.source_box)
-    if cutout:
-        image.putalpha(Image.fromarray(edit.alpha))
+    if edit.paint is None and edit.source_box is None:
+        if artifacts.image.size != edit.canvas.size:
+            artifacts.image = artifacts.image.resize(edit.canvas.size, Image.Resampling.LANCZOS)
+        return StageOutcome.success
+    base = edit.canvas if edit.cutout is None else edit.cutout.convert("RGB")
+    if edit.source_box is not None:
+        image = paste_strip(base, artifacts.image, edit.source_box, edit.drawn_source_box, edit.crop.size)
+    else:
+        image = paste_paint(base, artifacts.image, edit.plan, edit.paint, PAINT_FADE)
+    if edit.cutout is not None:
+        image.putalpha(edit.cutout.getchannel("A"))
     artifacts.image = image
     return StageOutcome.success
 

@@ -5,12 +5,13 @@ A start image, a video's first or last frame and a reference all go through here
 
 from __future__ import annotations
 
+import io
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageCms, ImageOps
 
 # The image types the app takes as an input: references, a start or last-frame image and an upscale source.
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
@@ -28,6 +29,39 @@ def open_image_upright(path: str | Path) -> Image.Image:
         return flatten_alpha(ImageOps.exif_transpose(opened))
 
 
+# The modes that are converted to RGB before their colour profile is applied; any other mode (CMYK) is managed as it is.
+_RGB_LIKE_MODES = frozenset({"1", "L", "LA", "La", "P", "PA", "RGB", "RGBA", "RGBa"})
+
+
+def to_srgb(image: Image.Image) -> Image.Image:
+    """Return *image* in sRGB: converted from its embedded colour profile, with the profile dropped, and any alpha kept.
+
+    An image without a profile is returned as it is. One whose profile cannot be used (a damaged or grey one) is
+    returned unconverted, without the profile. CMYK is converted through its own profile, not through naive RGB.
+    """
+    profile = image.info.get("icc_profile")
+    if not profile:
+        return image
+    info = {key: value for key, value in image.info.items() if key not in ("icc_profile", "transparency")}
+    if image.mode in _RGB_LIKE_MODES:
+        mode = "RGBA" if image.has_transparency_data else "RGB"
+        source, output = image.convert(mode), mode
+    else:
+        source, output = image, "RGB"
+    try:
+        converted = ImageCms.profileToProfile(
+            source,
+            ImageCms.ImageCmsProfile(io.BytesIO(profile)),
+            ImageCms.createProfile("sRGB"),
+            renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC,
+            outputMode=output,
+        )
+    except ImageCms.PyCMSError, OSError:
+        converted = image.copy()
+    converted.info = info
+    return converted
+
+
 def upright_size(path: str | Path) -> tuple[int, int]:
     """Return the upright ``(width, height)`` of the image at *path*, reading only its header and EXIF orientation.
 
@@ -35,9 +69,13 @@ def upright_size(path: str | Path) -> tuple[int, int]:
         OSError: The file cannot be read as an image.
     """
     with Image.open(path) as image:
-        width, height = image.size
-        turned = image.getexif().get(_EXIF_ORIENTATION) in _EXIF_QUARTER_TURNS
-    return (height, width) if turned else (width, height)
+        return image_upright_size(image)
+
+
+def image_upright_size(image: Image.Image) -> tuple[int, int]:
+    """Return the upright ``(width, height)`` of the opened *image*: its size, swapped when its EXIF orientation turns it a quarter."""
+    width, height = image.size
+    return (height, width) if image.getexif().get(_EXIF_ORIENTATION) in _EXIF_QUARTER_TURNS else (width, height)
 
 
 @contextmanager

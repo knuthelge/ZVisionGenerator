@@ -156,27 +156,25 @@ describe('Extend, apart from New video', () => {
     expect(enhancedStaleReason(draft.state)).toBeNull();
   });
 
-  it('keeps Batch and Seed of its own, shared by New image, New video and Audio only', () => {
+  it('keeps Batch and Seed of each tab and kind apart', () => {
     draft.hydrateFromContext(ctx, null);
     draft.patch({ runs: 2, seed: 5 });
     draft.setTab('video');
     draft.onTabChange(ctx);
-    expect(draft.state).toMatchObject({ runs: 2, seed: 5 });
+    expect(draft.state).toMatchObject({ runs: 1, seed: null });
+    draft.patch({ runs: 4, seed: 9 });
     openKind('video', 'extend', ctx);
     expect(draft.state).toMatchObject({ runs: 1, seed: null });
     draft.patch({ runs: 7, seed: 77 });
 
     openKind('video', 'new', ctx);
-    expect(draft.state).toMatchObject({ runs: 2, seed: 5 });
+    expect(draft.state).toMatchObject({ runs: 4, seed: 9 });
     draft.setTab('image');
     draft.onTabChange(ctx);
     expect(draft.state).toMatchObject({ runs: 2, seed: 5 });
     draft.setTab('video');
     openKind('video', 'extend', ctx);
-    draft.setTab('image');
-    expect(draft.state).toMatchObject({ runs: 2, seed: 5 });
-    draft.setTab('video');
-    expect(draft.state).toMatchObject({ workflow: 'extend', runs: 7, seed: 77 });
+    expect(draft.state).toMatchObject({ runs: 7, seed: 77 });
   });
 
   it('keeps its prompt source, prompts file and Enhancer options apart from New\'s', () => {
@@ -189,21 +187,9 @@ describe('Extend, apart from New video', () => {
     expect(draft.state).toMatchObject({ promptSource: 'file', promptFilePath: '/prompts/new.yaml', promptFileOptionIds: ['a:0'], enhanceSettingsVideo: { style: 'dreamy' } });
     openKind('video', 'extend', ctx);
     draft.setTab('image');
-    expect(draft.state).toMatchObject({ promptSource: 'file', promptFilePath: '/prompts/new.yaml' });
+    expect(draft.state).toMatchObject({ promptSource: 'inline', promptFilePath: null });
     draft.setTab('video');
     expect(draft.state).toMatchObject({ workflow: 'extend', promptFilePath: '/prompts/extend.yaml', enhanceSettingsVideo: { style: 'noir' } });
-  });
-
-  it('keeps its source, length and audio track whichever kind is open', () => {
-    setUpNewVideo();
-    openKind('video', 'extend', ctx);
-    draft.setExtendSourcePath('/clips/walk.mp4');
-    draft.applyExtendSource(sourceInfo(), ctx);
-    draft.setAudioTrack('extend', { path: '/audio/extend.wav' });
-
-    openKind('video', 'new', ctx);
-
-    expect(draft.state).toMatchObject({ extendSourcePath: '/clips/walk.mp4', extendFrames: 48, extendAudioTrackPath: '/audio/extend.wav' });
   });
 
   it('gives a machine that cannot extend New\'s own text back', () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BRUSH_DEFAULT, BRUSH_MAX, BRUSH_MIN, EXTEND_MAX, EXTEND_MIN, clampBrush, clampExtend, contentRect, extendedSize, extensionOf, extensionRect,
-  pushOp, sameOps, strokesOf, undoOp, type EditOp, type Stroke,
+  modeOf, pushOp, sameOps, strokesOf, undoOp, type EditOp, type Stroke,
 } from './editOps';
 
 const stroke = (size = BRUSH_DEFAULT, erase = false): EditOp => ({ kind: 'stroke', erase, size, points: [10, 10, 20, 20] });
@@ -24,6 +24,22 @@ describe('the history of the paint', () => {
     expect(extensionOf(ops)).toEqual({ side: 'left', amount: 128 });
     expect(extensionOf([...ops, { kind: 'extend', side: null, amount: 128 }])).toBeNull();
     expect(extensionOf([stroke()])).toBeNull();
+  });
+
+  it('reads the mode from the last switch, else from the mode the painter opened in', () => {
+    expect(modeOf([stroke()])).toBe('paint');
+    expect(modeOf([stroke()], 'extend')).toBe('extend');
+    expect(modeOf([{ kind: 'mode', mode: 'extend' }, stroke(), { kind: 'mode', mode: 'paint' }], 'extend')).toBe('paint');
+  });
+
+  it('removes the work of the mode left: strokes and an extension before a switch are gone, and Undo brings them back', () => {
+    const painted: EditOp[] = [stroke(24), stroke(32)];
+    const extended: EditOp[] = [{ kind: 'extend', side: 'top', amount: 256 }];
+    expect(strokesOf([...painted, { kind: 'mode', mode: 'extend' }])).toHaveLength(0);
+    expect(strokesOf(undoOp([...painted, { kind: 'mode', mode: 'extend' }]))).toHaveLength(2);
+    expect(extensionOf([...extended, { kind: 'mode', mode: 'paint' }], { side: 'left', amount: 128 })).toBeNull();
+    expect(extensionOf(undoOp([...extended, { kind: 'mode', mode: 'paint' }]))).toEqual({ side: 'top', amount: 256 });
+    expect(extensionOf([{ kind: 'mode', mode: 'paint' }], { side: 'left', amount: 128 })).toBeNull();
   });
 
   it('merges a change of amount into the step before it, so dragging the size is one step to undo', () => {

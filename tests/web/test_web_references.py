@@ -176,9 +176,9 @@ def test_check_refuses_a_body_without_a_list_of_paths(body):
 
 @pytest.mark.parametrize(
     ("family", "size", "expected"),
-    [("zimage", None, True), ("flux2_klein", "9b", True), ("krea2", None, True), ("ideogram4", None, False), ("moss", None, False), ("flux1", None, False), ("flux2", None, False)],
+    [("zimage", None, False), ("flux2_klein", "9b", True)],
 )
-def test_the_image_model_defaults_carry_whether_the_model_can_edit_a_painted_area(monkeypatch, packaged_config, family, size, expected):
+def test_only_klein_defaults_carry_the_ability_to_edit_a_painted_area(monkeypatch, packaged_config, family, size, expected):
     web_config = make_web_config()
     web_config.app_config["model_presets"] = packaged_config["model_presets"]
     web_config.app_config["generation"] = {**web_config.app_config["generation"], **packaged_config["generation"]}
@@ -189,6 +189,18 @@ def test_the_image_model_defaults_carry_whether_the_model_can_edit_a_painted_are
     defaults = workspace_api_module.build_workspace_bootstrap_view(web_config)["image_model_defaults"]
 
     assert {name: entry["supports_mask_edit"] for name, entry in defaults.items()} == {"zit": expected, "local-image": expected}
+
+
+def test_a_klein_that_is_not_downloaded_still_offers_edit_with_the_distilled_defaults(monkeypatch, packaged_config):
+    """Klein's family is declared in the metadata, so what it can do is known before it is downloaded and offline."""
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda *_a, **_k: (_ for _ in ()).throw(FileNotFoundError("not downloaded")))
+    web_config = make_web_config()
+    web_config.app_config["model_presets"] = packaged_config["model_presets"]
+    web_config.app_config["generation"] = {**web_config.app_config["generation"], **packaged_config["generation"]}
+
+    defaults = workspace_api_module._build_image_bootstrap_defaults("klein9b", web_config)
+
+    assert (defaults["supports_mask_edit"], defaults["family"], defaults["size_variant"], defaults["steps"]) == (True, "flux2_klein", "9b", 4)
 
 
 def test_a_model_that_cannot_be_detected_offers_no_mask_edit(monkeypatch):

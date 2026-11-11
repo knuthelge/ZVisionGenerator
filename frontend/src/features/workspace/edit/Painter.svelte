@@ -6,16 +6,17 @@
   import { portal } from '$lib/actions/portal';
   import { isPlainKey, isCommandKey } from '$lib/keyboard';
   import { draft } from '$lib/state/draft.svelte';
+  import { EXTEND_SIDES } from '$lib/state/editSlots';
   import { heldUploads } from '$lib/state/heldUploads.svelte';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import type { EditMode, ExtendSide } from '$lib/types';
   import {
-    BRUSH_MAX, BRUSH_MIN, BRUSH_STEP, EXTEND_MAX, EXTEND_MIN, EXTEND_SIDES, EXTEND_STEP,
-    contentRect, extensionRect, sameOps, type ExtendSide, type Stroke,
+    BRUSH_MAX, BRUSH_MIN, BRUSH_STEP, EXTEND_MAX, EXTEND_MIN, EXTEND_STEP,
+    contentRect, extensionRect, sameOps, type Stroke,
   } from './editOps';
   import { imageEdit } from './editStore.svelte';
-  import { readSize } from './editSource';
   import { sizeLine } from './editView';
-  import { decodeMask, detectCutout, drawOverlay, drawStroke, drawStrokes, makeScratch, maskScale, maskUpload, readPalette, type Palette } from './paintCanvas';
+  import { decodeMask, drawOverlay, drawStroke, drawStrokes, makeScratch, maskScale, maskUpload, readPalette, type Palette } from './paintCanvas';
   import {
     ZOOM_MAX, ZOOM_MIN, clampZoom, fitScale, fitView, panBy, pinchView, ringDiameter, scaleOf, stepZoom, toImage, toScreen, zoomAbout, zoomLabel,
     type PinchStart, type Point, type View,
@@ -23,12 +24,11 @@
 
   interface Props {
     /** Called when the painter closes: with `true` after Done, with `false` after Cancel. */
-    onclose: (done: boolean) => void;
+    onclose: () => void;
   }
 
   let { onclose }: Props = $props();
 
-  type Mode = 'paint' | 'extend';
   type Tool = 'brush' | 'erase';
 
   const source = $derived(imageEdit.source);
@@ -41,7 +41,8 @@
   // and a single docked row on a phone held sideways, where there is no height for a top bar.
   const variant = $derived<'wide' | 'phone' | 'landscape'>(layout.short ? 'landscape' : layout.compact ? 'phone' : 'wide');
 
-  let mode = $state<Mode>('paint');
+  // The mode is the history's: a switch is one of its steps, so Undo and Cancel bring the other mode back with its work.
+  const mode = $derived(imageEdit.mode);
   let tool = $state<Tool>('brush');
   // With no history yet, the paint the draft holds (a mask restored after a reload) is what the strokes sit on.
   imageEdit.begin(draft.state.editMaskUpload !== null ? heldUploads.editMask : null);
@@ -54,13 +55,12 @@
   let rootEl = $state<HTMLElement | null>(null);
   let surfaceEl = $state<HTMLElement | null>(null);
   let overlayEl = $state<HTMLCanvasElement | null>(null);
-  let imageEl = $state<HTMLImageElement | null>(null);
   let areaW = $state(0);
   let areaH = $state(0);
   const area = $derived({ w: areaW, h: areaH });
   let loaded = $state(false);
   let failed = $state(false);
-  // The picture's size once it is known: the source's own, else what the loaded picture says.
+  // The picture is drawn once it has loaded and the store knows its size (learnt in the background when the source is shown).
   const ready = $derived(loaded && width !== null && height !== null && areaW > 0 && areaH > 0);
 
   // Paint shows the picture alone, at the zoom and place the user left it; Extend shows the whole canvas, always at Fit.
@@ -219,18 +219,6 @@
     };
   });
 
-  function imageLoaded(): void {
-    loaded = true;
-    const current = imageEdit.source;
-    if (!current || !imageEl) return;
-    // A size the server could not tell is the loaded picture's own.
-    if (current.width === null || current.height === null) {
-      const { naturalWidth, naturalHeight } = imageEl;
-      void readSize(current).then((size) => imageEdit.learn(current.id, size ?? { width: naturalWidth, height: naturalHeight }));
-    }
-    if (current.cutout === null) imageEdit.learn(current.id, { cutout: detectCutout(imageEl) });
-  }
-
   // --- Painting --------------------------------------------------------------------------------------------------------
   const pointers = new Map<number, Point>();
   let stroke: Stroke | null = null;
@@ -387,16 +375,69 @@
     announcement = next === 'brush' ? 'Brush' : 'Eraser';
   }
 
-  function setMode(next: Mode): void {
-    if (next === mode) return;
-    mode = next;
-    // A half-drawn stroke or gesture does not carry over to the other mode.
+  const NO_EXTEND_REASON = 'Extend is off: this picture has transparent parts.';
+
+  /** Whether a mode can be entered, with the reason when it cannot: a cut-out cannot be extended. */
+  function refusal(next: EditMode): string | null {
+    return next === 'extend' && cutout ? NO_EXTEND_REASON : null;
+  }
+
+  /** What the live region says once the mode has changed, by a switch or by Undo. */
+  function modeAnnouncement(current: EditMode): string {
+    if (current === 'paint') return 'Paint';
+    const now = imageEdit.extension;
+    return now && width !== null && height !== null ? `Extend. Extending ${now.side} by ${now.amount} pixels, ${sizeLine(width, height, now).replace('→', 'to')}` : 'Extend. Choose a side to extend.';
+  }
+
+  let announcedMode = untrack(() => mode);
+
+  // A half-drawn stroke or gesture does not carry over to the other mode, however the mode changed.
+  $effect(() => {
+    const current = mode;
+    untrack(() => {
+      if (current === announcedMode) return;
+      announcedMode = current;
+      cancelStroke();
+      pointers.clear();
+      pinch = null;
+      dragging = null;
+      ring = null;
+      announcement = modeAnnouncement(current);
+    });
+  });
+
+  /**
+   * Switch mode: the other mode's work goes, so with work to lose it asks first (Undo brings the work back). Keys 1 and 2 and the
+   * switch come here. A mode that cannot be entered says why instead.
+   */
+  async function chooseMode(next: EditMode): Promise<void> {
+    if (next === mode || confirming) return;
+    const reason = refusal(next);
+    if (reason) {
+      announcement = reason;
+      return;
+    }
     cancelStroke();
     pointers.clear();
     pinch = null;
     dragging = null;
     ring = null;
-    announcement = next === 'paint' ? 'Paint' : cutout ? 'Extend is not available for an image with transparency' : 'Extend';
+    if (imageEdit.hasWork) {
+      const losing = mode === 'paint' ? 'paint' : 'extension';
+      confirming = true;
+      const approved = await requestConfirm({
+        question: `Remove the ${losing} and switch to ${next === 'extend' ? 'Extend' : 'Paint'}?`,
+        info: `One kind of change is sent at a time. Undo brings the ${losing} back.`,
+        confirmLabel: mode === 'paint' ? 'Remove paint' : 'Remove extension',
+        cancelLabel: mode === 'paint' ? 'Keep painting' : 'Keep extending',
+      });
+      confirming = false;
+      if (!approved) {
+        void tick().then(() => rootEl?.querySelector<HTMLElement>('[data-testid="painter-mode"] [aria-pressed="true"]')?.focus());
+        return;
+      }
+    }
+    imageEdit.setMode(next);
   }
 
   function handleKeydown(event: KeyboardEvent): void {
@@ -439,6 +480,11 @@
       return;
     }
     const key = event.key.toLowerCase();
+    if (key === '1' || key === '2') {
+      event.preventDefault();
+      void chooseMode(key === '1' ? 'paint' : 'extend');
+      return;
+    }
     if (mode === 'paint') {
       if (key === 'b') setTool('brush');
       else if (key === 'e') setTool('erase');
@@ -461,10 +507,6 @@
   // --- Closing ---------------------------------------------------------------------------------------------------------
   const changed = $derived(!sameOps(imageEdit.ops, opened));
 
-  function finish(done: boolean): void {
-    onclose(done);
-  }
-
   let committing = false;
 
   /**
@@ -477,7 +519,7 @@
     try {
       // A picture whose size is not known has nothing to measure the paint on: nothing to keep or lose.
       if (width === null || height === null) {
-        finish(true);
+        onclose();
         return;
       }
       // The mask is drawn again from the history and the paint under it, which may still be decoding, so what is kept is what the history says.
@@ -486,8 +528,8 @@
       const canvas = ensureMask();
       const painted = canvas ? await maskUpload(canvas) : null;
       const extension = imageEdit.extension;
-      draft.commitEditPaint({ mask: painted?.file ?? null, share: painted?.share ?? 0, extension, amount: extension?.amount ?? imageEdit.extendAmount });
-      finish(true);
+      draft.commitEdit({ mode: imageEdit.mode, mask: painted?.file ?? null, share: painted?.share ?? 0, extension, amount: extension?.amount ?? imageEdit.extendAmount });
+      onclose();
     } finally {
       committing = false;
     }
@@ -508,7 +550,7 @@
       if (!approved) return;
       imageEdit.restore(opened);
     }
-    finish(false);
+    onclose();
   }
 
   onMount(() => {
@@ -524,10 +566,10 @@
   });
 
   // --- What the controls show ------------------------------------------------------------------------------------------
-  const modeOptions = [
-    { value: 'paint' as const, label: 'Paint' },
-    { value: 'extend' as const, label: 'Extend' },
-  ];
+  const modeOptions = $derived([
+    { value: 'paint' as const, label: 'Paint', icon: variant === 'wide' ? ('brush' as const) : undefined, title: 'Paint the area to change (1)' },
+    { value: 'extend' as const, label: 'Extend', icon: variant === 'wide' ? ('extend' as const) : undefined, title: cutout ? NO_EXTEND_REASON : 'Give the picture more room on one side (2)', disabled: cutout },
+  ]);
   const toolOptions = $derived([
     { value: 'brush' as const, label: variant === 'landscape' ? '' : 'Brush', icon: 'brush' as const, title: 'Brush (B)' },
     { value: 'erase' as const, label: variant === 'landscape' ? '' : 'Erase', icon: 'eraser' as const, title: 'Erase (E)' },
@@ -536,7 +578,7 @@
   const fillOf = (value: number, min: number, max: number): string => `${((value - min) / (max - min)) * 100}%`;
   const brushDot = $derived(6 + ((imageEdit.brush - BRUSH_MIN) / (BRUSH_MAX - BRUSH_MIN)) * 16);
   const dimensions = $derived(width !== null && height !== null && !cutout ? sizeLine(width, height, extension) : '');
-  const canClear = $derived(mode === 'paint' ? imageEdit.strokes.length > 0 || imageEdit.baseShown : extension !== null);
+  const canClear = $derived(imageEdit.hasWork);
   const pill = $derived.by(() => {
     const box = imageBox;
     return {
@@ -568,11 +610,11 @@
 </script>
 
 {#snippet modeSwitch()}
-  <Segmented label="Mode" testId="painter-mode" value={mode} options={modeOptions} onchange={setMode} />
+  <Segmented label="Mode" testId="painter-mode" value={mode} options={modeOptions} onchange={(next) => void chooseMode(next)} />
 {/snippet}
 
 {#snippet toolSwitch()}
-  <Segmented label="Tool" testId="painter-tool" value={tool} options={toolOptions} onchange={setTool} />
+  <Segmented label="Tool" value={tool} options={toolOptions} onchange={setTool} />
 {/snippet}
 
 {#snippet brushSize()}
@@ -593,10 +635,6 @@
 {/snippet}
 
 {#snippet extendBy()}
-  {#if cutout}
-    <!-- A cut-out has transparent parts that a new area would cover: the sides are off, and this says why. -->
-    <span class="painter-reason" role="status" data-testid="painter-cutout-note">Extend is off for an image with transparent parts.</span>
-  {:else}
   <label class="painter-label" for="painter-extend-by">Extend by</label>
   <input
     id="painter-extend-by"
@@ -611,7 +649,6 @@
     oninput={(e) => setAmount(Number(e.currentTarget.value))}
   >
   <span class="painter-value">{imageEdit.extendAmount} px</span>
-  {/if}
 {/snippet}
 
 {#snippet history()}
@@ -622,7 +659,7 @@
 {#snippet zoom()}
   <div class="painter-zoom" role="group" aria-label="Zoom">
     <button type="button" class="ui-btn ui-btn-icon" aria-label="Zoom out" title="Zoom out (-)" disabled={view.z <= ZOOM_MIN} onclick={() => zoomBy(-1)}><Icon name="minus" size={14} /></button>
-    <span class="painter-value painter-zoom-value" data-testid="painter-zoom">{zoomLabel(view.z)}</span>
+    <span class="painter-value painter-zoom-value">{zoomLabel(view.z)}</span>
     <button type="button" class="ui-btn ui-btn-icon" aria-label="Zoom in" title="Zoom in (+)" disabled={view.z >= ZOOM_MAX - 1e-6} onclick={() => zoomBy(1)}><Icon name="plus" size={14} /></button>
     <button type="button" class="ui-btn" title="Show the whole picture (0)" disabled={view.z <= ZOOM_MIN} onclick={zoomFit}>Fit</button>
   </div>
@@ -632,12 +669,9 @@
   bind:this={rootEl}
   use:portal
   class="painter ui-viewport"
-  data-variant={variant}
-  data-mode={mode}
-  data-testid="painter"
   role="dialog"
   aria-modal="true"
-  aria-label="Paint or extend"
+  aria-label="Edit the picture"
   tabindex="-1"
 >
   {#if variant === 'wide'}
@@ -649,7 +683,7 @@
       {@render modeSwitch()}
       <div class="painter-end">
         <button type="button" class="ui-btn" data-testid="painter-cancel" onclick={() => void cancel()}>Cancel</button>
-        <button type="button" class="ui-btn ui-btn-primary" data-testid="painter-done" onclick={() => void done()}>Done</button>
+        <button type="button" class="ui-btn ui-btn-primary" onclick={() => void done()}>Done</button>
       </div>
     </header>
   {:else if variant === 'phone'}
@@ -667,7 +701,7 @@
       class:pan={panCursor}
       class:painting={mode === 'paint'}
       data-own-drag
-      data-testid="painter-surface"
+     
       role="presentation"
       {onpointerdown}
       {onpointermove}
@@ -681,7 +715,6 @@
           <div class="painter-new ui-checkerboard" style:left="{newArea.x}px" style:top="{newArea.y}px" style:width="{newArea.w}px" style:height="{newArea.h}px"></div>
         {/if}
         <img
-          bind:this={imageEl}
           class="painter-img"
           class:ui-checkerboard={cutout}
           src={source.url}
@@ -692,13 +725,13 @@
           style:width="{imageBox.w}px"
           style:height="{imageBox.h}px"
           style:visibility={ready ? 'visible' : 'hidden'}
-          onload={imageLoaded}
+          onload={() => { loaded = true; }}
           onerror={() => { failed = true; }}
         >
       {/if}
       <canvas bind:this={overlayEl} class="painter-overlay" style:width="{areaW}px" style:height="{areaH}px" aria-hidden="true"></canvas>
       {#if ring && mode === 'paint' && ready}
-        <span class="painter-ring" data-testid="painter-ring" style:width="{ringSize}px" style:height="{ringSize}px" style:left="{ring.x - ringSize / 2}px" style:top="{ring.y - ringSize / 2}px" aria-hidden="true"></span>
+        <span class="painter-ring" style:width="{ringSize}px" style:height="{ringSize}px" style:left="{ring.x - ringSize / 2}px" style:top="{ring.y - ringSize / 2}px" aria-hidden="true"></span>
       {/if}
     </div>
 
@@ -719,7 +752,6 @@
           class="painter-pill"
           data-side={side}
           aria-pressed={extension?.side === side}
-          disabled={cutout}
           style:left="{pill[side].left}px"
           style:top="{pill[side].top}px"
           style:translate={pill[side].shift}
@@ -738,7 +770,7 @@
         {:else}
           <div class="painter-size">
             {@render extendBy()}
-            <span class="painter-value painter-dimensions" data-testid="painter-size">{dimensions}</span>
+            <span class="painter-value painter-dimensions painter-dimensions-after">{dimensions}</span>
           </div>
         {/if}
         {@render history()}
@@ -759,7 +791,7 @@
       <div class="painter-row painter-size">
         {#if mode === 'paint'}{@render brushSize()}{:else}{@render extendBy()}{/if}
       </div>
-      <button type="button" class="ui-btn ui-btn-primary ui-btn-main painter-done" data-testid="painter-done" onclick={() => void done()}>Done</button>
+      <button type="button" class="ui-btn ui-btn-primary ui-btn-main painter-done" onclick={() => void done()}>Done</button>
     </footer>
   {:else}
     <footer class="painter-foot painter-dock painter-foot-landscape">
@@ -770,10 +802,10 @@
         <div class="painter-size painter-size-grow">{@render brushSize()}</div>
       {:else}
         <div class="painter-size painter-size-grow">{@render extendBy()}</div>
-        <span class="painter-value painter-dimensions" data-testid="painter-size">{dimensions}</span>
+        <span class="painter-value painter-dimensions painter-dimensions-after">{dimensions}</span>
       {/if}
       {@render history()}
-      <button type="button" class="ui-btn ui-btn-primary" data-testid="painter-done" onclick={() => void done()}>Done</button>
+      <button type="button" class="ui-btn ui-btn-primary" onclick={() => void done()}>Done</button>
     </footer>
   {/if}
 
@@ -801,14 +833,12 @@
   .painter-overlay { position: absolute; left: 0; top: 0; pointer-events: none; }
   .painter-ring { position: absolute; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--color-text-primary); box-shadow: 0 0 0 1.5px var(--color-bg-overlay), inset 0 0 0 1.5px var(--color-bg-overlay); pointer-events: none; }
   .painter-wait { position: absolute; inset: 0; display: grid; place-items: center; color: var(--color-text-secondary); font-size: var(--text-content); pointer-events: none; }
-  .painter-reason { flex: 1; min-width: 0; padding: 0 6px; font-size: var(--text-ui); color: var(--color-text-secondary); }
 
   /* The four sides of Extend: filled, so the label never sits on the picture's own pixels. */
   .painter-pill { position: absolute; z-index: 2; display: inline-flex; align-items: center; height: var(--spacing-bar); padding: 0 12px; border-radius: var(--radius-sm); background: var(--color-bg-overlay); font-size: var(--text-ui); font-weight: 600; white-space: nowrap; color: var(--color-text-primary); }
   .painter-pill[aria-pressed='true'] { background: var(--color-primary-main); color: var(--color-primary-ink); }
-  .painter-pill:disabled { opacity: 0.4; cursor: not-allowed; }
-  @media (hover: hover) { .painter-pill:hover:not(:disabled):not([aria-pressed='true']) { background: var(--color-bg-control-hover); } }
-  @media (hover: none) { .painter-pill:active:not(:disabled) { background: var(--color-bg-control-hover); } .painter-pill[aria-pressed='true']:active:not(:disabled) { background: var(--color-primary-hover); } }
+  @media (hover: hover) { .painter-pill:hover:not([aria-pressed='true']) { background: var(--color-bg-control-hover); } }
+  @media (hover: none) { .painter-pill:active { background: var(--color-bg-control-hover); } .painter-pill[aria-pressed='true']:active { background: var(--color-primary-hover); } }
 
   /* --- The foot --- */
   .painter-foot { flex: none; }
@@ -820,6 +850,8 @@
   .painter-label { flex: none; font-size: var(--text-ui); font-weight: 500; color: var(--color-text-secondary); }
   .painter-value { min-width: 4ch; text-align: right; white-space: nowrap; }
   .painter-dimensions { text-align: left; }
+  /* After the amount: a divider keeps `256 px` and `832 × 1216 → 1088 × 1216` from running into one line. */
+  .painter-dimensions-after { margin-left: 4px; padding-left: 12px; border-left: 1px solid var(--color-border-subtle); }
   .painter-zoom { display: flex; flex: none; align-items: center; gap: 4px; }
   .painter-zoom-value { min-width: 4ch; text-align: center; }
   .size-dot { display: grid; flex: none; place-items: center; width: 22px; height: 22px; }

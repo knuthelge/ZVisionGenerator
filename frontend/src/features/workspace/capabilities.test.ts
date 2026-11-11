@@ -340,32 +340,6 @@ describe('workspaceCapabilities for the controls the contract lists per workflow
     return { ...base, image_model_defaults: { ...base.image_model_defaults, ...models } };
   })();
   const stateOf = (workflow: string, model: string): DraftState => ({ workflow, model, promptSource: 'inline', referenceImagePaths: [] }) as unknown as DraftState;
-  const workflows = Object.keys(context.workflow_contract.definitions);
-
-  /** What these capabilities were before the contract listed them: the workflow's name and mode decided. */
-  function byName(workflow: string, mode: string, flags: { negative: boolean; json: boolean; sigma: boolean }) {
-    const image = mode === 'image' && workflow !== 'edit';
-    return {
-      showPreset: mode !== 'audio' && workflow !== 'edit',
-      supportsNegativePrompt: image && flags.negative,
-      supportsJsonPrompt: image && flags.json,
-      supportsFirstSigma: image && flags.sigma,
-    };
-  }
-
-  it('lists every workflow it compares, Edit and the Audio kinds included', () => {
-    expect(workflows).toEqual(expect.arrayContaining(['txt2img', 'img2img', 'edit', 'txt2vid', 'img2vid', 'extend', 'music', 'speech', 'sound']));
-  });
-
-  it.each(workflows)('shows in %s exactly what the workflow\'s name and mode used to decide', (workflow) => {
-    const mode = context.workflow_contract.definitions[workflow as keyof typeof context.workflow_contract.definitions]!.mode;
-    for (const negative of FLAGS) for (const json of FLAGS) for (const sigma of FLAGS) {
-      const caps = workspaceCapabilities(context, stateOf(workflow, modelId(negative, json, sigma)));
-      expect({ showPreset: caps.showPreset, supportsNegativePrompt: caps.supportsNegativePrompt, supportsJsonPrompt: caps.supportsJsonPrompt, supportsFirstSigma: caps.supportsFirstSigma })
-        .toEqual(byName(workflow, mode, { negative, json, sigma }));
-      expect(caps.showNegativePrompt).toBe(caps.supportsNegativePrompt);
-    }
-  });
 
   it('shows a control where the workflow lists it and the model supports it, and nowhere else', () => {
     const all = modelId(true, true, true);
@@ -376,7 +350,7 @@ describe('workspaceCapabilities for the controls the contract lists per workflow
     });
     const flagsOf = (ctx: WorkspaceContext, model: string) => {
       const caps = workspaceCapabilities(ctx, stateOf('edit', model));
-      return [caps.showPreset, caps.supportsNegativePrompt, caps.supportsJsonPrompt, caps.supportsFirstSigma];
+      return [caps.showPreset, caps.showNegativePrompt, caps.supportsJsonPrompt, caps.supportsFirstSigma];
     };
 
     expect(flagsOf(listing([]), all)).toEqual([false, false, false, false]);

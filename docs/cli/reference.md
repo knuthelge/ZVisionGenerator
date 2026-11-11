@@ -52,9 +52,9 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--image` | none | Start image for image-to-image |
 | `--image-strength` | `0.5` | How far the result may move from the start image, 0–1 |
 | `--reference` | none | Comma-separated reference images whose content the result keeps, named "image 1", "image 2" in the prompt; FLUX.2 Klein takes up to 4. Combines with `--image` |
-| `--edit` | none | Edit this picture instead of generating one: redraw the area painted in `--mask`, grow a side with `--extend`, or with neither change the whole picture (FLUX.2 Klein, opaque pictures). Needs `--prompt` and `-m`. Saved as `<name>_edit.png` beside the picture, or in `-o`. See [Edit a picture](images.md#edit-a-picture) |
-| `--mask` | none | The area of the `--edit` picture to redraw: a PNG of the picture's upright shape (any size of it), painted where any pixel isn't fully transparent when the PNG has transparency, otherwise where any pixel isn't black. Needs `--edit` |
-| `--extend` | none | Grow the `--edit` picture on one side: `top`, `right`, `bottom` or `left`, then `=` and 128 to 512 pixels in steps of 16, such as `top=256`. Combines with `--mask`. Needs `--edit` |
+| `--edit` | none | Edit this picture instead of generating one. Needs `--prompt` and a FLUX.2 Klein model (`-m`). See [Edit a picture](images.md#edit-a-picture) |
+| `--mask` | none | The area of the `--edit` picture to redraw, as a PNG. Needs `--edit` |
+| `--extend` | none | Grow the `--edit` picture on one side, such as `top=256`. Needs `--edit` |
 | `--upscale` | off | Upscale factor: `2` or `4` |
 | `--upscale-denoise` | from config | Denoise strength of the upscale pass |
 | `--upscale-steps` | per model | Steps of the upscale pass |
@@ -66,7 +66,7 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--contrast [AMOUNT]` / `--no-contrast` | off | Adjust contrast (1.0 = no change) |
 | `--saturation [AMOUNT]` / `--no-saturation` | off | Adjust saturation (1.0 = no change) |
 | `--transparent` | off | Cut the subject out and save a PNG with a transparent background. Non-commercial use only. See [Transparent background](../concepts/images.md#transparent-background) |
-| `-o`, `--output` | `.` | Output folder. With `--edit`, the default is the edited picture's folder |
+| `-o`, `--output` | `.` | Output folder. With `--edit`, the edited picture's folder |
 | `--enhance [SPEC]` | off | Rewrite each prompt before the model loads. See [the spec](enhance.md#the-spec). Overrides prompt-file `enhance:` entries. Ignored with `--json-prompt` |
 | `--enhance-note TEXT` | none | A direction for the enhancer, up to 300 characters. Implies `--enhance` |
 | `--enhance-model` | `fast` | `fast`, `smart`, `REPO[@REVISION]` or a local folder |

@@ -18,7 +18,7 @@ export interface EditFormInput {
 /**
  * The fields an Edit Generate sends, built from the draft: `new FormData(form)` would carry New's fields (size, guidance, scheduler,
  * post-processing, references), none of which an edit uses. Only what the `edit` workflow reads goes: the image (an upload wins
- * over a path), the painted mask with `edit_painted`, the extension, the prompt, the model, LoRAs, quantization, steps, seed and batch.
+ * over a path), the painted mask with `edit_painted` (Paint) or the extension (Extend), never both, the prompt, the model, LoRAs, quantization, steps, seed and batch.
  */
 export function editFormData(state: DraftState, input: EditFormInput): FormData {
   const form = new FormData();
@@ -27,11 +27,11 @@ export function editFormData(state: DraftState, input: EditFormInput): FormData 
   if (input.sourceFile !== null) form.set('edit_source_file', input.sourceFile);
   else if (hasPath(state.editSourcePath)) form.set('edit_source_path', state.editSourcePath);
   // The mask is sent only with its marker in the draft, as every held upload is: a file the draft does not mark is not an input.
-  if (input.maskFile !== null && state.editMaskUpload !== null) {
+  if (state.editMode === 'paint' && input.maskFile !== null && state.editMaskUpload !== null) {
     form.set('edit_mask_file', input.maskFile);
     form.set('edit_painted', 'true');
   }
-  if (state.editExtendSide !== null) {
+  if (state.editMode === 'extend' && state.editExtendSide !== null) {
     form.set('edit_extend_side', state.editExtendSide);
     form.set('edit_extend_amount', String(state.editExtendAmount));
   }

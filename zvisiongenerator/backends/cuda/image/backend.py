@@ -14,7 +14,7 @@ from diffusers import AutoPipelineForText2Image
 
 from zvisiongenerator.backends.cuda.block_streaming import group_offload
 from zvisiongenerator.backends.cuda.driver import require_cuda
-from zvisiongenerator.backends.cuda.image.edit import blend_callback
+from zvisiongenerator.backends.cuda.image.edit import blend_callback, match_strip
 from zvisiongenerator.backends.cuda.image.edit import prepare as prepare_edit
 from zvisiongenerator.backends.cuda.image.ideogram4 import generate as generate_ideogram4
 from zvisiongenerator.backends.cuda.image.ideogram4 import load_pipeline as load_ideogram4_pipeline
@@ -31,7 +31,6 @@ from zvisiongenerator.core.image_types import JobPrompt
 from zvisiongenerator.core.moss import img2img_run_steps
 from zvisiongenerator.core.moss import run_size as moss_run_size
 from zvisiongenerator.core.moss import sampler_settings as moss_sampler_settings
-from zvisiongenerator.processing.edit_region import EDIT_CELL_PIXELS
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.lora_files import normalised_lora_state
 from zvisiongenerator.utils.model_files import is_moss_model
@@ -760,6 +759,7 @@ class DiffusersBackend:
         self,
         model: Any,
         image: Image.Image,
+        reference: Image.Image,
         paint: np.ndarray,
         prompt: str,
         seed: int,
@@ -768,14 +768,21 @@ class DiffusersBackend:
         scheduler: str | None = None,
         skip_signal: Any | None = None,
         step_callback: Any | None = None,
+        fix_join: bool = False,
     ) -> Image.Image | None:
+        """Redraw the *paint* area of *image* at strength 1.0, with *reference* as the pipeline's reference image and the source's latents blended back in after every step.
+
+        With *fix_join* (an Extend) the last step's latents are decoded before the pin, and the strip of the result is colour-matched
+        to the source (:func:`match_join`): one extra VAE decode.
+
+        Raises:
+            RuntimeError: If :meth:`load_model` has not been called.
+        """
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
-        family = self._model_info.family
-        if family not in EDIT_CELL_PIXELS:
-            raise ValueError(f"Region editing is not available for the {family!r} family.")
-        prepared = prepare_edit(family, model, image, paint, seed)
-        return self._generate(
+        prepared = prepare_edit(model, image, paint, seed)
+        final: list[torch.Tensor] = []
+        result = self._generate(
             model,
             prompt,
             image.width,
@@ -786,6 +793,10 @@ class DiffusersBackend:
             scheduler,
             skip_signal,
             step_callback,
+            reference_images=[reference],
             latents=prepared.noise,
-            blend=blend_callback(prepared),
+            blend=blend_callback(prepared, final if fix_join else None),
         )
+        if result is None or not final:
+            return result
+        return match_strip(model, result, final[-1], image, paint)

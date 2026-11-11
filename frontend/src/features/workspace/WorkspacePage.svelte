@@ -526,7 +526,7 @@
     const video = s.workflow === 'img2vid' || s.workflow === 'txt2vid' || s.workflow === 'extend';
     const enhanced = anyEnhancedUsed(s);
     const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || (isEdit ? '' : s.scene);
-    const empty = video ? 'What happens in the clip…' : isEdit ? editPlaceholder(currentEditFacts(context)) : 'Describe what to make…';
+    const empty = video ? 'What happens in the clip…' : isEdit ? editPlaceholder(currentEditFacts()) : 'Describe what to make…';
     return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || empty, empty: !text };
   });
   const compactSubmitDisabled = $derived(busy || !authorityReady || composerReason !== null || promptChoiceMissing() || currentExtendGuard().blocked || imageBlock !== null || trackBlock !== null || block.blocked);
@@ -2167,7 +2167,7 @@
           />
         {/if}
         {#if context}<PresetMenu {context} applied={activePreset} changed={presetChanged} button={false} bind:open={presetMenuOpen} />{/if}
-        {#if isEdit && context}<ImageToEditCard {context} />{/if}
+        {#if isEdit}<ImageToEditCard />{/if}
         <SettingsStrip {chips} tab={workspaceTab(draft.state.workflow)} activeKey={activeChip} {changedCount} pending={controlsPending} onopen={toggleChip} onall={() => { activeChip = null; sheetOpen = true; }} />
         <div class="composer" class:expanded={composerOpen} data-testid="composer">
           {#if block.failures.length > 0}

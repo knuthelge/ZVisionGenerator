@@ -29,7 +29,7 @@ from mlx import nn
 
 from zvisiongenerator.backends.mac import moss as _moss
 from zvisiongenerator.backends.mac._temp_images import remove_file, save_temp_png
-from zvisiongenerator.backends.mac.image_edit import edit_blend, prepare as prepare_edit
+from zvisiongenerator.backends.mac.image_edit import edit_blend, match_strip, prepare as prepare_edit
 from zvisiongenerator.backends.mac.image_preview import estimate_clean_latents, render_latent_preview
 from zvisiongenerator.backends.mac.klein_references import generate_with_references
 from zvisiongenerator.backends.mac.memory import load_resident, upcast_weights
@@ -38,7 +38,6 @@ from zvisiongenerator.core import JobPrompt
 from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, INSTANT_GUIDANCE, sampler_settings, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
 from zvisiongenerator.core.moss import lora_stack as moss_lora_stack, run_size as moss_run_size, sampler_settings as moss_sampler_settings
 from zvisiongenerator.core.progress_events import preview_steps
-from zvisiongenerator.processing.edit_region import EDIT_CELL_PIXELS
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.lora_files import readable_lora_files
 from zvisiongenerator.utils.moss_build import is_moss_dir, require_built, shared_quant_source, turbo_lora_for
@@ -688,6 +687,7 @@ class MfluxBackend:
         self,
         model: Any,
         image: Image.Image,
+        reference: Image.Image,
         paint: np.ndarray,
         prompt: str,
         seed: int,
@@ -696,25 +696,29 @@ class MfluxBackend:
         scheduler: str | None = None,
         skip_signal: Any | None = None,
         step_callback: Any | None = None,
+        fix_join: bool = False,
     ) -> Image.Image | None:
-        """Redraw the *paint* area of *image* at strength 1.0 by blending the source's latents back in after every step.
+        """Redraw the *paint* area of *image* at strength 1.0, with *reference* as the model's reference image and the source's latents blended back in after every step.
 
-        mflux has no hook that replaces latents, so the run goes through :meth:`text_to_image` with a blend on the
-        scheduler's step (Z-Image, Klein) or on the Krea 2 stepper; scheduler choice, previews and Stop are unchanged.
+        With *fix_join* (an Extend) the last step's latents are decoded before the pin, and the strip of the result is colour-matched
+        to the source (:func:`match_join`): one extra VAE decode.
+
+        mflux has no hook that replaces latents, so the run goes through :meth:`text_to_image` (the Klein reference path,
+        with *reference* as the one reference) with a blend on the scheduler's step; scheduler choice, previews and Stop are unchanged.
 
         Raises:
             RuntimeError: If :meth:`load_model` has not been called.
-            ValueError: If the model's family does not support mask editing.
         """
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
-        family = self._model_info.family
-        if family not in EDIT_CELL_PIXELS:
-            raise ValueError(f"Mask editing is not supported for family {family!r}.")
         width, height = image.size
-        prepared = prepare_edit(family, model, image, paint, seed)
-        with edit_blend(model, family, prepared):
-            return self.text_to_image(model, prompt, width, height, seed, steps, guidance, scheduler=scheduler, skip_signal=skip_signal, step_callback=step_callback)
+        prepared = prepare_edit(model, image, paint, seed)
+        final: list[Any] = []
+        with edit_blend(model, prepared, final if fix_join else None):
+            result = self.text_to_image(model, prompt, width, height, seed, steps, guidance, scheduler=scheduler, skip_signal=skip_signal, step_callback=step_callback, reference_images=[reference])
+        if result is None or not final:
+            return result
+        return match_strip(model, result, final[-1], image, paint)
 
     def _moss_generate(
         self,

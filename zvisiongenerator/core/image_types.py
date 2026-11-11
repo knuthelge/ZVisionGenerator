@@ -141,23 +141,25 @@ class EditWork:
 
     Attributes:
         canvas: The full-size RGB picture the result is pasted onto (the source, or the source on its extended canvas).
-        alpha: The cut-out's alpha at canvas size, or ``None`` when the source is opaque.
-        colours: The cut-out's own RGB at canvas size (not flattened on the backdrop), or ``None`` when the source is opaque.
-        paint: The area to redraw (bool, canvas size), or ``None`` for a whole-picture edit.
-        crop: The part of the canvas the model works on, at ``target`` size.
+        cutout: The source as RGBA with its own colours (not flattened on the backdrop), or ``None`` when the source is opaque.
+        paint: The area to redraw (bool, canvas size), or ``None`` for a whole-picture edit or an Extend.
+        crop: The part of the canvas the model works on, at ``target`` size. For an Extend, the source scaled to about one megapixel with the new strip beside it, in whole 16 px cells.
         crop_paint: The paint of that crop (bool, ``target`` size).
-        plan: Where the crop sits on the canvas, and the size the model draws it at.
+        reference: The picture the model sees while it draws: the crop, or for an Extend the drawn canvas with a blurred strip.
+        plan: Where the crop sits on the canvas, and the size the model draws it at; ``None`` for an Extend.
+        drawn_source_box: Where the source sits on the Extend's crop ``(left, top, right, bottom)``, or ``None`` without an Extend.
         source_box: Where the source sits on an extended canvas ``(left, top, right, bottom)``, or ``None`` without an Extend.
     """
 
     canvas: Image.Image
-    alpha: np.ndarray | None = None
-    colours: np.ndarray | None = None
+    cutout: Image.Image | None = None
     paint: np.ndarray | None = None
     crop: Image.Image | None = None
     crop_paint: np.ndarray | None = None
+    reference: Image.Image | None = None
     plan: Plan | None = None
     source_box: tuple[int, int, int, int] | None = None
+    drawn_source_box: tuple[int, int, int, int] | None = None
 
 
 @dataclass

@@ -6,17 +6,18 @@ import warnings
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 from PIL import Image
 
 from tests._factories import _make_args, _make_plan
+from tests._images import noise_picture, painted_box
 from zvisiongenerator.core.image_backend import ImageBackend
 from zvisiongenerator.core.image_types import JobPrompt
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.provenance import read_png_config
+from zvisiongenerator.workflows.generation_prompt import EXTEND_INSTRUCTION
 
 _MODEL_INFO = ImageModelInfo(family="zimage", is_distilled=False, size=None)
 # An edit takes its size from the picture, so the config has no size presets.
@@ -25,25 +26,24 @@ _CONFIG = {"generation": {"seed_min": 1, "seed_max": 100}, "sharpening": {"norma
 
 def _source(tmp_path: Path, name: str = "door.png") -> Path:
     path = tmp_path / name
-    Image.fromarray(np.random.default_rng(7).integers(0, 256, (320, 480, 3), dtype=np.uint8)).save(path)
+    noise_picture(480, 320, seed=7).save(path)
     return path
 
 
-def _mask() -> np.ndarray:
-    painted = np.zeros((320, 480), dtype=bool)
-    painted[100:200, 150:260] = True
-    return painted
+def _mask():
+    return painted_box(320, 480, (150, 100, 260, 200))
 
 
 def _backend() -> MagicMock:
     backend = MagicMock(spec=ImageBackend)
     backend.name = "mock"
-    backend.edit_region.side_effect = lambda **kwargs: Image.fromarray(np.random.default_rng(1).integers(0, 256, (555, 777, 3), dtype=np.uint8))
+    backend.edit_region.side_effect = lambda **kwargs: noise_picture(777, 555, seed=1)
     return backend
 
 
 def _run(tmp_path: Path, backend: MagicMock, *, runs: int = 2, skip_signal: SkipSignal | None = None, source_name: str = "door.png", output: Path | None = None, **overrides) -> list[dict]:
-    args = _make_args(edit_source=str(_source(tmp_path, source_name)), edit_paint=_mask(), edit_extend=None, output=str(output or tmp_path / "out"), runs=runs, **overrides)
+    values = {"edit_paint": _mask(), "edit_extend": None, **overrides}
+    args = _make_args(edit_source=str(_source(tmp_path, source_name)), edit_size=(480, 320), output=str(output or tmp_path / "out"), runs=runs, **values)
     prompts = {"set1": [("a red door", None)]}
     events: list[dict] = []
     run_batch(
@@ -77,6 +77,28 @@ def test_an_edit_batch_prepares_the_prompts_once_and_never_releases_the_model(tm
     backend.release_model.assert_not_called()
     backend.load_model.assert_not_called()
     assert [event["status"] for event in events if event["type"] == "generation_finished"] == ["success"] * 3
+
+
+@pytest.mark.parametrize(
+    ("overrides", "sent"),
+    [
+        ({}, "a red door"),  # Paint
+        ({"edit_paint": None, "edit_extend": ("left", 128)}, EXTEND_INSTRUCTION + "a red door"),  # Extend
+        ({"edit_paint": None}, "a red door"),  # the whole picture: no instruction, only an Extend has one
+    ],
+    ids=["paint", "extend", "whole picture"],
+)
+def test_the_prompt_an_edit_sends_is_among_the_prompts_the_batch_prepared(tmp_path, overrides, sent):
+    """A backend that pre-encodes its prompts (macOS) frees the encoder after them, so a prompt it was not given fails the run."""
+    backend = _backend()
+    backend.text_to_image.side_effect = lambda **kwargs: Image.new("RGB", (kwargs["width"], kwargs["height"]))
+
+    _run(tmp_path, backend, runs=1, **overrides)
+
+    drawn = backend.edit_region if backend.edit_region.called else backend.text_to_image
+    prepared = [job_prompt.prompt for job_prompt in backend.prepare_prompts.call_args.args[1]]
+    assert drawn.call_args.kwargs["prompt"] == sent
+    assert sent in prepared
 
 
 def test_the_outputs_are_named_after_the_source_with_a_counter(tmp_path):

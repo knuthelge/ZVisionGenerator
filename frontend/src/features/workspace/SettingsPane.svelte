@@ -230,7 +230,7 @@
   <div class="settings-scroll">
     <!-- On a phone the same content is the card above the settings chips (ImageToEditCard). -->
     {#if caps.isEdit && !layout.compact}
-      <ImageToEditSection {context} {busy} />
+      <ImageToEditSection {busy} />
     {/if}
 
     {#if caps.showSourceVideo}

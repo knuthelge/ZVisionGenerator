@@ -1,7 +1,6 @@
-"""Tests for the mflux latent blend with fakes: mask layouts, the formula, and how the hooks install and come off.
+"""Tests for the mflux latent blend with fakes: the mask layout, the formula, and how the hook installs and comes off.
 
-NumPy arrays stand in for MLX arrays and small classes for mflux's scheduler and Krea 2 sampler, so this runs
-everywhere. ``test_mac_image_edit_real.py`` runs the same blend through mflux's real loops.
+NumPy arrays stand in for MLX arrays and a small class for mflux's scheduler, so this runs everywhere. ``test_mac_image_edit_real.py`` runs the same blend through mflux's real loops.
 """
 
 from __future__ import annotations
@@ -13,81 +12,37 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from tests._images import painted_box
 from tests._paths import REPO_ROOT
 from zvisiongenerator.backends.mac import image_edit
 from zvisiongenerator.backends.mac.image_edit import Prepared
-from zvisiongenerator.processing.edit_region import EDIT_CELL_PIXELS
+from zvisiongenerator.processing.edit_region import soft_cell_mask
 
 HEIGHT, WIDTH = 32, 48
-LAYOUTS = {
-    # family: (latents shape, mask shape)
-    "zimage": ((16, 1, 4, 6), (1, 1, 4, 6)),
-    "flux2_klein": ((1, 6, 128), (1, 6, 1)),
-    "krea2": ((1, 16, 4, 6), (1, 1, 4, 6)),
-}
+LATENTS_SHAPE = (1, 6, 128)
 
 
-def _paint() -> np.ndarray:
-    paint = np.zeros((HEIGHT, WIDTH), dtype=bool)
-    paint[0:16, 16:32] = True  # one whole 16 px cell: cell (0, 1)
-    paint[16:24, 0:8] = True  # a quarter of 16 px cell (1, 0), a whole 8 px cell
-    paint[28:32, 24:32] = True  # an eighth of 16 px cell (1, 1), half of 8 px cell (3, 3)
-    return paint
+# One whole 16 px cell (0, 1), a quarter of cell (1, 0) and an eighth of cell (1, 1).
+_PAINT_BOXES = ((16, 0, 32, 16), (0, 16, 8, 24), (24, 28, 32, 32))
 
 
 class _Stop(Exception):
     """Stands in for mflux's ``StopImageGenerationException``."""
 
 
-class TestLatentMask:
-    def test_zimage_mask_is_the_painted_fraction_of_each_8px_cell(self):
-        mask = image_edit.latent_mask("zimage", _paint())
-
-        assert mask.shape == (1, 1, 4, 6)
-        assert mask[0, 0, 0, 2] == 1.0 and mask[0, 0, 0, 3] == 1.0 and mask[0, 0, 1, 2] == 1.0  # the 16 px block is four 8 px cells
-        assert mask[0, 0, 2, 0] == 1.0 and mask[0, 0, 3, 0] == 0.0 and mask[0, 0, 3, 3] == 0.5
-        assert mask.dtype == np.float32
-
-    def test_klein_mask_has_one_row_per_token_in_row_major_order(self):
-        mask = image_edit.latent_mask("flux2_klein", _paint())
-
-        assert mask.shape == (1, 6, 1)
-        assert mask[0, :, 0].tolist() == [0.0, 1.0, 0.0, 0.25, 0.125, 0.0]  # grid (2 rows x 3 columns) read left to right, top to bottom
-
-    def test_krea2_mask_repeats_each_16px_cell_over_its_2x2_latent_pixels(self):
-        mask = image_edit.latent_mask("krea2", _paint())
-
-        assert mask.shape == (1, 1, 4, 6)
-        assert mask[0, 0].tolist() == [
-            [0.0, 0.0, 1.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 1.0, 0.0, 0.0],
-            [0.25, 0.25, 0.125, 0.125, 0.0, 0.0],
-            [0.25, 0.25, 0.125, 0.125, 0.0, 0.0],
-        ]
-
-    def test_a_mask_that_is_not_whole_cells_is_refused(self):
-        with pytest.raises(ValueError, match="whole number"):
-            image_edit.latent_mask("krea2", np.zeros((24, 48), dtype=bool))
-
-    def test_every_edit_family_has_a_layout_here(self):
-        assert set(EDIT_CELL_PIXELS) == set(LAYOUTS)
-
-
-def _prepared(family: str, seed: int = 0) -> Prepared:
-    latents_shape, _ = LAYOUTS[family]
+def _prepared(seed: int = 0) -> Prepared:
     rng = np.random.default_rng(seed)
     return Prepared(
-        clean=rng.normal(size=latents_shape).astype(np.float32),
-        noise=rng.normal(size=latents_shape).astype(np.float32),
-        mask=image_edit.latent_mask(family, _paint()),
+        clean=rng.normal(size=LATENTS_SHAPE).astype(np.float32),
+        noise=rng.normal(size=LATENTS_SHAPE).astype(np.float32),
+        mask=soft_cell_mask(painted_box(HEIGHT, WIDTH, *_PAINT_BOXES)).reshape(1, -1, 1),
     )
 
 
 class TestBlend:
-    @pytest.mark.parametrize("family", LAYOUTS)
     @pytest.mark.parametrize("sigma", [0.0, 0.37, 1.0])
-    def test_outside_the_paint_it_is_the_source_noised_to_sigma_and_inside_it_is_the_latents(self, family, sigma):
-        prepared = _prepared(family)
+    def test_outside_the_paint_it_is_the_source_noised_to_sigma_and_inside_it_is_the_latents(self, sigma):
+        prepared = _prepared()
         latents = np.random.default_rng(5).normal(size=prepared.clean.shape).astype(np.float32)
 
         blended = image_edit.blend(latents, prepared, sigma)
@@ -99,15 +54,8 @@ class TestBlend:
         np.testing.assert_allclose(blended[mask == 0], noised[mask == 0], atol=1e-6)
         assert (mask == 0).any() and (mask == 1).any() and ((mask > 0) & (mask < 1)).any()
 
-    def test_sigma_zero_pins_the_clean_latents_outside_the_paint(self):
-        prepared = _prepared("krea2")
-        blended = image_edit.blend(np.zeros_like(prepared.clean), prepared, 0.0)
-
-        outside = np.broadcast_to(prepared.mask, blended.shape) == 0
-        np.testing.assert_array_equal(blended[outside], prepared.clean[outside])
-
     def test_the_result_has_the_latents_dtype(self):
-        prepared = _prepared("flux2_klein")
+        prepared = _prepared()
 
         blended = image_edit.blend(np.zeros(prepared.clean.shape, dtype=np.float16), prepared, 0.5)
 
@@ -139,9 +87,9 @@ def _loop(config, prepared: Prepared, *, with_sigmas: bool):
 
 
 class TestSchedulerInstaller:
-    @pytest.mark.parametrize("with_sigmas", [False, True], ids=["zimage", "klein"])
+    @pytest.mark.parametrize("with_sigmas", [False, True], ids=["plain", "klein"])
     def test_a_loop_through_the_wrapper_blends_at_the_next_sigma(self, with_sigmas):
-        prepared = _prepared("flux2_klein")
+        prepared = _prepared()
         config = SimpleNamespace(scheduler=_Scheduler())
         original = config.scheduler.step
         installer = image_edit._BlendInstaller(prepared)
@@ -163,16 +111,9 @@ class TestSchedulerInstaller:
             assert all("sigmas" not in call for call in config.scheduler.calls)
         assert config.scheduler.step is not original
 
-    def test_the_wrapper_takes_only_keywords(self):
-        config = SimpleNamespace(scheduler=_Scheduler())
-        image_edit._BlendInstaller(_prepared("zimage")).call_before_loop(seed=1, prompt="p", latents=None, config=config)
-
-        with pytest.raises(TypeError):
-            config.scheduler.step(np.zeros(1), 0, np.zeros(1))
-
     def test_only_the_runs_own_scheduler_is_wrapped(self):
         first, second = SimpleNamespace(scheduler=_Scheduler()), SimpleNamespace(scheduler=_Scheduler())
-        image_edit._BlendInstaller(_prepared("zimage")).call_before_loop(seed=1, prompt="p", latents=None, config=first)
+        image_edit._BlendInstaller(_prepared()).call_before_loop(seed=1, prompt="p", latents=None, config=first)
 
         assert "step" in vars(first.scheduler)
         assert "step" not in vars(second.scheduler)
@@ -189,12 +130,11 @@ class _Callbacks:
             self.before_loop.append(callback)
 
 
-class TestEditBlendForSchedulerFamilies:
-    @pytest.mark.parametrize("family", ["zimage", "flux2_klein"])
-    def test_the_installer_is_registered_inside_the_block_and_gone_after(self, family):
+class TestEditBlend:
+    def test_the_installer_is_registered_inside_the_block_and_gone_after(self):
         model = SimpleNamespace(callbacks=_Callbacks())
 
-        with image_edit.edit_blend(model, family, _prepared(family)):
+        with image_edit.edit_blend(model, _prepared()):
             assert [type(callback) for callback in model.callbacks.before_loop] == [image_edit._BlendInstaller]
 
         assert model.callbacks.before_loop == []
@@ -202,7 +142,7 @@ class TestEditBlendForSchedulerFamilies:
     def test_the_installer_is_gone_after_the_block_raises(self):
         model = SimpleNamespace(callbacks=_Callbacks())
 
-        with pytest.raises(_Stop), image_edit.edit_blend(model, "flux2_klein", _prepared("flux2_klein")):
+        with pytest.raises(_Stop), image_edit.edit_blend(model, _prepared()):
             raise _Stop
 
         assert model.callbacks.before_loop == []
@@ -212,65 +152,38 @@ class TestEditBlendForSchedulerFamilies:
         model = SimpleNamespace(callbacks=_Callbacks())
         model.callbacks.register(other)
 
-        with image_edit.edit_blend(model, "zimage", _prepared("zimage")):
+        with image_edit.edit_blend(model, _prepared()):
             pass
 
         assert model.callbacks.before_loop == [other]
 
 
-class _Stepper:
-    def __init__(self, sigmas) -> None:
-        self.sigmas = sigmas
+def test_a_stop_during_an_extend_returns_none_without_running_the_join_fix(monkeypatch):
+    """A skip ends the run with no picture: the join fix, which needs one, must not run on the stopped run's latents."""
+    pytest.importorskip("mflux")
+    from contextlib import contextmanager
 
-    def step(self, i, x, v, denoised):
-        return x + (self.sigmas[i + 1] - self.sigmas[i]) * v
+    from PIL import Image
 
+    from zvisiongenerator.backends.mac import image as mac_image
+    from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
-@pytest.fixture
-def sampler(monkeypatch):
-    """Return a stand-in for Krea 2's sampler, which keeps a static ``make_stepper(name, sigmas, seed)`` in its own class body."""
+    @contextmanager
+    def blend_that_saw_a_step(model, prepared, final):
+        final.append(prepared.clean)  # the blend records the last step's latents as the first step runs
+        yield
 
-    class Sampler:
-        @staticmethod
-        def make_stepper(name, sigmas, seed):
-            return _Stepper(sigmas)
+    monkeypatch.setattr(mac_image, "prepare_edit", lambda model, image, paint, seed: _prepared())
+    monkeypatch.setattr(mac_image, "edit_blend", blend_that_saw_a_step)
+    monkeypatch.setattr(mac_image, "match_strip", lambda *args, **kwargs: pytest.fail("the join fix ran on a stopped run"))
+    monkeypatch.setattr(mac_image.MfluxBackend, "text_to_image", lambda self, *args, **kwargs: None)  # Stop: no picture
+    backend = mac_image.MfluxBackend()
+    backend._model_info = ImageModelInfo(family="flux2_klein", is_distilled=True, size=None)
+    crop = Image.new("RGB", (WIDTH, HEIGHT))
 
-    monkeypatch.setattr(image_edit, "_krea2_sampler", lambda: Sampler)
-    return Sampler
+    result = backend.edit_region(object(), crop, crop, painted_box(HEIGHT, WIDTH, (0, 0, 16, HEIGHT)), "p", 1, 4, 1.0, fix_join=True)
 
-
-class TestKrea2Stepper:
-    def test_a_stepper_built_inside_the_block_blends_at_the_next_sigma(self, sampler):
-        prepared = _prepared("krea2")
-        sigmas = np.array([1.0, 0.5, 0.0], dtype=np.float32)
-        v = np.ones(prepared.clean.shape, dtype=np.float32)
-
-        with image_edit.edit_blend(SimpleNamespace(), "krea2", prepared):
-            stepper = sampler.make_stepper("euler", sigmas, 3)
-            first = stepper.step(0, prepared.noise, v, None)
-            last = stepper.step(1, first, v, None)
-
-        np.testing.assert_allclose(first, image_edit.blend(prepared.noise + (0.5 - 1.0) * v, prepared, 0.5), atol=1e-6)
-        np.testing.assert_allclose(last, image_edit.blend(first + (0.0 - 0.5) * v, prepared, 0.0), atol=1e-6)
-
-    def test_make_stepper_is_restored_after_the_block(self, sampler):
-        saved = vars(sampler)["make_stepper"]
-
-        with image_edit.edit_blend(SimpleNamespace(), "krea2", _prepared("krea2")):
-            assert vars(sampler)["make_stepper"] is not saved
-
-        assert vars(sampler)["make_stepper"] is saved
-        assert "step" not in vars(sampler.make_stepper("euler", np.zeros(2), 0))  # a stepper built after the block is not wrapped
-
-    @pytest.mark.parametrize("error", [_Stop, RuntimeError])
-    def test_make_stepper_is_restored_when_the_block_raises(self, sampler, error):
-        saved = vars(sampler)["make_stepper"]
-
-        with pytest.raises(error), image_edit.blended_stepper(_prepared("krea2")):
-            raise error
-
-        assert vars(sampler)["make_stepper"] is saved
-        assert "step" not in vars(sampler.make_stepper("euler", np.zeros(2), 0))
+    assert result is None
 
 
 def test_the_module_imports_without_mlx_or_mflux(monkeypatch):
@@ -283,4 +196,4 @@ def test_the_module_imports_without_mlx_or_mflux(monkeypatch):
 
     spec.loader.exec_module(module)
 
-    assert module.latent_mask("zimage", _paint()).shape == LAYOUTS["zimage"][1]
+    assert callable(module.prepare) and callable(module.edit_blend)

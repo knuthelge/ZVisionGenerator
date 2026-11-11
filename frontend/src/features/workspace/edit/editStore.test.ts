@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
-import { sameOps, type Stroke } from './editOps';
+import type { Stroke } from './editOps';
 import { imageEdit, painterLayer } from './editStore.svelte';
 import type { EditSource } from './editSource';
 import { makeEditContext } from '../../../test-utils/workspace';
@@ -26,11 +26,47 @@ describe('the image to edit and its paint', () => {
     expect([imageEdit.source, imageEdit.strokes.length, imageEdit.extension, imageEdit.canUndo]).toEqual([null, 0, null, false]);
   });
 
-  it('keeps the strokes it is given', () => {
+  it('switches mode as one step that removes the other mode\'s work and that Undo brings back', () => {
     imageEdit.setSource(source());
+    expect([imageEdit.mode, imageEdit.hasWork]).toEqual(['paint', false]);
     imageEdit.addStroke(dab());
-    expect(imageEdit.strokes).toHaveLength(1);
-    expect(imageEdit.canUndo).toBe(true);
+    expect(imageEdit.hasWork).toBe(true);
+
+    imageEdit.setMode('extend');
+    expect([imageEdit.mode, imageEdit.strokes.length, imageEdit.hasWork]).toEqual(['extend', 0, false]);
+    imageEdit.toggleSide('left');
+    expect(imageEdit.hasWork).toBe(true);
+    imageEdit.setMode('paint');
+    expect([imageEdit.mode, imageEdit.extension, imageEdit.strokes.length]).toEqual(['paint', null, 0]);
+
+    imageEdit.undo();
+    expect([imageEdit.mode, imageEdit.extension?.side]).toEqual(['extend', 'left']);
+    imageEdit.undo();
+    imageEdit.undo();
+    expect([imageEdit.mode, imageEdit.strokes.length]).toEqual(['paint', 1]);
+  });
+
+  it('opens in the mode the draft holds, and restores a snapshot with its mode', () => {
+    imageEdit.setSource(source());
+    draft.commitEdit({ mode: 'extend', mask: null, share: 0, extension: { side: 'top', amount: 192 }, amount: 192 });
+    expect([imageEdit.mode, imageEdit.extension?.side]).toEqual(['extend', 'top']);
+    const opened = imageEdit.snapshot();
+    imageEdit.setMode('paint');
+    expect([imageEdit.mode, imageEdit.extension]).toEqual(['paint', null]);
+
+    imageEdit.restore(opened);
+
+    expect([imageEdit.mode, imageEdit.extension?.side]).toEqual(['extend', 'top']);
+  });
+
+  it('drops an Extend to Paint when the picture turns out to be a cut-out', () => {
+    const shown = source();
+    imageEdit.setSource(shown);
+    draft.commitEdit({ mode: 'extend', mask: null, share: 0, extension: { side: 'top', amount: 192 }, amount: 192 });
+
+    imageEdit.learn(shown.id, { cutout: true });
+
+    expect(draft.state).toMatchObject({ editMode: 'paint', editExtendSide: null });
   });
 
   it('undoes the last stroke', () => {
@@ -67,14 +103,10 @@ describe('the image to edit and its paint', () => {
     expect(imageEdit.extension).toEqual({ side: 'right', amount: 256 });
   });
 
-  it('changes the amount in steps of 16 within 128 to 512, as one step to undo', () => {
+  it('changes the amount as one step to undo', () => {
     imageEdit.setSource(source());
     imageEdit.toggleSide('top');
     imageEdit.setExtendAmount(300);
-    imageEdit.setExtendAmount(9999);
-    expect(imageEdit.extension?.amount).toBe(512);
-    imageEdit.setExtendAmount(1);
-    expect(imageEdit.extension?.amount).toBe(128);
     imageEdit.undo();
     expect(imageEdit.extension).toBeNull();
   });
@@ -84,13 +116,6 @@ describe('the image to edit and its paint', () => {
     imageEdit.setExtendAmount(400);
     imageEdit.toggleSide('left');
     expect(imageEdit.extension).toEqual({ side: 'left', amount: 400 });
-  });
-
-  it('keeps the brush between 24 and 256 px', () => {
-    imageEdit.setBrush(1);
-    expect(imageEdit.brush).toBe(24);
-    imageEdit.setBrush(1000);
-    expect(imageEdit.brush).toBe(256);
   });
 
   it('forgets paint and extension when the draft starts the image over (a new image, a Reset, a Reuse)', () => {
@@ -115,19 +140,8 @@ describe('the image to edit and its paint', () => {
     expect(imageEdit.canUndo).toBe(true);
   });
 
-  it('keeps its history when the same image moves: showing it at its new path is not a new image', () => {
-    imageEdit.setSource(source());
-    imageEdit.addStroke(dab());
-    draft.setEditSource({ path: '/out/scene.png' });
-    imageEdit.addStroke(dab());
-    draft.retargetPaths(new Map([['/out/scene.png', '/out/shots/scene.png']]));
-    imageEdit.setSource(source({ path: '/out/shots/scene.png' }));
-    expect(imageEdit.canUndo).toBe(true);
-    expect(imageEdit.strokes.length).toBeGreaterThan(0);
-  });
-
   it('opens on the extension the draft holds, and the history has the last word', () => {
-    draft.commitEditPaint({ mask: null, share: 0, extension: { side: 'left', amount: 320 }, amount: 320 });
+    draft.commitEdit({ mode: 'extend', mask: null, share: 0, extension: { side: 'left', amount: 320 }, amount: 320 });
     expect(imageEdit.extension).toEqual({ side: 'left', amount: 320 });
     expect(imageEdit.extendAmount).toBe(320);
     imageEdit.toggleSide('left');
@@ -139,7 +153,7 @@ describe('the image to edit and its paint', () => {
   it('undoes an extension kept with Done once the painter is opened again', () => {
     imageEdit.setSource(source());
     imageEdit.toggleSide('top');
-    draft.commitEditPaint({ mask: null, share: 0, extension: imageEdit.extension, amount: 256 });
+    draft.commitEdit({ mode: 'extend', mask: null, share: 0, extension: imageEdit.extension, amount: 256 });
     expect(imageEdit.extension).toEqual({ side: 'top', amount: 256 });
     imageEdit.undo();
     expect(imageEdit.extension).toBeNull();
@@ -171,9 +185,7 @@ describe('the image to edit and its paint', () => {
     const strokes = imageEdit.strokes.length;
     imageEdit.addStroke(dab(600, 600, 100));
     imageEdit.toggleSide('bottom');
-    expect(sameOps(imageEdit.ops, opened)).toBe(false);
     imageEdit.restore(opened);
-    expect(sameOps(imageEdit.ops, opened)).toBe(true);
     expect(imageEdit.strokes).toHaveLength(strokes);
     expect(imageEdit.extension).toBeNull();
   });

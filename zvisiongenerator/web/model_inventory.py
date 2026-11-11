@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.converters.list_assets import list_models, list_video_models
-from zvisiongenerator.utils.image_model_detect import detect_image_model
-from zvisiongenerator.utils.model_metadata import alias_map, image_model_family
+from zvisiongenerator.utils.image_model_detect import declared_image_model, detect_image_model
+from zvisiongenerator.utils.model_metadata import alias_map
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.stored_quant import parse_stored_quant_name
 from zvisiongenerator.utils.video_model_detect import detect_video_model, is_known_video_repo
@@ -66,9 +66,9 @@ def discover_image_inventory(
         resolved_path = _resolve_alias_path(alias_name, aliases, resolve_alias_path)
         if resolved_path is None:
             continue
-        declared = image_model_family(alias_name)
+        declared = declared_image_model(alias_name)
         if declared is not None:
-            family, size = declared, None
+            family, size = declared.family, declared.size
         elif is_known_video_repo(resolved_path):
             # Video aliases are recognised offline; probing them as image repos costs a Hub request each time.
             continue

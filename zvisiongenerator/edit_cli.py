@@ -7,8 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.utils.edit_request import check_edit_inputs, edit_mode, load_paint, parse_extend, source_is_cutout
-from zvisiongenerator.utils.input_images import upright_size
+from zvisiongenerator.utils.edit_request import check_edit_inputs, load_paint, parse_extend, read_edit_source
 
 __all__ = ["add_edit_arguments", "check_edit_source", "edit_output_folder", "refuse_edit_options"]
 
@@ -89,25 +88,20 @@ def refuse_edit_options(parser: argparse.ArgumentParser, args: argparse.Namespac
 
 
 def check_edit_source(parser: argparse.ArgumentParser, args: argparse.Namespace, defaults: dict[str, Any]) -> None:
-    """Refuse an edit the model or the files cannot do, before the model loads, and read the mask into ``args.edit_paint``.
+    """Refuse an edit the model or the files cannot do, before the model loads, and read the mask into ``args.edit_paint`` and the picture's size into ``args.edit_size``.
 
     Args:
         parser: The parser that reports the refusal.
-        args: Parsed arguments with ``edit_source``, ``edit_mask`` and ``edit_extend`` set and their paths expanded.
+        args: Parsed arguments with ``edit_source``, ``edit_mask`` and ``edit_extend`` set and their paths expanded. The picture's size is stored as ``edit_size``.
         defaults: The model's resolved settings, which carry ``supports_mask_edit`` and ``max_reference_images``.
     """
     source = args.edit_source
     if not os.path.isfile(source):
         parser.error(f"Image to edit not found: {source}")
     try:
-        width, height = upright_size(source)
-        cutout = source_is_cutout(source)
-    except (OSError, ValueError) as error:
-        parser.error(f"The image to edit is not a readable picture: {error}")
-    mode = edit_mode(args.edit_mask is not None, args.edit_extend)
-    try:
-        check_edit_inputs(mode, args.edit_extend, cutout, defaults.get("max_reference_images", 0), bool(defaults.get("supports_mask_edit", False)))
-        args.edit_paint = load_paint(args.edit_mask, width, height) if args.edit_mask is not None else None
+        args.edit_size, cutout = read_edit_source(source)
+        check_edit_inputs(args.edit_mask is not None, args.edit_extend, cutout, bool(defaults.get("supports_mask_edit", False)))
+        args.edit_paint = load_paint(args.edit_mask, *args.edit_size) if args.edit_mask is not None else None
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
 

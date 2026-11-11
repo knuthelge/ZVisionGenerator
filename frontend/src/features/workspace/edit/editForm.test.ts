@@ -4,7 +4,7 @@ import type { DraftState } from '$lib/types';
 import { editFormData, type EditFormInput } from './editForm';
 
 const state = (overrides: Partial<DraftState> = {}): DraftState => ({
-  editSourcePath: '/out/a.png', editSourceUpload: null, editMaskUpload: null, editPaintedShare: 0, editExtendSide: null, editExtendAmount: 256, editRepaint: false,
+  editSourcePath: '/out/a.png', editSourceUpload: null, editMode: 'paint', editMaskUpload: null, editPaintedShare: 0, editExtendSide: null, editExtendAmount: 256, editRepaint: false,
   model: 'klein', quantize: null, steps: 4, seed: null, runs: 1,
   ...overrides,
 } as DraftState);
@@ -34,14 +34,18 @@ describe('the fields an Edit Generate sends', () => {
   });
 
   it('sends the extension as a side and an amount, together', () => {
-    const form = editFormData(state({ editExtendSide: 'left', editExtendAmount: 192 }), input());
+    const form = editFormData(state({ editMode: 'extend', editExtendSide: 'left', editExtendAmount: 192 }), input());
     expect([form.get('edit_extend_side'), form.get('edit_extend_amount')]).toEqual(['left', '192']);
     expect(form.has('edit_mask_file')).toBe(false);
   });
 
-  it('sends paint and an extension both', () => {
-    const form = editFormData(state({ editMaskUpload: 'mask.png', editExtendSide: 'bottom', editExtendAmount: 128 }), input({ maskFile: new File(['png'], 'mask.png') }));
-    expect(fields(form)).toEqual(expect.arrayContaining(['edit_mask_file', 'edit_painted', 'edit_extend_side', 'edit_extend_amount']));
+  it('never sends a mask and an extension both: the draft\'s mode decides', () => {
+    const both = { editMaskUpload: 'mask.png', editExtendSide: 'bottom', editExtendAmount: 128 } as const;
+    const held = input({ maskFile: new File(['png'], 'mask.png') });
+    expect(fields(editFormData(state({ ...both, editMode: 'paint' }), held))).toEqual(expect.arrayContaining(['edit_mask_file', 'edit_painted']));
+    expect(editFormData(state({ ...both, editMode: 'paint' }), held).has('edit_extend_side')).toBe(false);
+    expect(editFormData(state({ ...both, editMode: 'extend' }), held).has('edit_mask_file')).toBe(false);
+    expect(editFormData(state({ ...both, editMode: 'extend' }), held).get('edit_extend_side')).toBe('bottom');
   });
 
   it('sends an uploaded picture as a file, which wins over a path', () => {

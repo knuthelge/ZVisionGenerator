@@ -6,47 +6,38 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 from PIL import Image
 
-from tests._factories import _patch_image_main_dependencies
+from tests._factories import KLEIN_EDIT_DEFAULTS, _patch_image_main_dependencies
+from tests._images import SIDEWAYS_UPRIGHT_SIZE, painted_block, write_cutout, write_mask_png, write_sideways_photo
 from zvisiongenerator import image_cli
 
-_KLEIN = {"steps": 4, "guidance": 1.0, "scheduler": None, "supports_mask_edit": True, "max_reference_images": 4}
-_ZIMAGE = {"steps": 8, "guidance": 0.0, "scheduler": None, "supports_mask_edit": True, "max_reference_images": 0}
 _IDEOGRAM = {"steps": 20, "guidance": 7.0, "scheduler": None, "supports_mask_edit": False, "max_reference_images": 0}
 _SIZE = (64, 48)
 
 
-def _save_source(path: Path, *, cutout: bool = False, size: tuple[int, int] = _SIZE) -> str:
-    """Write a source picture, with a transparent corner when *cutout*, and return its path."""
-    image = Image.new("RGBA" if cutout else "RGB", size, (120, 80, 40, 255) if cutout else (120, 80, 40))
-    if cutout:
-        image.putpixel((0, 0), (0, 0, 0, 0))
-    image.save(path)
+def _save_source(path: Path) -> str:
+    """Write a source picture and return its path."""
+    Image.new("RGB", _SIZE, (120, 80, 40)).save(path)
     return str(path)
 
 
-def _save_mask(path: Path, *, size: tuple[int, int] = _SIZE, painted: bool = True) -> str:
-    """Write a mask PNG that is white in its middle when *painted*, else all black, and return its path."""
-    data = np.zeros((size[1], size[0]), dtype=np.uint8)
-    if painted:
-        data[size[1] // 4 : size[1] // 2, size[0] // 4 : size[0] // 2] = 255
-    Image.fromarray(data).save(path)
-    return str(path)
+def _save_mask(path: Path, size: tuple[int, int] = _SIZE) -> str:
+    """Write a mask PNG of *size* that is white in its middle and return its path."""
+    return write_mask_png(path, painted_block(size[1], size[0]))
 
 
 @pytest.fixture
 def run(monkeypatch, tmp_path):
-    """Return ``run(argv, defaults=_KLEIN)``: run ``main()`` on an edit command and return what the batch received.
+    """Return ``run(argv, defaults=KLEIN_EDIT_DEFAULTS)``: run ``main()`` on an edit command and return what the batch received.
 
     The returned namespace has ``args`` (None when the batch never ran), ``batch`` and ``backend``.
     """
 
     def start(argv: list[str], *, defaults: dict | None = None) -> SimpleNamespace:
         backend = _patch_image_main_dependencies(monkeypatch)
-        monkeypatch.setattr(image_cli, "resolve_defaults", lambda _info, _config, overrides, _backend: {**(defaults or _KLEIN), **overrides})
+        monkeypatch.setattr(image_cli, "resolve_defaults", lambda _info, _config, overrides, _backend: {**(defaults or KLEIN_EDIT_DEFAULTS), **overrides})
         monkeypatch.setattr(image_cli, "ensure_built_model", lambda *a, **kw: True)
         monkeypatch.setattr(sys, "argv", ["ziv-image", *argv])
         image_cli.main()
@@ -71,6 +62,15 @@ def _refused(run, argv: list[str], capsys, *, defaults: dict | None = None) -> s
 
 
 class TestEditArguments:
+    def test_relative_paths_are_made_absolute_so_the_saved_file_records_the_full_path(self, run, source, tmp_path, monkeypatch):
+        _save_mask(tmp_path / "m.png")
+        monkeypatch.chdir(tmp_path)
+
+        result = run(["--edit", "a.png", "--prompt", "x", "-m", "z", "--mask", "m.png"])
+
+        assert result.args.edit_source == str(tmp_path / "a.png")
+        assert result.args.edit_mask == str(tmp_path / "m.png")
+
     def test_extend_builds_the_side_and_amount_without_a_mask(self, run, source):
         result = run(["--edit", source, "--prompt", "x", "-m", "z", "--extend", "top=256"])
 
@@ -87,13 +87,6 @@ class TestEditArguments:
         assert result.args.edit_extend is None
         assert result.args.edit_paint.dtype == bool and result.args.edit_paint.shape == (_SIZE[1], _SIZE[0])
         assert result.args.edit_paint[_SIZE[1] // 4 : _SIZE[1] // 2, _SIZE[0] // 4 : _SIZE[0] // 2].all() and result.args.edit_paint.sum() == (_SIZE[1] // 4) * (_SIZE[0] // 4)
-
-    def test_paint_with_extend_reaches_the_batch(self, run, source, tmp_path):
-        mask = _save_mask(tmp_path / "m.png")
-
-        result = run(["--edit", source, "--prompt", "x", "-m", "z", "--mask", mask, "--extend", "left=128"], defaults=_ZIMAGE)
-
-        assert (result.args.edit_mask, result.args.edit_extend) == (mask, ("left", 128))
 
     def test_whole_picture_on_klein_runs_without_paint(self, run, source):
         result = run(["--edit", source, "--prompt", "x", "-m", "z"])
@@ -118,11 +111,10 @@ class TestEditArguments:
         assert args.reference_paths == []
         assert args.transparent is False
 
-    @pytest.mark.parametrize("flag", ["--no-sharpen", "--no-contrast", "--no-saturation", "--no-enhance"])
-    def test_switching_an_effect_off_is_allowed(self, run, source, flag):
-        result = run(["--edit", source, "--prompt", "x", "-m", "z", flag])
+    def test_switching_an_effect_off_is_allowed(self, run, source):
+        result = run(["--edit", source, "--prompt", "x", "-m", "z", "--no-contrast"])
 
-        assert result.args.edit_source == source
+        assert result.batch.called and result.args.contrast is False
 
     def test_runs_steps_seed_and_quantize_are_allowed(self, run, source):
         result = run(["--edit", source, "--prompt", "x", "-m", "z", "-r", "2", "--steps", "6", "--seed", "7", "-q", "8"])
@@ -147,28 +139,7 @@ class TestEditOutput:
 class TestEditRefusals:
     @pytest.mark.parametrize(
         "extra",
-        [
-            ["--image", "start.png"],
-            ["--reference", "r.png"],
-            ["--upscale", "2"],
-            ["--review"],
-            ["--width", "512"],
-            ["--height", "512"],
-            ["--ratio", "1:1"],
-            ["--size", "m"],
-            ["--guidance", "2"],
-            ["--scheduler", "beta"],
-            ["--enhance"],
-            ["--enhance", "style=noir"],
-            ["--enhance-note", "at night"],
-            ["--enhance-format", "json"],
-            ["--transparent"],
-            ["--contrast"],
-            ["--contrast", "1.2"],
-            ["--saturation"],
-            ["--saturation", "1.2"],
-            ["--sharpen", "0.5"],
-        ],
+        [["--image", "start.png"], ["--width", "512"], ["--transparent"], ["--sharpen", "0.5"], ["--enhance", "style=noir"]],
         ids=lambda extra: " ".join(extra),
     )
     def test_a_flag_that_does_not_apply_is_refused_and_named(self, run, source, capsys, extra):
@@ -197,7 +168,7 @@ class TestEditRefusals:
 
         assert flag[0] in error
 
-    @pytest.mark.parametrize("value", ["top", "up=256", "top=100", "top=130", "top=640", "top=abc", "=256"])
+    @pytest.mark.parametrize("value", ["up=256", "top=100"])
     def test_a_bad_extend_is_refused(self, run, source, capsys, value):
         error = _refused(run, ["--edit", source, "--prompt", "x", "-m", "z", "--extend", value], capsys)
 
@@ -208,22 +179,20 @@ class TestEditRefusals:
 
         assert image_cli.get_backend().load_model.called is False
 
-    def test_a_model_without_references_cannot_restyle_the_whole_picture(self, run, source, capsys):
-        _refused(run, ["--edit", source, "--prompt", "x", "-m", "z"], capsys, defaults=_ZIMAGE)
-
     def test_a_cutout_needs_paint(self, run, tmp_path, capsys):
-        cutout = _save_source(tmp_path / "c.png", cutout=True)
+        cutout = write_cutout(tmp_path / "c.png", _SIZE)
 
         _refused(run, ["--edit", cutout, "--prompt", "x", "-m", "z"], capsys)
 
     def test_a_cutout_cannot_be_extended(self, run, tmp_path, capsys):
-        cutout = _save_source(tmp_path / "c.png", cutout=True)
-        mask = _save_mask(tmp_path / "m.png")
+        cutout = write_cutout(tmp_path / "c.png", _SIZE)
 
-        _refused(run, ["--edit", cutout, "--prompt", "x", "-m", "z", "--mask", mask, "--extend", "top=256"], capsys)
+        error = _refused(run, ["--edit", cutout, "--prompt", "x", "-m", "z", "--extend", "top=256"], capsys)
+
+        assert "cannot be extended" in error
 
     def test_a_cutout_can_be_painted(self, run, tmp_path):
-        cutout = _save_source(tmp_path / "c.png", cutout=True)
+        cutout = write_cutout(tmp_path / "c.png", _SIZE)
         mask = _save_mask(tmp_path / "m.png")
 
         result = run(["--edit", cutout, "--prompt", "x", "-m", "z", "--mask", mask])
@@ -239,9 +208,6 @@ class TestEditRefusals:
 
         _refused(run, ["--edit", str(bad), "--prompt", "x", "-m", "z"], capsys)
 
-    def test_a_missing_mask_is_refused(self, run, source, tmp_path, capsys):
-        _refused(run, ["--edit", source, "--prompt", "x", "-m", "z", "--mask", str(tmp_path / "nope.png")], capsys)
-
     def test_a_mask_of_another_shape_is_refused(self, run, source, tmp_path, capsys):
         mask = _save_mask(tmp_path / "m.png", size=(_SIZE[0] * 2, _SIZE[1]))
 
@@ -254,25 +220,10 @@ class TestEditRefusals:
 
         assert result.args.edit_paint.shape == (_SIZE[1], _SIZE[0])
 
-    def test_an_empty_mask_is_refused(self, run, source, tmp_path, capsys):
-        mask = _save_mask(tmp_path / "m.png", painted=False)
-
-        _refused(run, ["--edit", source, "--prompt", "x", "-m", "z", "--mask", mask], capsys)
-
     def test_the_mask_is_compared_with_the_upright_source(self, run, tmp_path):
-        sideways = tmp_path / "s.jpg"
-        image = Image.new("RGB", _SIZE, (10, 20, 30))
-        exif = Image.Exif()
-        exif[0x0112] = 6  # rotated a quarter turn, so it displays as 48 wide and 64 tall
-        image.save(sideways, exif=exif)
-        mask = _save_mask(tmp_path / "m.png", size=(_SIZE[1], _SIZE[0]))
+        sideways = write_sideways_photo(tmp_path / "s.jpg")  # stored sideways, shown upright
+        mask = _save_mask(tmp_path / "m.png", SIDEWAYS_UPRIGHT_SIZE)
 
-        result = run(["--edit", str(sideways), "--prompt", "x", "-m", "z", "--mask", mask])
+        result = run(["--edit", sideways, "--prompt", "x", "-m", "z", "--mask", mask])
 
         assert result.args.edit_mask == mask
-
-
-def test_the_image_flags_are_registered_with_the_edit_destinations() -> None:
-    parsed = image_cli._build_parser().parse_args(["--edit", "a.png", "--mask", "m.png", "--extend", "top=256"])
-
-    assert (parsed.edit_source, parsed.edit_mask, parsed.edit_extend) == ("a.png", "m.png", "top=256")

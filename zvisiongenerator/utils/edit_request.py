@@ -5,20 +5,19 @@ from __future__ import annotations
 import io
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
+from zvisiongenerator.utils.input_images import image_upright_size
+
 __all__ = [
-    "EditMode",
     "check_edit_inputs",
     "decode_paint",
-    "edit_mode",
     "image_is_cutout",
     "load_paint",
     "parse_extend",
-    "source_is_cutout",
+    "read_edit_source",
 ]
 
 EXTEND_SIDES = ("top", "right", "bottom", "left")
@@ -28,8 +27,6 @@ EXTEND_MAX = 512
 EXTEND_STEP = 16
 # A pixel is transparent when its alpha is below this; a picture with any such pixel is a cut-out.
 _OPAQUE_ALPHA = 250
-
-EditMode = Literal["paint", "extend", "both", "whole"]
 
 
 def parse_extend(value: str | Sequence[str | int]) -> tuple[str, int]:
@@ -66,27 +63,12 @@ def _painted(image: Image.Image) -> np.ndarray:
         alpha = np.asarray(image.convert("RGBA").getchannel("A"))
         if alpha.min() < 255:
             return alpha > 0
-    if image.mode.startswith("I"):
-        return np.asarray(image) > 0
     return np.asarray(image.convert("RGB")).any(axis=2)
 
 
-def _scales_overlap(coarse: tuple[int, int], fine: tuple[int, int]) -> bool:
-    """Return whether one scale, rounded to whole pixels on both axes, turns *fine* into *coarse*.
-
-    Each axis allows the scales within half a pixel of *coarse* either way; the sizes match when those two ranges meet.
-    """
-    (coarse_width, coarse_height), (fine_width, fine_height) = coarse, fine
-    low = max((coarse_width - 0.5) / fine_width, (coarse_height - 0.5) / fine_height)
-    high = min((coarse_width + 0.5) / fine_width, (coarse_height + 0.5) / fine_height)
-    return low <= high + 1e-9
-
-
-def _aspect_matches(mask_size: tuple[int, int], size: tuple[int, int]) -> bool:
-    """Return whether a mask of *mask_size* is *size* scaled by one factor, give or take the rounding of the coarser grid on each axis."""
-    if mask_size[0] >= size[0]:
-        return _scales_overlap(size, mask_size)
-    return _scales_overlap(mask_size, size)
+def _same_shape(mask_size: tuple[int, int], size: tuple[int, int]) -> bool:
+    """Return whether a mask of *mask_size* has the shape of *size*, give or take 1% of the aspect (the rounding of a scaled copy)."""
+    return abs(mask_size[0] / mask_size[1] - size[0] / size[1]) <= 0.01 * size[0] / size[1]
 
 
 def load_paint(mask_path: str, width: int, height: int) -> np.ndarray:
@@ -125,20 +107,13 @@ def decode_paint(data: bytes, width: int, height: int) -> np.ndarray:
         raise ValueError(f"The mask is not a readable PNG: {error}") from error
     mask_height, mask_width = painted.shape
     if (mask_width, mask_height) != (width, height):
-        if not _aspect_matches((mask_width, mask_height), (width, height)):
+        if not _same_shape((mask_width, mask_height), (width, height)):
             raise ValueError(f"The mask is {mask_width}x{mask_height}, which does not match the shape of the {width}x{height} image.")
         scaled = Image.fromarray(painted.astype(np.uint8) * 255).resize((width, height), Image.Resampling.NEAREST)
         painted = np.asarray(scaled) > 0
     if not painted.any():
         raise ValueError("The mask has no painted area.")
     return painted
-
-
-def edit_mode(has_mask: bool, extend: tuple[str, int] | None) -> EditMode:
-    """Return what an edit does: ``paint``, ``extend``, ``both`` (paint on the extended picture) or ``whole`` (no paint, no Extend)."""
-    if has_mask:
-        return "both" if extend else "paint"
-    return "extend" if extend else "whole"
 
 
 def image_is_cutout(image: Image.Image) -> bool:
@@ -149,25 +124,33 @@ def image_is_cutout(image: Image.Image) -> bool:
     return low < _OPAQUE_ALPHA
 
 
-def source_is_cutout(path: str) -> bool:
-    """Return whether the image at *path* has a transparent background (see :func:`image_is_cutout`)."""
-    with Image.open(path) as image:
-        return image_is_cutout(image)
+def read_edit_source(path: str) -> tuple[tuple[int, int], bool]:
+    """Return the upright ``(width, height)`` of the picture at *path* and whether it is a cut-out.
+
+    Raises:
+        ValueError: The file is not a readable image.
+    """
+    try:
+        with Image.open(path) as image:
+            return image_upright_size(image), image_is_cutout(image)
+    except OSError as error:
+        raise ValueError(f"The picture to edit is not a readable image: {error}") from error
 
 
-def check_edit_inputs(mode: EditMode, extend: tuple[str, int] | None, cutout: bool, max_references: int, supports_mask_edit: bool = True) -> None:
+def check_edit_inputs(has_mask: bool, extend: tuple[str, int] | None, cutout: bool, supports_mask_edit: bool) -> None:
     """Raise ``ValueError`` when an edit cannot run, in words the CLI and the Web UI both show.
 
     Args:
-        mode: What the edit does, from :func:`edit_mode`.
+        has_mask: Whether the edit has a painted mask.
         extend: The Extend request, if any.
         cutout: Whether the source has a transparent background.
-        max_references: How many references the model takes; 0 means none.
         supports_mask_edit: Whether the model can redraw a painted area.
     """
     if not supports_mask_edit:
-        raise ValueError("This model cannot edit a picture. Pick a model that can.")
+        raise ValueError("This model cannot edit a picture. Pick a FLUX.2 Klein model.")
     if extend is not None and cutout:
         raise ValueError("A picture with a transparent background cannot be extended.")
-    if mode == "whole" and (cutout or max_references <= 0):
+    if has_mask and extend is not None:
+        raise ValueError("An edit paints or extends, not both.")
+    if not has_mask and extend is None and cutout:
         raise ValueError("Paint the area to change.")

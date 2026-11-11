@@ -37,7 +37,6 @@ from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.config import get_variant_key, resolve_scheduler_class, sharpening_amounts
 from zvisiongenerator.utils.model_metadata import model_capabilities
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-from zvisiongenerator.utils.input_images import upright_size
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.upscale import default_upscale_denoise
 from zvisiongenerator.workflows import build_edit_workflow, build_workflow, conditioning_prompt, generation_negative, generation_prompt
@@ -76,6 +75,7 @@ def _job_prompts(
     *,
     supports_negative: bool,
     transparent: bool = False,
+    extend: bool = False,
 ) -> tuple[JobPrompt, ...]:
     """Return every prompt the job's generations can condition on, once each and in first-use order.
 
@@ -89,13 +89,14 @@ def _job_prompts(
         prompts_data: Prompt set name to ``(prompt, negative_prompt)`` entries.
         supports_negative: Whether the model takes negative prompts.
         transparent: Whether the images are cut out, which adds the plain-background phrase to the text.
+        extend: Whether the job is an Extend, which puts the Extend instruction in front of the text.
 
     Returns:
         The distinct prompts; an iteration whose entry *prompts_data* lacks is left out.
     """
     job_prompts: dict[JobPrompt, None] = {}
     for it in plan.iterations:
-        text = conditioning_prompt(generation_prompt(it.prompt, it.resolved_prompt, it.enhanced_prompt), transparent=transparent)
+        text = conditioning_prompt(generation_prompt(it.prompt, it.resolved_prompt, it.enhanced_prompt), transparent=transparent, extend=extend)
         try:
             negative = generation_negative(prompts_data[it.set_name][it.prompt_index][1], supports_negative=supports_negative)
         except KeyError, IndexError:
@@ -151,10 +152,7 @@ def run_batch(
 
     # Resolve size from config
     if edit_source is not None:
-        try:
-            width, height = upright_size(edit_source)
-        except OSError:
-            width, height = 0, 0  # the load stage reports an unreadable source
+        width, height = args.edit_size  # read where the job was made, before the model loaded
     else:
         sizes = config.get("sizes", {})
         dims = sizes[args.ratio][args.size]
@@ -216,7 +214,7 @@ def run_batch(
         """Encode the job's prompts for *loaded*, the model every generation of this batch uses."""
         backend.prepare_prompts(
             loaded,
-            _job_prompts(plan, prompts_data, supports_negative=supports_neg, transparent=transparent),
+            _job_prompts(plan, prompts_data, supports_negative=supports_neg, transparent=transparent, extend=getattr(args, "edit_extend", None) is not None),
             width=gen_width,
             height=gen_height,
             cancelled=cancelled,

@@ -7,14 +7,14 @@ import subprocess
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any
 
 from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
-from zvisiongenerator.utils.edit_request import EditMode, edit_mode, parse_extend
+from zvisiongenerator.utils.edit_request import parse_extend
 from zvisiongenerator.utils.enhance_record import parse_enhance_record
 from zvisiongenerator.utils.ffmpeg import staging_path
 from zvisiongenerator.utils.paths import collapse_home, display_stem, expand_home
@@ -36,7 +36,7 @@ UPSCALE_METHOD_SEEDVR2 = "seedvr2"
 UPSCALE_METHOD_LTX = "ltx"
 UPSCALE_WORKFLOW = "upscale"
 # What an edit can do, as recorded in the ``edit`` block.
-_EDIT_MODES = get_args(EditMode)
+_EDIT_MODES = ("paint", "extend", "whole")
 
 
 def build_image_config_payload(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> dict[str, Any]:
@@ -692,8 +692,8 @@ def _format_loras(paths: list[str] | None, weights: list[float] | None) -> str |
 
 def _edit_fields(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> dict[str, Any]:
     """Return the ``source`` and ``edit`` blocks of an edit: the picture it started from, what it did, and how far it extended."""
-    source = artifacts.metadata.get("edit_source") or {"path": request.edit_source}
-    edit: dict[str, Any] = {"mode": edit_mode(request.edit_paint is not None, request.edit_extend)}
+    source = artifacts.metadata["edit_source"]
+    edit: dict[str, Any] = {"mode": "paint" if request.edit_paint is not None else "extend" if request.edit_extend else "whole"}
     if request.edit_extend:
         side, amount = request.edit_extend
         edit["extend"] = {"side": side, "amount": amount}
@@ -711,7 +711,7 @@ def _image_workflow(request: ImageGenerationRequest) -> str:
 def _image_generation_details(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> dict[str, Any]:
     if request.edit_source:
         # An edit runs no post-processing; pixels outside the paint stay the source's own. A cut-out stays one: its alpha is kept.
-        cutout = artifacts.edit is not None and artifacts.edit.alpha is not None
+        cutout = artifacts.edit is not None and artifacts.edit.cutout is not None
         return _drop_empty({"time": _round_seconds(artifacts.generation_time), "quantize": request.quantize, "transparent": True if cutout else None})
     upscale = _upscale_details(request) if artifacts.was_upscaled and request.upscale_factor else None
     return _drop_empty(

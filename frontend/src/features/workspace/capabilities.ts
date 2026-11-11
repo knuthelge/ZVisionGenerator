@@ -31,7 +31,6 @@ export interface WorkspaceCapabilities {
   showSoundType: boolean;
   /** Speech, on a model that can follow a recording: the Voice section. */
   showVoice: boolean;
-  supportsNegativePrompt: boolean;
   supportsJsonPrompt: boolean;
   supportsFirstSigma: boolean;
   dimensionMin: number;
@@ -107,7 +106,7 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   const supportsUpscale = imageDefaults?.supports_upscale ?? true;
   const supportsScheduler = imageDefaults?.supports_scheduler ?? true;
   // A control shows when the workflow lists it and the model supports it.
-  const supportsNegativePrompt = visible.has('negative_prompt') && (imageDefaults?.supports_negative_prompt ?? false);
+  const showNegativePrompt = visible.has('negative_prompt') && (imageDefaults?.supports_negative_prompt ?? false);
   const enhancer = context?.prompt_enhancer ?? null;
   // What the model takes for images is `imageSupport`'s; the workflow's contract decides which of it the workflow shows.
   const images = imageSupport(context, state.model, isImageMode ? 'image' : 'video');
@@ -136,7 +135,7 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     showDelivery: visible.has('delivery') && state.voiceMode === 'builtin',
     showSoundType: visible.has('sound_type'),
     showVoice: visible.has('voice') && visible.has('voice_path') && visible.has('voice_text'),
-    supportsNegativePrompt,
+    showNegativePrompt,
     supportsJsonPrompt: visible.has('json_prompt') && (imageDefaults?.supports_json_prompt ?? false),
     supportsFirstSigma: visible.has('first_sigma') && (imageDefaults?.supports_first_sigma ?? false),
     dimensionMin: imageDefaults?.dimension_min ?? 16,
@@ -149,7 +148,6 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     showSourceVideo: visible.has('source_video'),
     showExtendLength: visible.has('extend_length'),
     showPromptFileControls: ['prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit'].some((id) => visible.has(id)),
-    showNegativePrompt: supportsNegativePrompt,
     showEnhance: enhancer !== null && visible.has('prompt_enhance'),
     showEnhanceAuto: enhancer !== null && visible.has('prompt_enhance_auto'),
     enhancer,

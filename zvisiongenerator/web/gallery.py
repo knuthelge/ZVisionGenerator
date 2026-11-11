@@ -486,7 +486,7 @@ def _edit_reuse_params(asset: GalleryAsset, *, source_missing: bool) -> dict[str
     elif asset.source is not None:
         params[EDIT_SOURCE_FIELD] = str(asset.source["path"])
     edit = asset.edit or {}
-    if edit.get("mode") in ("paint", "both"):
+    if edit.get("mode") == "paint":
         params["edit_repaint"] = "true"
     extend = edit.get("extend")
     if extend:
@@ -850,7 +850,6 @@ def _asset_details_json(asset: GalleryAsset) -> dict[str, Any]:
         "image_strength": asset.image_strength,
         "generation": dict(asset.generation),
         "source": dict(asset.source) if asset.source is not None else None,
-        "edit": dict(asset.edit) if asset.edit is not None else None,
     }
 
 

@@ -109,7 +109,7 @@
     extending ? 'What happens next…'
       : fromImage ? `What happens from the image: motion, camera moves, ${heard}.`
       : caps.showScene ? `What happens: action, camera moves, ${heard}.`
-      : caps.isEdit ? editPlaceholder(currentEditFacts(context))
+      : caps.isEdit ? editPlaceholder(currentEditFacts())
       : 'Describe the scene...'
   );
   // A source that recorded one prompt and no scene: the old prompt is pre-filled and the scene is left for the user to write.
@@ -569,7 +569,7 @@
       selectedOptionIds={s.promptFileOptionIds}
       workflowMode={caps.isImageMode ? 'image' : 'video'}
       captionRun={Boolean(caps.showEnhanceAuto && caps.enhancer) && effectiveFormat(s, caps.supportsJsonPrompt) === 'json'}
-      negativePromptSupported={caps.supportsNegativePrompt}
+      negativePromptSupported={caps.showNegativePrompt}
       disabled={busy}
       onPathChange={(path) => draft.update('promptFilePath', path)}
       onOptionChange={(optionIds) => draft.update('promptFileOptionIds', optionIds)}

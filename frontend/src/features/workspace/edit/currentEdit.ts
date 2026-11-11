@@ -1,8 +1,6 @@
 import { draft } from '$lib/state/draft.svelte';
 import { editSourceSet } from '$lib/state/editSlots';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
-import type { WorkspaceContext } from '$lib/types';
-import { editsWholePicture } from '$lib/state/editModels';
 import { imageEdit } from './editStore.svelte';
 import { editReason, type EditFacts } from './editView';
 
@@ -17,12 +15,13 @@ function lostSource(restored: boolean): string | null {
  * What the open Edit is made of, read from the draft (what Generate sends) and the model, with the size and transparency the
  * store has learnt about the picture.
  */
-export function currentEditFacts(context: WorkspaceContext | null): EditFacts {
+export function currentEditFacts(): EditFacts {
   const s = draft.state;
   const source = imageEdit.source;
   // A mask whose file did not come back from a reload is no paint: it has to be painted again.
   const maskLost = s.editMaskUpload !== null && heldUploads.restored && heldUploads.editMask === null;
   return {
+    mode: s.editMode,
     hasImage: editSourceSet(s),
     lost: lostSource(heldUploads.restored),
     painted: s.editMaskUpload !== null && !maskLost ? s.editPaintedShare : 0,
@@ -31,11 +30,10 @@ export function currentEditFacts(context: WorkspaceContext | null): EditFacts {
     width: source?.width ?? null,
     height: source?.height ?? null,
     cutout: source?.cutout ?? null,
-    wholePicture: editsWholePicture(context, s.model),
   };
 }
 
 /** Why Generate is off while editing, or null. */
-export function currentEditReason(context: WorkspaceContext | null): string | null {
-  return editReason(currentEditFacts(context));
+export function currentEditReason(): string | null {
+  return editReason(currentEditFacts());
 }

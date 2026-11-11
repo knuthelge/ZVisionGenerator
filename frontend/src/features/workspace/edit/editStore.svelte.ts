@@ -1,9 +1,10 @@
 import { draft } from '$lib/state/draft.svelte';
 import {
-  BRUSH_DEFAULT, clampBrush, clampExtend, extensionOf, pushOp, strokesOf, undoOp,
-  type EditOp, type ExtendSide, type Extension, type Stroke,
+  BRUSH_DEFAULT, clampBrush, clampExtend, extensionOf, modeOf, pushOp, strokesOf, undoOp,
+  type EditOp, type Extension, type Stroke,
 } from './editOps';
 import type { EditSource } from './editSource';
+import type { EditMode, ExtendSide } from '$lib/types';
 
 const NO_OPS: readonly EditOp[] = [];
 
@@ -16,8 +17,8 @@ interface Session {
   base: File | null;
   /** The amount a newly chosen side starts with; null until the user changes it. */
   amount: number | null;
-  /** The extension the history sits on, taken from the draft when the first op was added; undefined until then. Undo goes back to it, not to what the draft holds now. */
-  before?: Extension | null;
+  /** The mode and extension the history sits on, taken from the draft when the first op was added; undefined until then. Undo goes back to them, not to what the draft holds now. */
+  before?: { mode: EditMode; extension: Extension | null };
 }
 
 /**
@@ -36,20 +37,25 @@ class ImageEditStore {
     this.#session.epoch === draft.editEpoch ? this.#session : { epoch: draft.editEpoch, ops: NO_OPS, base: null, amount: null },
   );
   readonly #strokes = $derived(strokesOf(this.#current.ops));
-  /** The extension the draft holds, which the painter opens with. */
-  readonly #committed = $derived<Extension | null>(
-    draft.state.editExtendSide ? { side: draft.state.editExtendSide, amount: draft.state.editExtendAmount } : null,
-  );
+  /** The mode and extension the draft holds, which the painter opens with. */
+  readonly #committed = $derived<{ mode: EditMode; extension: Extension | null }>({
+    mode: draft.state.editMode,
+    extension: draft.state.editExtendSide ? { side: draft.state.editExtendSide, amount: draft.state.editExtendAmount } : null,
+  });
 
   get source(): EditSource | null { return this.#source; }
   get ops(): readonly EditOp[] { return this.#current.ops; }
   get strokes(): Stroke[] { return this.#strokes; }
   /** The extension in effect: the history's last word, or the one it sits on (the draft's until the history has a first op). */
-  get extension(): Extension | null { return extensionOf(this.#current.ops, this.#current.before === undefined ? this.#committed : this.#current.before); }
+  get extension(): Extension | null { return extensionOf(this.#current.ops, (this.#current.before ?? this.#committed).extension); }
+  /** The mode in effect: the history's last switch, or the one it sits on (the draft's until the history has a first op). */
+  get mode(): EditMode { return modeOf(this.#current.ops, (this.#current.before ?? this.#committed).mode); }
+  /** Whether the mode in effect holds work that a switch would remove: paint (strokes or the paint under them) in Paint, an extension in Extend. */
+  get hasWork(): boolean { return this.mode === 'paint' ? this.#strokes.length > 0 || this.baseShown : this.extension !== null; }
   /** The paint the history sits on, or null. It is gone from the picture once the history clears the paint. */
   get base(): File | null { return this.#current.base; }
   /** Whether the paint under the history still shows: there is one, and no Clear in the history has removed it. */
-  get baseShown(): boolean { return this.#current.base !== null && !this.#current.ops.some((op) => op.kind === 'clear'); }
+  get baseShown(): boolean { return this.#current.base !== null && !this.#current.ops.some((op) => op.kind === 'clear' || op.kind === 'mode'); }
   /** Brush size in image pixels; kept between visits to the painter. */
   get brush(): number { return this.#brush; }
   /** The extension a newly chosen side starts with. */
@@ -67,6 +73,10 @@ class ImageEditStore {
     if (this.#source?.id !== id) return;
     const known = Object.entries(facts).filter(([key, value]) => value !== null && this.#source?.[key as keyof EditSource] !== value);
     if (known.length > 0) this.#source = { ...this.#source, ...Object.fromEntries(known) };
+    // A cut-out cannot be extended (the new area would cover its transparency): an Extend chosen before this was known falls back to Paint.
+    if (facts.cutout === true && draft.state.editMode === 'extend') {
+      draft.commitEdit({ mode: 'paint', mask: null, share: 0, extension: null, amount: draft.state.editExtendAmount });
+    }
   }
 
   /** The painter opens: with no history yet, the paint the draft holds is what the history sits on. */
@@ -107,6 +117,11 @@ class ImageEditStore {
     if (now) this.#push({ kind: 'extend', side: now.side, amount: next }, true);
   }
 
+  /** Switch to the other mode, removing the work of the mode left. It is one step in the history, so Undo brings that work back. */
+  setMode(mode: EditMode): void {
+    if (mode !== this.mode) this.#push({ kind: 'mode', mode });
+  }
+
   undo(): void {
     this.#session = { ...this.#current, ops: undoOp(this.#current.ops) };
   }
@@ -122,7 +137,7 @@ class ImageEditStore {
 
   #push(op: EditOp, merge = false): void {
     const current = this.#current;
-    this.#session = { ...current, before: current.before === undefined ? this.#committed : current.before, ops: pushOp(current.ops, op, merge) };
+    this.#session = { ...current, before: current.before ?? this.#committed, ops: pushOp(current.ops, op, merge) };
   }
 
   #release(source: EditSource | null): void {

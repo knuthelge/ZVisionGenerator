@@ -5,10 +5,10 @@ import type { DraftState, ExtendSide } from '$lib/types';
 export const EXTEND_SIDES: readonly ExtendSide[] = ['top', 'right', 'bottom', 'left'];
 
 /** How far an extension reaches when none has been chosen yet, in pixels. */
-export const EDIT_EXTEND_DEFAULT = 256;
+const EDIT_EXTEND_DEFAULT = 256;
 
 /** The image to edit: a path on the host or an upload's marker. */
-export type EditSourceFields = Pick<DraftState, 'editSourcePath' | 'editSourceUpload'>;
+type EditSourceFields = Pick<DraftState, 'editSourcePath' | 'editSourceUpload'>;
 
 /** Whether the draft holds an image to edit, as a path or as an upload. */
 export function editSourceSet(state: EditSourceFields): boolean {
@@ -23,8 +23,9 @@ export function editSourcePatch(value: SlotValue): Pick<DraftState, 'editSourceP
   };
 }
 
-/** The draft's paint fields with nothing painted, no extension and no repaint: what any change of the image to edit leaves. */
-export const NO_EDIT_PAINT: Pick<DraftState, 'editMaskUpload' | 'editPaintedShare' | 'editExtendSide' | 'editExtendAmount' | 'editRepaint'> = {
+/** The draft's paint fields with Paint chosen, nothing painted, no extension and no repaint: what any change of the image to edit leaves. */
+export const NO_EDIT_PAINT: Pick<DraftState, 'editMode' | 'editMaskUpload' | 'editPaintedShare' | 'editExtendSide' | 'editExtendAmount' | 'editRepaint'> = {
+  editMode: 'paint',
   editMaskUpload: null,
   editPaintedShare: 0,
   editExtendSide: null,

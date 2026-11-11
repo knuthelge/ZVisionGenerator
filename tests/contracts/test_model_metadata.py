@@ -8,7 +8,6 @@ import pytest
 
 from tests._factories import video_config
 from zvisiongenerator.downloads.declaration import companion_targets, declared_repo_ids, model_targets, role_targets
-from zvisiongenerator.processing.edit_region import EDIT_CELL_PIXELS
 from zvisiongenerator.utils.ltx_facts import EULER_ANCESTRAL, LTX_SAMPLERS
 from zvisiongenerator.utils.config import video_family
 from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_preset
@@ -214,11 +213,11 @@ def test_ideo_declares_one_components_and_one_single_file_transformer_in_a_forma
 @pytest.mark.parametrize(
     ("family", "variant", "expected"),
     [
-        ("zimage", None, True),
+        ("zimage", None, False),
         ("flux2_klein", None, True),
         ("flux2_klein", "distilled", True),
         ("flux2_klein", "base", True),
-        ("krea2", None, True),
+        ("krea2", None, False),
         ("ideogram4", None, False),
         ("moss", None, False),
         ("moss", "turbo", False),
@@ -228,13 +227,5 @@ def test_ideo_declares_one_components_and_one_single_file_transformer_in_a_forma
         ("a-family-the-metadata-has-never-heard-of", None, False),
     ],
 )
-def test_only_the_families_that_redraw_a_painted_area_support_mask_edit(family: str, variant: str | None, expected: bool) -> None:
+def test_only_flux2_klein_supports_mask_edit(family: str, variant: str | None, expected: bool) -> None:
     assert model_capabilities(family, variant)["supports_mask_edit"] is expected
-
-
-def test_the_edit_backends_cell_table_names_exactly_the_families_that_support_mask_edit() -> None:
-    """``EDIT_CELL_PIXELS`` is what both backends read; a family with the flag and no cell would fail at the backend, and a cell without the flag is unreachable."""
-    families = load_model_metadata()["image_families"]
-    flagged = {family for family, block in families.items() if block.get("supports_mask_edit") or any(variant.get("supports_mask_edit") for variant in block.get("variants", {}).values())}
-
-    assert set(EDIT_CELL_PIXELS) == flagged

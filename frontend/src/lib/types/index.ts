@@ -96,6 +96,8 @@ export type ImageKind = 'new' | 'edit';
 
 /** The sides of a picture an Edit can extend. */
 export type ExtendSide = 'top' | 'right' | 'bottom' | 'left';
+/** What an Edit marks: paint (a mask, or nothing for a whole-picture edit) or an extension. Only one is sent. */
+export type EditMode = 'paint' | 'extend';
 
 export type PromptSource = 'inline' | 'file';
 
@@ -290,8 +292,6 @@ export interface AssetDetails {
   generation?: AssetGeneration;
   /** The image an upscale or an edit started from; `id` is set while it is still in the gallery. */
   source?: { path: string; width: number | null; height: number | null; id: string | null } | null;
-  /** What an edit did: `paint`, `extend`, `both` or `whole` (the whole picture, from the prompt alone), and the extension; null for any other asset. */
-  edit?: { mode: 'paint' | 'extend' | 'both' | 'whole'; extend?: { side: ExtendSide; amount: number } } | null;
 }
 
 export interface AssetGeneration {
@@ -1234,7 +1234,7 @@ export interface WritableConfigSchema {
 
 // ── Draft / workspace form state ──────────────────────────────────────────────
 
-/** The text a tab keeps for itself: what is typed, and the Enhanced text made from it. Image, Edit, Video and Audio each hold one; Video's two kinds share it. */
+/** The text a tab keeps for itself: what is typed, and the Enhanced text made from it. Each tab and kind (New image, Edit, New video, Extend, Audio) holds one. */
 export interface TabText {
   prompt: string;
   scene: string;
@@ -1353,17 +1353,12 @@ export interface DraftState {
    */
   savedText: Partial<Record<WorkspaceTab, TabText>>;
   /**
-   * What the tabs and kinds that are not open (New image, Edit, New video, Extend) kept: their Settings pane values, model with
-   * its LoRAs and quantization, the LoRAs remembered by model family, and applied preset; Edit's and Extend's also hold their own
-   * Batch and Seed, and Extend's its prompt source, prompts file and Enhancer options. The fields themselves hold the open one's;
+   * What the tabs and kinds that are not open (New image, Edit, New video, Extend, Audio) kept: their Settings pane values, Batch
+   * and Seed, model with its LoRAs and quantization, the LoRAs remembered by model family, applied preset, prompt source with its
+   * prompts file, and Enhancer options of video (Audio keeps its Batch and Seed alone). The fields themselves hold the open one's;
    * opening another tab swaps the two, so each comes back as it was left. A tab not visited yet has none, and takes its model's defaults.
    */
   savedSettings: Partial<Record<WorkspaceTab, Partial<DraftState>>>;
-  /**
-   * What New image, New video and Audio share and Edit or Extend replaces with their own: Batch and Seed, and the prompt source with
-   * its prompts file and Enhancer options. The fields hold them while one of those is open; while Edit or Extend is open they wait here.
-   */
-  savedShared: Partial<DraftState>;
   /** Last-used enhancement options for images; null until the user picks any (backend defaults apply). */
   enhanceSettings: EnhanceSettings | null;
   /** Last-used enhancement options for video, with the Rewrite choice of each video workflow; null until any are picked. */
@@ -1394,6 +1389,8 @@ export interface DraftState {
   editSourcePath: string | null;
   /** Edit: the file name of an image uploaded from this device (its file is in `heldUploads`); null when none. */
   editSourceUpload: string | null;
+  /** Edit: what the edit marks, Paint or Extend. Paint holds no extension and Extend no mask, so a form never sends both. */
+  editMode: EditMode;
   /** Edit: the file name of the painted mask (its PNG is in `heldUploads`); null when nothing is painted. */
   editMaskUpload: string | null;
   /** Edit: the share of the picture that is painted, 0 to 1; 0 when nothing is. */

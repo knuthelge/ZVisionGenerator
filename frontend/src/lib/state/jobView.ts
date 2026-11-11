@@ -75,7 +75,7 @@ export const SEGMENT_LIMIT = 48;
 
 /** Workflow stages that run denoising steps, with the label their bar gets. */
 const STEPPED_STAGES: Record<string, string> = {
-  text_to_image: 'Generate', upscale: 'Upscale', text_to_video: 'Generate', image_to_video: 'Generate', extend_video: 'Generate',
+  text_to_image: 'Generate', edit: 'Generate', upscale: 'Upscale', text_to_video: 'Generate', image_to_video: 'Generate', extend_video: 'Generate',
 };
 
 /** What an item shows after its last step, for stages that name their work; others read "Finishing up…". */

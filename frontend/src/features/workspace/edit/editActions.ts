@@ -1,23 +1,18 @@
 import { draft } from '$lib/state/draft.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { imageEdit } from './editStore.svelte';
-import { readCutout, readSize, sourceOfFile, sourceOfPath, type EditSource } from './editSource';
+import { readPicture, sourceOfFile, sourceOfPath, type EditSource } from './editSource';
 
 /**
- * Show a source as the image to edit and learn what it does not tell yet, in the background: its size, and whether it is a cut-out,
- * which matters even when the painter is never opened (Klein with nothing painted is refused on one). An answer that never comes
- * leaves the fact unknown, and Generate stays on: the server refuses what it cannot run.
+ * Show a source as the image to edit and learn what it does not tell yet, in the background, from one load of the picture: its size
+ * and whether it is a cut-out, which matter even when the painter is never opened (the card shows the size, and a cut-out cannot be
+ * extended). An answer that never comes leaves the fact unknown, and Generate stays on: the server refuses what it cannot run.
  */
 function showSource(source: EditSource): void {
   imageEdit.setSource(source);
-  if (source.width === null || source.height === null) {
-    void readSize(source).then((size) => {
-      if (size) imageEdit.learn(source.id, size);
-    });
-  }
-  if (source.cutout === null) {
-    void readCutout(source).then((cutout) => {
-      if (cutout !== null) imageEdit.learn(source.id, { cutout });
+  if (source.width === null || source.height === null || source.cutout === null) {
+    void readPicture(source).then((picture) => {
+      if (picture) imageEdit.learn(source.id, picture);
     });
   }
 }

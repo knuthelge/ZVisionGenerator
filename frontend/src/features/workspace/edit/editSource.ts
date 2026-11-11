@@ -1,4 +1,4 @@
-import { browseInfo, browseMediaUrl, browsePreviewUrl } from '$lib/api/browse';
+import { browseMediaUrl, browsePreviewUrl } from '$lib/api/browse';
 import { fileName } from '$lib/components/molecules/assetDetails';
 import type { GalleryAsset } from '$lib/types';
 import { detectCutout } from './paintCanvas';
@@ -24,7 +24,7 @@ export interface EditSource {
 
 let _nextId = 1;
 
-/** A file on the server's machine, chosen with the browser; the painter draws the file itself, the thumbnail is a preview. Its size is read separately (`readSize`). */
+/** A file on the server's machine, chosen with the browser; the painter draws the file itself, the thumbnail is a preview. Its size is read from the loaded picture (`readPicture`). */
 export function sourceOfPath(path: string): EditSource {
   return {
     id: _nextId++,
@@ -46,9 +46,9 @@ export function sourceOfFile(file: File): EditSource {
 }
 
 /**
- * An image from the gallery. Its size is read separately (`readSize`), as for a browsed file: the size the gallery recorded can be
- * the raw one, before the picture is turned upright, or out of date. A cut-out the gallery marks as one (`transparent`) is known;
- * another is looked at later (`readCutout`).
+ * An image from the gallery. Its size is read from the loaded picture (`readPicture`), as for a browsed file: the size the gallery
+ * recorded can be the raw one, before the picture is turned upright, or out of date. A cut-out the gallery marks as one
+ * (`transparent`) is known; another is looked at later.
  */
 export function sourceOfAsset(asset: GalleryAsset): EditSource {
   return {
@@ -64,20 +64,6 @@ export function sourceOfAsset(asset: GalleryAsset): EditSource {
   };
 }
 
-/** The real size of a source that does not know it yet; null when it cannot be read. */
-export async function readSize(source: EditSource): Promise<{ width: number; height: number } | null> {
-  if (source.file !== null) return decodeSize(source.url);
-  if (source.path !== null) {
-    try {
-      const info = await browseInfo('reference_image', source.path);
-      if (info.width && info.height) return { width: info.width, height: info.height };
-    } catch {
-      // The image itself tells its size once it loads.
-    }
-  }
-  return null;
-}
-
 /** Load the picture at `url`; null when the browser cannot decode it. */
 function loadImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
@@ -88,14 +74,12 @@ function loadImage(url: string): Promise<HTMLImageElement | null> {
   });
 }
 
-/** The size of a picture the browser can decode from `url`. */
-async function decodeSize(url: string): Promise<{ width: number; height: number } | null> {
-  const image = await loadImage(url);
-  return image ? { width: image.naturalWidth, height: image.naturalHeight } : null;
-}
-
-/** Whether the source has transparent pixels (a cut-out), looked for on a small copy of the picture; null when it cannot be read. */
-export async function readCutout(source: EditSource): Promise<boolean | null> {
+/**
+ * What a loaded picture tells: its size (the browser reports `naturalWidth` and `naturalHeight` after applying the EXIF orientation,
+ * so a photo taken sideways reads upright) and whether it has transparent pixels (a cut-out, looked for on a small copy). Null when
+ * the browser cannot decode it.
+ */
+export async function readPicture(source: EditSource): Promise<{ width: number; height: number; cutout: boolean | null } | null> {
   const image = await loadImage(source.url);
-  return image ? detectCutout(image) : null;
+  return image ? { width: image.naturalWidth, height: image.naturalHeight, cutout: detectCutout(image) } : null;
 }

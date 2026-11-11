@@ -130,4 +130,4 @@ A contract test pins the attribute names against `Flux2Initializer.init` and the
 
 ## Relation to other proposals
 
-[Edit images](../image-editing.md) Phase 2 ("Klein edits") is the instruction-edit side of the same Klein mechanism. Once this ships, it reduces to the editor's **Edit** tool calling the references path with the source image as reference 1, and its `supports_edit` flag becomes `max_reference_images > 0`.
+[Edit images](image-editing.md) Phase 2 ("Klein edits") is the instruction-edit side of the same Klein mechanism. Once this ships, it reduces to the editor's **Edit** tool calling the references path with the source image as reference 1, and the shipped Edit flag is `supports_mask_edit`, true for FLUX.2 Klein only, kept apart from `max_reference_images`.

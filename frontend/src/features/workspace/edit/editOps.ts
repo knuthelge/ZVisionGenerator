@@ -3,11 +3,7 @@
  * mask is always the replay of the ops. Nothing here touches a canvas.
  */
 
-import { EXTEND_SIDES } from '$lib/state/editSlots';
-import type { ExtendSide } from '$lib/types';
-
-export type { ExtendSide };
-export { EXTEND_SIDES };
+import type { EditMode, ExtendSide } from '$lib/types';
 
 /** The brush in image pixels. */
 export const BRUSH_MIN = 24;
@@ -30,7 +26,9 @@ export interface Stroke {
 export type EditOp =
   | ({ kind: 'stroke' } & Stroke)
   | { kind: 'clear' }
-  | { kind: 'extend'; side: ExtendSide | null; amount: number };
+  | { kind: 'extend'; side: ExtendSide | null; amount: number }
+  /** Switch to the other mode, which removes the work of the one left: a later Undo brings both back. */
+  | { kind: 'mode'; mode: EditMode };
 
 /** One side of the picture pushed out by some pixels. */
 export interface Extension {
@@ -54,21 +52,34 @@ export const clampBrush = (size: number): number => snap(size, BRUSH_MIN, BRUSH_
 /** The extension within its range, on its step of 16. */
 export const clampExtend = (amount: number): number => snap(amount, EXTEND_MIN, EXTEND_MAX, EXTEND_STEP);
 
-/** The strokes that make up the paint: those after the last Clear. */
+/** The mode in effect: the last mode op, else `before` (the mode the painter opened in). */
+export function modeOf(ops: readonly EditOp[], before: EditMode = 'paint'): EditMode {
+  for (let index = ops.length - 1; index >= 0; index -= 1) {
+    const op = ops[index];
+    if (op.kind === 'mode') return op.mode;
+  }
+  return before;
+}
+
+/** The strokes that make up the paint: those after the last Clear or switch of mode. */
 export function strokesOf(ops: readonly EditOp[]): Stroke[] {
   const strokes: Stroke[] = [];
   for (const op of ops) {
-    if (op.kind === 'clear') strokes.length = 0;
+    if (op.kind === 'clear' || op.kind === 'mode') strokes.length = 0;
     else if (op.kind === 'stroke') strokes.push(op);
   }
   return strokes;
 }
 
-/** The extension in effect: the last extend op, or none when it was removed; with no extend op at all, `before` (the extension the painter opened with). */
+/**
+ * The extension in effect: the last extend op, or none when it was removed or a switch of mode came after it; with no extend or
+ * mode op at all, `before` (the extension the painter opened with).
+ */
 export function extensionOf(ops: readonly EditOp[], before: Extension | null = null): Extension | null {
   for (let index = ops.length - 1; index >= 0; index -= 1) {
     const op = ops[index];
     if (op.kind === 'extend') return op.side === null ? null : { side: op.side, amount: op.amount };
+    if (op.kind === 'mode') return null;
   }
   return before;
 }

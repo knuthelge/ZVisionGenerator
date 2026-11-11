@@ -151,5 +151,5 @@ export function imagesView({ state, caps, files, restored, edit }: ImagesViewInp
 /** The view of the open tab, read from the draft and the held uploads. */
 export function currentImagesView(context: WorkspaceContext): ImagesView {
   const caps = workspaceCapabilities(context, draft.state);
-  return imagesView({ state: draft.state, caps, files: heldUploads, restored: heldUploads.restored, edit: caps.isEdit ? { block: currentEditReason(context) } : undefined });
+  return imagesView({ state: draft.state, caps, files: heldUploads, restored: heldUploads.restored, edit: caps.isEdit ? { block: currentEditReason() } : undefined });
 }

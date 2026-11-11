@@ -40,6 +40,11 @@ def test_the_background_phrase_is_added_only_when_transparent():
     assert conditioning_prompt("a cat", transparent=False) == "a cat"
 
 
+def test_an_extend_puts_its_instruction_in_front_and_nothing_else_changes():
+    assert conditioning_prompt("more sky", transparent=False, extend=True) == "Expand the image to fill the empty canvas.\n\nmore sky"
+    assert conditioning_prompt("more sky", transparent=False) == "more sky"
+
+
 def test_a_json_caption_is_never_given_the_background_phrase():
     caption = '{"summary": "a cat"}'
 

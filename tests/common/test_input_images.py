@@ -6,8 +6,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from tests._images import SIDEWAYS_UPRIGHT_SIZE, is_bluish, is_reddish, write_cutout, write_sideways_photo
-from zvisiongenerator.utils.input_images import flatten_alpha, open_image_upright, upright_image_copies, upright_size
+from tests._images import SIDEWAYS_UPRIGHT_SIZE, cmyk_profile, display_p3_profile, is_bluish, is_reddish, write_cutout, write_sideways_photo
+from zvisiongenerator.utils.input_images import flatten_alpha, open_image_upright, to_srgb, upright_image_copies, upright_size
 
 
 def test_an_input_image_is_opened_upright_and_keeps_its_size(tmp_path):
@@ -76,3 +76,41 @@ def test_flatten_alpha_composites_over_the_given_colour():
 
 def test_flatten_alpha_defaults_to_white():
     assert flatten_alpha(Image.new("RGBA", (1, 1), (0, 0, 0, 0))).getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_a_picture_with_a_colour_profile_is_converted_to_srgb_and_loses_the_profile():
+    tagged = Image.new("RGBA", (4, 4), (60, 180, 90, 128))
+    tagged.info["icc_profile"] = display_p3_profile()
+
+    converted = to_srgb(tagged)
+
+    assert "icc_profile" not in converted.info
+    assert converted.mode == "RGBA" and converted.getpixel((0, 0))[3] == 128
+    assert converted.getpixel((0, 0))[:3] != (60, 180, 90)
+
+
+def test_a_cmyk_picture_is_converted_through_its_own_profile(tmp_path):
+    path = tmp_path / "print.jpg"
+    Image.new("CMYK", (4, 4), (200, 20, 20, 10)).save(path, icc_profile=cmyk_profile())
+
+    with Image.open(path) as opened:
+        converted = to_srgb(opened)
+        naive = opened.convert("RGB").getpixel((0, 0))
+
+    assert converted.mode == "RGB" and "icc_profile" not in converted.info
+    assert max(abs(a - b) for a, b in zip(converted.getpixel((0, 0)), naive)) > 20
+
+
+def test_a_damaged_profile_is_dropped_and_the_picture_kept():
+    tagged = Image.new("RGB", (4, 4), (60, 180, 90))
+    tagged.info["icc_profile"] = display_p3_profile()[:200]
+
+    result = to_srgb(tagged)
+
+    assert "icc_profile" not in result.info and result.getpixel((0, 0)) == (60, 180, 90)
+
+
+def test_a_picture_without_a_profile_is_returned_as_it_is():
+    plain = Image.new("RGB", (4, 4), (10, 200, 30))
+
+    assert to_srgb(plain) is plain

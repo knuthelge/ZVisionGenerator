@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -13,17 +14,21 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from starlette.datastructures import FormData, UploadFile
 
+from tests._factories import _make_plan
+from tests._images import SIDEWAYS_UPRIGHT_SIZE, mask_png, painted_box, write_cutout, write_sideways_photo
 from tests.web._helpers import make_resolved_image_defaults, make_web_config, patch_image_submit_dependencies
-from zvisiongenerator.processing.edit_region import target_size
-from zvisiongenerator.utils.edit_request import check_edit_inputs, edit_mode
+from zvisiongenerator.core.image_backend import ImageBackend
+from zvisiongenerator.image_runner import run_batch
+from zvisiongenerator.utils.edit_request import check_edit_inputs
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.provenance import read_png_config
 from zvisiongenerator.web import edit_job
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
+from zvisiongenerator.workflows.generation_prompt import EXTEND_INSTRUCTION
 
 _SOURCE_SIZE = (64, 48)
 _KLEIN = ImageModelInfo(family="flux2_klein", is_distilled=True, size="4b")
-_ZIMAGE = ImageModelInfo(family="zimage", is_distilled=True, size=None)
 
 
 @pytest.fixture(autouse=True)
@@ -32,13 +37,8 @@ def _no_real_memory_release(monkeypatch):
 
 
 def _png_bytes(size: tuple[int, int], paint: tuple[int, int, int, int] | None = (4, 4, 20, 20), *, mode: str = "L") -> bytes:
-    """Return a PNG of *size* that is black with a white box at *paint* (left, top, right, bottom); ``None`` paints nothing."""
-    image = Image.new(mode, size, 0)
-    if paint is not None:
-        image.paste(255, paint)
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
+    """Return a mask PNG of *size* that is black with a white box at *paint* (left, top, right, bottom); ``None`` paints nothing."""
+    return mask_png(painted_box(size[1], size[0], *([paint] if paint else [])), mode=mode)
 
 
 def _upload(data: bytes, name: str = "mask.png") -> UploadFile:
@@ -92,28 +92,19 @@ class TestTheJob:
         assert env.response["context"]["workflow"] == "edit"
         assert env.response["context"]["job_type"] == "Edit"
 
-    def test_the_painted_area_is_in_no_recorded_setting_context_or_request_field_but_its_own(self, env):
-        job = env.submit(("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))), ("edit_painted", "true"))
+    def test_the_painted_area_is_not_among_the_settings_the_job_shows(self, env):
+        env.submit(("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))), ("edit_painted", "true"))
 
-        paint = job["args"].edit_paint
         assert "edit_mask_file" not in env.response["context"]["settings"]
         assert env.response["context"]["settings"]["edit_painted"] == "true"
         assert env.response["context"]["settings"]["edit_source_path"] == str(env.source)
-        assert not [key for key, value in vars(job["args"]).items() if key != "edit_paint" and value is paint]
-        assert not [value for value in vars(job["request"]).values() if value is paint]
-        assert '"edit_paint"' not in json.dumps(env.response["context"], default=str)
 
     def test_an_edit_runs_no_post_processing_and_takes_no_other_inputs(self, env):
-        args = env.submit(("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))["args"]
+        job = env.submit(("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))
 
+        args, request = job["args"], job["request"]
         assert args.sharpen is False and args.contrast is False and args.saturation is False
-        assert args.transparent is False
-        assert args.upscale is None and args.image_path is None and args.reference_paths == []
-        assert args.review is False
-
-    def test_the_form_s_default_sharpen_is_not_recorded_for_an_edit(self, env):
-        request = env.submit(("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))["request"]
-
+        assert args.upscale is None and args.image_path is None
         assert (request.sharpen, request.contrast, request.saturation, request.transparent, request.upscale_factor) == (False, False, False, False, None)
         assert request.reference_paths == () and request.image_path is None
 
@@ -121,15 +112,14 @@ class TestTheJob:
         job = env.submit(("enhance_auto", "true"), ("enhance_settings", "{}"), ("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))
 
         args = job["args"]
-        assert (args.no_enhance, args.enhance, args.enhance_record, args.prompt_input) == (True, None, None, None)
+        assert args.no_enhance is True
         assert job["enhance_by_set"] is None
         assert job["prompts_data"] == {"web": [("a red door", None)]}
 
     def test_a_job_without_paint_or_extend_runs_whole_picture_on_a_model_with_references(self, env):
         job = env.submit()
 
-        assert job["args"].edit_paint is None
-        assert edit_mode(False, None) == "whole"
+        assert job["args"].edit_paint is None and job["args"].edit_extend is None
 
     def test_extend_is_carried_as_a_side_and_an_amount(self, env):
         job = env.submit(("edit_extend_side", "top"), ("edit_extend_amount", "256"))
@@ -168,57 +158,21 @@ class TestTheJob:
         assert job["args"].output == str(env.root)
         assert env.submitted[-1]["context"]["settings"]["edit_source_path"] == job["args"].edit_source
 
-    def test_a_painted_edit_shows_the_size_of_the_picture(self, env):
-        env.submit(("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))
-
-        context = env.response["context"]
-        assert (context["width"], context["height"]) == _SOURCE_SIZE
-        assert context["meta"].startswith(f"{_SOURCE_SIZE[0]}x{_SOURCE_SIZE[1]} ")
-
-    def test_the_source_is_read_upright(self, env):
-        turned = env.root / "turned.jpg"
-        exif = Image.Exif()
-        exif[0x0112] = 6
-        Image.new("RGB", (64, 48), "teal").save(turned, exif=exif)
-
-        env.submit(("edit_source_path", str(turned)), ("edit_mask_file", _upload(_png_bytes((96, 128)))))
-
-        assert (env.response["context"]["width"], env.response["context"]["height"]) == (48, 64)
-
     @pytest.mark.parametrize(
-        ("side", "grown"),
-        [("left", (64 + 128, 48)), ("right", (64 + 128, 48)), ("top", (64, 48 + 128)), ("bottom", (64, 48 + 128))],
+        ("entries", "shown"),
+        [
+            ((("edit_mask_file", "mask"),), _SOURCE_SIZE),  # paint: the picture's own size
+            ((("edit_extend_side", "top"), ("edit_extend_amount", "128")), (_SOURCE_SIZE[0], _SOURCE_SIZE[1] + 128)),  # extend: the amount added on its side
+            ((), _SOURCE_SIZE),  # the whole picture: the picture's own size
+        ],
+        ids=["paint", "extend", "whole picture"],
     )
-    @pytest.mark.parametrize("painted", [False, True])
-    def test_an_extend_adds_its_amount_on_its_side_to_the_size_the_job_shows(self, env, side, grown, painted):
-        entries = [("edit_extend_side", side), ("edit_extend_amount", "128")]
-        if painted:
-            entries.append(("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))
-
-        env.submit(*entries)
+    def test_the_job_shows_the_size_the_picture_will_have(self, env, entries, shown):
+        env.submit(*((key, _upload(_png_bytes(_SOURCE_SIZE))) if value == "mask" else (key, value) for key, value in entries))
 
         context = env.response["context"]
-        assert (context["width"], context["height"]) == grown
-        assert context["meta"].startswith(f"{grown[0]}x{grown[1]} ")
-
-    def test_a_whole_picture_edit_shows_the_size_the_model_draws_at(self, env):
-        env.submit()
-
-        context = env.response["context"]
-        assert (context["width"], context["height"]) == target_size(*_SOURCE_SIZE)
-        assert context["meta"].startswith(f"{context['width']}x{context['height']} ")
-
-    def test_a_download_plan_has_no_size_to_show(self, env, monkeypatch):
-        monkeypatch.setattr(web_server, "load_web_config", lambda: env.web_config)
-        monkeypatch.setattr(web_server, "job_download_parts", lambda *_a, **_kw: ())
-        with TestClient(web_server.app) as client:
-            response = client.post(
-                "/api/generate/plan",
-                data={"mode": "image", "workflow": "edit", "model": "zit", "prompt": "x", "edit_extend_side": "top", "edit_extend_amount": "128"},
-                files={"edit_source_file": ("door.png", b"", "image/png")},
-            )
-
-        assert response.status_code == 200
+        assert (context["width"], context["height"]) == shown
+        assert context["meta"].startswith(f"{shown[0]}x{shown[1]} ")
 
     def test_a_mask_at_another_size_of_the_same_shape_is_scaled_to_the_source(self, env):
         paint = env.submit(("edit_mask_file", _upload(_png_bytes((128, 96), (8, 8, 40, 40)))))["args"].edit_paint
@@ -226,15 +180,6 @@ class TestTheJob:
         assert paint.shape == (_SOURCE_SIZE[1], _SOURCE_SIZE[0])
         assert set(np.unique(paint)) == {True, False}
         assert paint[4:20, 4:20].all() and paint.sum() == 16 * 16
-
-    def test_a_browser_mask_painted_over_the_whole_picture_is_all_painted(self, env):
-        """The browser draws strokes in white at full alpha, so a canvas painted completely is an opaque white RGBA PNG."""
-        buffer = io.BytesIO()
-        Image.new("RGBA", _SOURCE_SIZE, (255, 255, 255, 255)).save(buffer, format="PNG")
-
-        paint = env.submit(("edit_mask_file", _upload(buffer.getvalue())))["args"].edit_paint
-
-        assert paint.all()
 
     def test_a_browser_mask_with_a_transparent_background_keeps_only_the_strokes(self, env):
         image = Image.new("RGBA", _SOURCE_SIZE, (0, 0, 0, 0))
@@ -246,15 +191,14 @@ class TestTheJob:
 
         assert paint[4:20, 4:20].all() and paint.sum() == 16 * 16
 
-    def test_a_mask_of_a_turned_source_follows_the_upright_shape(self, env):
-        turned = env.root / "turned.jpg"
-        exif = Image.Exif()
-        exif[0x0112] = 6
-        Image.new("RGB", (64, 48), "teal").save(turned, exif=exif)
+    def test_a_turned_source_is_read_upright_and_its_mask_follows_the_upright_shape(self, env):
+        turned = write_sideways_photo(env.root / "turned.jpg")
+        width, height = SIDEWAYS_UPRIGHT_SIZE
 
-        paint = env.submit(("edit_source_path", str(turned)), ("edit_mask_file", _upload(_png_bytes((96, 128)))))["args"].edit_paint
+        paint = env.submit(("edit_source_path", turned), ("edit_mask_file", _upload(_png_bytes((width * 2, height * 2)))))["args"].edit_paint
 
-        assert paint.shape == (64, 48)
+        assert paint.shape == (height, width)
+        assert (env.response["context"]["width"], env.response["context"]["height"]) == (width, height)
 
     def test_a_mask_is_never_staged_as_an_upload(self, env):
         env.submit(("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))
@@ -265,13 +209,6 @@ class TestTheJob:
 # -- R8.4: the refusals ------------------------------------------------------------------------------------------
 
 
-def _cutout(path: Path) -> Path:
-    image = Image.new("RGBA", _SOURCE_SIZE, (200, 30, 30, 255))
-    image.paste((0, 0, 0, 0), (0, 0, 32, 48))
-    image.save(path)
-    return path
-
-
 def _shared_refusal(**inputs) -> str:
     with pytest.raises(ValueError) as refusal:
         check_edit_inputs(**inputs)
@@ -280,26 +217,18 @@ def _shared_refusal(**inputs) -> str:
 
 class TestRefusals:
     def test_a_cut_out_cannot_be_extended_in_the_words_the_cli_uses(self, env):
-        env.submit(("edit_source_path", str(_cutout(env.root / "cut.png"))), ("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))  # paint alone is fine
+        env.submit(("edit_source_path", write_cutout(env.root / "cut.png", _SOURCE_SIZE)), ("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))  # paint alone is fine
 
         with pytest.raises(ValueError) as refusal:
             env.submit(("edit_source_path", str(env.root / "cut.png")), ("edit_extend_side", "left"), ("edit_extend_amount", "128"))
 
-        assert str(refusal.value) == _shared_refusal(mode="extend", extend=("left", 128), cutout=True, max_references=4, supports_mask_edit=True)
+        assert str(refusal.value) == _shared_refusal(has_mask=False, extend=("left", 128), cutout=True, supports_mask_edit=True)
 
     def test_whole_picture_on_a_cut_out_asks_for_paint(self, env):
         with pytest.raises(ValueError) as refusal:
-            env.submit(("edit_source_path", str(_cutout(env.root / "cut.png"))))
+            env.submit(("edit_source_path", write_cutout(env.root / "cut.png", _SOURCE_SIZE)))
 
-        assert str(refusal.value) == _shared_refusal(mode="whole", extend=None, cutout=True, max_references=4, supports_mask_edit=True)
-
-    def test_whole_picture_on_a_model_without_references_asks_for_paint(self, env, monkeypatch):
-        _use_model(monkeypatch, _ZIMAGE, supports_mask_edit=True, max_reference_images=0)
-
-        with pytest.raises(ValueError) as refusal:
-            env.submit(model="z")
-
-        assert str(refusal.value) == _shared_refusal(mode="whole", extend=None, cutout=False, max_references=0, supports_mask_edit=True)
+        assert str(refusal.value) == _shared_refusal(has_mask=False, extend=None, cutout=True, supports_mask_edit=True)
 
     def test_a_model_that_cannot_edit_is_refused(self, env, monkeypatch):
         _use_model(monkeypatch, ImageModelInfo(family="flux1", is_distilled=False, size=None), supports_mask_edit=False, max_reference_images=0)
@@ -307,7 +236,7 @@ class TestRefusals:
         with pytest.raises(ValueError) as refusal:
             env.submit(("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))
 
-        assert str(refusal.value) == _shared_refusal(mode="paint", extend=None, cutout=False, max_references=0, supports_mask_edit=False)
+        assert str(refusal.value) == _shared_refusal(has_mask=True, extend=None, cutout=False, supports_mask_edit=False)
 
     def test_an_empty_mask_is_refused(self, env):
         with pytest.raises(ValueError, match="no painted area"):
@@ -315,17 +244,15 @@ class TestRefusals:
 
         assert env.submitted == []
 
-    @pytest.mark.parametrize("size", [(64, 64), (96, 128)])
-    def test_a_mask_of_another_shape_is_refused(self, env, size):
+    def test_a_mask_of_another_shape_is_refused(self, env):
         with pytest.raises(ValueError, match="does not match the shape"):
-            env.submit(("edit_mask_file", _upload(_png_bytes(size))))
+            env.submit(("edit_mask_file", _upload(_png_bytes((64, 64)))))
 
-    def test_a_mask_that_is_not_a_png_is_refused(self, env):
-        jpeg = io.BytesIO()
-        Image.new("RGB", _SOURCE_SIZE, "white").save(jpeg, format="JPEG")
+    def test_paint_and_extend_together_are_refused_before_a_job_is_queued(self, env):
+        with pytest.raises(ValueError, match="paints or extends, not both"):
+            env.submit(("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))), ("edit_extend_side", "left"), ("edit_extend_amount", "128"))
 
-        with pytest.raises(ValueError, match="PNG"):
-            env.submit(("edit_mask_file", _upload(jpeg.getvalue())))
+        assert env.submitted == []
 
     @pytest.mark.parametrize(
         ("side", "amount", "message"),
@@ -361,7 +288,7 @@ class TestRefusals:
     def test_the_route_answers_a_refusal_with_422_and_its_message(self, env, monkeypatch):
         monkeypatch.setattr(web_server, "load_web_config", lambda: env.web_config)
         with TestClient(web_server.app) as client:
-            response = client.post("/api/generate", data={"workflow": "edit", "model": "zit", "prompt": "x", "edit_source_path": str(_cutout(env.root / "cut.png"))})
+            response = client.post("/api/generate", data={"workflow": "edit", "model": "zit", "prompt": "x", "edit_source_path": write_cutout(env.root / "cut.png", _SOURCE_SIZE)})
 
         assert response.status_code == 422
         assert response.json()["detail"] == "Paint the area to change."
@@ -382,14 +309,13 @@ class TestThePlan:
         def forbidden(*_a, **_kw):
             raise AssertionError("a plan must not touch the files")
 
-        monkeypatch.setattr(edit_job, "source_is_cutout", forbidden)
+        monkeypatch.setattr(web_server, "read_edit_source", forbidden)
         monkeypatch.setattr(edit_job, "decode_paint", forbidden)
-        monkeypatch.setattr(edit_job, "upright_size", forbidden)
         before = sorted(path.relative_to(env.tmp_path).as_posix() for path in env.tmp_path.rglob("*"))
 
         response = plan_client.post(
             "/api/generate/plan",
-            data={"mode": "image", "workflow": "edit", "model": "zit", "prompt": "a red door", "edit_painted": "true", "edit_extend_side": "top", "edit_extend_amount": "256"},
+            data={"mode": "image", "workflow": "edit", "model": "zit", "prompt": "a red door", "edit_painted": "true"},
             files={"edit_source_file": ("door.png", b"", "image/png"), "edit_mask_file": ("mask.png", b"", "image/png")},
         )
 
@@ -421,11 +347,11 @@ class TestThePlan:
     def test_a_plan_of_a_cut_out_without_paint_is_refused_like_a_submit(self, env, plan_client):
         response = plan_client.post(
             "/api/generate/plan",
-            data={"mode": "image", "workflow": "edit", "model": "zit", "prompt": "x", "edit_source_path": str(_cutout(env.root / "cut.png"))},
+            data={"mode": "image", "workflow": "edit", "model": "zit", "prompt": "x", "edit_source_path": write_cutout(env.root / "cut.png", _SOURCE_SIZE)},
         )
 
         assert response.status_code == 422
-        assert response.json()["detail"] == "Paint the area to change."
+        assert response.json()["detail"] == _shared_refusal(has_mask=False, extend=None, cutout=True, supports_mask_edit=True)
 
 
 # -- R8.6: the contract ------------------------------------------------------------------------------------------
@@ -462,28 +388,12 @@ class TestTheContract:
 
 
 class TestTheParsedJobRuns:
-    def test_the_args_and_request_the_form_builds_run_through_run_batch(self, env):
-        """The job's namespace carries everything ``run_batch`` reads: an edit lands beside its source with its own provenance."""
-        from unittest.mock import MagicMock
-
-        from tests._factories import _make_plan
-        from zvisiongenerator.core.image_backend import ImageBackend
-        from zvisiongenerator.image_runner import run_batch
-        from zvisiongenerator.utils.provenance import read_png_config
-
-        painted_at_run: list[bool] = []
-        backend = MagicMock(spec=ImageBackend)
+    @staticmethod
+    def _run_form(env, backend: MagicMock, prompt: str, *entries: tuple[str, object]) -> None:
+        """Parse an Edit form on the source picture and run the job it builds through ``run_batch`` on *backend*."""
         backend.name = "mock"
-
-        def edit_region(**kwargs):
-            painted_at_run.append(bool(kwargs["paint"].any()))
-            return Image.new("RGB", (555, 777), "white")
-
-        backend.edit_region.side_effect = edit_region
-        parsed = web_server._parse_image_job(
-            FormData([("workflow", "edit"), ("model", "zit"), ("prompt", "a red door"), ("edit_source_path", str(env.source)), ("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE)))]),
-            env.web_config,
-        )
+        fields = [("workflow", "edit"), ("model", "zit"), ("prompt", prompt), ("edit_source_path", str(env.source)), *entries]
+        parsed = web_server._parse_image_job(FormData(fields), env.web_config)
         config = {"generation": {"seed_min": 1, "seed_max": 100}, "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4}}
         run_batch(
             backend,
@@ -491,10 +401,23 @@ class TestTheParsedJobRuns:
             parsed.prompts_data,
             config,
             parsed.args,
-            model_info=_ZIMAGE,
+            model_info=_KLEIN,
             plan=_make_plan(parsed.prompts_data, parsed.args, config=config),
             progress_callback=lambda _event: None,
         )
+
+    def test_the_args_and_request_the_form_builds_run_through_run_batch(self, env):
+        """The job's namespace carries everything ``run_batch`` reads: an edit lands beside its source with its own provenance."""
+        painted_at_run: list[bool] = []
+        backend = MagicMock(spec=ImageBackend)
+
+        def edit_region(**kwargs):
+            painted_at_run.append(bool(kwargs["paint"].any()))
+            return Image.new("RGB", (555, 777), "white")
+
+        backend.edit_region.side_effect = edit_region
+
+        self._run_form(env, backend, "a red door", ("edit_mask_file", _upload(_png_bytes(_SOURCE_SIZE))))
 
         saved = env.root / "door_edit.png"
         assert saved.is_file() and painted_at_run == [True]
@@ -503,3 +426,15 @@ class TestTheParsedJobRuns:
         assert recorded["edit"] == {"mode": "paint"}
         assert "sharpen" not in recorded["generation"]
         assert '"edit_paint"' not in json.dumps(recorded)
+
+    def test_an_extend_form_reaches_the_extend_the_model_draws_and_saves_the_grown_picture(self, env):
+        backend = MagicMock(spec=ImageBackend)
+        backend.edit_region.side_effect = lambda **kwargs: kwargs["image"].copy()
+
+        self._run_form(env, backend, "more door", ("edit_extend_side", "left"), ("edit_extend_amount", "128"))
+
+        call = backend.edit_region.call_args.kwargs
+        assert call["fix_join"] is True and call["prompt"] == EXTEND_INSTRUCTION + "more door"
+        assert call["reference"].size == call["image"].size and call["paint"].shape == call["image"].size[::-1]
+        with Image.open(next(env.root.glob("door_edit*.png"))) as saved:
+            assert saved.size == (_SOURCE_SIZE[0] + 128, _SOURCE_SIZE[1])

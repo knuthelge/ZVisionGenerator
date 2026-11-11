@@ -15,6 +15,7 @@ from zvisiongenerator.utils.audio_preset import parse_audio_presets
 from zvisiongenerator.utils.enhancer_models import enhancer_tier_models, smart_unavailable
 from zvisiongenerator.utils.config import load_config, resolve_scheduler_class, video_load_options
 from zvisiongenerator.utils.h3_preset import h3_preset
+from zvisiongenerator.utils.image_model_detect import ImageModelInfo, declared_image_model
 from zvisiongenerator.utils.licences import licences_for, load_licences
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.platform import PLATFORM_LABELS
@@ -151,6 +152,9 @@ def test_only_some_image_models_name_a_family_the_web_ui_lists_them_by_offline()
     assert image_model_family("ideo") == "ideogram4"
     assert image_model_family("krea2") == "krea2"
     assert image_model_family("zit") is None
+    assert declared_image_model("klein9b") == ImageModelInfo("flux2_klein", True, "9b")
+    assert declared_image_model("klein4b") == ImageModelInfo("flux2_klein", True, "4b")
+    assert declared_image_model("zit") is None
     assert image_model_family("ltx-4") is None
     assert image_model_family("unknown-name") is None
 

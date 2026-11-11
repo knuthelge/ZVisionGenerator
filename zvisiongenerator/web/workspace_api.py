@@ -14,12 +14,12 @@ from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.downloads.plans import built_model_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
-from zvisiongenerator.utils.model_metadata import alias_map, image_model_family, model_display_name, model_download_size_label
+from zvisiongenerator.utils.model_metadata import alias_map, model_display_name, model_download_size_label
 from zvisiongenerator.utils.enhancer_models import ENHANCER_TIERS, enhancer_model_id, enhancer_tier_models, smart_unavailable
 from zvisiongenerator.utils.config import configured_enhancer_models, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, video_family
 from zvisiongenerator.utils.audio_settings import audio_settings_contract
 from zvisiongenerator.utils.alignment import align_frames
-from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
+from zvisiongenerator.utils.image_model_detect import declared_image_model, detect_image_model
 from zvisiongenerator.utils.h3_converted import CONVERTED_H3_STORAGES, read_converted_h3
 from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, licence_payload, load_licences
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
@@ -695,12 +695,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
     family: str | None = None
     size_variant: str | None = None
     try:
-        resolved_model = resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform)
-        declared = image_model_family(model_name)
-        if declared is not None:
-            model_info = ImageModelInfo(family=declared, is_distilled=False, size=None)
-        else:
-            model_info = detect_image_model(resolved_model)
+        model_info = declared_image_model(model_name) or detect_image_model(resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform))
         defaults = resolve_defaults(model_info, app_config, {}, get_backend_name())
         family = _known_family(model_info.family)
         size_variant = model_info.size

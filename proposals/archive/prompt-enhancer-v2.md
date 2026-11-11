@@ -56,7 +56,7 @@ No new UI. Both values are already in the request.
 Two steps, the first needs no new model:
 
 - **3a. Text-only (cheap).** When the job has a reference image, tell the model: *"The first frame is supplied as an image. Describe the motion, camera and changes over time; refer to the subject briefly and don't restyle it or add appearance details."* For img2img, Style and Mood still apply, but the subject and layout come from the image. `enhance_prompt` gets `has_reference: bool`.
-- **3b. Vision (spike first).** Qwen3.5 is natively multimodal. Feed the reference image so the rewrite can name what is actually in the frame. Needs `mlx-vlm` on macOS and the processor or VLM class in transformers on CUDA, and a vision-capable checkpoint. The current pinned `heretic` 4-bit MLX conversion may be text-only (the `*_text` fallback in `prompt_enhancer_mac._load` suggests it). Spike: find an uncensored Qwen3.5-4B checkpoint that keeps the vision tower on both platforms, and measure memory and the time per rewrite. Same machinery would serve Klein edits in [Edit images](../image-editing.md).
+- **3b. Vision (spike first).** Qwen3.5 is natively multimodal. Feed the reference image so the rewrite can name what is actually in the frame. Needs `mlx-vlm` on macOS and the processor or VLM class in transformers on CUDA, and a vision-capable checkpoint. The current pinned `heretic` 4-bit MLX conversion may be text-only (the `*_text` fallback in `prompt_enhancer_mac._load` suggests it). Spike: find an uncensored Qwen3.5-4B checkpoint that keeps the vision tower on both platforms, and measure memory and the time per rewrite. Same machinery would serve Klein edits in [Edit images](image-editing.md).
 
 ### 4. Model-aware rewrites
 

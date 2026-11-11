@@ -304,6 +304,10 @@ describe('jobView', () => {
     expect(formatClock(Number.NaN)).toBe('0:00');
   });
 
+  it('treats the edit stage as stepped, and the composite after it as not', () => {
+    expect([isSteppedStage('edit'), isSteppedStage('composite')]).toEqual([true, false]);
+  });
+
   describe('extend', () => {
     const extending = (overrides: Partial<ActiveJobState> = {}) => job({ workflow: 'extend', stageNames: ['extend_video', 'join_clips'], stageName: 'extend_video', ...overrides });
 

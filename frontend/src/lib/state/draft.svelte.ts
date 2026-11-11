@@ -17,7 +17,7 @@ import { declinesModel, modelsOf } from './workflowModels';
 import { keysOf, pickScopes, RESET_SCOPE, REUSE_SCOPE, type Scope } from './resetScope';
 import { firstValues, listOf } from '$lib/prefillParams';
 import { AUDIO_KINDS } from '$lib/types';
-import type { NavTab, ExtendSide, ImageKind, VideoKind, TabText, WorkspaceTab, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import type { NavTab, EditMode, ExtendSide, ImageKind, VideoKind, TabText, WorkspaceTab, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
@@ -102,7 +102,6 @@ const DEFAULT_DRAFT: DraftState = {
   enhancedScratched: null,
   savedText: {},
   savedSettings: {},
-  savedShared: {},
   enhanceSettings: null,
   enhanceSettingsVideo: null,
   enhanceAuto: false,
@@ -240,50 +239,31 @@ function _withTextOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftS
   return { ...state, ...(entering ?? EMPTY_TEXT), savedText: { ...rest, [from]: _textOf(state) } };
 }
 
-/** The fields a tab keeps for when it comes back: its Settings pane values, the model with its LoRAs and quantization, the LoRAs remembered by model family, and the applied preset. */
-const MEMORY_KEYS: readonly (keyof DraftState)[] = [...keysOf(['settings', 'model', 'preset']), 'lorasByFamily'];
-/** Batch and Seed. New image, New video and Audio share one pair; Edit and Extend have their own. */
-const SHARED_KEYS: readonly (keyof DraftState)[] = keysOf(['shared']);
-/** The prompt source with its prompts file and chosen prompts, and the Enhancer options of video. New image and New video share them; Extend has its own. */
-const PROMPT_KEYS: readonly (keyof DraftState)[] = [...keysOf(['promptFile']), 'promptSource', 'enhanceSettingsVideo'];
-/** What New image, New video and Audio hold in common: the values Edit or Extend replaces with its own while open. */
-const COMMON_KEYS: readonly (keyof DraftState)[] = [...SHARED_KEYS, ...PROMPT_KEYS];
-
-/** The shared values the tabs with a memory of their own keep apart: Edit its Batch and Seed, Extend those and its prompt source, prompts file and Enhancer options. */
-const OWN_SHARED_KEYS: Partial<Record<WorkspaceTab, readonly (keyof DraftState)[]>> = { edit: SHARED_KEYS, extend: COMMON_KEYS };
+/**
+ * The fields a tab keeps for when it comes back: its Settings pane values, Batch and Seed, the model with its LoRAs and
+ * quantization, the LoRAs remembered by model family, the applied preset, the prompt source with its prompts file, and the
+ * Enhancer options of video. The Audio tab keeps its Batch and Seed alone: its kinds and models have their own fields.
+ */
+const TAB_KEYS: readonly (keyof DraftState)[] = [...keysOf(['settings', 'shared', 'model', 'preset', 'promptFile']), 'lorasByFamily', 'promptSource', 'enhanceSettingsVideo'];
+const AUDIO_TAB_KEYS: readonly (keyof DraftState)[] = keysOf(['shared']);
 
 function _pick(source: Partial<DraftState>, keys: readonly (keyof DraftState)[]): Partial<DraftState> {
   return Object.fromEntries(keys.filter((key) => key in source).map((key) => [key, source[key]]));
 }
 
-/** The fields a tab saves when it is left. */
-function _memoryKeys(tab: WorkspaceTab): readonly (keyof DraftState)[] {
-  return [...MEMORY_KEYS, ...(OWN_SHARED_KEYS[tab] ?? [])];
-}
+const _memoryKeys = (tab: WorkspaceTab): readonly (keyof DraftState)[] => (tab === 'audio' ? AUDIO_TAB_KEYS : TAB_KEYS);
 
 /**
- * Return the state with the settings of the tab a workflow belongs to. New image, Edit, New video and Extend each keep their own,
- * with their model, LoRAs and preset: moving to another saves the open ones under the tab being left and brings back what the
- * entered one saved. A tab not visited yet has none: Edit and Extend, and a tab entered from one of them, start from the defaults of
- * their memory (the model follows from the next hydration, which picks one that can edit or extend); the others keep the model and
- * settings for the next hydration to replace with the model's defaults.
- *
- * Batch and Seed are one pair for New image, New video and Audio, held in the fields; Edit and Extend keep their own, and Extend
- * also its own prompt source, prompts file and Enhancer options. The shared values wait in `savedShared` while one of them is open:
- * they are put aside on leaving a tab that has none of its own and put back, key by key, on leaving one that has. The Audio tab holds
- * none of these: entering it saves the tab it leaves and changes nothing else, so coming back to that tab, or on to another, finds its own.
+ * Return the state with the settings of the tab a workflow belongs to. New image, Edit, New video, Extend and Audio each keep their
+ * own (`_memoryKeys`): moving to another saves the open ones under the tab being left and brings back what the entered one saved.
+ * A tab not visited yet starts from the defaults of its keys, and the next hydration gives it a model and that model's defaults.
  */
 function _withSettingsOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
   const from = workspaceTab(state.workflow);
   const to = workspaceTab(workflow);
   if (from === to) return state;
-  const savedSettings = from === 'audio' ? state.savedSettings : { ...state.savedSettings, [from]: _pick(state, _memoryKeys(from)) };
-  const ownFrom = OWN_SHARED_KEYS[from];
-  const savedShared = ownFrom ? state.savedShared : _pick(state, COMMON_KEYS);
-  const restored = ownFrom ? _pick(savedShared, ownFrom) : {};
-  if (to === 'audio') return { ...state, savedSettings, savedShared, ...restored };
-  const entering = savedSettings[to] ?? (ownFrom || OWN_SHARED_KEYS[to] ? _pick(DEFAULT_DRAFT, _memoryKeys(to)) : {});
-  return { ...state, savedSettings, savedShared, ...restored, ...entering };
+  const savedSettings = { ...state.savedSettings, [from]: _pick(state, _memoryKeys(from)) };
+  return { ...state, savedSettings, ...(savedSettings[to] ?? _pick(DEFAULT_DRAFT, _memoryKeys(to))) };
 }
 
 /** The defaults an exact Reuse of an audio kind puts back: the Audio scope without the settings that belong to the other kinds. */
@@ -941,6 +921,8 @@ export const draft = {
       if (params.edit_repaint === 'true') prefill.editRepaint = true;
       const side = EXTEND_SIDES.find((candidate) => candidate === params.edit_extend_side);
       if (side) {
+        // An edit that was extended comes back as an Extend: only one of the two is sent.
+        prefill.editMode = 'extend';
         prefill.editExtendSide = side;
         const amount = Number(params.edit_extend_amount);
         if (Number.isFinite(amount) && amount > 0) prefill.editExtendAmount = amount;
@@ -1026,14 +1008,13 @@ export const draft = {
     const candidates = preferred !== null ? [preferred] : [_draft.model];
     const defaultModel = isVideoMode ? ctx.current_video_model : ctx.current_image_model;
     const offered = (id: string | null | undefined): id is string => id != null && id !== '' && validModels.some((m) => m.id === id);
-    const model = candidates.find(offered)
-      ?? ((workflow === 'edit' || workflow === 'extend') && !offered(defaultModel) ? validModels[0]?.id ?? _draft.model : defaultModel ?? validModels[0]?.id ?? '');
+    const model = candidates.find(offered) ?? (offered(defaultModel) ? defaultModel : validModels[0]?.id ?? _draft.model);
 
     const sameModel = model === _draft.model;
     const keepSettings = options.keepSettings === true && sameModel;
     const keepChanged = options.keepChangedSettings === true;
     const keepsPromptSource = (keepSettings || keepChanged) && ctx.prompt_sources.includes(_draft.promptSource);
-    // A workflow that offers no prompt source (Edit) leaves the one New chose alone.
+    // A workflow that offers no prompt source (Edit) leaves the one it holds alone.
     const takesPromptSource = _visibleControlsForWorkflow(ctx, workflow).has('prompt_source');
     const promptSource = keepsPromptSource || !takesPromptSource ? _draft.promptSource : ctx.default_prompt_source;
     let nextState = _withModelDefaults(ctx, { ..._draft, workflow, model, promptSource, ..._swapFamilyLoras(ctx, _draft, _draft.model, model) });
@@ -1067,19 +1048,15 @@ export const draft = {
   setTab(tab: NavTab): void {
     if (tab === navTab(_draft.workflow)) return;
     const workflow = tab === 'audio' ? _draft.audioKind : tab === 'video' && _draft.videoKind === 'extend' ? 'extend' : tab === 'image' && _draft.imageKind === 'edit' ? 'edit' : workflowFor(tab, _draft, true);
-    // A tab opened for the first time starts without the preset of the one it comes from; the next hydration gives it its model's defaults.
-    const entering = workspaceTab(workflow);
-    const entersFresh = entering !== 'audio' && entering !== workspaceTab(_draft.workflow) && !_draft.savedSettings[entering];
-    _draft = { ..._withModeOf(_draft, workflow), workflow, ...(entersFresh ? { appliedPreset: null } : {}) };
+    _draft = { ..._withModeOf(_draft, workflow), workflow };
     this.saveDraft();
   },
 
   /**
    * Open a kind of the Image tab (New or Edit) or of the Video tab (New or Extend). Each kind keeps its own prompt and Enhanced text
-   * (`savedText`), and its own model, LoRAs, quantization, settings and preset (`savedSettings`), Edit and Extend their Batch and Seed
-   * too, Extend its prompt source and Enhancer options; the slots stay. The first time, Edit and Extend take the default model that
-   * can edit or extend and that model's defaults, when the Workspace calls `onTabChange` with its context. Off the tab, a kind only
-   * becomes the one the tab opens on.
+   * (`savedText`) and its own model, LoRAs, settings, Batch and Seed, prompt source and preset (`savedSettings`); the slots stay. The
+   * first time, a kind takes its default model and that model's defaults (for Edit and Extend, the default one that can edit or
+   * extend), when the Workspace calls `onTabChange` with its context. Off the tab, a kind only becomes the one the tab opens on.
    *
    * @param ctx Tells whether New's model takes a start image or first frame; without it one is assumed.
    */
@@ -1150,22 +1127,26 @@ export const draft = {
   },
 
   /**
-   * Keep what the painter ended with (Done): the mask's PNG is held for Generate and the draft holds its marker, the painted share
-   * and the extension. Nothing painted (`mask` null) and no extension leave the edit without a region. Adding paint, or an extension
-   * that was not there, answers a reused edit's "paint it again"; an extension the reuse restored does not, as its paint is still
-   * missing. The image and its history are unchanged.
+   * Keep what the painter ended with (Done): the mode it ended in and that mode's work. Paint holds the mask's PNG for Generate with
+   * its marker and painted share, and no extension; Extend holds the side and amount, and no mask. Nothing painted (`mask` null) in
+   * Paint is a whole-picture edit where the model can make one. Adding paint answers a reused edit's "paint it again", and any
+   * other result in Paint leaves it asked; Extend has no paint to ask for. The image and its history are unchanged.
    *
    * @param edit.amount How far the next extension starts at, which the draft keeps while there is none.
    */
-  commitEditPaint(edit: { mask: File | null; share: number; extension: { side: ExtendSide; amount: number } | null; amount: number }): void {
-    heldUploads.setEditMask(edit.mask);
+  commitEdit(edit: { mode: EditMode; mask: File | null; share: number; extension: { side: ExtendSide; amount: number } | null; amount: number }): void {
+    const paint = edit.mode === 'paint';
+    const mask = paint ? edit.mask : null;
+    const extension = paint ? null : edit.extension;
+    heldUploads.setEditMask(mask);
     _draft = {
       ..._draft,
-      editMaskUpload: edit.mask?.name ?? null,
-      editPaintedShare: edit.mask ? edit.share : 0,
-      editExtendSide: edit.extension?.side ?? null,
-      editExtendAmount: edit.extension?.amount ?? edit.amount,
-      editRepaint: _draft.editRepaint && edit.mask === null && (edit.extension === null || _draft.editExtendSide !== null),
+      editMode: edit.mode,
+      editMaskUpload: mask?.name ?? null,
+      editPaintedShare: mask ? edit.share : 0,
+      editExtendSide: extension?.side ?? null,
+      editExtendAmount: extension?.amount ?? edit.amount,
+      editRepaint: paint && _draft.editRepaint && mask === null,
     };
     this.saveDraft();
   },

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
+from zvisiongenerator.utils.model_metadata import image_model_family, model_entry
 from zvisiongenerator.utils.moss_build import is_moss_dir, is_turbo_dir
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, split_huggingface_revision
 
@@ -34,6 +35,20 @@ class ImageModelInfo:
     family: str  # "zimage" | "flux2_klein" | "flux2" | "flux1" | "ideogram4" | "krea2" | "moss" | "unknown"
     is_distilled: bool  # True for distilled Klein and MOSS-Image Turbo, False otherwise
     size: str | None  # "4b" | "9b" | None
+
+
+def declared_image_model(name: str) -> ImageModelInfo | None:
+    """Return the info the metadata declares for the image model *name*, or ``None`` when it declares none.
+
+    A declared model needs no look at its files, so it is known before it is downloaded and offline. A Klein entry also
+    declares the two facts detection reads from the model's files (distilled or base, 4B or 9B), so its defaults and LoRA
+    matching are right before the model is downloaded.
+    """
+    family = image_model_family(name)
+    if family is None:
+        return None
+    entry = model_entry(name) or {}
+    return ImageModelInfo(family=family, is_distilled=bool(entry.get("distilled", False)), size=entry.get("size"))
 
 
 def detect_image_model(model_path: str) -> ImageModelInfo:

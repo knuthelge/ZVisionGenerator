@@ -1,31 +1,39 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { makeEditContext } from '../../test-utils/workspace';
-import { draft } from './draft.svelte';
+import { draft, slotPaths } from './draft.svelte';
 import { heldUploads } from './heldUploads.svelte';
 import { memoryUploadStore } from './uploadStore';
+import { modelsOf } from './workflowModels';
 import type { WorkspaceContext } from '$lib/types';
 import { openKind } from '../../test-utils/draftKind';
 
 const png = (name: string): File => new File(['x'], name, { type: 'image/png' });
 
-/** Give the draft an image to edit with paint, an extension and a held mask, as a Done in the painter leaves it. */
+/** Give the draft an image to edit with paint and a held mask, as a Done in the painter in Paint leaves it. */
 function paintedEdit(path = '/out/a.png'): void {
   draft.setEditSource({ path });
-  draft.commitEditPaint({ mask: png('mask.png'), share: 0.25, extension: { side: 'top', amount: 320 }, amount: 320 });
+  draft.commitEdit({ mode: 'paint', mask: png('mask.png'), share: 0.25, extension: null, amount: 320 });
 }
 
-const NO_PAINT = { editMaskUpload: null, editPaintedShare: 0, editExtendSide: null, editExtendAmount: 256, editRepaint: false };
+/** A clean draft on Klein with a context that can edit, and the held files in memory; `loras` are the ones installed. */
+function freshEditDraft(loras?: WorkspaceContext['loras']): WorkspaceContext {
+  localStorage.clear();
+  draft.reset();
+  heldUploads.useStore(memoryUploadStore());
+  const context = makeEditContext();
+  if (loras) context.loras = loras;
+  draft.hydrateFromContext(context, 'klein');
+  return context;
+}
+
+const NO_PAINT = { editMode: 'paint', editMaskUpload: null, editPaintedShare: 0, editExtendSide: null, editExtendAmount: 256, editRepaint: false };
 
 describe('the draft\'s image to edit', () => {
   let ctx: WorkspaceContext;
 
   beforeEach(() => {
-    localStorage.clear();
-    draft.reset();
-    heldUploads.useStore(memoryUploadStore());
-    ctx = makeEditContext();
-    draft.hydrateFromContext(ctx, 'klein');
+    ctx = freshEditDraft();
   });
 
   it('starts with no image and no paint', () => {
@@ -58,7 +66,7 @@ describe('the draft\'s image to edit', () => {
     const epoch = draft.editEpoch;
     draft.setEditSource({ path: '/out/a.png' });
     expect(draft.editEpoch).toBe(epoch + 1);
-    draft.commitEditPaint({ mask: png('mask.png'), share: 0.1, extension: null, amount: 256 });
+    draft.commitEdit({ mode: 'paint', mask: png('mask.png'), share: 0.1, extension: null, amount: 256 });
     draft.retargetPaths(new Map([['/out/a.png', '/out/Bus/a.png']]));
     expect(draft.editEpoch).toBe(epoch + 1);
     draft.resetSelections(ctx);
@@ -68,15 +76,22 @@ describe('the draft\'s image to edit', () => {
     expect(draft.editEpoch).toBe(epoch + 2);
   });
 
-  it('keeps what the painter ended with: the mask by name with its share, and the extension', () => {
+  it('keeps what the painter ended with: the mode, and the mask by name with its share (Paint) or the side and amount (Extend)', () => {
     paintedEdit();
-    expect(draft.state).toMatchObject({ editMaskUpload: 'mask.png', editPaintedShare: 0.25, editExtendSide: 'top', editExtendAmount: 320 });
+    expect(draft.state).toMatchObject({ editMode: 'paint', editMaskUpload: 'mask.png', editPaintedShare: 0.25, editExtendSide: null, editExtendAmount: 320 });
     expect(heldUploads.editMask?.name).toBe('mask.png');
+
+    draft.commitEdit({ mode: 'extend', mask: png('mask.png'), share: 0.25, extension: { side: 'top', amount: 192 }, amount: 192 });
+    expect(draft.state).toMatchObject({ editMode: 'extend', editMaskUpload: null, editPaintedShare: 0, editExtendSide: 'top', editExtendAmount: 192 });
+    expect(heldUploads.editMask).toBeNull();
+
+    draft.commitEdit({ mode: 'paint', mask: png('mask.png'), share: 0.1, extension: { side: 'top', amount: 192 }, amount: 192 });
+    expect(draft.state).toMatchObject({ editMode: 'paint', editMaskUpload: 'mask.png', editExtendSide: null });
   });
 
   it('keeps no mask, share or extension when nothing was painted or extended', () => {
     paintedEdit();
-    draft.commitEditPaint({ mask: null, share: 0.3, extension: null, amount: 192 });
+    draft.commitEdit({ mode: 'paint', mask: null, share: 0.3, extension: null, amount: 192 });
     expect(draft.state).toMatchObject({ editMaskUpload: null, editPaintedShare: 0, editExtendSide: null, editExtendAmount: 192 });
     expect(heldUploads.editMask).toBeNull();
   });
@@ -84,39 +99,32 @@ describe('the draft\'s image to edit', () => {
   it('answers a reused edit\'s repaint by added paint, or by an extension that was not there', () => {
     draft.setEditSource({ path: '/out/a.png' });
     draft.patch({ editRepaint: true });
-    draft.commitEditPaint({ mask: null, share: 0, extension: null, amount: 256 });
+    draft.commitEdit({ mode: 'paint', mask: null, share: 0, extension: null, amount: 256 });
     expect(draft.state.editRepaint).toBe(true);
-    draft.commitEditPaint({ mask: png('mask.png'), share: 0.1, extension: null, amount: 256 });
+    draft.commitEdit({ mode: 'paint', mask: png('mask.png'), share: 0.1, extension: null, amount: 256 });
     expect(draft.state.editRepaint).toBe(false);
 
     draft.patch({ editRepaint: true });
-    draft.commitEditPaint({ mask: null, share: 0, extension: { side: 'left', amount: 128 }, amount: 128 });
+    draft.commitEdit({ mode: 'extend', mask: null, share: 0, extension: { side: 'left', amount: 128 }, amount: 128 });
     expect(draft.state.editRepaint).toBe(false);
   });
 
-  it('keeps the repaint of an edit that already had its extension until paint is added', () => {
-    draft.setEditSource({ path: '/out/a.png' });
-    draft.patch({ editRepaint: true, editExtendSide: 'left', editExtendAmount: 128 });
-    draft.commitEditPaint({ mask: null, share: 0, extension: { side: 'left', amount: 128 }, amount: 128 });
-    expect(draft.state.editRepaint).toBe(true);
-  });
-
-  it('survives a reload with its paint summary and extension, as the draft is saved', () => {
+  it('survives a reload with its mode and paint summary, as the draft is saved', () => {
     paintedEdit();
     draft.saveDraft();
 
     draft.loadDraft();
 
-    expect(draft.state).toMatchObject({ editSourcePath: '/out/a.png', editMaskUpload: 'mask.png', editPaintedShare: 0.25, editExtendSide: 'top', editExtendAmount: 320 });
+    expect(draft.state).toMatchObject({ editSourcePath: '/out/a.png', editMode: 'paint', editMaskUpload: 'mask.png', editPaintedShare: 0.25, editExtendSide: null, editExtendAmount: 320 });
   });
 
-  it('keeps the paint, the share and the extension when the image moves, and follows it to its new path', () => {
+  it('keeps the paint and the share when the image moves, and follows it to its new path', () => {
     paintedEdit();
     const mask = heldUploads.editMask;
 
     draft.retargetPaths(new Map([['/out/a.png', '/out/Bus/a.png']]));
 
-    expect(draft.state).toMatchObject({ editSourcePath: '/out/Bus/a.png', editMaskUpload: 'mask.png', editPaintedShare: 0.25, editExtendSide: 'top', editExtendAmount: 320 });
+    expect(draft.state).toMatchObject({ editSourcePath: '/out/Bus/a.png', editMode: 'paint', editMaskUpload: 'mask.png', editPaintedShare: 0.25, editExtendSide: null, editExtendAmount: 320 });
     expect(heldUploads.editMask).toBe(mask);
   });
 
@@ -140,8 +148,7 @@ describe('the draft\'s image to edit', () => {
     expect([heldUploads.editSource, heldUploads.editMask]).toEqual([null, null]);
   });
 
-  it('is part of the slots a recheck looks at, so a moved or deleted file is flagged like any other', async () => {
-    const { slotPaths } = await import('./draft.svelte');
+  it('is part of the slots a recheck looks at, so a moved or deleted file is flagged like any other', () => {
     draft.setEditSource({ path: '/out/a.png' });
     expect(slotPaths(draft.state)).toContain('/out/a.png');
   });
@@ -157,23 +164,27 @@ describe('the draft\'s image to edit', () => {
     expect(draft.state).toMatchObject({ workflow: 'edit', prompt: 'make the door red', enhancedPrompt: '' });
   });
 
-  it('is a workflow of its own, and is remembered with the draft', () => {
-    openKind('image', 'edit', ctx);
-    expect(draft.state.workflow).toBe('edit');
-    draft.loadDraft();
-    expect(draft.state.workflow).toBe('edit');
-  });
-
   it('opens on the default model that can edit, with that model\'s defaults, when New is on a model that cannot', () => {
     draft.hydrateFromContext(ctx, 'flux-lite');
     draft.patch({ seed: 7, runs: 3 });
     openKind('image', 'edit', ctx);
-    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'zit', seed: null, runs: 1, steps: 28 });
+    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'klein4b', seed: null, runs: 1, steps: 28 });
+  });
+
+  it('offers only the models the context says can edit, and opens on the first of them when the default cannot', () => {
+    // The list and the first-visit fallback follow the capability, not model names: with the first Klein out, the next one is offered.
+    ctx.image_model_defaults!.klein4b = { ...ctx.image_model_defaults!.klein4b, supports_mask_edit: false };
+    expect(modelsOf(ctx, 'edit').map((model) => model.id)).toEqual(['klein']);
+
+    draft.hydrateFromContext(ctx, 'klein4b');
+    openKind('image', 'edit', ctx);
+
+    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'klein' });
   });
 
   it('opens on its own model, never New\'s, even when New\'s can edit', () => {
     openKind('image', 'edit', ctx);
-    expect(draft.state.model).toBe('zit');
+    expect(draft.state.model).toBe('klein4b');
     draft.patch({ model: 'klein' });
     openKind('image', 'new', ctx);
     openKind('image', 'edit', ctx);
@@ -184,7 +195,7 @@ describe('the draft\'s image to edit', () => {
     draft.hydrateFromContext(ctx, 'flux-lite');
     draft.loadFromUrl({ workflow: 'edit' }, ctx);
     draft.hydrateFromContext(ctx, null);
-    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'zit' });
+    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'klein4b' });
   });
 });
 
@@ -192,11 +203,7 @@ describe('the Image tab left on Edit', () => {
   let ctx: WorkspaceContext;
 
   beforeEach(() => {
-    localStorage.clear();
-    draft.reset();
-    heldUploads.useStore(memoryUploadStore());
-    ctx = makeEditContext();
-    draft.hydrateFromContext(ctx, 'klein');
+    ctx = freshEditDraft();
   });
 
   it('opens on Edit again, with Edit\'s text, after a visit to Video or Audio', () => {
@@ -262,16 +269,7 @@ describe('prefilling the image to edit', () => {
   let ctx: WorkspaceContext;
 
   beforeEach(() => {
-    localStorage.clear();
-    draft.reset();
-    heldUploads.useStore(memoryUploadStore());
-    ctx = makeEditContext();
-    draft.hydrateFromContext(ctx, 'klein');
-  });
-
-  it('opens Edit, whatever the draft was on, and sets the image', () => {
-    draft.loadFromUrl({ workflow: 'edit', edit_source_path: '/out/a.png' }, ctx);
-    expect(draft.state).toMatchObject({ workflow: 'edit', editSourcePath: '/out/a.png' });
+    ctx = freshEditDraft();
   });
 
   it('sets the image and the extension a Reuse names, asks for the paint again, and fills Edit\'s prompt, replacing the paint it had', () => {
@@ -287,26 +285,14 @@ describe('prefilling the image to edit', () => {
     });
   });
 
-  it('leaves New\'s prompt and Enhanced text as they were, from New and from the Video tab', () => {
+  it('leaves New\'s prompt and Enhanced text as they were when the prefill comes while the Video tab is open', () => {
     draft.patch({ prompt: 'a fox', enhancedPrompt: 'an enhanced fox', enhancedFrom: { prompt: 'a fox', scene: '', mode: 'image' } });
-    draft.loadFromUrl({ workflow: 'edit', edit_source_path: '/out/a.png', prompt: 'a door' }, ctx, { replaceSlots: true, exact: true });
-    expect(draft.state).toMatchObject({ workflow: 'edit', prompt: 'a door', enhancedPrompt: '', enhancedFrom: null });
 
     draft.setTab('video');
     draft.loadFromUrl({ workflow: 'edit', edit_source_path: '/out/b.png', prompt: 'a window' }, ctx, { replaceSlots: true, exact: true });
     openKind('image', 'new', ctx);
+
     expect(draft.state).toMatchObject({ workflow: 'txt2img', prompt: 'a fox', enhancedPrompt: 'an enhanced fox' });
-  });
-
-  it('restores a saved Extend alone, with no repaint', () => {
-    draft.loadFromUrl({ workflow: 'edit', edit_source_path: '/out/a.png', edit_extend_side: 'bottom', edit_extend_amount: '128' }, ctx, { replaceSlots: true, exact: true });
-    expect(draft.state).toMatchObject({ editExtendSide: 'bottom', editExtendAmount: 128, editRepaint: false });
-  });
-
-  it('empties the image when the source is named blank (a picture that is gone), and keeps the rest of the edit', () => {
-    paintedEdit();
-    draft.loadFromUrl({ workflow: 'edit', edit_source_path: '', edit_repaint: 'true', prompt: 'a door' }, ctx, { replaceSlots: true, exact: true });
-    expect(draft.state).toMatchObject({ editSourcePath: null, editSourceUpload: null, editMaskUpload: null, editRepaint: true, prompt: 'a door' });
   });
 
   it('starts an Edit action with no paint and an empty prompt, and keeps New\'s images and text', () => {
@@ -332,7 +318,7 @@ describe('prefilling the image to edit', () => {
     draft.loadFromUrl({ workflow: 'txt2img', image_path: '/in/start.png', use_as: 'start' }, ctx, { replaceSlots: false });
     draft.loadFromUrl({ workflow: 'txt2vid', scene: 'a castle' }, ctx, { replaceSlots: true, exact: true });
 
-    expect(draft.state).toMatchObject({ editSourcePath: '/out/a.png', editMaskUpload: 'mask.png', editPaintedShare: 0.25, editExtendSide: 'top', editExtendAmount: 320 });
+    expect(draft.state).toMatchObject({ editSourcePath: '/out/a.png', editMode: 'paint', editMaskUpload: 'mask.png', editPaintedShare: 0.25, editExtendSide: null, editExtendAmount: 320 });
     expect(heldUploads.editMask).toBe(mask);
     expect(draft.editEpoch).toBe(epoch);
   });
@@ -352,12 +338,7 @@ describe('Edit\'s settings, apart from New\'s', () => {
   let ctx: WorkspaceContext;
 
   beforeEach(() => {
-    localStorage.clear();
-    draft.reset();
-    heldUploads.useStore(memoryUploadStore());
-    ctx = makeEditContext();
-    ctx.loras = [{ name: 'detail', path: '/loras/detail.safetensors' }, { name: 'soft', path: '/loras/soft.safetensors' }];
-    draft.hydrateFromContext(ctx, 'klein');
+    ctx = freshEditDraft([{ name: 'detail', path: '/loras/detail.safetensors' }, { name: 'soft', path: '/loras/soft.safetensors' }]);
   });
 
   /** What New holds, whichever tab is open: the open fields while New is open, else what it saved. */
@@ -376,7 +357,7 @@ describe('Edit\'s settings, apart from New\'s', () => {
     const before = newKept();
 
     openKind('image', 'edit', ctx);
-    draft.patch({ model: 'zit', steps: 6, seed: 99, runs: 4, quantize: 4, loraString: 'detail:0.7' });
+    draft.patch({ model: 'klein4b', steps: 6, seed: 99, runs: 4, quantize: 4, loraString: 'detail:0.7' });
     const edit = editKept();
     openKind('image', 'new', ctx);
 
@@ -394,7 +375,7 @@ describe('Edit\'s settings, apart from New\'s', () => {
     draft.patch({ loraString: 'soft:0.5', steps: 14 });
 
     openKind('image', 'edit', ctx);
-    expect(draft.state.model).toBe('zit');
+    expect(draft.state.model).toBe('klein4b');
     expect(draft.state.loraString).toBe('');
     openKind('image', 'new', ctx);
 
@@ -402,13 +383,16 @@ describe('Edit\'s settings, apart from New\'s', () => {
   });
 
   it('keeps the LoRAs each tab remembers for a model family apart', () => {
+    draft.hydrateFromContext(ctx, 'zit');
     draft.patch({ loraString: 'soft:0.5' });
     openKind('image', 'edit', ctx);
-    draft.hydrateFromContext(ctx, 'zit');
+    draft.hydrateFromContext(ctx, 'klein4b');
     draft.patch({ loraString: 'detail:0.7' });
     draft.hydrateFromContext(ctx, 'klein');
     openKind('image', 'new', ctx);
-    draft.hydrateFromContext(ctx, 'zit');
+    // New comes back on its own model with its own LoRAs, and nothing of Edit's family memory reaches it.
+    expect(draft.state).toMatchObject({ model: 'zit', loraString: 'soft:0.5' });
+    draft.hydrateFromContext(ctx, 'klein4b');
     expect(draft.state.loraString).toBe('');
   });
 
@@ -430,9 +414,9 @@ describe('Edit\'s settings, apart from New\'s', () => {
     draft.patch({ ratio: '16:9', size: 'l', guidance: 2.5, postprocessSharpenAmount: 1.1, appliedPreset: 'fast', seed: 3 });
     const before = newKept();
 
-    draft.loadFromUrl({ workflow: 'edit', edit_source_path: '/out/a.png', prompt: 'a door', model: 'zit', steps: '6', seed: '9', lora: 'detail:0.7' }, ctx, { replaceSlots: true, exact: true });
+    draft.loadFromUrl({ workflow: 'edit', edit_source_path: '/out/a.png', prompt: 'a door', model: 'klein4b', steps: '6', seed: '9', lora: 'detail:0.7' }, ctx, { replaceSlots: true, exact: true });
 
-    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'zit', steps: 6, seed: 9, loraString: 'detail:0.7' });
+    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'klein4b', steps: 6, seed: 9, loraString: 'detail:0.7' });
     openKind('image', 'new', ctx);
     expect(newKept()).toEqual(before);
     expect(draft.state.appliedPreset).toBe('fast');
@@ -440,7 +424,7 @@ describe('Edit\'s settings, apart from New\'s', () => {
 
   it('leaves Edit alone when a normal image is reused', () => {
     openKind('image', 'edit', ctx);
-    draft.patch({ model: 'zit', steps: 6, seed: 99, runs: 4, loraString: 'detail:0.7' });
+    draft.patch({ model: 'klein4b', steps: 6, seed: 99, runs: 4, loraString: 'detail:0.7' });
     const edit = editKept();
 
     draft.loadFromUrl({ workflow: 'txt2img', prompt: 'a cat', model: 'klein', steps: '8', seed: '3' }, ctx, { replaceSlots: true, exact: true });
@@ -449,36 +433,15 @@ describe('Edit\'s settings, apart from New\'s', () => {
     expect(editKept()).toEqual(edit);
   });
 
-  it('shares Batch and Seed between New and Video, as before, and keeps Edit\'s own', () => {
-    draft.patch({ seed: 5, runs: 2 });
-    openKind('image', 'edit', ctx);
-    draft.patch({ seed: 77, runs: 6 });
-    draft.setTab('video');
-    expect(draft.state).toMatchObject({ seed: 5, runs: 2 });
-    draft.patch({ seed: 8 });
-    draft.setTab('image');
-    expect(draft.state).toMatchObject({ workflow: 'edit', seed: 77, runs: 6 });
-    openKind('image', 'new', ctx);
-    expect(draft.state).toMatchObject({ seed: 8, runs: 2 });
-  });
-
-  it('leaves the prompt source New chose alone, as Edit offers none', () => {
-    draft.patch({ promptSource: 'file', promptFilePath: '/prompts/a.yaml', promptFileOptionIds: ['a:0'] });
-    openKind('image', 'edit', ctx);
-    expect(draft.state).toMatchObject({ promptSource: 'file', promptFilePath: '/prompts/a.yaml' });
-    openKind('image', 'new', ctx);
-    expect(draft.state).toMatchObject({ promptSource: 'file', promptFileOptionIds: ['a:0'] });
-  });
-
   it('survives a reload, with New\'s kept beside it', () => {
     draft.patch({ steps: 12, seed: 5, loraString: 'soft:0.4' });
     openKind('image', 'edit', ctx);
-    draft.patch({ model: 'zit', steps: 6, seed: 99, loraString: 'detail:0.7' });
+    draft.patch({ model: 'klein4b', steps: 6, seed: 99, loraString: 'detail:0.7' });
     draft.saveDraft();
 
     draft.loadDraft();
 
-    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'zit', steps: 6, seed: 99, loraString: 'detail:0.7' });
+    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'klein4b', steps: 6, seed: 99, loraString: 'detail:0.7' });
     openKind('image', 'new', null);
     expect(draft.state).toMatchObject({ model: 'klein', steps: 12, seed: 5, loraString: 'soft:0.4' });
   });
@@ -495,7 +458,7 @@ describe('Edit\'s settings, apart from New\'s', () => {
     draft.patch({ model: 'flux-lite' });
     openKind('image', 'new', ctx);
     openKind('image', 'edit', ctx);
-    expect(draft.state.model).toBe('zit');
+    expect(draft.state.model).toBe('klein4b');
   });
 });
 
@@ -510,12 +473,7 @@ describe('a recorded model that Edit cannot use', () => {
   }
 
   beforeEach(() => {
-    localStorage.clear();
-    draft.reset();
-    heldUploads.useStore(memoryUploadStore());
-    ctx = makeEditContext();
-    ctx.loras = [{ name: 'detail', path: '/loras/detail.safetensors' }, { name: 'own', path: '/loras/own.safetensors' }] as WorkspaceContext['loras'];
-    draft.hydrateFromContext(ctx, 'klein');
+    ctx = freshEditDraft([{ name: 'detail', path: '/loras/detail.safetensors' }, { name: 'own', path: '/loras/own.safetensors' }] as WorkspaceContext['loras']);
     openKind('image', 'edit', ctx);
     draft.patch({ model: 'klein', loraString: 'own:0.5' });
   });
@@ -527,9 +485,9 @@ describe('a recorded model that Edit cannot use', () => {
   });
 
   it('is taken once the model can edit, with its LoRAs', () => {
-    prefill({ workflow: 'edit', model: 'zit', lora: 'detail:0.8' }, 'zit');
+    prefill({ workflow: 'edit', model: 'klein4b', lora: 'detail:0.8' }, 'klein4b');
 
-    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'zit', loraString: 'detail:0.8' });
+    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'klein4b', loraString: 'detail:0.8' });
   });
 
   it('falls to the default model that can edit when Edit\'s own model is not offered either', () => {
@@ -537,7 +495,7 @@ describe('a recorded model that Edit cannot use', () => {
 
     prefill({ workflow: 'edit', model: 'flux-lite', lora: 'detail:0.8' }, 'flux-lite');
 
-    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'zit' });
+    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'klein4b' });
     expect(draft.state.loraString).not.toBe('detail:0.8');
   });
 

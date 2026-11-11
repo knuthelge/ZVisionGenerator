@@ -77,7 +77,7 @@ from zvisiongenerator.utils.lora_trigger import clean_trigger
 from zvisiongenerator.utils.curated_loras import curated_by_id
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.subprocess_env import utf8_child_env
-from zvisiongenerator.utils.image_model_detect import detect_image_model
+from zvisiongenerator.utils.image_model_detect import declared_image_model, detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.licences import load_licences
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
@@ -102,7 +102,7 @@ from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_se
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_LTX, UPSCALE_METHOD_SEEDVR2
 from zvisiongenerator.processing.edit_region import edit_output_size
-from zvisiongenerator.utils.edit_request import check_edit_inputs, edit_mode
+from zvisiongenerator.utils.edit_request import check_edit_inputs, parse_extend, read_edit_source
 from zvisiongenerator.utils.video_cut import extend_cut_point
 from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
 from zvisiongenerator.utils.lora_preview import LARGE_PREVIEW_EDGE, PREVIEW_EDGE
@@ -121,7 +121,7 @@ from zvisiongenerator.utils.audio_writers import FillResult, NoChangeError
 from zvisiongenerator.web.audio_enhance import AUDIO_MODE, audio_done_frame, audio_text_frame, run_audio_enhance, validate_audio_enhance_body
 from zvisiongenerator.web.audio_models import find_audio_model, runnable_audio_models
 from zvisiongenerator.web.audio_job import AudioFields, audio_request_from_fields
-from zvisiongenerator.web.edit_job import EDIT_MASK_FIELD, EDIT_SOURCE_FIELD, EDIT_WORKFLOW, extend_from_fields, read_edit_source, read_job_paint
+from zvisiongenerator.web.edit_job import EDIT_MASK_FIELD, EDIT_SOURCE_FIELD, EDIT_WORKFLOW, read_job_paint
 from zvisiongenerator.web.planned_upload import PlannedUpload, planned_form, planned_upload_path
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response
@@ -1728,77 +1728,39 @@ def _parse_edit_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
     if source_path is None:
         raise ValueError("Pick the picture to edit.")
     planned_source = isinstance(form.get(_upload_field(EDIT_SOURCE_FIELD)), PlannedUpload)
-    source = read_edit_source(source_path, read=not planned_source)
-    extend = extend_from_fields(_optional_text(form, "edit_extend_side"), _optional_text(form, "edit_extend_amount"))
+    size, cutout = (None, False) if planned_source else read_edit_source(source_path)
+    extend_side, extend_amount = _optional_text(form, "edit_extend_side"), _optional_text(form, "edit_extend_amount")
+    extend = None if extend_side is None and extend_amount is None else parse_extend((extend_side or "", extend_amount or ""))
     mask_upload = form.get(EDIT_MASK_FIELD)
     has_mask = _is_uploaded_file(mask_upload)
     # An edit lands beside its source when that is an asset in the output folder; a staged or outside source uses the picked project.
-    save_dir = output_source_folder(output_dir, source.path) or project_save_dir
-    args = argparse.Namespace(
-        ratio=None,
-        size=None,
-        width=None,
-        height=None,
-        runs=_optional_int(form, "runs") or 1,
-        seed=_optional_int(form, "seed"),
-        steps=_optional_int(form, "steps"),
-        guidance=None,
-        scheduler=None,
-        upscale=None,
-        upscale_denoise=None,
-        upscale_steps=None,
-        upscale_guidance=None,
-        upscale_sharpen=False,
-        upscale_save_pre=False,
-        review=False,
-        image_path=None,
-        reference_paths=[],
-        image_strength=0.5,
-        output=save_dir,
-        model=model_name,
-        quantize=_optional_int(form, "quantize"),
-        # The form's defaults would turn sharpening on and record it; an edit runs no post-processing.
-        sharpen=False,
-        contrast=False,
-        saturation=False,
-        transparent=False,
-        lora_paths=None,
-        lora_weights=None,
-        first_sigma=None,
-        json_prompt_enabled=False,
-        edit_source=source.path,
-        edit_paint=None,
-        edit_extend=extend,
-    )
-    _validate_image_args(args, quantize_options=web_config.quantize_options)
+    save_dir = output_source_folder(output_dir, source_path) or project_save_dir
+    runs, seed, quantize, steps = _optional_int(form, "runs") or 1, _optional_int(form, "seed"), _optional_int(form, "quantize"), _optional_int(form, "steps")
+    if runs < 1:
+        raise ValueError("Runs must be at least 1.")
+    if quantize is not None and quantize not in web_config.quantize_options:
+        raise ValueError(f"Quantize must be one of {list(web_config.quantize_options)}.")
+    if steps is not None and steps < 1:
+        raise ValueError("Steps must be at least 1.")
 
-    resolved_model = resolve_model_path(args.model, aliases=alias_map(app_config), platform_key=sys.platform)
-    model_info = detect_image_model(resolved_model)
-    defaults = resolve_defaults(model_info, app_config, {"steps": args.steps} if args.steps is not None else {}, get_backend_name())
-    check_edit_inputs(edit_mode(has_mask, extend), extend, source.cutout, int(defaults.get("max_reference_images", 0)), bool(defaults.get("supports_mask_edit", False)))
-    if args.quantize is not None and not defaults.get("supports_quantize", True):
+    resolved_model = resolve_model_path(model_name, aliases=alias_map(app_config), platform_key=sys.platform)
+    model_info = declared_image_model(model_name) or detect_image_model(resolved_model)
+    defaults = resolve_defaults(model_info, app_config, {}, get_backend_name())
+    steps_explicit = steps is not None and steps != defaults["steps"]
+    if steps is not None:
+        defaults["steps"] = steps
+    check_edit_inputs(has_mask, extend, cutout, bool(defaults.get("supports_mask_edit", False)))
+    if quantize is not None and not defaults.get("supports_quantize", True):
         raise ValueError("This model does not support quantization.")
 
     prompt = _required_text(form, "prompt")
-    # Enhancement stays off: the prompt the backend encoded before the run must be the prompt the edit sends.
-    args.no_enhance = True
-    args.enhance = None
-    args.enhance_model = None
-    args.enhance_format = None
-    args.enhance_record = None
-    args.prompt_input = None
-    model_defaults = resolve_defaults(model_info, app_config, {}, get_backend_name())
-    args.steps_explicit = args.steps is not None and args.steps != model_defaults["steps"]
-    args.guidance_explicit = False
-    args.steps = defaults["steps"]
-    args.guidance = defaults["guidance"]
-    args.scheduler = defaults["scheduler"] if defaults.get("supports_scheduler", True) else None
-    validate_scheduler(args.scheduler)
-    args.lora_paths, args.lora_weights = _resolve_loras(form, require_file=True)
+    scheduler = defaults["scheduler"] if defaults.get("supports_scheduler", True) else None
+    validate_scheduler(scheduler)
+    lora_paths, lora_weights = _resolve_loras(form, require_file=True)
 
-    width, height = source.size or (None, None)
+    width, height = size or (None, None)
     # What the job saves: Extend adds its side, and a whole-picture edit is the model's own size.
-    out_width, out_height = edit_output_size(width, height, painted=has_mask, extend=extend) if width is not None else (None, None)
+    out_width, out_height = edit_output_size(width, height, extend=extend) if width is not None else (None, None)
     request = ImageGenerationRequest(
         backend=None,
         model=None,
@@ -1806,21 +1768,17 @@ def _parse_edit_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         model_name=model_name,
         model_family=model_info.family,
         supports_negative_prompt=False,
-        lora_paths=args.lora_paths,
-        lora_weights=args.lora_weights,
-        seed=args.seed or 0,
-        steps=args.steps,
-        guidance=args.guidance,
-        scheduler=args.scheduler,
-        steps_explicit=args.steps_explicit,
-        guidance_explicit=False,
-        upscale_sharpen=False,
-        max_reference_images=int(defaults.get("max_reference_images", 0)),
+        lora_paths=lora_paths,
+        lora_weights=lora_weights,
+        seed=seed or 0,
+        steps=defaults["steps"],
+        guidance=defaults["guidance"],
+        scheduler=scheduler,
+        steps_explicit=steps_explicit,
         sharpen=False,
         contrast=False,
         saturation=False,
-        transparent=False,
-        output_dir=args.output,
+        output_dir=save_dir,
         **({"width": width, "height": height} if width is not None and height is not None else {}),
     )
     context = _public_job_context(
@@ -1830,15 +1788,41 @@ def _parse_edit_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         model=model_name,
         model_label=model_display_name(model_name),
         prompt=prompt,
-        runs=args.runs,
-        meta=f"{out_width}x{out_height} · {args.steps} steps" if out_width is not None else f"{args.steps} steps",
+        runs=runs,
+        meta=f"{out_width}x{out_height} · {defaults['steps']} steps" if out_width is not None else f"{defaults['steps']} steps",
         width=out_width,
         height=out_height,
         output_dir=output_dir,
         save_dir=save_dir,
-        uploads={EDIT_SOURCE_FIELD: source.path},
+        uploads={EDIT_SOURCE_FIELD: source_path},
     )
-    args.edit_paint = read_job_paint(mask_upload, source.size) if has_mask else None
+    # The runner reads these fields of an edit's arguments; enhancement stays off, since the prompt the backend encoded before the run must be the prompt the edit sends.
+    args = argparse.Namespace(
+        runs=runs,
+        seed=seed,
+        output=save_dir,
+        model=model_name,
+        quantize=quantize,
+        steps=defaults["steps"],
+        guidance=defaults["guidance"],
+        scheduler=scheduler,
+        steps_explicit=steps_explicit,
+        lora_paths=lora_paths,
+        lora_weights=lora_weights,
+        no_enhance=True,
+        upscale=None,
+        upscale_guidance=None,
+        upscale_sharpen=False,
+        image_path=None,
+        image_strength=0.5,
+        sharpen=False,
+        contrast=False,
+        saturation=False,
+        edit_source=source_path,
+        edit_size=size,
+        edit_paint=read_job_paint(mask_upload, size) if has_mask else None,
+        edit_extend=extend,
+    )
     return ParsedJob(
         request=request,
         prompts_data={"web": [(prompt, None)]},

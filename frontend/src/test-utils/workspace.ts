@@ -122,7 +122,7 @@ export const MATTE_LICENCE: ModelLicence = {
 };
 
 /** The `edit` workflow as the server lists it: the controls an edit uses. */
-export const EDIT_DEFINITION: WorkflowContractEntry = {
+const EDIT_DEFINITION: WorkflowContractEntry = {
   mode: 'image',
   model_kind: 'image',
   visible_controls: ['workflow', 'model', 'quantize', 'loras', 'prompt_inline', 'runs', 'steps', 'seed'],
@@ -365,8 +365,8 @@ export function withVideoEnhancer(context: WorkspaceContext): WorkspaceContext {
 }
 
 /**
- * A context that can edit: three image models (Flux Lite, which cannot; Z-Image, which needs paint; Klein, which also takes
- * reference images and so edits the whole picture).
+ * A context that can edit: four image models (Flux Lite and Z-Image, which cannot; Klein 9B and Klein 4B, which can). Only FLUX.2 Klein
+ * edits, as in the real capabilities.
  */
 export function makeEditContext(): WorkspaceContext {
   const base = makeContext();
@@ -375,11 +375,13 @@ export function makeEditContext(): WorkspaceContext {
     image_models: [
       { id: 'flux-lite', label: 'Flux Lite', type: 'image' },
       { id: 'zit', label: 'Z-Image', type: 'image' },
+      { id: 'klein4b', label: 'Klein 4B', type: 'image' },
       { id: 'klein', label: 'Klein', type: 'image' },
     ],
     image_model_defaults: {
       'flux-lite': makeImageDefaults({ family: 'flux2' }),
-      zit: makeImageDefaults({ family: 'zimage', supports_mask_edit: true }),
+      zit: makeImageDefaults({ family: 'zimage' }),
+      klein4b: makeImageDefaults({ family: 'flux2_klein', supports_mask_edit: true, max_reference_images: 4 }),
       klein: makeImageDefaults({ family: 'flux2_klein', supports_mask_edit: true, max_reference_images: 4 }),
     },
   };

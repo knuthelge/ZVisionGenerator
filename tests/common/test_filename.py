@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from zvisiongenerator.utils.filename import generate_filename, unique_output_path
+import pytest
+
+from zvisiongenerator.utils.filename import edit_output_stem, generate_filename, unique_output_path
 
 _NOW = datetime(2026, 10, 4, 14, 3, 22)
 
@@ -40,3 +42,8 @@ def test_unique_output_path_ignores_other_suffixes(tmp_path):
     (tmp_path / "clip.png").write_bytes(b"")
 
     assert unique_output_path(tmp_path, "clip", ".mp4") == tmp_path / "clip.mp4"
+
+
+@pytest.mark.parametrize(("source", "stem"), [("photo.png", "photo_edit"), ("photo_edit.png", "photo_edit"), ("photo_edit_2.png", "photo_edit"), ("/pics/photo_editor.png", "photo_editor_edit")])
+def test_an_edit_is_named_after_its_source_without_stacking_a_second_edit_suffix(source, stem):
+    assert edit_output_stem(source) == stem

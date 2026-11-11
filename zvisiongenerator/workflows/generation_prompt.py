@@ -8,6 +8,8 @@ __all__ = ["BACKGROUND_SUFFIX", "conditioning_prompt", "generation_negative", "g
 
 # Asks the model for a plain backdrop, so the cut-out has an even background to separate the subject from.
 BACKGROUND_SUFFIX = ", isolated on a plain light grey studio background"
+# The instruction an Extend sends in front of the user's text: it asks the model to fill the empty part of the canvas.
+EXTEND_INSTRUCTION = "Expand the image to fill the empty canvas.\n\n"
 
 
 def generation_prompt(template: str, resolved: str | None, enhanced: str | None = None) -> str:
@@ -25,8 +27,8 @@ def generation_prompt(template: str, resolved: str | None, enhanced: str | None 
     return chosen or template
 
 
-def conditioning_prompt(text: str, *, transparent: bool) -> str:
-    """Return the text a model conditions on: *text*, plus the plain-background phrase when the image will be cut out.
+def conditioning_prompt(text: str, *, transparent: bool = False, extend: bool = False) -> str:
+    """Return the text a model conditions on: *text*, behind the Extend instruction for an Extend, plus the plain-background phrase when the image will be cut out.
 
     Only text that reaches a model is conditioned. The saved, displayed and recorded prompt stays the one the user wrote.
     The phrase is not deduplicated, because recorded prompts never carry it.
@@ -34,10 +36,14 @@ def conditioning_prompt(text: str, *, transparent: bool) -> str:
     Args:
         text: The prompt from :func:`generation_prompt`.
         transparent: Whether the image is cut out and saved with transparency.
+        extend: Whether the job is an Extend, which sends the instruction in front of the text.
 
     Returns:
-        *text* with the background phrase appended, or *text* unchanged when *transparent* is false or *text* is a JSON caption.
+        *text* with the Extend instruction in front when *extend*, and the background phrase appended when *transparent*
+        (not for a JSON caption).
     """
+    if extend:
+        text = EXTEND_INSTRUCTION + text
     if not transparent or is_json_caption(text):
         return text
     return text + BACKGROUND_SUFFIX

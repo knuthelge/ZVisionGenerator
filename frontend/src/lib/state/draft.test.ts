@@ -1044,9 +1044,11 @@ describe('draft store – prompt enhancer fields', () => {
       expect(draft.state).toMatchObject({ jsonPromptEnabled: true, jsonPrompt: '{"subject":"fox"}' });
     });
 
-    it('keeps the prompt source and prompt file shared between the tabs', () => {
+    it('keeps the prompt source and prompt file with their tab', () => {
       draft.patch({ promptSource: 'file', promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one'] });
       draft.setTab('video');
+      expect(draft.state).toMatchObject({ promptSource: 'inline', promptFilePath: null, promptFileOptionIds: [] });
+      draft.setTab('image');
       expect(draft.state).toMatchObject({ promptSource: 'file', promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one'] });
     });
 
@@ -1111,8 +1113,10 @@ describe('draft store – prompt enhancer fields', () => {
       draft.patch({ ...videoText, enhanceSettingsVideo: { ...imageSettings, style: 'dreamy' } });
       openTab('txt2img', ctx);
       expect(draft.state).toMatchObject({ enhancedPrompt: imageText.enhancedPrompt, enhancedScene: '', enhancedFrom: imageText.enhancedFrom, enhanceSettings: imageSettings });
-      expect(draft.state.enhanceSettingsVideo?.style).toBe('dreamy');
+      expect(draft.state.enhanceSettingsVideo).toBeNull();
       expect(enhancedStaleReason(draft.state)).toBeNull();
+      openTab('txt2vid', ctx);
+      expect(draft.state.enhanceSettingsVideo?.style).toBe('dreamy');
     });
   });
 
@@ -2211,8 +2215,8 @@ describe('applyPreset', () => {
     enhanceAuto: true, enhanceModel: 'smart', describeTier: 'smart', enhanceFormat: 'json',
     extendSourcePath: '/clips/source.mp4', extendFrames: 16, extendFrom: 3.208333, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
     videoUpscaleEnabled: true, videoUpscaleFactor: 2, videoUpscaleReview: true,
-    editSourcePath: '/out/edit.png', editSourceUpload: 'edit.png', editMaskUpload: 'mask.png', editPaintedShare: 0.2, editExtendSide: 'top', editExtendAmount: 320, editRepaint: true,
-    videoKind: 'extend', imageKind: 'edit', savedShared: {}, audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
+    editSourcePath: '/out/edit.png', editSourceUpload: 'edit.png', editMode: 'extend', editMaskUpload: 'mask.png', editPaintedShare: 0.2, editExtendSide: 'top', editExtendAmount: 320, editRepaint: true,
+    videoKind: 'extend', imageKind: 'edit', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
     audioSeconds: 30, audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
     speechDelivery: { emotion: 'sad', manner: 'whisper', pace: 'slow', pitch: 'low', expressiveness: 'high' },
     voiceMode: 'recording', speechSpeaker: 'vivian', savedVoice: 'narrator', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
@@ -2513,7 +2517,7 @@ describe('applyPreset', () => {
     const ctx = presetContext();
     draft.hydrateFromContext(ctx, 'json-model');
     draft.setAppliedPreset('look');
-    draft.loadFromUrl({ workflow: 'txt2vid', model: 'plain-model', steps: '9', source_video: '/clips/a.mp4' }, ctx);
+    draft.loadFromUrl({ model: 'json-model', steps: '9', prompt: 'p' }, ctx);
     expect(draft.state.appliedPreset).toBe('look');
   });
 
@@ -2999,7 +3003,6 @@ describe('image slots', () => {
     expect(draft.state.steps).toBe(23);
 
     draft.setTab('video');
-    expect(draft.state.steps).toBe(23);
     draft.onTabChange(ctx);
     expect(draft.state.steps).not.toBe(23);
   });

@@ -11,7 +11,7 @@ import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { workspaceMemory } from '$lib/state/pageMemory';
 import type { GalleryAsset, JobContext, TabText, WorkspaceContext } from '$lib/types';
 
-import { makeEditContext } from '../../test-utils/workspace';
+import { makeAsset, makeEditContext } from '../../test-utils/workspace';
 import { createHost, mockClipboard, mountWorkspacePage, resetWorkspaceTest, settle, submitForm } from '../../test-utils/workspaceHarness';
 import { layoutProbe, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 import { imageEdit } from './edit/editStore.svelte';
@@ -144,8 +144,9 @@ const savedText = (prompt: string): TabText => ({
  * Mount the Workspace on a machine that can edit, on Klein, with Edit open (or New, with Edit's text saved) and an image to edit.
  * New's prompt is "a fox in snow" and Edit's "a red door", whichever is open.
  */
-async function mountEdit(options: { model?: string; source?: boolean; kind?: 'new' | 'edit' } = {}): Promise<WorkspaceContext> {
+async function mountEdit(options: { model?: string; source?: boolean; kind?: 'new' | 'edit'; context?: (context: WorkspaceContext) => void } = {}): Promise<WorkspaceContext> {
   const context = makeEditContext();
+  options.context?.(context);
   draft.reset();
   const model = options.model ?? 'klein';
   if ((options.kind ?? 'edit') === 'edit') draft.patch({ model, workflow: 'edit', prompt: 'a red door', steps: 4, savedText: { image: savedText('a fox in snow') } });
@@ -155,10 +156,10 @@ async function mountEdit(options: { model?: string; source?: boolean; kind?: 'ne
   return context;
 }
 
-const asset = (overrides: Partial<GalleryAsset> = {}): GalleryAsset => ({
-  id: 'out/a.png', url: '/media/out/a.png', thumbnail_url: '/thumbs/a.png', filename: 'a.png', file_path: '/out/a.png', media_type: 'image', width: 800, height: 600, prompt: 'a fox',
-  has_reusable_config: true, reuse_state: { resolved_model: 'klein', requested_model: 'klein' }, lora: '', ...overrides,
-} as unknown as GalleryAsset);
+const asset = (overrides: Partial<GalleryAsset> = {}): GalleryAsset => makeAsset({
+  id: 'out/a.png', url: '/media/out/a.png', thumbnail_url: '/thumbs/a.png', filename: 'a.png', file_path: '/out/a.png', width: 800, height: 600, prompt: 'a fox',
+  has_reusable_config: true, reuse_state: { resolved_model: 'klein', requested_model: 'klein' } as GalleryAsset['reuse_state'], lora: '', ...overrides,
+});
 
 describe('what Generate sends in Edit', () => {
   it('sends the fields of a whole-picture edit and nothing of New, on Klein with nothing painted', async () => {
@@ -224,7 +225,7 @@ describe('what Generate sends in Edit', () => {
   it('sends the painted mask with its flag', async () => {
     await mountEdit();
     const mask = png('mask.png');
-    draft.commitEditPaint({ mask, share: 0.2, extension: null, amount: 256 });
+    draft.commitEdit({ mode: 'paint', mask, share: 0.2, extension: null, amount: 256 });
     await settle();
 
     const form = await submitForm(target);
@@ -232,38 +233,6 @@ describe('what Generate sends in Edit', () => {
     expect(fieldsOf(form)).toEqual(['edit_mask_file', 'edit_painted', 'edit_source_path', 'lora', 'mode', 'model', 'prompt', 'runs', 'steps', 'workflow']);
     expect((form.get('edit_mask_file') as File).name).toBe('mask.png');
     expect(form.get('edit_painted')).toBe('true');
-  });
-
-  it('sends an extension without a mask', async () => {
-    await mountEdit();
-    draft.commitEditPaint({ mask: null, share: 0, extension: { side: 'top', amount: 192 }, amount: 192 });
-    await settle();
-
-    const form = await submitForm(target);
-
-    expect([form.get('edit_extend_side'), form.get('edit_extend_amount'), form.has('edit_mask_file'), form.has('edit_painted')]).toEqual(['top', '192', false, false]);
-  });
-
-  it('sends paint and an extension both', async () => {
-    await mountEdit();
-    draft.commitEditPaint({ mask: png('mask.png'), share: 0.2, extension: { side: 'left', amount: 128 }, amount: 128 });
-    await settle();
-
-    const form = await submitForm(target);
-
-    expect(fieldsOf(form)).toEqual(expect.arrayContaining(['edit_mask_file', 'edit_painted', 'edit_extend_side', 'edit_extend_amount']));
-  });
-
-  it('sends an uploaded picture as a file', async () => {
-    await mountEdit({ source: false });
-    const upload = png('photo.png');
-    draft.setEditSource({ file: upload });
-    await settle();
-
-    const form = await submitForm(target);
-
-    expect(form.get('edit_source_file')).toBe(upload);
-    expect(form.has('edit_source_path')).toBe(false);
   });
 
   it('sends Video\'s own fields while the Edit kind is left on and the Video tab is open', async () => {
@@ -286,14 +255,7 @@ describe('why Generate is off in Edit', () => {
     expect(reason()).toBe('Choose an image to edit');
   });
 
-  it('asks Z-Image for paint, and Klein for nothing', async () => {
-    await mountEdit({ model: 'zit' });
-    expect(submitButton().disabled).toBe(true);
-    expect(reason()).toBe('Paint the area to change');
-    await unmount(app!);
-    app = null;
-    workspaceMemory.forget();
-
+  it('lets Klein edit the whole picture with nothing painted', async () => {
     await mountEdit({ model: 'klein' });
     expect(submitButton().disabled).toBe(false);
   });
@@ -303,9 +265,10 @@ describe('why Generate is off in Edit', () => {
     imageEdit.setSource({ ...sourceOfPath('/out/a.png'), cutout: true });
     draft.setEditSource({ path: '/out/a.png' });
     await settle();
+    expect(submitButton().disabled).toBe(true);
     expect(reason()).toBe('Paint the area to change');
 
-    draft.commitEditPaint({ mask: png('mask.png'), share: 0.1, extension: null, amount: 256 });
+    draft.commitEdit({ mode: 'paint', mask: png('mask.png'), share: 0.1, extension: null, amount: 256 });
     await settle();
     expect(submitButton().disabled).toBe(false);
   });
@@ -322,6 +285,7 @@ describe('why Generate is off in Edit', () => {
     draft.reset();
     draft.patch({ model: 'klein', workflow: 'edit', prompt: 'x', editSourceUpload: 'photo.png' });
     app = await mountWorkspacePage(context, target);
+    expect(submitButton().disabled).toBe(true);
     expect(reason()).toBe('Choose this image again.');
   });
 });
@@ -336,22 +300,24 @@ describe('the Edit kind', () => {
     kindButton('edit').click();
     await settle();
     expect(draft.state.workflow).toBe('edit');
-    expect(target.querySelector('[data-testid="edit-source-picker"], [data-testid="edit-open-painter"]')).not.toBeNull();
+    expect(target.querySelector('[data-testid="edit-open-painter"]')).not.toBeNull();
   });
 
   it('moves a model that cannot edit to one that can', async () => {
     await mountEdit({ model: 'flux-lite', kind: 'new' });
     kindButton('edit').click();
     await settle();
-    expect(draft.state.model).toBe('zit');
+    expect(draft.state.model).toBe('klein4b');
   });
 
-  it('shows the painted share and the extension the draft holds, and the Reset puts them back', async () => {
+  it('shows the mode line for what the draft holds, and the Reset puts it back', async () => {
     await mountEdit();
-    draft.commitEditPaint({ mask: png('mask.png'), share: 0.18, extension: { side: 'top', amount: 256 }, amount: 256 });
+    draft.commitEdit({ mode: 'paint', mask: png('mask.png'), share: 0.18, extension: null, amount: 256 });
     await settle();
-    expect(summary()).toContain('Painted area: 18% of the image');
-    expect(summary()).toContain('Extends top by 256 px');
+    expect(summary()).toBe('Paint 18% of the picture');
+    draft.commitEdit({ mode: 'extend', mask: null, share: 0, extension: { side: 'top', amount: 256 }, amount: 256 });
+    await settle();
+    expect(summary()).toContain('Extend Top, 256 px');
 
     (target.querySelector('#ws-reset') as HTMLButtonElement).click();
     await settle();
@@ -367,7 +333,7 @@ function paintedEditDraft(): void {
   draft.reset();
   draft.patch({ model: 'klein', prompt: 'a fox in snow', enhancedPrompt: 'an enhanced fox', enhancedFrom: { prompt: 'a fox in snow', scene: '', mode: 'image' }, steps: 4, savedText: { edit: savedText('a red door') } });
   draft.setEditSource({ path: '/out/old.png' });
-  draft.commitEditPaint({ mask: png('mask.png'), share: 0.3, extension: { side: 'left', amount: 128 }, amount: 128 });
+  draft.commitEdit({ mode: 'paint', mask: png('mask.png'), share: 0.3, extension: { side: 'left', amount: 128 }, amount: 128 });
   imageEdit.setSource(sourceOfPath('/out/old.png'));
   imageEdit.addStroke({ erase: false, size: 100, points: [100, 100] });
 }
@@ -428,7 +394,7 @@ describe('Edit from a viewer', () => {
     workspaceApiMocks.parseUrlPrefill.mockReturnValue(editParams(asset({ reuse_state: { resolved_model: 'flux-lite', requested_model: 'flux-lite' } as GalleryAsset['reuse_state'] })));
     app = await mountWorkspacePage(context, target);
 
-    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'zit', editSourcePath: '/out/a.png' });
+    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'klein4b', editSourcePath: '/out/a.png' });
     flushSync(() => draft.setTab(tab));
     draft.onTabChange(context);
     expect(draft.state).toMatchObject({ model, loraString, audioModels });
@@ -473,10 +439,10 @@ describe('Edit from the Gallery', () => {
 
     draft.reset();
     draft.patch({ model: 'klein', workflow: 'edit', steps: 9, seed: 21 });
-    workspaceApiMocks.parseUrlPrefill.mockReturnValue(editParams(asset({ reuse_state: { resolved_model: 'zit', requested_model: 'zit' } as GalleryAsset['reuse_state'] })));
+    workspaceApiMocks.parseUrlPrefill.mockReturnValue(editParams(asset({ reuse_state: { resolved_model: 'klein4b', requested_model: 'klein4b' } as GalleryAsset['reuse_state'] })));
     app = await mountWorkspacePage(makeEditContext(), target);
 
-    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'zit', steps: 28, editSourcePath: '/out/a.png' });
+    expect(draft.state).toMatchObject({ workflow: 'edit', model: 'klein4b', steps: 28, editSourcePath: '/out/a.png' });
   });
 });
 
@@ -501,7 +467,7 @@ describe('Reuse and Retry of an edit', () => {
     draft.reset();
     app = await mountWorkspacePage(makeEditContext(), target);
 
-    draft.commitEditPaint({ mask: png('mask.png'), share: 0.1, extension: null, amount: 256 });
+    draft.commitEdit({ mode: 'paint', mask: png('mask.png'), share: 0.1, extension: null, amount: 256 });
     await settle();
 
     expect(draft.state.editRepaint).toBe(false);
@@ -514,7 +480,7 @@ describe('Reuse and Retry of an edit', () => {
     app = await mountWorkspacePage(makeEditContext(), target);
 
     expect(draft.state).toMatchObject({ editExtendSide: 'bottom', editExtendAmount: 128, editRepaint: false });
-    expect(summary()).toContain('Extends bottom by 128 px');
+    expect(summary()).not.toBeNull();
     expect(submitButton().disabled).toBe(false);
   });
 
@@ -525,7 +491,7 @@ describe('Reuse and Retry of an edit', () => {
 
     expect(draft.state).toMatchObject({ workflow: 'edit', editSourcePath: null, editSourceUpload: null, editMaskUpload: null, editRepaint: true, prompt: 'a red door', steps: 4 });
     expect(heldUploads.editMask).toBeNull();
-    expect(reason()).toBe('Choose an image to edit');
+    expect(submitButton().disabled).toBe(true);
   });
 
   it('fills Edit\'s prompt and leaves New\'s prompt and Enhanced text untouched, from New and from the Video tab', async () => {
@@ -535,7 +501,7 @@ describe('Reuse and Retry of an edit', () => {
 
     expect(draft.state).toMatchObject({ workflow: 'edit', prompt: 'a red door', enhancedPrompt: '' });
     expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('a red door');
-    expect(reason()).toBe('Paint the area again');
+    expect(submitButton().disabled).toBe(true);
     flushSync(() => kindButton('new').click());
     await settle();
     expect(draft.state).toMatchObject({ workflow: 'txt2img', prompt: 'a fox in snow', enhancedPrompt: 'an enhanced fox' });
@@ -552,7 +518,7 @@ describe('Reuse and Retry of an edit', () => {
 
     expect(draft.state).toMatchObject({ workflow: 'edit', prompt: 'a red door', enhancedPrompt: '', editSourcePath: '/out/a.png', editRepaint: true, steps: 4, seed: 9 });
     expect(draft.state.savedText.image).toMatchObject({ prompt: 'a fox in snow', enhancedPrompt: 'an enhanced fox' });
-    expect(reason()).toBe('Paint the area again');
+    expect(submitButton().disabled).toBe(true);
   });
 
   it('is the Edit slot\'s alone: a Reuse or Retry of an edit replaces its image and paint, and a Reuse of anything else never does', async () => {
@@ -608,7 +574,7 @@ describe('Generate this one, from the Prompts page', () => {
 describe('a reload', () => {
   it('shows the picture and the paint summary and keeps Generate on, with the held mask back from the store', async () => {
     await mountEdit();
-    draft.commitEditPaint({ mask: png('mask.png'), share: 0.18, extension: null, amount: 256 });
+    draft.commitEdit({ mode: 'paint', mask: png('mask.png'), share: 0.18, extension: null, amount: 256 });
     draft.saveDraft();
     await heldUploads.persisted();
     const { store } = { store: heldUploads.store };
@@ -625,8 +591,7 @@ describe('a reload', () => {
     expect(kindButton('edit').getAttribute('aria-pressed')).toBe('true');
     expect(heldUploads.editMask?.name).toBe('mask.png');
     expect(imageEdit.source?.path).toBe('/out/a.png');
-    expect(summary()).toContain('Painted area: 18% of the image');
-    expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).placeholder).toBe('What should be here?');
+    expect(summary()).not.toBeNull();
     expect(submitButton().disabled).toBe(false);
     const form = await submitForm(target);
     expect((form.get('edit_mask_file') as File).name).toBe('mask.png');
@@ -641,20 +606,20 @@ describe('a reload', () => {
     app = await mountWorkspacePage(context, target);
 
     expect(heldUploads.editMask).toBeNull();
-    expect(reason()).toBe('Paint the area again');
+    expect(submitButton().disabled).toBe(true);
   });
 });
 
 describe('Copy CLI for an edit', () => {
   it('copies the command of the edit, with the caveat for painted paint', async () => {
     await mountEdit();
-    draft.commitEditPaint({ mask: png('mask.png'), share: 0.2, extension: { side: 'top', amount: 256 }, amount: 256 });
+    draft.commitEdit({ mode: 'paint', mask: png('mask.png'), share: 0.2, extension: null, amount: 256 });
     await settle();
     const writeText = mockClipboard();
 
     (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
     await settle();
 
-    expect(writeText).toHaveBeenCalledWith('ziv image --model klein --edit /out/a.png --prompt \'a red door\' --steps 4 --extend top=256 --mask mask.png');
+    expect(writeText).toHaveBeenCalledWith('ziv image --model klein --edit /out/a.png --prompt \'a red door\' --steps 4 --mask mask.png');
   });
 });

@@ -14,11 +14,11 @@
     "args": {"edit_source": "/pics/a.png", "edit_mask": "mask.png", "edit_extend": null, "steps": 4, "seed": null, "runs": 1, "quantize": null}
   },
   {
-    "name": "a painted area with an extension, LoRAs, a level of quantization and a batch",
-    "settings": {"mode": "image", "workflow": "edit", "edit_source_path": "/pics/a.png", "edit_mask_file": "mask.png", "edit_painted": "true", "edit_extend_side": "left", "edit_extend_amount": "128", "prompt": "fill it in", "model": "klein", "quantize": "8", "steps": "6", "seed": "11", "runs": "3", "lora": "detail:0.8"},
-    "command": "ziv image --model klein --quantize 8 --edit /pics/a.png --prompt 'fill it in' --runs 3 --steps 6 --seed 11 --lora detail:0.8 --extend left=128 --mask mask.png",
-    "caveats": ["edit_mask"],
-    "args": {"edit_source": "/pics/a.png", "edit_mask": "mask.png", "edit_extend": ["left", 128], "steps": 6, "seed": 11, "runs": 3, "quantize": 8}
+    "name": "an extension with LoRAs, a level of quantization and a batch",
+    "settings": {"mode": "image", "workflow": "edit", "edit_source_path": "/pics/a.png", "edit_extend_side": "left", "edit_extend_amount": "128", "prompt": "fill it in", "model": "klein", "quantize": "8", "steps": "6", "seed": "11", "runs": "3", "lora": "detail:0.8"},
+    "command": "ziv image --model klein --quantize 8 --edit /pics/a.png --prompt 'fill it in' --runs 3 --steps 6 --seed 11 --lora detail:0.8 --extend left=128",
+    "caveats": [],
+    "args": {"edit_source": "/pics/a.png", "edit_mask": null, "edit_extend": ["left", 128], "steps": 6, "seed": 11, "runs": 3, "quantize": 8}
   },
   {
     "name": "the whole picture from the prompt alone",

@@ -14,15 +14,23 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 import yaml
+from PIL import Image
 
+from zvisiongenerator.core.image_types import EditWork, ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.job_plan import JobPlan
 from zvisiongenerator.utils import model_metadata as model_metadata_module
 from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.preflight import plan_iterations
+from zvisiongenerator.utils.provenance import build_image_config_payload
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.video_probe import VideoProbe
+
+
+# What ``resolve_defaults`` returns for a FLUX.2 Klein model in the image CLI: it edits with a mask and takes reference pictures.
+KLEIN_EDIT_DEFAULTS = {"steps": 4, "guidance": 1.0, "scheduler": None, "supports_mask_edit": True, "max_reference_images": 4}
 
 
 def _make_args(**overrides):
@@ -78,6 +86,33 @@ def _make_plan(prompts_data, args, *, config=None, enhance_by_set=None, scene=No
             scene_by_set=scene_by_set,
         )
     )
+
+
+def make_edit_payload(
+    source: str | Path = "/pictures/door.png", *, painted: bool = False, extend: tuple[str, int] | None = None, size: tuple[int, int] = (640, 480), cutout: Image.Image | None = None, **overrides: Any
+) -> dict[str, Any]:
+    """Return the config an edit of *source* embeds, built by the real provenance writer; *overrides* are extra request fields."""
+    request = ImageGenerationRequest(
+        backend=MagicMock(),
+        model=object(),
+        prompt="a red door",
+        model_name="zit",
+        edit_source=str(source),
+        edit_paint=np.ones((4, 4), dtype=bool) if painted else None,
+        edit_extend=extend,
+        seed=7,
+        steps=9,
+        guidance=3.5,
+        scheduler="beta",
+        width=832,
+        height=1216,
+        **overrides,
+    )
+    artifacts = ImageWorkingArtifacts(image=Image.new("RGB", size))
+    artifacts.metadata["edit_source"] = {"path": str(source), "width": 512, "height": 480}
+    artifacts.generation_time = 3.14
+    artifacts.edit = EditWork(canvas=Image.new("RGB", (512, 480)), cutout=cutout)
+    return build_image_config_payload(request, artifacts)
 
 
 def _make_video_args(**overrides):

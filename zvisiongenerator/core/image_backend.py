@@ -111,6 +111,7 @@ class ImageBackend(Protocol):
         self,
         model: Any,
         image: Image.Image,
+        reference: Image.Image,
         paint: np.ndarray,
         prompt: str,
         seed: int,
@@ -119,11 +120,14 @@ class ImageBackend(Protocol):
         scheduler: str | None = None,
         skip_signal: Any | None = None,
         step_callback: Any | None = None,
+        fix_join: bool = False,
     ) -> Image.Image | None:
         """Redraw the *paint* area of *image* at strength 1.0 and return the whole picture. Returns None if skipped.
 
-        *paint* is a bool array of *image*'s height by width, and *image* is 16 px aligned. The result may be any size;
-        the caller pastes it back through its own soft mask. Only families with ``supports_mask_edit`` in the model
+        *paint* is a bool array of *image*'s height by width, and *image* is 16 px aligned. *reference* is the picture
+        the model sees while it draws: *image* itself, or for an Extend the same frame with a blurred strip. With
+        *fix_join* (an Extend), the strip of the result is colour-matched to the source across the join. The result may
+        be any size; the caller pastes it back through its own soft mask. Only families with ``supports_mask_edit`` in the model
         metadata take it; the caller checks before calling.
         """
         ...

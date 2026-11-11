@@ -125,21 +125,13 @@ On macOS an audio track is held as a frozen audio state, the way the vendored `A
 
 ## Image editing
 
-`ImageBackend.edit_region(model, image, paint, prompt, seed, steps, guidance, ...)` redraws the `paint` area of a 16 px aligned crop at strength 1.0 and returns an image of any size, or `None` when skipped. Both platforms do it by latent blending: after step `t` the latents sit at noise level `sigmas[t + 1]`, and outside the paint they are replaced by the source's clean latents noised to that level with the run's own starting noise, `latents = (1 - mask) * noised_clean + mask * latents`. At the last step the sigma is 0, so the latents outside the paint are the clean ones. The mask is the painted fraction of each latent cell (`soft_cell_mask`), so a cell the paint only touches is mostly kept. What differs is each family's latent layout, which is a backend fact:
+`ImageBackend.edit_region(model, image, reference, paint, prompt, seed, steps, guidance, ...)` redraws the `paint` area of a 16 px aligned crop at strength 1.0 and returns an image of any size, or `None` when skipped. Only FLUX.2 Klein does it (`supports_mask_edit`, checked where the job is made, never by family).
 
-| Family | Latent layout | Mask cell |
-|---|---|---|
-| Z-Image | The VAE's latents with shift and scale applied, four-dimensional on diffusers and packed on mflux | 8 px |
-| FLUX.2 Klein | 128-channel patchified latents that the diffusers pipeline takes, but its step-end callback sees them packed into tokens; packed on mflux | 16 px |
-| Krea 2 | Packed tokens on diffusers, four-dimensional `(1, 16, H, W)` on mflux | 16 px |
+Both platforms do two things. The model gets `reference` as a reference image, so it sees the picture around the paint. And after every step the latents outside the paint are replaced by the source's clean latents noised to that step's level with the run's own starting noise, so at the last step they are the clean ones. The mask is the painted fraction of each 16 px latent cell (`soft_cell_mask`). Both libraries shrink a reference over 1024 x 1024 px, and an Extend's reference, the drawn canvas, can pass that.
 
-The families and their cell widths are one table, `EDIT_CELL_PIXELS` in `processing/edit_region.py`, which both backends read; each backend's `edit_region` refuses a family that is not in it.
+On Windows and Linux `backends/cuda/image/edit.py` prepares the noise, the clean latents and the mask; `DiffusersBackend.edit_region` passes the noise as `latents=` and runs the blend in the step-end callback before the preview reads the latents, so Stop and previews behave as for a generation. On macOS mflux's loop callbacks can't replace latents, and at strength 1.0 it never encodes the source, so `backends/mac/image_edit.py` encodes the crop itself, draws the same noise again and wraps the run's `config.scheduler.step`; `MfluxBackend.edit_region` then runs `klein_references.generate_with_references`. With `fix_join` both keep the last step's latents so `match_strip` can colour-match the strip to the source (`match_join`).
 
-On Windows and Linux `backends/cuda/image/edit.py` prepares `noise`, `clean` and the mask per family, and `DiffusersBackend.edit_region` passes the noise as `latents=` to the pipeline, which every one of the three families accepts. The blend runs in the step-end callback before the preview reads the latents, so Stop and previews behave as for a generation. `tests/contracts/test_diffusers_image_edit_contract.py` pins the diffusers names this uses.
-
-On macOS mflux's loop callbacks return nothing, so they can't replace latents, and at strength 1.0 mflux never encodes the source and draws its noise from the seed alone. `backends/mac/image_edit.py` therefore encodes the crop itself, draws the same noise again, and hooks the step. For Z-Image and Klein, a before-loop callback wraps the run's `config.scheduler.step` for that run only. Krea 2 keeps its stepper in a local, so `blended_stepper` patches `Krea2Sampler.make_stepper` for the duration of the call and restores it, also on Stop. `MfluxBackend.edit_region` then calls `text_to_image`, so scheduler choice, previews and Stop are unchanged. The module imports `mlx` and `mflux` inside functions, so it imports on Windows and Linux.
-
-These hooks depend on mflux's private loops, so `tests/contracts/test_mflux_edit_contract.py` pins the names and signatures they use, and the dependency is bounded to `mflux<0.25`. Re-run it on every mflux bump. The contract test and the real-array test of the blend (`tests/backends/mac/test_mac_image_edit_real.py`) need real MLX arrays: they skip where `mlx` or `mflux` isn't installed and run in `make test` on a Mac.
+The Mac hooks depend on mflux's private loops, so `tests/contracts/test_mflux_edit_contract.py` pins them and `mflux` is bounded below 0.25; re-run it on every bump. `tests/contracts/test_diffusers_image_edit_contract.py` pins the diffusers names. The contract test and `tests/backends/mac/test_mac_image_edit_real.py` need real MLX arrays, so they run on a Mac and are skipped elsewhere.
 
 ## CUDA only
 

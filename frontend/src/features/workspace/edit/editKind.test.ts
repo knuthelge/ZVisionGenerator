@@ -1,17 +1,18 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
-import { canEdit, editParams } from '$lib/state/assetActions';
+import { modelsOf } from '$lib/state/workflowModels';
 import { assetMenuEntries } from '$lib/components/molecules/assetMenu';
 import { viewerActionFor, viewerShortcutsFor } from '$lib/components/molecules/viewerShortcuts';
 import type { GalleryAsset, WorkspaceContext } from '$lib/types';
 
-import { makeContext, makeEditContext } from '../../../test-utils/workspace';
+import { makeAsset, makeEditContext } from '../../../test-utils/workspace';
+import { makeChipFacts } from '../../../test-utils/chipFacts';
 import { workspaceCapabilities } from '../capabilities';
 import { imagesView } from '../imagesView';
 import { settingsChips } from '../settingsChips';
-import { canEditWith, editableModels, editsWholePicture } from '$lib/state/editModels';
 import { openKind } from '../../../test-utils/draftKind';
+import { editFormData } from './editForm';
 
 const editContext = makeEditContext;
 
@@ -39,10 +40,7 @@ describe('the Image tab\'s kind', () => {
   it('shows Kind as the first chip on a phone, and names the open one', () => {
     const context = editContext();
     openKind('image', 'edit', context);
-    const facts = (caps: ReturnType<typeof workspaceCapabilities>) => ({
-      caps, state: draft.state, videoKind: null, changed: () => false, width: 832, height: 1216, seconds: null, extendSeconds: null,
-      loraNames: [], modelLabel: 'Z-Image', modelDownloaded: true, sourceName: null, images: null, track: null, memoryWarn: false, presetName: null, presetSlug: null, presetChanged: false,
-    });
+    const facts = (caps: ReturnType<typeof workspaceCapabilities>) => makeChipFacts({ caps, state: draft.state, width: 832, height: 1216, modelLabel: 'Z-Image' });
     const chips = settingsChips(facts(workspaceCapabilities(context, draft.state)));
     expect(chips[0]).toMatchObject({ key: 'kind', value: 'Edit', icon: 'edit' });
     expect(chips.map((chip) => chip.key)).not.toContain('preset');
@@ -111,31 +109,28 @@ describe('what Edit shows', () => {
   });
 });
 
-describe('which models can edit', () => {
-  it('are the models whose metadata says so (`supports_mask_edit`), in the order the context lists them', () => {
-    const context = editContext();
-    expect(editableModels(context, context.image_models).map((model) => model.id)).toEqual(['zit', 'klein']);
-    expect([canEditWith(context, 'flux-lite'), canEditWith(context, 'zit'), canEditWith(context, 'nope'), canEditWith(null, 'zit')]).toEqual([false, true, false, false]);
+describe('Edit\'s model picker', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
   });
 
-  it('say whether they can change the whole picture from the prompt alone: a model that takes reference images can, Z-Image cannot', () => {
+  it('lists Klein whether or not it is downloaded, and Edit settles on it, so the job carries the model and downloads it', () => {
     const context = editContext();
-    expect([editsWholePicture(context, 'klein'), editsWholePicture(context, 'zit'), editsWholePicture(context, 'flux-lite')]).toEqual([true, false, false]);
+    context.image_models = context.image_models.map((model) => ({ ...model, downloaded: model.id === 'flux-lite' || model.id === 'zit' }));
+    draft.hydrateFromContext(context, 'flux-lite');
+
+    openKind('image', 'edit', context);
+
+    expect(modelsOf(context, 'edit').map((model) => model.id)).toEqual(['klein4b', 'klein']);
+    expect(draft.state.model).toBe('klein4b');
+    expect(editFormData(draft.state, { sourceFile: null, maskFile: null, prompt: 'a red door', lora: '', quantize: true }).get('model')).toBe('klein4b');
   });
 });
 
 describe('the viewer and menu action', () => {
-  const image = { id: 'a', media_type: 'image', file_path: '/out/a.png', lora: 'detail:0.8', reuse_state: { resolved_model: 'klein' }, filename: 'a.png', url: '/media/a.png' } as unknown as GalleryAsset;
-  const video = { ...image, media_type: 'video' } as GalleryAsset;
-
-  it('is offered for an image with a file, and for nothing else', () => {
-    expect([canEdit(image), canEdit(video), canEdit({ ...image, file_path: undefined } as GalleryAsset)]).toEqual([true, false, false]);
-  });
-
-  it('carries the image as a Use as with the model and LoRAs it was made with, and never the prompt', () => {
-    expect(editParams(image)).toEqual({ workflow: 'edit', edit_source_path: '/out/a.png', use_as: 'edit', model: 'klein', lora: 'detail:0.8' });
-    expect(Object.keys(editParams(image))).not.toContain('prompt');
-  });
+  const image = makeAsset({ file_path: '/out/a.png' });
+  const video = makeAsset({ file_path: '/out/a.mp4', media_type: 'video' });
 
   it('lists Edit in the menu of an image, and only when there is a handler', () => {
     const ids = (asset: GalleryAsset, onedit?: () => void) => assetMenuEntries(asset, { onedit }).flatMap((entry) => (entry.kind === 'item' ? [entry.id] : []));
