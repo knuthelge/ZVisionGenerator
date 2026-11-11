@@ -7,44 +7,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
-- **Projects.** Pick a project in the top bar and the Gallery and Workspace show only its files, and new work is saved into it. **All files** works as before. **Move to project…** sorts files into projects without overwriting anything. Folders already in your output folder are projects at once.
-- **Audio.** A new **Audio** tab and `ziv-audio` (`ziv audio`) make songs and instrumentals with YuE2 3B (up to 6 minutes), speech with Qwen3-TTS 1.7B (nine default voices, or a voice of your own: see **Voices**) and music, ambience and sound effects with Stable Audio 3 Medium (up to 380 s). Takes are saved as FLAC with their settings, show a live preview while they are made, and play in the Gallery, which has a new **Audio only** filter. **Use as → Audio track** gives a take to a video, and **Use as → Voice** makes a speech take the voice of the next one. Steer a song with a **tempo** and a **key**, speech with a **delivery** and `[sad]`-style marks in the text, and a sound with a **type** (`--tempo`, `--key`, `--speaker`, `--vibe`, `--emotion`, `--manner`, `--pace`, `--pitch`, `--expressiveness`, `--sound-type`, `--kind`), and rewrite a sound's description or a song's style with `--enhance`. It runs on Windows and Linux with a 10 GB GPU and on macOS with Apple silicon, and needs ffmpeg like video does
-- **Voices.** Speech has one library of the nine default voices and **Your voices**, which you design from a description, save from a recording or keep from a speech take; `--voice NAME` uses a saved voice in `ziv-audio`. Delivery works with the default voices only.
-- **Audio helpers.** In the Web UI, **Describe it** and **Fill in** write a song's or speech's fields from one idea; **Enhance** rewrites a song's Style or a sound's prompt; Lyrics are song blocks with an **Improve lyrics** helper; and speech has an **Insert** menu and a **Script helper** that fits a script to a time or adds delivery marks. Each result is a version you can step through and undo.
-- **Clear for every text box.** A 🗑 button first in the right of the tools row empties the box (your text, the Enhanced text and its versions; Lyrics, the whole song; a video's Scene and Action together; Describe it, the idea) and the line under it offers **Undo**. **Fill in** in Describe it has its own **Fast** or **Smart** choice
-- **Every built-in model shows its licence.** An **ⓘ** beside the model picker, on the Models page and in the download dialog names the licence, what it allows and a link, and the CLIs print the same terms before a first download. YuE2 and Stable Audio 3 are non-commercial or limited, so read their terms before you use the output
-- **Extend from a point.** Pause a video in the viewer or the Workspace preview, click the time and choose **Extend from**: the new file keeps the clip up to that frame and continues from there. In the Workspace, **Source video** has a handle for the point, and the CLI takes `--extend-from SECONDS`
-- **A frame of a video as a first or last frame.** Pause a video, click the time and choose **First frame** or **Last frame** to start or end a new clip on that frame
-- **One player for video and audio.** The viewer, the Workspace preview and the file browser's preview play video and audio in the same player: click the picture to play and pause, drag the timeline to seek, and drag up to scrub one frame at a time
-- **Previews in the file browser.** The pickers for images, audio tracks and source videos show thumbnails, can switch to a grid, and have a preview (`Alt+P`) that plays audio and video. Workspace slots show the file they hold. Anyone who can open the Web UI can see and play these files, so use `--host local` only on a network you trust
-- **Edit images.** A new **Edit** kind in the Image tab changes part of a picture you already have, or gives it more room. Paint the part to change, or extend a side, in a full-screen painter, then describe what should be there. It works on FLUX.2 Klein, on every platform. With nothing painted, FLUX.2 Klein changes the whole picture from the prompt. In the CLI, `ziv-image --edit` takes `--mask` and `--extend`.
+- **Projects.** Pick a project in the top bar and the Gallery and Workspace show only its files, and new work is saved into it. **All files** shows everything, as before, and **Move to project…** sorts files into projects. Folders already in your output folder are projects at once.
+- **Audio.** A new **Audio** tab and `ziv-audio` (`ziv audio`) make songs and instrumentals with YuE2 3B (up to 6 minutes), speech with Qwen3-TTS 1.7B, and sound effects, ambience and music with Stable Audio 3 Medium (up to 380 s). Takes play in the Gallery, and **Use as → Audio track** gives one to a video. It runs on Windows and Linux with a 10 GB GPU and on macOS with Apple silicon, and needs ffmpeg like video does.
+  - **Steering.** Set a tempo and key for a song, a delivery for speech and a type for a sound.
+  - **Voices.** Speech has nine default voices and **Your voices**, which you design from a description, save from a recording or keep from a speech take (`--voice NAME` in the CLI). Delivery works with the default voices only.
+  - **Writing helpers.** **Describe it** and **Fill in** write a song's or speech's fields from one idea, and there are helpers for lyrics, for fitting a script to a time and for rewriting a song's style or a sound's description.
+- **Edit images.** A new **Edit** kind in the Image tab changes a painted part of a picture you already have, or gives it more room; with nothing painted, it redraws the whole picture from your prompt. It works with FLUX.2 Klein on every platform. In the CLI, use `ziv-image --edit`.
+- **Extend a video from a point.** Pause a video, click the time and choose **Extend from**: the new clip keeps the video up to that frame and continues from there (`--extend-from SECONDS` in the CLI). The same menu uses the frame as a **First frame** or **Last frame** of a new clip. A last frame needs a first frame.
+- **One player and previews.** Video and audio play in the same player in the viewer, the Workspace and the file browser, whose pickers now show thumbnails and a preview and sort by name, size or date. Anyone who can open the Web UI can see and play these files, so use `--host local` only on a network you trust.
+- **Every built-in model shows its licence.** The model picker, the Models page, the download dialog and the CLIs show the licence and what it allows. YuE2 and Stable Audio 3 are non-commercial or limited, so read their terms before you use the output.
 
 ### Changed
-- **The documentation is reorganised around what you want to do.** **Get started** takes you through Install to your first image, video and audio; **Guides** cover making images, video, music, speech and sound, getting better results, batches and models; **Concepts** explain the ideas several tasks share; **Web UI** describes each screen; **CLI** has its own tab with worked commands for each task and every flag; and **Reference** holds every setting, models and licences, the data folder and Troubleshooting, which lists problems by what you see and by the exact message. Pages moved, so old links to them no longer work. `cli/` and `cli/reference/` keep their URLs. Install and Your first image, video and audio are under `get-started/`; Images and Video under `guides/`; the CLI how-tos are `cli/images/`, `cli/video/`, `cli/audio/`, `cli/batches/` and `cli/models/`; Prompts is `concepts/prompt-syntax/` and Quantization is part of `concepts/memory/`; Models, Configuration, Data folder and Troubleshooting are under `reference/`. The Enhance page is gone: its values are in `cli/reference/`
-- **A last frame needs a first frame.** With a last frame and no first frame, **Generate** is disabled and says to add a first frame
-- The prompt enhancer repeats itself less, for images, video and audio.
-- **The prompt enhancer writes about 3× faster on Windows and Linux** with an NVIDIA GPU, with the same models and nothing new to install.
-- **One header for every prompt box** (Image, Video and the Audio boxes). Marks on the **Enhanced** tab replace the status line, **✕** scratches the Enhanced text, and **Enhance again** keeps up to five versions to step through. **Use mine** and the word counts are gone
-- **The image tools row is shorter.** JSON is the **{ }** icon, and Triggers is a tag with the number of trigger words not yet in the prompt, so the whole row fits on a phone
-- **The Hugging Face cache view marks only the repos this platform's models load as used**
-- **The Gallery and the Workspace strip load small thumbnails** instead of the full images and videos, so they open faster
-- **The Web UI asks before a job downloads a model**, listing what will download with its size, the free space and its terms
-- **Extend Video is now a kind in the Video tab.** The top bar is Image, Video and Audio, and **Kind** in Video switches between **New** and **Extend**
-- **Extend Video keeps its own prompt, model, settings, Batch size and Seed** in the Web UI, apart from New video's.
-- **Reset on Extend also clears the source video**, with its point, length and track; the model, LoRAs and prompts stay
-- **Reset acts on the open tab only**, and **Reuse settings** and **Load settings** apply a file's settings exactly: what the file didn't record takes its default instead of what the form held
-- **The file browser sorts by name, size or date**, newest first by default, shows the time with dates, and has a phone layout when held sideways
+- **The documentation is reorganised around what you want to do.** Pages moved, so old links to them no longer work.
+- **`config.yaml` holds settings only.** Which models the app offers, where they download from, their schedulers and platform labels are part of the app, so keys for them in your own `config.yaml` have no effect. See [Configuration](https://knuthelge.github.io/ZVisionGenerator/reference/configuration/).
+- **Extend is a kind of the Video tab, and every tab keeps its own settings.** Extend, New video, Image and Edit no longer share a prompt, model or preset. **Reset** acts on the open tab only, and **Reuse settings** and **Load settings** apply a file's settings exactly: what the file didn't record takes its default.
+- **The Web UI asks before a job downloads a model**, listing what will download with its size, the free space and its terms.
+- **The prompt enhancer writes about 3× faster on Windows and Linux** with an NVIDIA GPU, with nothing new to install.
+- **Prompt boxes share one header** with a Clear button and Undo. **Use mine** and the word counts are gone.
 
 ### Fixed
-- **Image and Video keep their own settings, model and preset** when you switch between them
-- **The viewer stays on the result you opened** when a new one lands or an earlier one is deleted
-- **The job card's notice has room**, so *Pausing after this image* is no longer cut off
-- **Steps stops at the video model's limit** as you type, so the count shown is the count that runs
-- **Saving on the Config page, skipping the first-run dialog and the Discover Hugging Face switch keep the comments in your `config.yaml`**, instead of rewriting the file without them
-- **A Windows/Linux LTX model with a file missing no longer shows as downloaded** on the Models page; a row reads downloaded only when everything it needs is on disk
-- **The two Ideogram 4 LoRAs in Discover are marked Non-commercial**, as the model they build on is
-- **Deleting the last LTX-2.3 model on a Mac removes its Gemma 3 text encoder too**, so it no longer stays in the cache
-- `ziv-image -m <owner/repo>` with a built-in model's repo records the model under its short name, as `ziv-video` does
+- **The viewer stays on the result you opened** when a new one lands or an earlier one is deleted.
+- **Saving on the Config page keeps the comments in your `config.yaml`**, as do skipping the first-run dialog and the Discover Hugging Face switch.
+- **A Windows/Linux LTX model with a file missing no longer shows as downloaded** on the Models page.
+- **The two Ideogram 4 LoRAs in Discover are marked Non-commercial**, as the model they build on is.
+- **Deleting the last LTX-2.3 model on a Mac removes its Gemma 3 text encoder too**, so it no longer stays in the cache.
+- `ziv-image -m <owner/repo>` with a built-in model's repo records the model under its short name, as `ziv-video` does.
+
+### Known issues
+- **Moving a file into a project breaks Reuse on files made from it** (extensions, edits and upscales), because they record the file's old location.
 
 ## [0.14.0b4] - 2026-11-02
 
