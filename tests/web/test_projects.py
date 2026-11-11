@@ -17,6 +17,9 @@ class TestListProjects:
 
         assert list_projects(tmp_path) == (Project("Alpha", str(tmp_path / "Alpha")), Project("beta", str(tmp_path / "beta")))
 
+    def test_a_missing_output_folder_has_no_projects(self, tmp_path):
+        assert list_projects(tmp_path / "outputs") == ()
+
 
 class TestCreateProject:
     def test_creates_the_folder_with_the_trimmed_name(self, tmp_path):
@@ -24,6 +27,14 @@ class TestCreateProject:
 
         assert project == Project("Reel", str(tmp_path / "Reel"))
         assert (tmp_path / "Reel").is_dir()
+
+    def test_creates_a_missing_output_folder(self, tmp_path):
+        root = tmp_path / "outputs"
+
+        project = create_project(root, "Reel")
+
+        assert project == Project("Reel", str(root / "Reel"))
+        assert (root / "Reel").is_dir()
 
     @pytest.mark.parametrize(
         "name",

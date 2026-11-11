@@ -69,7 +69,7 @@ A move is a rename inside the output folder:
 Three things to know:
 
 - Don't move a file a queued job uses, just as you wouldn't delete it: the job keeps the path it was given.
-- Upscales and extensions record where their source was. After a move that link shows as a missing source, as it does when the source is deleted.
+- Upscales, edits and extensions record where their source was. After you move the source, **Reuse settings** on them reports it missing, as it does when the source is deleted.
 - A Workspace slot that held a moved file, such as a start image, a reference or an extend source, follows it to its new place. A deleted file empties the slot.
 
 ## Projects on the command line
