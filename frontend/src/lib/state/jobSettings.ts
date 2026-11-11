@@ -3,7 +3,7 @@ import type { DraftState, EnhancedSource, EnhanceParts, EnhanceSettings, JobSett
 import { EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
 
 /** Fields the workspace prefill path applies on top of the model's defaults (the same keys as a reuse URL). */
-const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio', 'size', 'width', 'height', 'frames', 'lora', 'image_path', 'end_image_path', 'audio_track_path', 'audio_track_start', 'source_video', 'extend_frames', 'extend_from'] as const;
+const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio', 'size', 'width', 'height', 'frames', 'lora', 'image_path', 'end_image_path', 'audio_track_path', 'audio_track_start', 'source_video', 'extend_frames', 'extend_from', 'edit_source_path', 'edit_extend_side', 'edit_extend_amount'] as const;
 
 export interface JobSettingsPrefill {
   /** Applied like a reuse URL: workflow and model first, so their defaults load before the values. */
@@ -140,6 +140,8 @@ export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: Enha
     // A blank LoRA list is kept: the job ran without LoRAs, so loading it clears them.
     if (value !== undefined && (value !== '' || key === 'lora')) params[key] = value;
   }
+  // An edit asked for its painted area (`edit_painted`); the mask itself is never recorded, so it has to be painted again.
+  if (first(settings, 'edit_painted') === 'true') params.edit_repaint = 'true';
   // The references the job ran with, in prompt order; none named clears them, as the job had none.
   if (first(settings, 'mode') !== 'video') params.reference_path = values(settings, 'reference_path');
 

@@ -10,7 +10,7 @@ import threading
 import warnings
 from pathlib import Path
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PIL import Image
 from mflux.models.flux2 import Flux2Klein
@@ -29,6 +29,7 @@ from mlx import nn
 
 from zvisiongenerator.backends.mac import moss as _moss
 from zvisiongenerator.backends.mac._temp_images import remove_file, save_temp_png
+from zvisiongenerator.backends.mac.image_edit import edit_blend, prepare as prepare_edit
 from zvisiongenerator.backends.mac.image_preview import estimate_clean_latents, render_latent_preview
 from zvisiongenerator.backends.mac.klein_references import generate_with_references
 from zvisiongenerator.backends.mac.memory import load_resident, upcast_weights
@@ -37,9 +38,13 @@ from zvisiongenerator.core import JobPrompt
 from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, INSTANT_GUIDANCE, sampler_settings, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
 from zvisiongenerator.core.moss import lora_stack as moss_lora_stack, run_size as moss_run_size, sampler_settings as moss_sampler_settings
 from zvisiongenerator.core.progress_events import preview_steps
+from zvisiongenerator.processing.edit_region import EDIT_CELL_PIXELS
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.lora_files import readable_lora_files
 from zvisiongenerator.utils.moss_build import is_moss_dir, require_built, shared_quant_source, turbo_lora_for
+
+if TYPE_CHECKING:
+    import numpy as np
 
 # Per-run override slot, distinct from the always-on default constant (IDEOGRAM4_INITIAL_SIGMA).
 # The sentinel distinguishes "no override" (use the default) from "override to
@@ -678,6 +683,38 @@ class MfluxBackend:
         finally:
             # The recorded Ideogram 4 schedule belongs to this run only; never let a later run read it.
             _ideogram4_timesteps.value = None
+
+    def edit_region(
+        self,
+        model: Any,
+        image: Image.Image,
+        paint: np.ndarray,
+        prompt: str,
+        seed: int,
+        steps: int,
+        guidance: float,
+        scheduler: str | None = None,
+        skip_signal: Any | None = None,
+        step_callback: Any | None = None,
+    ) -> Image.Image | None:
+        """Redraw the *paint* area of *image* at strength 1.0 by blending the source's latents back in after every step.
+
+        mflux has no hook that replaces latents, so the run goes through :meth:`text_to_image` with a blend on the
+        scheduler's step (Z-Image, Klein) or on the Krea 2 stepper; scheduler choice, previews and Stop are unchanged.
+
+        Raises:
+            RuntimeError: If :meth:`load_model` has not been called.
+            ValueError: If the model's family does not support mask editing.
+        """
+        if self._model_info is None:
+            raise RuntimeError("load_model() must be called before generation")
+        family = self._model_info.family
+        if family not in EDIT_CELL_PIXELS:
+            raise ValueError(f"Mask editing is not supported for family {family!r}.")
+        width, height = image.size
+        prepared = prepare_edit(family, model, image, paint, seed)
+        with edit_blend(model, family, prepared):
+            return self.text_to_image(model, prompt, width, height, seed, steps, guidance, scheduler=scheduler, skip_signal=skip_signal, step_callback=step_callback)
 
     def _moss_generate(
         self,

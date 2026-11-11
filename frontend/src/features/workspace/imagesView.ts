@@ -6,6 +6,7 @@ import { referenceRows, type ReferenceRow } from '$lib/state/references';
 import { workspaceTab } from '$lib/state/workspaceTab';
 import type { WorkspaceContext } from '$lib/types';
 import { workspaceCapabilities, type WorkspaceCapabilities } from './capabilities';
+import { currentEditReason } from './edit/currentEdit';
 
 /** What one image slot (the start image, the first frame or the last frame) holds and what the run does with it. */
 export interface SlotView {
@@ -70,6 +71,8 @@ export interface ImagesViewInput {
   files: { startImage: File | null; firstFrame: File | null; lastFrame: File | null; references: readonly (File | null)[] };
   /** The held uploads have been read back, so an upload without a file is known to be lost. */
   restored: boolean;
+  /** Edit, where the image to edit stands in for the images: its reason (no image, a lost upload, paint to add) is Generate's. Absent outside Edit. */
+  edit?: { block: string | null };
 }
 
 // An image is gone when its path is flagged missing, or when it is an upload (a marker) whose file did not come back from the
@@ -123,7 +126,7 @@ function _sent(view: Pick<ImagesView, 'tab' | 'start' | 'last'>, strength: numbe
  * Derive which images the open tab uses: the start image (the first frame in Video), the last frame, the reference rows,
  * whether Strength is offered, the reason Generate is blocked and what a submit sends. A slot the model cannot use is null.
  */
-export function imagesView({ state, caps, files, restored }: ImagesViewInput): ImagesView {
+export function imagesView({ state, caps, files, restored, edit }: ImagesViewInput): ImagesView {
   const tab: ImageTab = workspaceTab(state.workflow) === 'video' ? 'video' : 'image';
   const video = tab === 'video';
   const start = caps.showRefImage
@@ -140,12 +143,13 @@ export function imagesView({ state, caps, files, restored }: ImagesViewInput): I
     ...partial,
     visible: start !== null || references !== null,
     strength: start?.set === true && caps.showI2IStrength,
-    block: _block(partial, restored),
+    block: edit ? edit.block : _block(partial, restored),
     sent: _sent(partial, state.referenceImageStrength),
   };
 }
 
 /** The view of the open tab, read from the draft and the held uploads. */
 export function currentImagesView(context: WorkspaceContext): ImagesView {
-  return imagesView({ state: draft.state, caps: workspaceCapabilities(context, draft.state), files: heldUploads, restored: heldUploads.restored });
+  const caps = workspaceCapabilities(context, draft.state);
+  return imagesView({ state: draft.state, caps, files: heldUploads, restored: heldUploads.restored, edit: caps.isEdit ? { block: currentEditReason(context) } : undefined });
 }

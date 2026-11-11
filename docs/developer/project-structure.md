@@ -4,6 +4,7 @@
 zvisiongenerator/
 ├── __init__.py
 ├── image_cli.py                   Image CLI entry point (ziv-image)
+├── edit_cli.py                    The `--edit`, `--mask` and `--extend` options of `ziv-image` and the refusals that keep an edit apart from a generation
 ├── video_cli.py                   Video CLI entry point (ziv-video)
 ├── audio_cli.py                   Audio CLI entry point (ziv-audio)
 ├── cli.py                         Unified CLI entry point (ziv)
@@ -58,6 +59,7 @@ zvisiongenerator/
 │   │   ├── seedvr2.py             SeedVR2 upscaler (vendored PyTorch core, FP8 streamed from system memory)
 │   │   ├── image/
 │   │   │   ├── backend.py         Image backend
+│   │   │   ├── edit.py            Region editing on diffusers: the per-family latent layouts and the step-end blend
 │   │   │   ├── ideogram4.py       Ideogram 4 Instant: load, placement, the first-step sigma and the pipeline call
 │   │   │   ├── lokr.py            LyCORIS LoKr adapters (applied like mflux)
 │   │   │   ├── moss.py            MOSS-Image: load, placement, the sampling run and the stored q4/q8 copies
@@ -99,6 +101,7 @@ zvisiongenerator/
 │       ├── h3_staged.py           MiniMax H3 image modes (MLX): keyframe, vision, prompt, denoise and decode phases that each load one component and drop it before the next
 │       ├── h3_video.py            MiniMax H3 video backend (MLX): file resolution, the 4-bit text-encoder copy, LoRA combining and Extend around the vendored port
 │       ├── image.py               Image backend (mflux)
+│       ├── image_edit.py          Region editing on mflux: the per-family latents and the wraps that blend them into Z-Image, Klein and Krea 2's loops
 │       ├── image_preview.py       Cheap latent → RGB live previews for the mflux backend
 │       ├── klein_references.py    FLUX.2 Klein references (mflux): an edit view over the loaded model, and the start-image hook for references with img2img
 │       ├── ltx_converted.py       Write a converted LTX-2.3 MLX folder from a single-file checkpoint
@@ -152,6 +155,7 @@ zvisiongenerator/
 │   └── worker.py                  Child entry point: snapshot_download one target, print byte counts
 ├── processing/
 │   ├── contrast.py                Contrast adjustment
+│   ├── edit_region.py             Crop planning, the Extend canvas, the paste alpha and the composite of an image edit (pure)
 │   ├── matte.py                   Pure helpers for the cut-out: trimap, working size, alpha merge, foreground colours, RGBA
 │   ├── saturation.py              Saturation adjustment
 │   └── sharpen.py                 AMD CAS post-processing
@@ -180,6 +184,7 @@ zvisiongenerator/
 │   ├── curated_loras.json         The curated list: hand-checked Hugging Face LoRAs, each pinned to a commit, file, size and SHA-256, with its Hugging Face download count
 │   ├── curated_loras.py           Pure loader of the curated list: frozen `CuratedLora` entries and lookups by family, size or version, id and local name
 │   ├── enhancer_models.py         The built-in prompt-enhancer models (Fast and Smart) per platform, and why Smart cannot run on a machine, read from the metadata
+│   ├── edit_request.py            Parse and check the inputs of an image edit (Extend, mask, refusals), shared by the CLI and the Web UI
 │   ├── enhance_record.py          Record how a prompt was enhanced for a generated asset, and read it back
 │   ├── ffmpeg.py                  ffmpeg availability check and install, one ffmpeg call that prints to stdout, the error for a failed ffmpeg or ffprobe run, and the hidden temp path of in-place rewrites
 │   ├── file_links.py              Hard-link model files into a new folder, copying where linking fails
@@ -192,7 +197,7 @@ zvisiongenerator/
 │   ├── hf_snapshot.py             Find or download the files of one pinned Hugging Face revision (shared by the CUDA and macOS H3 backends)
 │   ├── ideogram4_instant.py       Ideogram 4 Instant's pinned build sources, model folder and build record
 │   ├── image_model_detect.py      Image model type detection
-│   ├── input_images.py            Input images opened upright and on white (`open_image_upright`, `upright_image_copies`), `flatten_alpha` for another backdrop, and the accepted extensions
+│   ├── input_images.py            Input images opened upright and on white (`open_image_upright`, `upright_image_copies`, `upright_size`), `flatten_alpha` for another backdrop, and the accepted extensions
 │   ├── interactive.py             Keyboard interrupt handling and review state
 │   ├── library_noise.py           Silence the known console noise of the audio models' libraries
 │   ├── licences.py                Pure parser and lookups of the licence records, and the licence notice for a download that is about to start
@@ -266,6 +271,7 @@ zvisiongenerator/
 │   ├── discover_api.py            Discover LoRAs responses: the curated entries with their state, repository details, family checks and the sources to install
 │   ├── discover_hub.py            Read LoRAs from Hugging Face for Discover: adapters per base model, a repository's files and card, a file's family
 │   ├── download_lane.py           Models-page and LoRA downloads: a queue run one at a time on its own thread, beside the job queue
+│   ├── edit_job.py                Turn an Edit form's fields into the job's picture, Extend and mask, and own the mask file until the job ends
 │   ├── extend_api.py              Extend routes: check and describe a source video, fit its window to memory, build the rewrite context of an extension
 │   ├── first_run.py               The model the first-run dialog preselects, and the dialog's payload block
 │   ├── gallery.py                 Gallery inventory and response serialization
@@ -316,7 +322,7 @@ zvisiongenerator/
 
 | Path | Holds |
 |---|---|
-| `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed. The Audio tab is in `src/features/workspace/` with its state in `src/lib/state/`, and the default voices' preview clips in `public/voices/` (see [Frontend](frontend.md#preview-clips)) |
+| `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed. The Audio tab is in `src/features/workspace/` with its state in `src/lib/state/`, and the default voices' preview clips in `public/voices/` (see [Frontend](frontend.md#preview-clips)); the Edit kind of the Image tab, with its painter, is in `src/features/workspace/edit/` |
 | `tests/` | The pytest suite, grouped by area: `web/`, `video/`, `image/`, `prompts/`, `downloads/`, `converters/`, `contracts/`, `backends/` (with `cuda/` and `mac/`), `audio/` and `common/`. `conftest.py` holds the autouse guards and fixtures, `_factories.py` and the other `_*.py` files the helpers shared between areas, and `fixtures/` the JSON the frontend tests also read. See [Conventions](conventions.md#tests) |
 | `bench/enhance/` | The [prompt-enhancer bench](enhancer-bench.md); not packaged |
 | `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX, MOSS-Image, BiRefNet, YuE2, Stable Audio 3 and Qwen3-TTS code |

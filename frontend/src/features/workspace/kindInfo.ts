@@ -9,6 +9,12 @@ export interface KindInfo {
   title?: string;
 }
 
+/** How each kind of the Image tab reads. */
+export const IMAGE_KIND_INFO: Record<'new' | 'edit', KindInfo> = {
+  new: { label: 'New', icon: 'reference', description: 'From text or a start image', title: 'A new image, from text or a start image' },
+  edit: { label: 'Edit', icon: 'edit', description: 'Change part of an image', title: 'Change part of an image' },
+};
+
 /** How each kind of the Video tab reads. */
 export const VIDEO_KIND_INFO: Record<VideoKind, KindInfo> = {
   new: { label: 'New', icon: 'film', description: 'From text or a first frame', title: 'A new clip, from text or a first frame' },
@@ -22,7 +28,7 @@ export const AUDIO_KIND_INFO: Record<AudioWorkflow, KindInfo> = {
   sound: { label: 'Sound', icon: 'waveform', description: 'Ambience and effects', title: 'Ambience and sound effects' },
 };
 
-/** The kinds the open tab offers, the open one, and how to switch: Audio's kinds, or Video's New and Extend. */
+/** The kinds the open tab offers, the open one, and how to switch: Audio's kinds, Image's New and Edit, or Video's New and Extend. */
 export interface KindChoice {
   kinds: readonly string[];
   info: Record<string, KindInfo>;

@@ -15,7 +15,7 @@
   import { belongsToView } from '$lib/state/viewMoves';
   import { jobStore } from '$lib/state/job.svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { audioTrackParams, extendParams, frameParams, referenceParams, reuseParams, frameSetNotice, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type FrameTarget, type ReferenceTarget } from '$lib/state/assetActions';
+  import { audioTrackParams, editParams, extendParams, frameParams, referenceParams, reuseParams, frameSetNotice, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type FrameTarget, type ReferenceTarget } from '$lib/state/assetActions';
   import type { FramePoint } from '$lib/state/framePoint';
   import { runFrameGrab } from '$lib/state/frameGrab.svelte';
   import { heldUploads } from '$lib/state/heldUploads.svelte';
@@ -597,6 +597,11 @@
     });
   }
 
+  /** Make an image the image to edit: the Workspace opens the Edit kind with it and no paint. */
+  function editAsset(asset: GalleryAsset): void {
+    router.navigate('workspace', editParams(asset));
+  }
+
   async function upscaleAsset(asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod): Promise<void> {
     // The job panel and queue live in the Workspace; follow the upscale there.
     if (await startUpscale(asset, factor, method)) router.navigate('workspace');
@@ -738,6 +743,7 @@
             onuseaudio={useAudio}
             {useAs}
             onextend={extendAsset}
+            onedit={editAsset}
             onupscale={upscaleAsset}
             ondelete={deleteSingle}
             onmove={moveSingle}
@@ -808,6 +814,7 @@
   audioVocabulary={context?.audio_settings}
   onextend={extendAsset}
   onuseframe={useFrame}
+  onedit={editAsset}
   onupscale={upscaleAsset}
   ondelete={deleteSingle}
   onmove={moveSingle}

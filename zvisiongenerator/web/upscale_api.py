@@ -288,12 +288,13 @@ def plan_ltx_video_upscale(source: ExtendSource, recorded_config: Mapping[str, A
 
 def _source_request_fields(source: UpscaleSource, recorded: RecordedSettings) -> dict[str, Any]:
     """Return the request fields both upscale methods take from *source* and its recorded settings."""
-    prompt = recorded.prompt or ""
+    # An edit's prompt says what to change, not what the picture shows: refining it with that text would redraw the change.
+    prompt = "" if recorded.workflow == "edit" else recorded.prompt or ""
     return {
         "backend": None,
         "model": None,
         "prompt": prompt,
-        "resolved_prompt": source.rendered_prompt or prompt or None,
+        "resolved_prompt": (source.rendered_prompt if recorded.workflow != "edit" else None) or prompt or None,
         "ratio": recorded.ratio,
         "size": recorded.size,
         "width": source.width,

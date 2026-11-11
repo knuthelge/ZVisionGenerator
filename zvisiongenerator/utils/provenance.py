@@ -7,13 +7,14 @@ import subprocess
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.utils.edit_request import EditMode, edit_mode, parse_extend
 from zvisiongenerator.utils.enhance_record import parse_enhance_record
 from zvisiongenerator.utils.ffmpeg import staging_path
 from zvisiongenerator.utils.paths import collapse_home, display_stem, expand_home
@@ -34,6 +35,8 @@ UPSCALE_METHOD_SEEDVR2 = "seedvr2"
 # A video file upscaled on macOS: LTX's spatial upsampler and a short refine of the clip's own latent.
 UPSCALE_METHOD_LTX = "ltx"
 UPSCALE_WORKFLOW = "upscale"
+# What an edit can do, as recorded in the ``edit`` block.
+_EDIT_MODES = get_args(EditMode)
 
 
 def build_image_config_payload(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> dict[str, Any]:
@@ -81,6 +84,8 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
     if source:
         # The workflow that made the original, so Reuse settings regenerates it (img2img keeps its reference).
         payload["source"] = {**source, "path": _portable_path(source.get("path")), "workflow": "img2img" if request.image_path else "txt2img"}
+    if request.edit_source:
+        payload.update(_edit_fields(request, artifacts))
     return _drop_unserializable(payload)
 
 
@@ -459,8 +464,10 @@ class RecordedSettings:
     enhance: dict[str, Any] | None = None
     # How the file was made: time, quantize, upscale and post-processing (empty for files that predate it).
     generation: dict[str, Any] = field(default_factory=dict)
-    # The image an upscale started from: ``{path, width, height, workflow}``.
+    # The image an upscale or an edit started from: ``{path, width, height, workflow}`` (an edit's ``workflow`` is None).
     source: dict[str, Any] | None = None
+    # What an edit did: ``{mode, extend}``, where ``extend`` is ``{side, amount}`` when it extended and else absent; None for any other file.
+    edit: dict[str, Any] | None = None
 
 
 def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
@@ -496,6 +503,7 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         lora=_lora_string(config.get("lora")),
         generation=_generation_block(config.get("generation"), is_video=_is_video_config(config)),
         source=_source_block(config.get("source")),
+        edit=_edit_block(config.get("edit")),
         enhance=_enhance_block(config.get("enhance"), is_video=_is_video_config(config)),
     )
 
@@ -594,6 +602,24 @@ def _source_block(value: Any) -> dict[str, Any] | None:
     }
 
 
+def _edit_block(value: Any) -> dict[str, Any] | None:
+    """Return a recorded ``edit`` block as ``{mode}`` plus ``extend`` when it extended, or None when absent or malformed."""
+    if not isinstance(value, dict):
+        return None
+    mode = optional_text(value.get("mode"))
+    if mode not in _EDIT_MODES:
+        return None
+    block: dict[str, Any] = {"mode": mode}
+    extend = value.get("extend")
+    if isinstance(extend, dict):
+        try:
+            side, amount = parse_extend((extend.get("side") or "", extend.get("amount") or ""))
+        except ValueError:
+            return block
+        block["extend"] = {"side": side, "amount": amount}
+    return block
+
+
 def image_prompt_text(image: Any) -> str | None:
     """Return the rendered prompt saved in an open PIL image (PNG ``Description`` or EXIF ImageDescription)."""
     return optional_text(image.info.get("Description") or image.getexif().get(EXIF_IMAGE_DESCRIPTION))
@@ -664,13 +690,29 @@ def _format_loras(paths: list[str] | None, weights: list[float] | None) -> str |
     return ",".join(f"{item['path']}:{item['weight']:g}" for item in loras)
 
 
+def _edit_fields(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> dict[str, Any]:
+    """Return the ``source`` and ``edit`` blocks of an edit: the picture it started from, what it did, and how far it extended."""
+    source = artifacts.metadata.get("edit_source") or {"path": request.edit_source}
+    edit: dict[str, Any] = {"mode": edit_mode(request.edit_paint is not None, request.edit_extend)}
+    if request.edit_extend:
+        side, amount = request.edit_extend
+        edit["extend"] = {"side": side, "amount": amount}
+    return {"source": {**source, "path": _portable_path(source.get("path"))}, "edit": edit}
+
+
 def _image_workflow(request: ImageGenerationRequest) -> str:
+    if request.edit_source:
+        return "edit"
     if request.upscale_source:
         return "upscale"
     return "img2img" if request.image_path else "txt2img"
 
 
 def _image_generation_details(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> dict[str, Any]:
+    if request.edit_source:
+        # An edit runs no post-processing; pixels outside the paint stay the source's own. A cut-out stays one: its alpha is kept.
+        cutout = artifacts.edit is not None and artifacts.edit.alpha is not None
+        return _drop_empty({"time": _round_seconds(artifacts.generation_time), "quantize": request.quantize, "transparent": True if cutout else None})
     upscale = _upscale_details(request) if artifacts.was_upscaled and request.upscale_factor else None
     return _drop_empty(
         {

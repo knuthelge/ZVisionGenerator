@@ -25,6 +25,8 @@
   import SoundSection from './SoundSection.svelte';
   import DeliverySection from './DeliverySection.svelte';
   import ImagesSection from './ImagesSection.svelte';
+  import ImageToEditSection from './edit/ImageToEditSection.svelte';
+  import { layout } from '$lib/state/layoutMode.svelte';
   import type { ImagesView } from './imagesView';
   import SourceVideoSection from './SourceVideoSection.svelte';
   import WaitingLabel from './WaitingLabel.svelte';
@@ -174,7 +176,7 @@
   }
 
   // --- Footer ---------------------------------------------------------------
-  const promptFileMode = $derived(s.promptSource === 'file' && !caps.isAudio);
+  const promptFileMode = $derived(caps.promptFileMode);
   const promptChoiceMissing = $derived(promptFileMode && s.promptFileOptionIds.length === 0);
   // A LoRA chip whose file is downloading (or failed) holds Generate back.
   const block = $derived(generateBlock(s, context.loras));
@@ -226,6 +228,11 @@
   </div>
 
   <div class="settings-scroll">
+    <!-- On a phone the same content is the card above the settings chips (ImageToEditCard). -->
+    {#if caps.isEdit && !layout.compact}
+      <ImageToEditSection {context} {busy} />
+    {/if}
+
     {#if caps.showSourceVideo}
       <SourceVideoSection {context} {busy} guard={sourceGuard} />
     {/if}

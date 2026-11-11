@@ -45,6 +45,7 @@ const MARKED: DraftState = {
   loraString: 'detail:0.8', lorasByFamily: { 'model:ltx-8': 'detail:0.5' }, 
   referenceImagePath: '/refs/ref.png', referenceImageUpload: 'start.png', firstFramePath: '/refs/first.png', firstFrameUpload: 'first.png',
   referenceImagePaths: ['/refs/a.png', '/refs/b.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', endImageUpload: 'end.png',
+  editSourcePath: '/out/edit.png', editSourceUpload: 'edit.png', editMaskUpload: 'mask.png', editPaintedShare: 0.2, editExtendSide: 'top', editExtendAmount: 320, editRepaint: true,
   audioTrackPath: '/audio/song.mp3', audioTrackUpload: 'memo.m4a', audioTrackStart: 90,
   extendAudioTrackPath: '/audio/other.mp3', extendAudioTrackUpload: 'extend.m4a', extendAudioTrackStart: 12,
   referenceImageStrength: 0.9, frameCount: 33, fps: 30, audio: false, lowMemory: false, upscaleEnabled: true, upscaleFactor: 4, quantize: 4,
@@ -60,7 +61,7 @@ const MARKED: DraftState = {
   savedSettings: { video: { steps: 31, model: 'ltx-8' } },
   enhanceSettings: SETTINGS, enhanceSettingsVideo: { ...SETTINGS, style: 'dreamy', partsByWorkflow: {} }, enhanceAuto: true, enhanceModel: 'smart', describeTier: 'smart', enhanceFormat: 'json',
   extendSourcePath: '/clips/source.mp4', extendFrames: 16, extendFrom: 3.208333, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
-  appliedPreset: 'look', videoKind: 'new', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' },
+  appliedPreset: 'look', videoKind: 'new', leftOnEdit: true, audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' },
   audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain', audioSeconds: 30,
   audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
   speechDelivery: { emotion: 'sad', manner: 'whisper', pace: 'slow', pitch: 'low', expressiveness: 'high' },
@@ -74,12 +75,13 @@ const MARKED: DraftState = {
 /** What each tab's draft looks like when that tab is open: its workflow and the model of its mode. */
 const OPEN: Record<WorkspaceTab, Partial<DraftState>> = {
   image: {},
+  edit: { workflow: 'edit' },
   video: { workflow: 'img2vid', model: 'ltx-8', quantize: null, videoKind: 'new' },
   extend: { workflow: 'extend', model: 'ltx-8', quantize: null, videoKind: 'extend' },
   audio: { workflow: 'speech', model: 'qwen3_tts' },
 };
 
-const TEXT_WORKFLOW: Record<WorkspaceTab, string> = { image: 'txt2img', video: 'txt2vid', extend: 'extend', audio: 'speech' };
+const TEXT_WORKFLOW: Record<WorkspaceTab, string> = { image: 'txt2img', edit: 'edit', video: 'txt2vid', extend: 'extend', audio: 'speech' };
 
 const AUDIO_TAB_KEYS = ['audioKind', 'audioModels', 'audioStyle', 'lyrics', 'speechText', 'soundPrompt', 'audioSeconds', 'audioTempo', 'audioKey', 'musicSeconds', 'soundType', 'speechDelivery', 'voiceMode', 'speechSpeaker', 'savedVoice', 'voicePath', 'voiceUpload', 'voiceText', 'audioRewrites', 'lyricsVersions', 'lyricsCurrent', 'enhanceSettingsAudio', 'audioDescribe'] as const;
 
@@ -117,15 +119,16 @@ describe('Reset on each tab', () => {
   /** Hold a file for each tab and tick the speaker's consent, so a Reset shows what it forgets. */
   function holdUploads(): void {
     heldUploads.setStart('image', file('start.png'));
+    heldUploads.setEditSource(file('edit.png'));
     heldUploads.setStart('video', file('first.png'));
     heldUploads.setTrack('extend', file('extend.m4a'));
     heldUploads.setVoice(file('me.wav'));
     voiceConsent.ticked = true;
   }
 
-  const held = () => ({ image: heldUploads.startImage, video: heldUploads.firstFrame, extend: heldUploads.extendAudioTrack, audio: heldUploads.voice });
+  const held = () => ({ image: heldUploads.startImage, edit: heldUploads.editSource, video: heldUploads.firstFrame, extend: heldUploads.extendAudioTrack, audio: heldUploads.voice });
 
-  it.each(['image', 'video', 'extend', 'audio'] as WorkspaceTab[])('on %s changes its own scope to the defaults and leaves every other field as it was', (tab) => {
+  it.each(['image', 'edit', 'video', 'extend', 'audio'] as WorkspaceTab[])('on %s changes its own scope to the defaults and leaves every other field as it was', (tab) => {
     draft.hydrateFromContext(ctx, null);
     draft.applyExtendSource(sourceInfo(), ctx);
     draft.patch({ ...MARKED, ...OPEN[tab] });
@@ -143,7 +146,7 @@ describe('Reset on each tab', () => {
     }
     expect(draft.state.workflow).toBe(TEXT_WORKFLOW[tab]);
     // Only the open tab forgets the files it held.
-    const owner: Record<WorkspaceTab, string | null> = { image: 'image', video: 'video', extend: 'extend', audio: 'audio' };
+    const owner: Record<WorkspaceTab, string | null> = { image: 'image', edit: 'edit', video: 'video', extend: 'extend', audio: 'audio' };
     for (const [name, value] of Object.entries(held())) expect(value === null, `${name} upload`).toBe(name === owner[tab]);
     expect(voiceConsent.ticked).toBe(tab !== 'audio');
   });

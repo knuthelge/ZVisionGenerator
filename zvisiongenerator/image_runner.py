@@ -32,14 +32,15 @@ from zvisiongenerator.job_controls import announce_repeat, pause_until_resumed, 
 from zvisiongenerator.matte_room import MatteRoom
 from zvisiongenerator.review import ReviewOutcome, review_enabled
 from zvisiongenerator.utils.model_metadata import model_display_name
-from zvisiongenerator.utils import generate_filename, format_generation_info
+from zvisiongenerator.utils import edit_output_stem, generate_filename, format_generation_info
 from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.config import get_variant_key, resolve_scheduler_class, sharpening_amounts
 from zvisiongenerator.utils.model_metadata import model_capabilities
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.input_images import upright_size
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.upscale import default_upscale_denoise
-from zvisiongenerator.workflows import build_workflow, conditioning_prompt, generation_negative, generation_prompt
+from zvisiongenerator.workflows import build_edit_workflow, build_workflow, conditioning_prompt, generation_negative, generation_prompt
 from zvisiongenerator.utils.enhance_record import planned_enhance_record
 
 
@@ -145,19 +146,29 @@ def run_batch(
     supports_neg = capabilities["supports_negative_prompt"]
     max_references = capabilities["max_reference_images"]
 
+    # An edit job works on the picture it was given: no preset size, no ratio, and no cut-out stage.
+    edit_source = getattr(args, "edit_source", None)
+
     # Resolve size from config
-    sizes = config.get("sizes", {})
-    dims = sizes[args.ratio][args.size]
-    width = dims["width"]
-    height = dims["height"]
-    if args.width is not None:
-        width = args.width
-    if args.height is not None:
-        height = args.height
+    if edit_source is not None:
+        try:
+            width, height = upright_size(edit_source)
+        except OSError:
+            width, height = 0, 0  # the load stage reports an unreadable source
+    else:
+        sizes = config.get("sizes", {})
+        dims = sizes[args.ratio][args.size]
+        width = dims["width"]
+        height = dims["height"]
+        if args.width is not None:
+            width = args.width
+        if args.height is not None:
+            height = args.height
 
     # Determine whether to propagate ratio/size — only when user didn't specify explicit dims
-    use_ratio = args.ratio if args.width is None and args.height is None else None
-    use_size = args.size if args.width is None and args.height is None else None
+    preset_size = edit_source is None and args.width is None and args.height is None
+    use_ratio = args.ratio if preset_size else None
+    use_size = args.size if preset_size else None
 
     # The size the first generation runs at; an upscale refines it up to the requested size.
     gen_width = round_to_alignment(width // args.upscale) if args.upscale else width
@@ -244,7 +255,7 @@ def run_batch(
     else:
         saturation_amount = saturation_cfg.get("default_amount", 1.0)
 
-    workflow = build_workflow(args, enhance=plan.has_rewrites)
+    workflow = build_workflow(args, enhance=plan.has_rewrites) if edit_source is None else build_edit_workflow()
     chain = (matte_factory or create_matte_chain)() if transparent else None
     room = MatteRoom(backend, model, reload_model, accelerator_free_bytes, release_accelerator_memory) if chain is not None else None
 
@@ -331,7 +342,7 @@ def run_batch(
                         if retries > 0:
                             # Retries keep the planned text and always draw a new seed, even when the job's seed is fixed.
                             seed = random.randint(seed_min, seed_max)
-                        gen_filename = generate_filename(set_name)
+                        gen_filename = generate_filename(set_name) if edit_source is None else edit_output_stem(edit_source)
                         # Honour pause/quit queued before this generation started (e.g. during model load).
                         # skip/repeat have no generation to act on yet, so they are dropped.
                         pending_action = skip.consume()
@@ -431,6 +442,9 @@ def run_batch(
                             image_path=args.image_path,
                             image_strength=args.image_strength,
                             reference_paths=reference_paths,
+                            edit_source=edit_source,
+                            edit_paint=getattr(args, "edit_paint", None),
+                            edit_extend=getattr(args, "edit_extend", None),
                             sharpen_amount_normal=sharpen_normal,
                             sharpen_amount_upscaled=sharpen_upscaled,
                             sharpen_amount_pre_upscale=sharpen_pre_upscale,

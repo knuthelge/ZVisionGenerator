@@ -4271,7 +4271,7 @@ describe('the tab beside the others', () => {
     app = await mountWorkspacePage(makeContext(), target);
 
     expect(draft.state.workflow).toBe('txt2img');
-    expect(target.querySelector('[data-testid="kind-control"]')).toBeNull();
+    expect(target.querySelector('[data-testid="kind-control"] [data-value="speech"]')).toBeNull();
   });
 });
 

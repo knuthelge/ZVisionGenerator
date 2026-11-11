@@ -14,12 +14,11 @@ export interface TriggerModes {
   file: boolean;
 }
 
-export function triggerModes(caps: Pick<WorkspaceCapabilities, 'showScene' | 'showPromptInline' | 'supportsJsonPrompt'>, state: Pick<DraftState, 'promptSource' | 'jsonPromptEnabled'>): TriggerModes {
-  const file = state.promptSource === 'file';
+export function triggerModes(caps: Pick<WorkspaceCapabilities, 'showScene' | 'showPromptInline' | 'supportsJsonPrompt' | 'promptFileMode'>, state: Pick<DraftState, 'jsonPromptEnabled'>): TriggerModes {
   return {
-    pair: caps.showScene && !file && caps.showPromptInline,
+    pair: caps.showScene && !caps.promptFileMode && caps.showPromptInline,
     json: caps.showPromptInline && caps.supportsJsonPrompt && state.jsonPromptEnabled,
-    file,
+    file: caps.promptFileMode,
   };
 }
 

@@ -28,7 +28,7 @@
   import { fly } from 'svelte/transition';
   import AudioTrackPopover from './AudioTrackPopover.svelte';
   import type { AudioTrackView } from './audioTrackView';
-  import { AUDIO_KIND_INFO, VIDEO_KIND_INFO, type KindChoice } from './kindInfo';
+  import { AUDIO_KIND_INFO, IMAGE_KIND_INFO, VIDEO_KIND_INFO, type KindChoice } from './kindInfo';
   import type { AudioView } from './audioView';
   import type { AudioWorkflow, VideoKind } from '$lib/types';
   import VoicePopover from './VoicePopover.svelte';
@@ -38,7 +38,7 @@
   import { availableKinds, clampSeconds, musicSecondsShown, secondsRange, settleMusicSeconds } from '$lib/state/audioDraft';
   import { autoSecondsText, autoSoundSeconds, soundTypeLabel } from '$lib/state/soundSettings';
   import { keyOptions } from '$lib/state/musicSettings';
-  import { videoKinds } from '$lib/state/workspaceTab';
+  import { IMAGE_KINDS, videoKinds } from '$lib/state/workspaceTab';
   import ImagesPopover from './ImagesPopover.svelte';
   import type { ImagesView } from './imagesView';
   import type { ChipKey } from './settingsChips';
@@ -130,7 +130,9 @@
   const kindChoice = $derived<KindChoice>(
     caps.isAudio
       ? { kinds: availableKinds(context), info: AUDIO_KIND_INFO, value: s.workflow, pick: (kind) => draft.setAudioKind(kind as AudioWorkflow, context) }
-      : { kinds: videoKinds(context.workflow_contract.values), info: VIDEO_KIND_INFO, value: s.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setVideoKind(kind as VideoKind, context) },
+      : caps.isImageMode
+        ? { kinds: IMAGE_KINDS, info: IMAGE_KIND_INFO, value: caps.isEdit ? 'edit' : 'new', pick: (kind) => draft.setEditing(kind === 'edit', context) }
+        : { kinds: videoKinds(context.workflow_contract.values), info: VIDEO_KIND_INFO, value: s.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setVideoKind(kind as VideoKind, context) },
   );
 
   // A sound's length is blank on Auto: the field shows what the type will use, and typing or sliding locks a number.

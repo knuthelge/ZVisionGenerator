@@ -1,5 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { currentEditFacts } from './edit/currentEdit';
+  import { editPlaceholder } from './edit/editView';
   import { draft } from '$lib/state/draft.svelte';
   import { anyEnhancedUsed, canSubmitText, effectiveFormat, enhancedPartUsed, enhancedStaleReason, isJsonCaption, runParts, workflowMode } from '$lib/state/promptEnhance';
   import { extendModelSupport, isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
@@ -48,7 +50,8 @@
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
-  const promptFileMode = $derived(s.promptSource === 'file');
+  // Edit has no prompt file: its prompt is typed.
+  const promptFileMode = $derived(caps.promptFileMode);
   const jsonMode = $derived(caps.showPromptInline && caps.supportsJsonPrompt && s.jsonPromptEnabled);
   /** A box with one view only: JSON on, or Enhance each image on. It has a "Prompt" heading and no tabs or marks. */
   const singleView = $derived(caps.showPromptInline && caps.showEnhance && (jsonMode || s.enhanceAuto));
@@ -106,6 +109,7 @@
     extending ? 'What happens next…'
       : fromImage ? `What happens from the image: motion, camera moves, ${heard}.`
       : caps.showScene ? `What happens: action, camera moves, ${heard}.`
+      : caps.isEdit ? editPlaceholder(currentEditFacts(context))
       : 'Describe the scene...'
   );
   // A source that recorded one prompt and no scene: the old prompt is pre-filled and the scene is left for the user to write.
@@ -235,7 +239,8 @@
   /** Bring a recent prompt back: its text into the boxes this workflow has, and no Enhanced text or versions left over from the previous one. */
   function pickRecent(entry: RecentPrompt): void {
     const patch: Partial<DraftState> = clearRewritesPatch();
-    if (entry.format === 'json') {
+    // Where there is no JSON prompt (an edit), a JSON caption is the text like any other.
+    if (entry.format === 'json' && caps.supportsJsonPrompt) {
       patch.jsonPromptEnabled = true;
       patch.jsonPrompt = entry.prompt;
     } else {
@@ -249,7 +254,7 @@
     clearMessages();
     recentsOpen = false;
     // A finger would raise the keyboard over the result.
-    if (!layout.coarse) void focusField(entry.format === 'json' ? 'ws-json-prompt' : 'ws-prompt', 'mine');
+    if (!layout.coarse) void focusField(entry.format === 'json' && caps.supportsJsonPrompt ? 'ws-json-prompt' : 'ws-prompt', 'mine');
   }
 
   // Alt+↑ in an empty prompt (and, for a video, an empty scene) opens the recent prompts; with text in it the browser keeps its caret movement.

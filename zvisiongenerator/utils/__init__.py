@@ -6,7 +6,7 @@ from .alignment import round_to_alignment
 from .config import load_config, resolve_defaults, resolve_video_defaults, validate_scheduler
 from .console import format_generation_info
 from .ffmpeg import ensure_ffmpeg, strip_audio
-from .filename import generate_filename, unique_output_path
+from .filename import edit_output_stem, generate_filename, unique_output_path
 from .image_model_detect import ImageModelInfo, detect_image_model
 from .interactive import SkipSignal
 from .lora import parse_lora_arg
@@ -81,6 +81,7 @@ __all__ = [
     "ensure_ffmpeg",
     "expand_random_choices",
     "format_generation_info",
+    "edit_output_stem",
     "generate_filename",
     "get_ziv_data_dir",
     "image_prompt_text",

@@ -134,8 +134,8 @@ describe('heldUploads', () => {
     const get = vi.spyOn(store, 'get');
     await Promise.all([heldUploads.restore(), heldUploads.restore()]);
     await heldUploads.restore();
-    // One read per tab: Image, Video, Extend and Audio.
-    expect(get).toHaveBeenCalledTimes(4);
+    // One read per tab: Image, Edit, Video, Extend and Audio.
+    expect(get).toHaveBeenCalledTimes(5);
   });
 
   it('clear deletes both records, clearTab only its own', async () => {
@@ -276,5 +276,54 @@ describe('heldUploads', () => {
       expect([heldUploads.voice, await store.get('audio')]).toEqual([null, null]);
     });
   });
+  });
+
+  describe('the image to edit and its mask', () => {
+    it('hold a record of the Edit tab, apart from the Image tab\'s, and read it back after a reload', async () => {
+      const source = file('edit.png');
+      const mask = file('mask.png');
+      const start = file('start.png');
+      heldUploads.setStart('image', start);
+      heldUploads.setEditSource(source);
+      heldUploads.setEditMask(mask);
+      await heldUploads.persisted();
+      expect(await store.get('edit')).toEqual({ start: source, end: mask, references: [], track: null });
+      expect(await store.get('image')).toEqual({ start, end: null, references: [], track: null });
+
+      heldUploads.useStore(store);
+      await heldUploads.restore();
+
+      expect([heldUploads.editSource, heldUploads.editMask, heldUploads.startImage]).toEqual([source, mask, start]);
+    });
+
+    it('are forgotten by clearing the Edit tab alone, which leaves no record behind', async () => {
+      const start = file('start.png');
+      heldUploads.setStart('image', start);
+      heldUploads.setEditSource(file('edit.png'));
+      heldUploads.setEditMask(file('mask.png'));
+      await heldUploads.persisted();
+
+      heldUploads.clearTab('edit');
+      await heldUploads.persisted();
+
+      expect([heldUploads.editSource, heldUploads.editMask, heldUploads.startImage]).toEqual([null, null, start]);
+      expect(await store.get('edit')).toBeNull();
+    });
+
+    it('keep the source while only the mask goes', async () => {
+      const source = file('edit.png');
+      heldUploads.setEditSource(source);
+      heldUploads.setEditMask(file('mask.png'));
+      heldUploads.setEditMask(null);
+      await heldUploads.persisted();
+      expect(await store.get('edit')).toEqual({ start: source, end: null, references: [], track: null });
+    });
+
+    it('do not touch the Video tab', () => {
+      heldUploads.setStart('video', file('first.png'));
+      heldUploads.setEditMask(file('mask.png'));
+      heldUploads.clearTab('video');
+      expect(heldUploads.editMask).not.toBeNull();
+    });
   });
 });

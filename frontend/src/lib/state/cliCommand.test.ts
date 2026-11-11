@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import audioCases from '../../../../tests/fixtures/audio_cli_cases.json';
+import editCases from '../../../../tests/fixtures/edit_cli_cases.json';
 import { cliCommand, cliOutputDir, formSettings, shellQuote } from './cliCommand';
 import type { JobSettings } from '$lib/types';
 
@@ -451,5 +452,35 @@ describe('cliCommand for audio', () => {
 
   it('refuses a recording without its transcript', () => {
     expect(() => cliCommand({ mode: 'audio', workflow: 'speech', model: 'h', prompt: 'Hi', voice_path: '/v/me.wav' })).toThrow('Write what the recording says first.');
+  });
+});
+
+describe('cliCommand for an edit', () => {
+  // The same cases run through `ziv-image` in tests/image/test_edit_copy_cli.py, which checks each command asks for the form's edit.
+  it.each(editCases)('builds the command for $name', ({ settings, command, caveats }) => {
+    expect(cliCommand(settings as unknown as JobSettings, { outputDir: '/out' })).toEqual({ command, caveats });
+  });
+
+  it('names an uploaded picture by its file name, with the caveat, and saves where the Web UI does', () => {
+    const form = new FormData();
+    form.append('mode', 'image');
+    form.append('workflow', 'edit');
+    form.append('edit_source_file', new File(['x'], 'my photo.png', { type: 'image/png' }));
+    form.append('prompt', 'a');
+    expect(cliCommand(formSettings(form), { outputDir: '/out' })).toEqual({ command: "ziv image --edit 'my photo.png' --prompt a --output /out", caveats: ['uploaded_image'] });
+  });
+
+  it('leaves out everything an edit does not use, whatever else the settings carry', () => {
+    const edit = { mode: 'image', workflow: 'edit', edit_source_path: '/in/a.png', prompt: 'a', ratio: '2:3', size: 'm', guidance: '3', scheduler: 'beta', sharpen_enabled: 'true', upscale: '2' };
+    expect(cliCommand(edit).command).toBe('ziv image --edit /in/a.png --prompt a');
+  });
+
+  it('refuses a command without a picture or without a prompt', () => {
+    expect(() => cliCommand({ mode: 'image', workflow: 'edit', prompt: 'a' })).toThrow('Choose an image to edit first.');
+    expect(() => cliCommand({ mode: 'image', workflow: 'edit', edit_source_path: '/in/a.png' })).toThrow('Write a prompt first.');
+  });
+
+  it('leaves a New image\'s command as it was', () => {
+    expect(cliCommand({ mode: 'image', workflow: 'txt2img', prompt: 'a fox', edit_source_path: '/in/a.png' }).command).toBe("ziv image --prompt 'a fox'");
   });
 });

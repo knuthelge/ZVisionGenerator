@@ -9,7 +9,11 @@ from zvisiongenerator.review import review_enabled
 from zvisiongenerator.workflows import seedvr2_stages
 from zvisiongenerator.workflows.generation_prompt import conditioning_prompt, generation_negative, generation_prompt
 from zvisiongenerator.workflows.image_stages import (
+    composite_stage,
+    edit_stage,
     enhance_prompt_stage,
+    load_edit_source_stage,
+    prepare_edit_stage,
     resolve_prompt_stage,
     suppress_negative_stage,
     load_reference_stage,
@@ -25,7 +29,16 @@ from zvisiongenerator.workflows.image_stages import (
     save_image_stage,
 )
 
-__all__ = ["conditioning_prompt", "generation_negative", "generation_prompt", "build_workflow", "build_upscale_workflow", "build_seedvr2_upscale_workflow", "build_video_workflow"]
+__all__ = [
+    "conditioning_prompt",
+    "generation_negative",
+    "generation_prompt",
+    "build_workflow",
+    "build_edit_workflow",
+    "build_upscale_workflow",
+    "build_seedvr2_upscale_workflow",
+    "build_video_workflow",
+]
 
 
 def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> GenerationWorkflow:
@@ -48,6 +61,15 @@ def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> Genera
         stages.append(matte_stage)
     stages.append(save_image_stage)
     return GenerationWorkflow(name="dynamic", stages=stages)
+
+
+def build_edit_workflow() -> GenerationWorkflow:
+    """Build the workflow that edits an existing image: load it, prepare the crop, redraw, paste back, save.
+
+    There is no sharpen, contrast, saturation or cut-out stage: pixels outside the paint stay the source's own.
+    """
+    stages = [resolve_prompt_stage, load_edit_source_stage, prepare_edit_stage, edit_stage, composite_stage, save_image_stage]
+    return GenerationWorkflow(name="edit", stages=stages)
 
 
 def build_upscale_workflow(*, sharpen: bool = True, transparent: bool = False) -> GenerationWorkflow:

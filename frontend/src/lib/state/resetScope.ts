@@ -4,10 +4,10 @@ import type { DraftState, WorkspaceTab } from '$lib/types';
  * Who owns a field of the draft. Every transition that touches part of the draft (a Reset, a Reuse) is a list of these scopes,
  * so a field never sits in a hand-kept list of its own.
  *
- * - `slotsImage`, `slotsVideo`, `slotsExtend`: the images, upload markers and audio track of one tab or kind (Image's also holds Strength).
+ * - `slotsImage`, `slotsEdit`, `slotsVideo`, `slotsExtend`: the images, upload markers and audio track of one tab or kind (Image's also holds Strength; Edit's is the image to edit with its paint and extension).
  * - `settings`: the open mode's (image or video) values for the Settings pane; the Audio tab keeps none of these.
  * - `extendSettings`: the Extend kind's length.
- * - `shared`: Batch and Seed, one pair for every tab.
+ * - `shared`: Batch and Seed, one pair for New, Video and Audio; Edit has its own.
  * - `model`: the model, its LoRAs and the quantization.
  * - `text`: the open mode's typed text, its Enhanced text and its prompt source.
  * - `promptFile`: the prompts file and the prompts chosen from it.
@@ -21,7 +21,7 @@ import type { DraftState, WorkspaceTab } from '$lib/types';
  * - `derived`: values recomputed from other fields, never set by themselves.
  */
 export type Scope =
-  | 'slotsImage' | 'slotsVideo' | 'slotsExtend' | 'settings' | 'extendSettings' | 'shared' | 'model' | 'text' | 'promptFile'
+  | 'slotsImage' | 'slotsEdit' | 'slotsVideo' | 'slotsExtend' | 'settings' | 'extendSettings' | 'shared' | 'model' | 'text' | 'promptFile'
   | 'enhanceImage' | 'enhanceVideo' | 'enhanceAudio' | 'extendSource' | 'audioText' | 'audioSettings' | 'audioDelivery' | 'voice'
   | 'memory' | 'ui' | 'preset' | 'derived';
 
@@ -34,6 +34,13 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   referenceImagePath: 'slotsImage',
   referenceImageUpload: 'slotsImage',
   referenceImagePaths: 'slotsImage',
+  editSourcePath: 'slotsEdit',
+  editSourceUpload: 'slotsEdit',
+  editMaskUpload: 'slotsEdit',
+  editPaintedShare: 'slotsEdit',
+  editExtendSide: 'slotsEdit',
+  editExtendAmount: 'slotsEdit',
+  editRepaint: 'slotsEdit',
 
   firstFramePath: 'slotsVideo',
   firstFrameUpload: 'slotsVideo',
@@ -140,6 +147,7 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   describeTier: 'memory',
   enhanceFormat: 'memory',
   videoKind: 'memory',
+  leftOnEdit: 'memory',
   audioKind: 'memory',
   audioModels: 'memory',
 
@@ -154,6 +162,7 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
 /** What a Reset puts back on each tab. Adding a tab to `WorkspaceTab` fails the type check until it has a scope here. */
 export const RESET_SCOPE: Record<WorkspaceTab, readonly Scope[]> = {
   image: ['slotsImage', 'settings', 'shared', 'enhanceImage', 'preset'],
+  edit: ['slotsEdit', 'settings', 'shared'],
   video: ['slotsVideo', 'settings', 'shared', 'enhanceVideo', 'preset'],
   extend: ['slotsExtend', 'extendSettings', 'extendSource', 'settings', 'shared', 'enhanceVideo', 'preset'],
   audio: ['audioSettings', 'audioDelivery', 'voice', 'enhanceAudio', 'shared', 'preset'],
@@ -167,6 +176,7 @@ export const RESET_SCOPE: Record<WorkspaceTab, readonly Scope[]> = {
  */
 export const REUSE_SCOPE: Record<WorkspaceTab, readonly Scope[]> = {
   image: [...RESET_SCOPE.image, 'text', 'model'],
+  edit: [...RESET_SCOPE.edit, 'text', 'model'],
   video: [...RESET_SCOPE.video, 'text', 'model'],
   extend: [...RESET_SCOPE.extend, 'text', 'model'],
   audio: ['shared', 'audioSettings', 'audioDelivery'],

@@ -973,7 +973,7 @@ describe('WorkspacePage extend', () => {
     const context = makeContext();
     if (options.withExtend !== false) context.workflow_contract.values = [...context.workflow_contract.values, 'extend'];
     context.workflow_contract.definitions.extend.visible_controls = [
-      'workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'prompt_enhance', 'prompt_enhance_auto',
+      'workflow', 'model', 'preset', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'prompt_enhance', 'prompt_enhance_auto',
       'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
       'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'runs', 'steps', 'seed', 'audio', 'low_memory',
     ];

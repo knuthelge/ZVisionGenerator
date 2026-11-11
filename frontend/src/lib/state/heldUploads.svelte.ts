@@ -2,13 +2,14 @@ import type { TrackTab } from './audioTrack';
 import type { ImageTab } from './imageSlots';
 import { defaultUploadStore, type TabUploads, type UploadStore, type UploadTab } from './uploadStore';
 
-type FileField = 'startImage' | 'firstFrame' | 'lastFrame' | 'audioTrack' | 'extendAudioTrack' | 'voice';
+type FileField = 'startImage' | 'firstFrame' | 'lastFrame' | 'audioTrack' | 'extendAudioTrack' | 'voice' | 'editSource' | 'editMask';
 
 // The files picked from this device that wait for Generate: per tab the start image (the first frame in Video), the
 // last frame, and one entry per reference row (null for a row that holds a path), the audio track of Video and Extend
-// Video, and the recording of the Audio tab's voice. The Workspace is unmounted on another
-// page, so they live here to survive a visit to the Gallery or the Prompts page. Every write is mirrored into an upload
-// store (IndexedDB), and `restore` reads it back after a reload. The draft keeps only the file's name as the upload marker.
+// Video, the recording of the Audio tab's voice, and in the Edit kind the image to edit with the PNG of its painted
+// mask. The Workspace is unmounted on another page, so they live here to survive a visit to the Gallery or the Prompts
+// page. Every write is mirrored into an upload store (IndexedDB), and `restore` reads it back after a reload. The draft
+// keeps only the file's name as the upload marker.
 class HeldUploads {
   /** The pending start image of the Image tab, or null. */
   startImage = $state.raw<File | null>(null);
@@ -22,6 +23,10 @@ class HeldUploads {
   extendAudioTrack = $state.raw<File | null>(null);
   /** The pending voice recording of the Audio tab, or null. */
   voice = $state.raw<File | null>(null);
+  /** The pending image to edit (the Edit kind), or null. */
+  editSource = $state.raw<File | null>(null);
+  /** The painted mask of the image to edit, a PNG, or null when nothing is painted. */
+  editMask = $state.raw<File | null>(null);
   /** The pending reference uploads by row. */
   references = $state.raw<(File | null)[]>([]);
   /** Whether the stored uploads have been read back. True once `restore` settles, also when the store failed. */
@@ -54,6 +59,8 @@ class HeldUploads {
     this.audioTrack = null;
     this.extendAudioTrack = null;
     this.voice = null;
+    this.editSource = null;
+    this.editMask = null;
     this.references = [];
     this.restored = false;
   }
@@ -87,13 +94,25 @@ class HeldUploads {
     this.#persist('audio');
   }
 
+  /** Hold the image to edit, or forget it with null. */
+  setEditSource(file: File | null): void {
+    this.#setFile('editSource', file);
+    this.#persist('edit');
+  }
+
+  /** Hold the painted mask of the image to edit, or forget it with null. */
+  setEditMask(file: File | null): void {
+    this.#setFile('editMask', file);
+    this.#persist('edit');
+  }
+
   /** Replace the pending reference uploads. */
   setReferences(files: (File | null)[]): void {
     this.#setReferences(files);
     this.#persist('image');
   }
 
-  /** Forget every pending upload of a tab: the start image and references in Image, the first and last frame and the audio track in Video, the audio track in the Extend kind, the voice recording in Audio. */
+  /** Forget every pending upload of a tab: the start image and references in Image, the image to edit with its mask in Edit, the first and last frame and the audio track in Video, the audio track in the Extend kind, the voice recording in Audio. */
   clearTab(tab: UploadTab): void {
     this.#forget(tab);
     this.#persist(tab);
@@ -102,6 +121,7 @@ class HeldUploads {
   /** Forget every pending upload. */
   clear(): void {
     this.clearTab('image');
+    this.clearTab('edit');
     this.clearTab('video');
     this.clearTab('extend');
     this.clearTab('audio');
@@ -134,6 +154,9 @@ class HeldUploads {
     if (tab === 'image') {
       this.#setFile('startImage', null);
       this.#setReferences([]);
+    } else if (tab === 'edit') {
+      this.#setFile('editSource', null);
+      this.#setFile('editMask', null);
     } else if (tab === 'video') {
       this.#setFile('firstFrame', null);
       this.#setFile('lastFrame', null);
@@ -150,11 +173,13 @@ class HeldUploads {
     const record: TabUploads =
       tab === 'image'
         ? { start: this.startImage, end: null, references: this.references, track: null }
-        : tab === 'video'
-          ? { start: this.firstFrame, end: this.lastFrame, references: [], track: this.audioTrack }
-          : tab === 'extend'
-            ? { start: null, end: null, references: [], track: this.extendAudioTrack }
-            : { start: null, end: null, references: [], track: this.voice };
+        : tab === 'edit'
+          ? { start: this.editSource, end: this.editMask, references: [], track: null }
+          : tab === 'video'
+            ? { start: this.firstFrame, end: this.lastFrame, references: [], track: this.audioTrack }
+            : tab === 'extend'
+              ? { start: null, end: null, references: [], track: this.extendAudioTrack }
+              : { start: null, end: null, references: [], track: this.voice };
     const empty = record.start === null && record.end === null && record.track === null && record.references.every((file) => file === null);
     return empty ? null : record;
   }
@@ -181,9 +206,11 @@ class HeldUploads {
   async #restore(): Promise<void> {
     const generation = this.#generation;
     try {
-      const [image, video, extend, audio] = await Promise.all([this.#read('image'), this.#read('video'), this.#read('extend'), this.#read('audio')]);
+      const [image, edit, video, extend, audio] = await Promise.all([this.#read('image'), this.#read('edit'), this.#read('video'), this.#read('extend'), this.#read('audio')]);
       if (generation !== this.#generation) return;
       if (!this.#written.has('startImage')) this.startImage = image?.start ?? null;
+      if (!this.#written.has('editSource')) this.editSource = edit?.start ?? null;
+      if (!this.#written.has('editMask')) this.editMask = edit?.end ?? null;
       if (!this.#written.has('references')) this.references = image?.references ?? [];
       if (!this.#written.has('firstFrame')) this.firstFrame = video?.start ?? null;
       if (!this.#written.has('lastFrame')) this.lastFrame = video?.end ?? null;

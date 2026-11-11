@@ -61,6 +61,22 @@ ziv-image -m klein9b --reference woman.jpg,backpack.jpg --prompt "the woman from
 
 Only FLUX.2 Klein takes references; other models refuse the flag. It also refuses more images than the model takes and a file that is missing or isn't a PNG, JPEG or WebP. See [References](../concepts/images.md#references) for what works and what it costs.
 
+## Edit a picture
+
+`--edit` changes a picture you already have instead of generating a new one. It needs `--prompt` and `-m`.
+
+```bash
+ziv-image -m klein9b --edit photo.png --mask mask.png --prompt "a glass vase of red tulips"
+ziv-image -m zit --edit photo.png --extend right=320 --prompt "more of the garden"
+ziv-image -m klein9b --edit photo.png --prompt "make it night"
+```
+
+- **`--mask`** redraws the painted area. The mask is a PNG of the picture's shape, as the picture looks upright (a photo's orientation tag is applied first). It may be another size of that shape, such as a downscaled copy, and is scaled to the picture: in a PNG with transparency, any pixel that isn't fully transparent is painted; in any other PNG, including one with an alpha channel that is fully opaque, any pixel that isn't black is. A mask of another shape, or one with nothing painted, is refused.
+- **`--extend`** grows one side: `top`, `right`, `bottom` or `left`, then `=` and 128 to 512 pixels in steps of 16. It combines with `--mask`.
+- **Neither** changes the whole picture, on FLUX.2 Klein and an opaque picture. Z-Image and Krea 2, and a picture with transparent parts, need `--mask` or `--extend`.
+
+The result is saved as `<name>_edit.png` in the picture's folder, or in `-o`; a picture already named `..._edit` is saved with a counter instead (`photo_edit_2.png`). Every pixel outside the paint is the original's. An edit takes `-q`, `--lora`, `--steps`, `--seed` and `-r`; any other option is refused before a model loads, such as `--image`, `--reference`, `--upscale`, `--enhance`, `--transparent`, the size options, `--guidance` and the finishing options. What each case does, and how it treats a picture with transparent parts, is in [Edit a picture](../concepts/images.md#edit).
+
 ## Add LoRAs
 
 ```bash

@@ -93,7 +93,7 @@ def test_distributions_include_exact_license_notices_and_metadata(built_distribu
 def test_workflow_contract_exposes_canonical_values_only() -> None:
     contract = build_workflow_contract()
 
-    assert contract["values"] == ["txt2img", "img2img", "txt2vid", "img2vid", "extend"]
+    assert contract["values"] == ["txt2img", "img2img", "edit", "txt2vid", "img2vid", "extend"]
     assert list(contract["definitions"]) == contract["values"]
 
 
@@ -104,6 +104,7 @@ def test_extend_definition_lists_its_controls_and_cleared_fields() -> None:
     assert definition["visible_controls"] == [
         "workflow",
         "model",
+        "preset",
         "loras",
         "prompt_source",
         "prompt_scene",

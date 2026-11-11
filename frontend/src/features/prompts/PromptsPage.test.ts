@@ -173,6 +173,28 @@ describe('PromptsPage', () => {
     expect(draft.state.promptFileOptionIds).toEqual(['portrait:1']);
   });
 
+  it('moves an Image tab left on Edit to New when its file is used in the Workspace, keeping Edit\'s image and paint', async () => {
+    draft.patch({ workflow: 'edit', prompt: 'a red door', editSourcePath: '/out/a.png', editMaskUpload: 'mask.png', editPaintedShare: 0.2 });
+    await mountPage();
+
+    button('Use in Workspace').click();
+    await settle();
+
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', promptSource: 'file', promptFilePath: PATH, editSourcePath: '/out/a.png', editMaskUpload: 'mask.png', editPaintedShare: 0.2 });
+    expect(draft.state.savedText.edit?.prompt).toBe('a red door');
+    expect(router.page).toBe('workspace');
+  });
+
+  it('notes New as the kind the Image tab opens on when it was left on Edit with another tab open', async () => {
+    draft.patch({ workflow: 'txt2vid', leftOnEdit: true });
+    await mountPage();
+
+    button('Use in Workspace').click();
+    await settle();
+
+    expect(draft.state).toMatchObject({ workflow: 'txt2vid', leftOnEdit: false, promptSource: 'file' });
+  });
+
   it('overwrites a file that changed on disk only after confirmation', async () => {
     api.savePromptDocument
       .mockRejectedValueOnce(new ApiError('conflict', 409, 'The prompt file changed on disk since it was opened.'))

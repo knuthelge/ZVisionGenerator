@@ -100,6 +100,7 @@ export function filterCurated(entries: readonly CuratedEntry[], query: string, s
 const WORKFLOW_LABELS: Record<Workflow, string> = {
   txt2img: 'Image, without a start image',
   img2img: 'Image, with a start image',
+  edit: 'Image, editing a picture',
   txt2vid: 'Video, without a first frame',
   img2vid: 'Video, with a first frame',
   extend: 'Video, extending a clip',

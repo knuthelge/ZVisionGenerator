@@ -4,7 +4,7 @@ import type { WorkspaceCapabilities } from './capabilities';
 import type { ImagesSummary } from './imagesSummary';
 import type { IconName } from '$lib/components/atoms/Icon.svelte';
 import type { AudioWorkflow, DraftState, VideoKind, Workflow, WorkspaceWorkflow } from '$lib/types';
-import { AUDIO_KIND_INFO, VIDEO_KIND_INFO } from './kindInfo';
+import { AUDIO_KIND_INFO, IMAGE_KIND_INFO, VIDEO_KIND_INFO } from './kindInfo';
 import type { VoiceView } from './audioView';
 import { isAudioWorkflow } from '$lib/state/workspaceTab';
 import { keyShortName } from '$lib/state/musicSettings';
@@ -86,9 +86,11 @@ const fmt = (value: number): string => (Number.isInteger(value) ? String(value) 
  */
 export function settingsChips(f: ChipFacts): SettingChip[] {
   const { caps, state: s } = f;
+  const kindOfTab = IMAGE_KIND_INFO[caps.isEdit ? 'edit' : 'new'];
   const chips: (SettingChip | null)[] = [
     f.videoKind ? { key: 'kind', label: '', value: VIDEO_KIND_INFO[f.videoKind].label, changed: false, icon: VIDEO_KIND_INFO[f.videoKind].icon } : null,
-    { key: 'preset', label: 'Preset', value: f.presetName ?? 'none', changed: f.presetChanged, on: f.presetName !== null, applied: f.presetSlug ?? '' },
+    caps.isImageMode ? { key: 'kind', label: '', value: kindOfTab.label, changed: false, icon: kindOfTab.icon } : null,
+    caps.showPreset ? { key: 'preset', label: 'Preset', value: f.presetName ?? 'none', changed: f.presetChanged, on: f.presetName !== null, applied: f.presetSlug ?? '' } : null,
     caps.showFrameCount && f.seconds !== null ? { key: 'seconds', label: 'Length', value: `${fmt(f.seconds)} s`, changed: f.changed('seconds'), warn: f.memoryWarn } : null,
     // The Kind chip already says Extend, so the length chip reads Length in both kinds.
     caps.showExtendLength ? { key: 'extendSeconds', label: 'Length', value: f.extendSeconds === null ? '—' : `+${fmt(f.extendSeconds)} s`, changed: f.changed('extendSeconds'), warn: f.memoryWarn } : null,
@@ -177,6 +179,7 @@ const PENDING_AUDIO_CHIPS: Record<AudioWorkflow, [ChipKey, string][]> = {
 const PENDING_CHIPS: Record<Workflow, [ChipKey, string][]> = {
   txt2img: PENDING_IMAGE_CHIPS,
   img2img: PENDING_IMAGE_CHIPS,
+  edit: [['steps', 'Steps'], ['seed', 'Seed'], ['runs', 'Batch'], ['loras', 'LoRA'], ['model', '']],
   txt2vid: PENDING_VIDEO_CHIPS,
   img2vid: PENDING_VIDEO_CHIPS,
   extend: [['extendSeconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['source', 'Source'], ['track', 'Track'], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
@@ -190,7 +193,9 @@ export function pendingChips(workflow: WorkspaceWorkflow): SettingChip[] {
   if (isAudioWorkflow(workflow)) {
     return PENDING_AUDIO_CHIPS[workflow].map(([key, label]) => ({ key, label, value: '—', changed: false }));
   }
-  const kind: [ChipKey, string][] = workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? [['kind', '']] : [];
-  const keys: [ChipKey, string][] = [...kind, ['preset', 'Preset'], ...(PENDING_CHIPS[workflow] ?? PENDING_CHIPS.txt2img)];
+  const kind: [ChipKey, string][] = [['kind', '']];
+  // Edit has no preset.
+  const preset: [ChipKey, string][] = workflow === 'edit' ? [] : [['preset', 'Preset']];
+  const keys: [ChipKey, string][] = [...kind, ...preset, ...(PENDING_CHIPS[workflow] ?? PENDING_CHIPS.txt2img)];
   return keys.map(([key, label]) => ({ key, label, value: '—', changed: false }));
 }

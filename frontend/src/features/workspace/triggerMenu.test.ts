@@ -76,10 +76,10 @@ describe('insertWordPatch', () => {
 });
 
 describe('triggerModes', () => {
-  it('reads the layout from the capabilities and the prompt source', () => {
-    const caps = { showScene: true, showPromptInline: true, supportsJsonPrompt: false };
-    expect(triggerModes(caps, { promptSource: 'inline', jsonPromptEnabled: false })).toEqual({ pair: true, json: false, file: false });
-    expect(triggerModes(caps, { promptSource: 'file', jsonPromptEnabled: false })).toEqual({ pair: false, json: false, file: true });
-    expect(triggerModes({ ...caps, showScene: false, supportsJsonPrompt: true }, { promptSource: 'inline', jsonPromptEnabled: true }).json).toBe(true);
+  it('reads the layout from the capabilities', () => {
+    const caps = { showScene: true, showPromptInline: true, supportsJsonPrompt: false, promptFileMode: false };
+    expect(triggerModes(caps, { jsonPromptEnabled: false })).toEqual({ pair: true, json: false, file: false });
+    expect(triggerModes({ ...caps, promptFileMode: true }, { jsonPromptEnabled: false })).toEqual({ pair: false, json: false, file: true });
+    expect(triggerModes({ ...caps, showScene: false, supportsJsonPrompt: true }, { jsonPromptEnabled: true }).json).toBe(true);
   });
 });

@@ -211,6 +211,8 @@
     const path = builder.path;
     if (!path || (builder.dirty && !(await save()))) return;
     const sameFile = draft.state.promptFilePath === path;
+    // A prompts file is New's: Edit has none, so an Image tab left on Edit moves to New (Edit's image and paint stay).
+    draft.setEditing(false, null);
     draft.patch({ promptSource: 'file', promptFilePath: path, promptFileOptionIds: sameFile ? draft.state.promptFileOptionIds : [] });
     router.navigate('workspace');
   }

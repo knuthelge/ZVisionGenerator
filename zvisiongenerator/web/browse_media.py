@@ -57,8 +57,8 @@ PREVIEW_KINDS: Final = ("image", "video")
 INFO_KINDS: Final = ("image", "audio", "video")
 """The preview kinds the info route describes."""
 
-MEDIA_KINDS: Final = ("audio", "video")
-"""The preview kinds the media route plays."""
+MEDIA_KINDS: Final = ("audio", "video", "image")
+"""The preview kinds the media route serves: a player's audio and video, and an image at its full size (the painter draws it)."""
 
 SPRITE_KINDS: Final = ("video",)
 """The preview kinds the sprite route draws a contact sheet for."""
@@ -87,10 +87,11 @@ _MEDIA_TYPES: Final = {
     ".m4v": "video/x-m4v",
     ".mkv": "video/x-matroska",
     ".webm": "video/webm",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
 }
-# Orientation values of the EXIF tag that turn a picture a quarter turn, so its width and height swap.
-_EXIF_ORIENTATION: Final = 0x0112
-_QUARTER_TURNS: Final = frozenset({5, 6, 7, 8})
 
 
 @dataclass(frozen=True)
@@ -272,11 +273,10 @@ def _build_preview(media: MediaFile, frame: str, edge: int, at: float | None) ->
 def _image_facts(path: Path) -> dict[str, Any]:
     from PIL import Image
 
+    from zvisiongenerator.utils.input_images import upright_size
+
     try:
-        with Image.open(path) as image:
-            width, height = image.size
-            if image.getexif().get(_EXIF_ORIENTATION) in _QUARTER_TURNS:
-                width, height = height, width
+        width, height = upright_size(path)
     except Image.DecompressionBombError as exc:
         raise ValueError(f"{path.name} has too many pixels to read.") from exc
     return {"width": width, "height": height}
@@ -399,6 +399,6 @@ async def serve_sprite(request: Request, media: MediaFile, cache_dir: Path) -> R
 
 
 def serve_media(media: MediaFile) -> FileResponse:
-    """Answer with the audio or video file itself, ready for range requests, typed by its extension and never sniffed as a page."""
+    """Answer with the audio, video or image file itself, ready for range requests, typed by its extension and never sniffed as a page."""
     media_type = _MEDIA_TYPES.get(media.path.suffix.lower()) or mimetypes.guess_type(media.path.name)[0] or "application/octet-stream"
     return FileResponse(media.path, stat_result=media.stat, media_type=media_type, headers={"Cache-Control": _CACHE_CONTROL, "X-Content-Type-Options": "nosniff"})

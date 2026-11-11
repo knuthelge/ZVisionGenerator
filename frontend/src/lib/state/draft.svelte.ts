@@ -1,4 +1,5 @@
 import { AUDIO_FIELD_DEFAULTS, AUDIO_KIND_SETTINGS, audioPrefill, availableKinds, hydrateAudio, isAudioModelId } from './audioDraft';
+import { EXTEND_SIDES, NO_EDIT, NO_EDIT_PAINT, editSourcePatch } from './editSlots';
 import { extendPrefillFor } from './extend';
 import { extendCutView, settledExtendFrom } from './extendCut';
 import { downloadStore } from './downloads.svelte';
@@ -10,12 +11,13 @@ import { outputSettingsPatch } from './jobSettings';
 import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
-import { isAudioWorkflow, navTab, videoKindOf, workflowFor, workspaceTab, type MediaTab } from './workspaceTab';
+import { isAudioWorkflow, navTab, textTab, videoKindOf, workflowFor, workspaceTab, type MediaTab } from './workspaceTab';
 import { voiceConsent } from './voiceConsent.svelte';
-import { pickScopes, RESET_SCOPE, REUSE_SCOPE, type Scope } from './resetScope';
+import { declinesModel, modelsOf } from './workflowModels';
+import { keysOf, pickScopes, RESET_SCOPE, REUSE_SCOPE, type Scope } from './resetScope';
 import { firstValues, listOf } from '$lib/prefillParams';
 import { AUDIO_KINDS } from '$lib/types';
-import type { NavTab, VideoKind, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import type { NavTab, ExtendSide, VideoKind, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
@@ -113,6 +115,8 @@ const DEFAULT_DRAFT: DraftState = {
   extendPrefill: null,
   appliedPreset: null,
   videoKind: 'new',
+  leftOnEdit: false,
+  ...NO_EDIT,
   audioKind: 'music',
   audioModels: { music: '', speech: '', sound: '' },
   ...AUDIO_FIELD_DEFAULTS,
@@ -223,34 +227,51 @@ function _textOf(state: DraftState): TabText {
 }
 
 /**
- * Return the state with the text of the mode a workflow belongs to. Image and Video each keep their own: moving to the other
- * mode saves the open text under the mode being left and brings back what the entered one saved (nothing, for a mode not
+ * Return the state with the text of the tab a workflow writes. New, Edit, Video and Audio each keep their own: moving to
+ * another saves the open text under the tab being left and brings back what the entered one saved (nothing, for a tab not
  * visited yet). Video's two kinds share one text, so moving between them changes nothing.
  */
 function _withTextOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
-  const from = workflowMode(state.workflow);
-  const to = workflowMode(workflow);
+  const from = textTab(state.workflow);
+  const to = textTab(workflow);
   if (from === to) return state;
   const { [to]: entering, ...rest } = state.savedText;
   return { ...state, ...(entering ?? EMPTY_TEXT), savedText: { ...rest, [from]: _textOf(state) } };
 }
 
-/** The scopes a mode keeps for when it comes back: its Settings pane values, the model with its LoRAs and quantization, and the applied preset. */
-const MODE_MEMORY_SCOPES: readonly Scope[] = ['settings', 'model', 'preset'];
+/** The fields a tab keeps for when it comes back: its Settings pane values, the model with its LoRAs and quantization, the LoRAs remembered by model family, and the applied preset. */
+const MEMORY_KEYS: readonly (keyof DraftState)[] = [...keysOf(['settings', 'model', 'preset']), 'lorasByFamily'];
+/** Batch and Seed. New, Video and Audio share one pair; Edit has its own. */
+const SHARED_KEYS: readonly (keyof DraftState)[] = keysOf(['shared']);
+/** What Edit keeps: the same as the others, with its own Batch and Seed. */
+const EDIT_MEMORY_KEYS: readonly (keyof DraftState)[] = [...MEMORY_KEYS, ...SHARED_KEYS];
+
+function _pick(source: Partial<DraftState>, keys: readonly (keyof DraftState)[]): Partial<DraftState> {
+  return Object.fromEntries(keys.filter((key) => key in source).map((key) => [key, source[key]]));
+}
+
+/** What Edit starts with the first time it opens: the defaults of its memory, so it takes a model, settings and LoRAs of its own and nothing of New's. */
+const FRESH_EDIT: Partial<DraftState> = _pick(DEFAULT_DRAFT, EDIT_MEMORY_KEYS);
 
 /**
- * Return the state with the settings of the mode a workflow belongs to. Image and Video each keep their own, with their model
- * and preset: moving to the other mode saves the open ones under the mode being left and brings back what the entered one saved
- * (for a mode not visited yet, the model and settings stay for the next hydration to replace with the model's defaults). The Audio tab holds none of these: entering it saves the mode it leaves and changes nothing else, so coming back
- * to that mode, or on to the other, finds its own.
+ * Return the state with the settings of the tab a workflow belongs to. New, Edit and Video each keep their own, with their
+ * model, LoRAs and preset: moving to another saves the open ones under the tab being left and brings back what the entered one
+ * saved. A tab not visited yet has none: Edit starts from the defaults of its memory (its model follows from the next hydration, which
+ * picks one that can edit), the others keep the model and settings for the next hydration to replace with the model's defaults.
+ * Batch and Seed are one pair for New, Video and Audio, held in the fields; Edit keeps its own, and the shared pair waits in New's
+ * memory while Edit is open. The Audio tab holds none of these: entering it saves the tab it leaves and changes nothing else, so
+ * coming back to that tab, or on to another, finds its own.
  */
 function _withSettingsOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
-  const from = workflowMode(state.workflow);
-  const to = workflowMode(workflow);
+  const from = textTab(state.workflow);
+  const to = textTab(workflow);
   if (from === to) return state;
-  const savedSettings = from === 'audio' ? state.savedSettings : { ...state.savedSettings, [from]: pickScopes(state, MODE_MEMORY_SCOPES) };
-  if (to === 'audio') return { ...state, savedSettings };
-  return { ...state, savedSettings, ...savedSettings[to] };
+  const left = from === 'audio' ? state.savedSettings : { ...state.savedSettings, [from]: _pick(state, from === 'edit' ? EDIT_MEMORY_KEYS : MEMORY_KEYS) };
+  const savedSettings = to === 'edit' && from !== 'edit' ? { ...left, image: { ...left.image, ..._pick(state, SHARED_KEYS) } } : left;
+  const shared = from === 'edit' && to !== 'edit' ? _pick(savedSettings.image ?? {}, SHARED_KEYS) : {};
+  if (to === 'audio') return { ...state, savedSettings, ...shared };
+  const entering = to === 'edit' ? (savedSettings.edit ?? FRESH_EDIT) : _pick(savedSettings[to] ?? {}, MEMORY_KEYS);
+  return { ...state, savedSettings, ...entering, ...shared };
 }
 
 /** The defaults an exact Reuse of an audio kind puts back: the Audio scope without the settings that belong to the other kinds. */
@@ -259,20 +280,43 @@ function _audioReuseDefaults(kind: AudioWorkflow): Partial<DraftState> {
   return Object.fromEntries(Object.entries(pickScopes(DEFAULT_DRAFT, REUSE_SCOPE.audio)).filter(([key]) => !others.has(key as keyof DraftState)));
 }
 
-/** Return the state with the text and the settings of the mode a workflow belongs to, as that mode left them. */
-function _withModeOf(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
-  return _withSettingsOfMode(_withTextOfMode(state, workflow), workflow);
+/**
+ * Return the state noting whether the Image tab was left on Edit: opening another tab from Edit sets it, and opening the Image
+ * tab clears it (the workflow says which kind it is on). Opening one tab from another leaves it alone.
+ */
+function _withEditMemory(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
+  const leftOnEdit = navTab(workflow) === 'image' ? false : state.leftOnEdit || state.workflow === 'edit';
+  return leftOnEdit === state.leftOnEdit ? state : { ...state, leftOnEdit };
 }
 
-/** The draft fields that hold an image path: one per slot, and the reference rows. */
-const SLOT_KEYS = ['referenceImagePath', 'firstFramePath', 'endImagePath', 'referenceImagePaths'] as const satisfies readonly (keyof DraftState)[];
+/** Return the state with the text and the settings of the mode a workflow belongs to, as that mode left them, and the Image tab's kind noted. */
+function _withModeOf(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
+  return _withEditMemory(_withSettingsOfMode(_withTextOfMode(state, workflow), workflow), workflow);
+}
 
-/** The paths the state's image slots hold (the start image, the frames and the reference rows); a slot can hold the empty path of an upload. */
+/** The draft fields that hold an image path: one per slot, the reference rows and the image to edit. */
+const SLOT_KEYS = ['referenceImagePath', 'firstFramePath', 'endImagePath', 'referenceImagePaths', 'editSourcePath'] as const satisfies readonly (keyof DraftState)[];
+
+/** The paths the state's image slots hold (the start image, the frames, the reference rows and the image to edit); a slot can hold the empty path of an upload. */
 export function slotPaths(state: Pick<DraftState, (typeof SLOT_KEYS)[number]>, keys: readonly (typeof SLOT_KEYS)[number][] = SLOT_KEYS): string[] {
   return keys.flatMap((key) => {
     const value = state[key];
     return Array.isArray(value) ? value : value ? [value] : [];
   });
+}
+
+/** The LoRAs remembered by model family without one that was removed. */
+function _withoutLoraByFamily(byFamily: Record<string, string>, name: string, installed: LoraInfo[]): Record<string, string> {
+  return Object.fromEntries(Object.entries(byFamily).map(([key, value]) => [key, withoutLora(value, name, installed)]));
+}
+
+/** The settings a tab kept, without a LoRA that was removed from its chips and from what it remembers by family. */
+function _withoutLoraIn(saved: Partial<DraftState>, name: string, installed: LoraInfo[]): Partial<DraftState> {
+  return {
+    ...saved,
+    ...(saved.loraString === undefined ? {} : { loraString: withoutLora(saved.loraString, name, installed) }),
+    ...(saved.lorasByFamily === undefined ? {} : { lorasByFamily: _withoutLoraByFamily(saved.lorasByFamily, name, installed) }),
+  };
 }
 
 /** The state's missing-file flags without the one for a replaced path, unless another slot still holds that path. */
@@ -622,7 +666,7 @@ function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState, sourceF
 }
 
 /** The workflow each media tab falls to without a start image. */
-const _TEXT_WORKFLOW: Record<MediaTab, Workflow> = { image: 'txt2img', video: 'txt2vid', extend: 'extend' };
+const _TEXT_WORKFLOW: Record<MediaTab, Workflow> = { image: 'txt2img', edit: 'edit', video: 'txt2vid', extend: 'extend' };
 
 /**
  * Return the defaults of every field for the tab the state has open, resolved in three layers: the static defaults, then the
@@ -666,6 +710,7 @@ function loadFromStorage(): DraftState {
 /** The uploads held for the tabs a transition resets are forgotten with their fields; a voice takes its consent tick with it. */
 function _clearHeldUploads(scopes: readonly Scope[]): void {
   if (scopes.includes('slotsImage')) heldUploads.clearTab('image');
+  if (scopes.includes('slotsEdit')) heldUploads.clearTab('edit');
   if (scopes.includes('slotsVideo')) heldUploads.clearTab('video');
   if (scopes.includes('slotsExtend')) heldUploads.clearTab('extend');
   if (scopes.includes('voice')) {
@@ -682,6 +727,8 @@ function _droppedRecording(): Pick<DraftState, 'voicePath' | 'voiceUpload' | 'vo
 }
 
 let _draft = $state<DraftState>(loadFromStorage());
+// Counts the changes that start the image to edit over (a new image, a Reset, a Reuse): the painter's history belongs to one count.
+let _editEpoch = $state(0);
 let _authorityReady = $state(false);
 // What the server last reported about the extend source; fetched again on load, so it is not saved with the draft.
 let _extendSource = $state<ExtendSourceInfo | null>(null);
@@ -710,6 +757,11 @@ export const draft = {
   get authorityReady(): boolean { return _authorityReady; },
   /** What the server reported about the chosen extend source; null before it answers or without a source. */
   get extendSource(): ExtendSourceInfo | null { return _extendSource; },
+  /**
+   * Changes whenever the image to edit starts over: a new image, a Reset, a Reuse or an Edit prefill, a slot emptied by a delete. It
+   * does not change for a move, which is the same image. The painter's history is only valid for the count it was made in.
+   */
+  get editEpoch(): number { return _editEpoch; },
 
   loadDraft(): void {
     _draft = loadFromStorage();
@@ -770,7 +822,9 @@ export const draft = {
     if (params.json_prompt && canApply('prompt') && workflowMode(workflow) === 'image') {
       Object.assign(prefill, { jsonPrompt: prettyCaption(params.json_prompt), jsonPromptEnabled: true, prompt: '', enhancedPrompt: '', enhancedFrom: null });
     }
-    const reusesText = extending || ['prompt', 'scene', 'enhanced_prompt', 'enhanced_scene'].some((key) => params[key]);
+    // An Edit action names no text and starts the edit's prompt over: what the image was made from is not what to change.
+    const startsEditOver = workflow === 'edit' && params.use_as === 'edit';
+    const reusesText = extending || startsEditOver || ['prompt', 'scene', 'enhanced_prompt', 'enhanced_scene'].some((key) => params[key]);
     if (extending) {
       // A source that moved still names its old path; the Workspace asks for it to be chosen again.
       prefill.extendSourcePath = params.source_video || null;
@@ -817,7 +871,9 @@ export const draft = {
         prefill.extendPrefill = named ? { path: prefill.extendSourcePath, scene: prefill.scene ?? '', prompt: prefill.prompt } : null;
       }
     }
-    if (params.model && canApply('model')) prefill.model = params.model;
+    // A model the workflow does not offer (one that cannot edit, for Edit) is not taken, nor are the LoRAs recorded with it: the workflow keeps its own.
+    const declined = ctx !== null && Boolean(params.model) && declinesModel(ctx, workflow, params.model);
+    if (params.model && canApply('model') && !declined) prefill.model = params.model;
     if (params.steps && canApply('steps')) prefill.steps = Number(params.steps);
     if (params.guidance && canApply('guidance')) prefill.guidance = Number(params.guidance);
     if (params.seed && canApply('seed')) prefill.seed = Number(params.seed);
@@ -831,7 +887,7 @@ export const draft = {
       prefill.frameCount = alignFrames(Number(params.frames), rule);
     }
     // A named but blank list clears the LoRAs: a reused job runs with exactly its source's.
-    if (params.lora !== undefined && canApply('lora')) prefill.loraString = params.lora;
+    if (params.lora !== undefined && canApply('lora') && !declined) prefill.loraString = params.lora;
     // A named but blank level clears the quantization, like the LoRAs: a reused image has exactly its source's level.
     // A level the model does not offer is dropped rather than left for the server to reject.
     if (params.quantize !== undefined && ctx && canApply('quantize')) {
@@ -843,7 +899,7 @@ export const draft = {
     // slot of the tab, so what it does not name is empty (a reused text-made asset has no start image).
     const slotTab = workspaceTab(workflow);
     const replacing = options.replaceSlots === true && params.use_as === undefined;
-    if (slotTab !== 'extend') {
+    if (slotTab === 'image' || slotTab === 'video') {
       if (params.image_path && canApply('image_path')) Object.assign(prefill, startSlotPatch(slotTab, { path: params.image_path }));
       else if (replacing) Object.assign(prefill, startSlotPatch(slotTab, null));
     }
@@ -853,7 +909,7 @@ export const draft = {
     }
     // The audio track belongs to the same tab (Video or Extend) and follows the images' rule: a full prefill replaces it,
     // so a job made without a track clears it. A Use as leaves it alone.
-    if (slotTab !== 'image') {
+    if (slotTab === 'video' || slotTab === 'extend') {
       if (params.audio_track_path && canApply('audio_track_path')) {
         const start = Number(params.audio_track_start);
         Object.assign(prefill, trackPatch(slotTab, { path: params.audio_track_path }, Number.isFinite(start) && start > 0 ? start : 0));
@@ -861,8 +917,25 @@ export const draft = {
     }
     // A named list, even an empty one, replaces the references: a reused image has exactly its source's. The list is kept
     // whole, whatever the model takes; the Workspace shows and sends the first few.
-    if (lists.reference_path !== undefined && canApply('reference_path')) prefill.referenceImagePaths = lists.reference_path.filter((path) => path !== '');
-    else if (replacing && slotTab === 'image') prefill.referenceImagePaths = [];
+    if (slotTab === 'image') {
+      if (lists.reference_path !== undefined && canApply('reference_path')) prefill.referenceImagePaths = lists.reference_path.filter((path) => path !== '');
+      else if (replacing) prefill.referenceImagePaths = [];
+    }
+    // The image to edit belongs to the Edit slot: a full prefill empties it and its paint, and one that names an image (a blank one
+    // names none) sets it with no paint. What the edit did comes with it: whether the paint must be painted again (a mask is never
+    // saved) and the extension.
+    const startsEdit = slotTab === 'edit' && (replacing || exact || params.edit_source_path !== undefined);
+    if (slotTab === 'edit') {
+      if (replacing) Object.assign(prefill, NO_EDIT);
+      if (params.edit_source_path !== undefined) Object.assign(prefill, editSourcePatch(params.edit_source_path ? { path: params.edit_source_path } : null), NO_EDIT_PAINT);
+      if (params.edit_repaint === 'true') prefill.editRepaint = true;
+      const side = EXTEND_SIDES.find((candidate) => candidate === params.edit_extend_side);
+      if (side) {
+        prefill.editExtendSide = side;
+        const amount = Number(params.edit_extend_amount);
+        if (Number.isFinite(amount) && amount > 0) prefill.editExtendAmount = amount;
+      }
+    }
     // Flags from the slots the prefill replaced are dropped, those of the other slots stay; the Workspace checks the new paths.
     if (SLOT_KEYS.some((key) => key in prefill)) prefill.missingReferencePaths = _flagsOfUntouchedSlots(_draft, prefill);
     // An image Reuse names the finishing settings the asset was made with; Transparent is named on its own too (a viewer-upscaled
@@ -901,6 +974,7 @@ export const draft = {
     _draft = { ...opened, ...reset, ...prefill };
     if (ctx) _draft = _withDerivedWorkflow(ctx, _draft);
     if (exact) _draft = _fitToModel(ctx, _draft);
+    if (startsEdit) _editEpoch += 1;
   },
 
   /**
@@ -922,7 +996,7 @@ export const draft = {
     // A machine that cannot extend gives the Extend kind back to New.
     if (_draft.workflow === 'extend' && !ctx.workflow_contract.values.includes('extend')) _draft = _withDerivedWorkflow(ctx, { ..._draft, workflow: 'txt2vid', videoKind: 'new' });
     // The Audio tab settles on a kind and one of its models; a machine that runs no audio model gives the tab back to Image.
-    if (isAudioWorkflow(_draft.workflow) && availableKinds(ctx).length === 0) _draft = { ..._draft, workflow: 'txt2img' };
+    if (isAudioWorkflow(_draft.workflow) && availableKinds(ctx).length === 0) _draft = { ..._draft, workflow: 'txt2img', leftOnEdit: false };
     if (isAudioWorkflow(_draft.workflow)) {
       const hydrated = hydrateAudio(ctx, _draft, preferredModel);
       _draft = { ...hydrated, ..._swapFamilyLoras(ctx, _draft, _draft.model, hydrated.model) };
@@ -932,21 +1006,26 @@ export const draft = {
     }
     const workflow = _draft.workflow;
     const isVideoMode = _isVideoWorkflow(workflow);
-    const validModels = isVideoMode ? ctx.video_models : ctx.image_models;
+    const validModels = modelsOf(ctx, workflow);
 
-    // Determine model: preferredModel > current draft model (if still valid) > context default. An explicit preferredModel
-    // that is not valid goes straight to the default. Coming back to a mode has already put its own model in the draft.
-    const candidates = preferredModel !== null ? [preferredModel] : [_draft.model];
-    const model = candidates.find((id) => id !== '' && validModels.some((m) => m.id === id))
-      ?? (isVideoMode ? ctx.current_video_model : ctx.current_image_model)
-      ?? validModels[0]?.id
-      ?? '';
+    // Determine model: preferredModel > current draft model (if still valid) > context default (the first model the workflow offers
+    // when the default is not one of them). An explicit preferredModel that is not valid goes straight to the default, unless the
+    // workflow declines it (a model that cannot edit, for Edit): then the workflow keeps its own model. Coming back to a tab has
+    // already put its own model in the draft.
+    const preferred = preferredModel !== null && !declinesModel(ctx, workflow, preferredModel) ? preferredModel : null;
+    const candidates = preferred !== null ? [preferred] : [_draft.model];
+    const defaultModel = isVideoMode ? ctx.current_video_model : ctx.current_image_model;
+    const offered = (id: string | null | undefined): id is string => id != null && id !== '' && validModels.some((m) => m.id === id);
+    const model = candidates.find(offered)
+      ?? (workflow === 'edit' && !offered(defaultModel) ? validModels[0]?.id ?? _draft.model : defaultModel ?? validModels[0]?.id ?? '');
 
     const sameModel = model === _draft.model;
     const keepSettings = options.keepSettings === true && sameModel;
     const keepChanged = options.keepChangedSettings === true;
     const keepsPromptSource = (keepSettings || keepChanged) && ctx.prompt_sources.includes(_draft.promptSource);
-    const promptSource = keepsPromptSource ? _draft.promptSource : ctx.default_prompt_source;
+    // A workflow that offers no prompt source (Edit) leaves the one New chose alone.
+    const takesPromptSource = _visibleControlsForWorkflow(ctx, workflow).has('prompt_source');
+    const promptSource = keepsPromptSource || !takesPromptSource ? _draft.promptSource : ctx.default_prompt_source;
     let nextState = _withModelDefaults(ctx, { ..._draft, workflow, model, promptSource, ..._swapFamilyLoras(ctx, _draft, _draft.model, model) });
     if (keepSettings || (keepChanged && sameModel)) {
       // Same model: the user's settings win over its defaults. A preset that no longer exists falls back to the default size.
@@ -959,7 +1038,7 @@ export const draft = {
       nextState = _fitToModel(ctx, { ...nextState, ..._changedSinceOldDefaults(ctx, _draft) });
     }
     // A model that is gone (a mode's saved model that was removed) takes its defaults: the applied preset no longer describes them.
-    if (!sameModel && preferredModel === null) nextState = { ...nextState, appliedPreset: null };
+    if (!sameModel && preferred === null) nextState = { ...nextState, appliedPreset: null };
     nextState = _applyCapabilityGates(ctx, nextState);
 
     // The workflow follows from the tab and its images, whatever the model: one it cannot start from an image runs from text.
@@ -980,10 +1059,11 @@ export const draft = {
     // Leaving Video notes the kind it was on, so coming back opens it again.
     const left = videoKindOf(_draft.workflow);
     const videoKind = left ?? _draft.videoKind;
-    // The Audio tab opens on the kind it was left on, the Video tab on its kind.
-    const workflow = tab === 'audio' ? _draft.audioKind : tab === 'video' && videoKind === 'extend' ? 'extend' : workflowFor(tab, _draft, true);
-    // A mode opened for the first time starts without the preset of the one it comes from; the next hydration gives it its model's defaults.
-    const entersFresh = workflowMode(workflow) !== 'audio' && workflowMode(workflow) !== workflowMode(_draft.workflow) && !_draft.savedSettings[workflowMode(workflow)];
+    // The Audio tab opens on the kind it was left on, the Video tab and the Image tab on theirs.
+    const workflow = tab === 'audio' ? _draft.audioKind : tab === 'video' && videoKind === 'extend' ? 'extend' : tab === 'image' && _draft.leftOnEdit ? 'edit' : workflowFor(tab, _draft, true);
+    // A tab opened for the first time starts without the preset of the one it comes from; the next hydration gives it its model's defaults.
+    const entering = textTab(workflow);
+    const entersFresh = entering !== 'audio' && entering !== textTab(_draft.workflow) && !_draft.savedSettings[entering];
     _draft = { ..._withModeOf(_draft, workflow), workflow, videoKind, ...(entersFresh ? { appliedPreset: null } : {}) };
     this.saveDraft();
   },
@@ -997,6 +1077,27 @@ export const draft = {
   setVideoKind(kind: VideoKind, ctx: WorkspaceContext | null): void {
     const workflow = kind === 'extend' ? 'extend' : workflowFor('video', _draft, imageSupport(ctx, _draft.model, 'video').start);
     _draft = { ..._draft, workflow, videoKind: kind };
+    this.saveDraft();
+  },
+
+  /**
+   * Open Edit or New on the Image tab: the workflow becomes `edit`, or the one New's images call for. Each keeps its own prompt and
+   * Enhanced text (`savedText`), and its own model, LoRAs, quantization and settings (`savedSettings`), Edit its Batch and Seed too; the
+   * slots stay. The first time, Edit takes the default model that can edit and that model's defaults. Off the Image tab, opening New only clears the note that the tab was left on Edit.
+   *
+   * @param ctx Tells which models Edit can use and whether New's model takes a start image; without it the models are settled by the next hydration and a start image is assumed.
+   */
+  setEditing(editing: boolean, ctx: WorkspaceContext | null): void {
+    if (navTab(_draft.workflow) !== 'image') {
+      // Off the Image tab, New can still be made the kind it opens on.
+      if (!editing && _draft.leftOnEdit) this.patch({ leftOnEdit: false });
+      return;
+    }
+    if ((_draft.workflow === 'edit') === editing) return;
+    const opened = _withSettingsOfMode(_withTextOfMode(_draft, editing ? 'edit' : 'txt2img'), editing ? 'edit' : 'txt2img');
+    const workflow = editing ? 'edit' : workflowFor('image', opened, imageSupport(ctx, opened.model, 'image').start);
+    _draft = { ...opened, workflow };
+    if (ctx) this.hydrateFromContext(ctx, null, { keepSettings: true });
     this.saveDraft();
   },
 
@@ -1034,6 +1135,42 @@ export const draft = {
     const patched = { ..._draft, ...lastSlotPatch(value) };
     heldUploads.setLastFrame(value !== null && 'file' in value ? value.file : null);
     _draft = { ...patched, missingReferencePaths: _withoutFlag(patched, _draft.endImagePath) };
+    this.saveDraft();
+  },
+
+  /**
+   * Set or clear the image to edit: the draft holds its path or the upload's file name and the file is held for Generate. Any
+   * change of the image starts over: the painted mask, its share, the extension and the repaint flag go, and the painter's history
+   * with them (`editEpoch`). Nothing else changes.
+   */
+  setEditSource(value: SlotValue): void {
+    const replaced = _draft.editSourcePath;
+    heldUploads.setEditSource(value !== null && 'file' in value ? value.file : null);
+    heldUploads.setEditMask(null);
+    const patched = { ..._draft, ...editSourcePatch(value), ...NO_EDIT_PAINT };
+    _draft = { ...patched, missingReferencePaths: _withoutFlag(patched, replaced) };
+    _editEpoch += 1;
+    this.saveDraft();
+  },
+
+  /**
+   * Keep what the painter ended with (Done): the mask's PNG is held for Generate and the draft holds its marker, the painted share
+   * and the extension. Nothing painted (`mask` null) and no extension leave the edit without a region. Adding paint, or an extension
+   * that was not there, answers a reused edit's "paint it again"; an extension the reuse restored does not, as its paint is still
+   * missing. The image and its history are unchanged.
+   *
+   * @param edit.amount How far the next extension starts at, which the draft keeps while there is none.
+   */
+  commitEditPaint(edit: { mask: File | null; share: number; extension: { side: ExtendSide; amount: number } | null; amount: number }): void {
+    heldUploads.setEditMask(edit.mask);
+    _draft = {
+      ..._draft,
+      editMaskUpload: edit.mask?.name ?? null,
+      editPaintedShare: edit.mask ? edit.share : 0,
+      editExtendSide: edit.extension?.side ?? null,
+      editExtendAmount: edit.extension?.amount ?? edit.amount,
+      editRepaint: _draft.editRepaint && edit.mask === null && (edit.extension === null || _draft.editExtendSide !== null),
+    };
     this.saveDraft();
   },
 
@@ -1123,6 +1260,7 @@ export const draft = {
     const defaults = clearsSource ? defaultsFor(ctx, { ...s, extendSourcePath: null, extendPrefill: null, extendFrames: null }, null) : defaultsFor(ctx, s, _extendSource);
     _clearHeldUploads(scopes);
     if (clearsSource) _extendSource = null;
+    if (scopes.includes('slotsEdit')) _editEpoch += 1;
     const reset = { ...s, ...pickScopes(defaults, scopes) };
     const kept = new Set(slotPaths(reset));
     _draft = _withDerivedWorkflow(ctx, { ...reset, missingReferencePaths: s.missingReferencePaths.filter((path) => kept.has(path)) });
@@ -1185,8 +1323,8 @@ export const draft = {
    * family switch or tab change can ask for a file that is gone. *installed* lets a chip written as a path be matched by its name.
    */
   removeLora(name: string, installed: LoraInfo[] = []): void {
-    const lorasByFamily = Object.fromEntries(Object.entries(_draft.lorasByFamily).map(([key, value]) => [key, withoutLora(value, name, installed)]));
-    const savedSettings = Object.fromEntries(Object.entries(_draft.savedSettings).map(([mode, saved]) => [mode, saved.loraString === undefined ? saved : { ...saved, loraString: withoutLora(saved.loraString, name, installed) }]));
+    const lorasByFamily = _withoutLoraByFamily(_draft.lorasByFamily, name, installed);
+    const savedSettings = Object.fromEntries(Object.entries(_draft.savedSettings).map(([tab, saved]) => [tab, _withoutLoraIn(saved, name, installed)]));
     _draft = { ..._draft, loraString: withoutLora(_draft.loraString, name, installed), lorasByFamily, savedSettings };
     this.saveDraft();
   },
@@ -1242,6 +1380,7 @@ export const draft = {
       firstFramePath: to(before.firstFramePath),
       endImagePath: to(before.endImagePath),
       referenceImagePaths: before.referenceImagePaths.map(toPath),
+      editSourcePath: to(before.editSourcePath),
       missingReferencePaths: before.missingReferencePaths.filter((path) => !moved.has(path)),
       audioTrackPath: to(before.audioTrackPath),
       extendAudioTrackPath: to(before.extendAudioTrackPath),
@@ -1325,6 +1464,7 @@ export const draft = {
 
   reset(): void {
     _draft = { ...DEFAULT_DRAFT };
+    _editEpoch += 1;
     _authorityReady = false;
     _extendSource = null;
     heldUploads.clear();

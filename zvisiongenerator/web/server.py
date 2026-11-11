@@ -101,6 +101,8 @@ from zvisiongenerator.utils.prompt_enhance_video import EnhancePairResult, enhan
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_LTX, UPSCALE_METHOD_SEEDVR2
+from zvisiongenerator.processing.edit_region import edit_output_size
+from zvisiongenerator.utils.edit_request import check_edit_inputs, edit_mode
 from zvisiongenerator.utils.video_cut import extend_cut_point
 from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
 from zvisiongenerator.utils.lora_preview import LARGE_PREVIEW_EDGE, PREVIEW_EDGE
@@ -119,6 +121,7 @@ from zvisiongenerator.utils.audio_writers import FillResult, NoChangeError
 from zvisiongenerator.web.audio_enhance import AUDIO_MODE, audio_done_frame, audio_text_frame, run_audio_enhance, validate_audio_enhance_body
 from zvisiongenerator.web.audio_models import find_audio_model, runnable_audio_models
 from zvisiongenerator.web.audio_job import AudioFields, audio_request_from_fields
+from zvisiongenerator.web.edit_job import EDIT_MASK_FIELD, EDIT_SOURCE_FIELD, EDIT_WORKFLOW, extend_from_fields, read_edit_source, read_job_paint
 from zvisiongenerator.web.planned_upload import PlannedUpload, planned_form, planned_upload_path
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response
@@ -403,7 +406,7 @@ async def api_browse_sprite(request: Request, purpose: str, path: str) -> Respon
 
 @app.get("/api/browse/media", dependencies=[Depends(_refuse_cross_site_fetch)])
 async def api_browse_media(purpose: str, path: str) -> FileResponse:
-    """Return an audio or video file itself, with range requests, for the browser's players."""
+    """Return an audio, video or image file itself, with range requests: for the browser's players, and the painter's full-size picture."""
     media = await _browse_media_file(purpose, path, browse_media.MEDIA_KINDS)
     return browse_media.serve_media(media)
 
@@ -1513,6 +1516,8 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
     """
     app_config = web_config.app_config
     workflow = _workflow_from_form(_optional_text(form, "workflow"), fallback="txt2img")
+    if workflow == EDIT_WORKFLOW:
+        return _parse_edit_job(form, web_config)
     model_name = _text_or_default(form, "model", web_config.default_models.image)
     if not model_name:
         raise ValueError("An image model is required.")
@@ -1700,6 +1705,150 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         scene_by_set=None,
         context=context,
         supported_controls=generation_supported_controls(review=review_enabled(args)),
+    )
+
+
+def _parse_edit_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
+    """Validate an Edit form (``workflow=edit``) and describe the job it asks for, without queueing it.
+
+    The job works on the picture it is given, so the size, ratio, start image, references, upscale, post-processing,
+    cut-out and enhancement fields do not apply and are ignored. In a download plan the uploads are stand-ins: the
+    picture is not read, so the checks that need its content wait for the submit, and the mask is not decoded.
+
+    Raises:
+        ValueError: If the form is invalid or the edit cannot run (the refusals of ``check_edit_inputs``).
+    """
+    app_config = web_config.app_config
+    model_name = _text_or_default(form, "model", web_config.default_models.image)
+    if not model_name:
+        raise ValueError("An image model is required.")
+    output_dir = _resolve_output_dir(web_config.output_dir)
+    project_save_dir = _project_save_dir(form, output_dir)
+    source_path = _resolve_reference_image(form, output_dir, path_key=EDIT_SOURCE_FIELD, keep_name=True)
+    if source_path is None:
+        raise ValueError("Pick the picture to edit.")
+    planned_source = isinstance(form.get(_upload_field(EDIT_SOURCE_FIELD)), PlannedUpload)
+    source = read_edit_source(source_path, read=not planned_source)
+    extend = extend_from_fields(_optional_text(form, "edit_extend_side"), _optional_text(form, "edit_extend_amount"))
+    mask_upload = form.get(EDIT_MASK_FIELD)
+    has_mask = _is_uploaded_file(mask_upload)
+    # An edit lands beside its source when that is an asset in the output folder; a staged or outside source uses the picked project.
+    save_dir = output_source_folder(output_dir, source.path) or project_save_dir
+    args = argparse.Namespace(
+        ratio=None,
+        size=None,
+        width=None,
+        height=None,
+        runs=_optional_int(form, "runs") or 1,
+        seed=_optional_int(form, "seed"),
+        steps=_optional_int(form, "steps"),
+        guidance=None,
+        scheduler=None,
+        upscale=None,
+        upscale_denoise=None,
+        upscale_steps=None,
+        upscale_guidance=None,
+        upscale_sharpen=False,
+        upscale_save_pre=False,
+        review=False,
+        image_path=None,
+        reference_paths=[],
+        image_strength=0.5,
+        output=save_dir,
+        model=model_name,
+        quantize=_optional_int(form, "quantize"),
+        # The form's defaults would turn sharpening on and record it; an edit runs no post-processing.
+        sharpen=False,
+        contrast=False,
+        saturation=False,
+        transparent=False,
+        lora_paths=None,
+        lora_weights=None,
+        first_sigma=None,
+        json_prompt_enabled=False,
+        edit_source=source.path,
+        edit_paint=None,
+        edit_extend=extend,
+    )
+    _validate_image_args(args, quantize_options=web_config.quantize_options)
+
+    resolved_model = resolve_model_path(args.model, aliases=alias_map(app_config), platform_key=sys.platform)
+    model_info = detect_image_model(resolved_model)
+    defaults = resolve_defaults(model_info, app_config, {"steps": args.steps} if args.steps is not None else {}, get_backend_name())
+    check_edit_inputs(edit_mode(has_mask, extend), extend, source.cutout, int(defaults.get("max_reference_images", 0)), bool(defaults.get("supports_mask_edit", False)))
+    if args.quantize is not None and not defaults.get("supports_quantize", True):
+        raise ValueError("This model does not support quantization.")
+
+    prompt = _required_text(form, "prompt")
+    # Enhancement stays off: the prompt the backend encoded before the run must be the prompt the edit sends.
+    args.no_enhance = True
+    args.enhance = None
+    args.enhance_model = None
+    args.enhance_format = None
+    args.enhance_record = None
+    args.prompt_input = None
+    model_defaults = resolve_defaults(model_info, app_config, {}, get_backend_name())
+    args.steps_explicit = args.steps is not None and args.steps != model_defaults["steps"]
+    args.guidance_explicit = False
+    args.steps = defaults["steps"]
+    args.guidance = defaults["guidance"]
+    args.scheduler = defaults["scheduler"] if defaults.get("supports_scheduler", True) else None
+    validate_scheduler(args.scheduler)
+    args.lora_paths, args.lora_weights = _resolve_loras(form, require_file=True)
+
+    width, height = source.size or (None, None)
+    # What the job saves: Extend adds its side, and a whole-picture edit is the model's own size.
+    out_width, out_height = edit_output_size(width, height, painted=has_mask, extend=extend) if width is not None else (None, None)
+    request = ImageGenerationRequest(
+        backend=None,
+        model=None,
+        prompt=prompt,
+        model_name=model_name,
+        model_family=model_info.family,
+        supports_negative_prompt=False,
+        lora_paths=args.lora_paths,
+        lora_weights=args.lora_weights,
+        seed=args.seed or 0,
+        steps=args.steps,
+        guidance=args.guidance,
+        scheduler=args.scheduler,
+        steps_explicit=args.steps_explicit,
+        guidance_explicit=False,
+        upscale_sharpen=False,
+        max_reference_images=int(defaults.get("max_reference_images", 0)),
+        sharpen=False,
+        contrast=False,
+        saturation=False,
+        transparent=False,
+        output_dir=args.output,
+        **({"width": width, "height": height} if width is not None and height is not None else {}),
+    )
+    context = _public_job_context(
+        form,
+        job_type="Edit",
+        workflow=EDIT_WORKFLOW,
+        model=model_name,
+        model_label=model_display_name(model_name),
+        prompt=prompt,
+        runs=args.runs,
+        meta=f"{out_width}x{out_height} · {args.steps} steps" if out_width is not None else f"{args.steps} steps",
+        width=out_width,
+        height=out_height,
+        output_dir=output_dir,
+        save_dir=save_dir,
+        uploads={EDIT_SOURCE_FIELD: source.path},
+    )
+    args.edit_paint = read_job_paint(mask_upload, source.size) if has_mask else None
+    return ParsedJob(
+        request=request,
+        prompts_data={"web": [(prompt, None)]},
+        config=app_config,
+        args=args,
+        model_ref=resolved_model,
+        enhance_by_set=None,
+        scene_by_set=None,
+        context=context,
+        supported_controls=generation_supported_controls(review=False),
     )
 
 
@@ -2342,17 +2491,18 @@ def _upload_field(path_key: str) -> str:
     return f"{path_key.removesuffix('_path')}_file"
 
 
-def _resolve_reference_image(form: Any, output_dir: str, *, path_key: str = "image_path") -> str | None:
+def _resolve_reference_image(form: Any, output_dir: str, *, path_key: str = "image_path", keep_name: bool = False) -> str | None:
     """Return the reference image a form carries: an upload (saved under the output folder) wins over a typed path.
 
     Args:
         form: The submitted form.
         output_dir: The output folder uploads are saved under.
         path_key: The path field to read; its upload field is derived from it (``end_image_path`` -> ``end_image_file``).
+        keep_name: Whether an upload keeps its own name when saved (see :func:`_save_upload`).
     """
     uploaded_file = form.get(_upload_field(path_key))
     if _is_uploaded_file(uploaded_file):
-        return _save_upload(uploaded_file, output_dir)
+        return _save_upload(uploaded_file, output_dir, keep_name=keep_name)
     return _optional_path(form, path_key)
 
 
@@ -2398,11 +2548,11 @@ def _is_uploaded_file(value: Any) -> bool:
     return bool(getattr(value, "filename", None))
 
 
-def _save_upload(uploaded_file: Any, output_dir: str, *, audio: bool = False, label: str = "Audio track") -> str:
+def _save_upload(uploaded_file: Any, output_dir: str, *, audio: bool = False, label: str = "Audio track", keep_name: bool = False) -> str:
     """Save an uploaded image (or, with *audio*, an audio file) under ``.web_uploads``, keyed by the hash of its content so the same file is saved once.
 
-    An image is saved as ``<hash>.<ext>``. An audio track keeps its own name, so the Web UI can show it later:
-    ``<hash>/<name>``, with the name cleaned of anything but letters, digits, spaces and ``._-()``.
+    An image is saved as ``<hash>.<ext>``. An audio track, and an image with *keep_name* (the picture to edit, whose result is
+    named after it), keeps its own name: ``<hash>/<name>``, with the name cleaned of anything but letters, digits, spaces and ``._-()``.
 
     An image is opened with PIL to check it; an audio file is only checked by its extension, since a track that cannot be
     read fails the job that uses it.
@@ -2412,6 +2562,7 @@ def _save_upload(uploaded_file: Any, output_dir: str, *, audio: bool = False, la
         output_dir: The output folder uploads are saved under.
         audio: Whether the file is an audio file (a video's track or a speech voice) rather than an image.
         label: What an audio file is called in the error message.
+        keep_name: Whether an image keeps its own name; an audio file always does.
 
     Returns:
         The path of the saved file; a file already there (same content, same name) is left as it is.
@@ -2436,17 +2587,17 @@ def _save_upload(uploaded_file: Any, output_dir: str, *, audio: bool = False, la
         except (OSError, UnidentifiedImageError, ValueError) as exc:
             raise ValueError("Uploaded image is invalid or unreadable.") from exc
     digest = hashlib.sha256(data).hexdigest()
-    path = Path(output_dir) / UPLOADS_FOLDER / (f"{digest}/{_upload_name(uploaded_file.filename, suffix)}" if audio else f"{digest}{suffix}")
+    path = Path(output_dir) / UPLOADS_FOLDER / (f"{digest}/{_upload_name(uploaded_file.filename, suffix, 'audio' if audio else 'image')}" if audio or keep_name else f"{digest}{suffix}")
     if not path.is_file():
         path.parent.mkdir(parents=True, exist_ok=True)
         write_bytes_atomic(path, data)
     return str(path)
 
 
-def _upload_name(filename: Any, suffix: str) -> str:
-    """Return the saved name of an upload: its own name with unsafe characters replaced and the extension in lower case."""
+def _upload_name(filename: Any, suffix: str, fallback: str) -> str:
+    """Return the saved name of an upload: its own name with unsafe characters replaced and the extension in lower case; *fallback* when nothing is left."""
     stem = re.sub(r"[^\w ()\-.]", "_", Path(Path(str(filename)).name).stem).strip(" .")[:100]
-    return f"{stem or 'audio'}{suffix}"
+    return f"{stem or fallback}{suffix}"
 
 
 def _project_save_dir(form: Any, root: str) -> str:

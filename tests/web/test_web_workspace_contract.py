@@ -234,3 +234,26 @@ def test_every_video_workflow_offers_the_audio_track_controls(workflow):
 @pytest.mark.parametrize("workflow", ["txt2img", "img2img"])
 def test_the_image_workflows_offer_no_audio_track_controls(workflow):
     assert not set(AUDIO_TRACK_CONTROLS) & set(WORKFLOW_DEFINITIONS[workflow]["visible_controls"])
+
+
+# ---------------------------------------------------------------------------
+# Controls a workflow shows only where its definition lists them
+# ---------------------------------------------------------------------------
+
+
+def _workflows_listing(control: str) -> list[str]:
+    return [name for name in CANONICAL_WORKFLOW_VALUES if control in WORKFLOW_DEFINITIONS[name]["visible_controls"]]
+
+
+@pytest.mark.parametrize(
+    ("control", "workflows"),
+    [
+        ("preset", ["txt2img", "img2img", "txt2vid", "img2vid", "extend"]),
+        ("negative_prompt", ["txt2img", "img2img"]),
+        ("json_prompt", ["txt2img", "img2img"]),
+        ("first_sigma", ["txt2img", "img2img"]),
+    ],
+)
+def test_the_contract_lists_the_controls_that_depend_on_the_workflow(control, workflows):
+    """The Workspace shows these where the workflow lists them (and the model supports them): neither Edit nor Audio does."""
+    assert _workflows_listing(control) == workflows

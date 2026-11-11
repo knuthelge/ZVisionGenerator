@@ -5,6 +5,7 @@ import { EXTEND_SHORT_REASON, pointLabel, type FramePoint } from '$lib/state/fra
 import { hasPath, imageSupport, slotSet } from '$lib/state/imageSlots';
 import { workflowMode } from '$lib/state/promptEnhance';
 import { stripMarks } from '$lib/state/speechDelivery';
+import { textTab } from '$lib/state/workspaceTab';
 import type { AssetUpscaleFactor, DraftState, GalleryAsset, JobWorkflow, PrefillParams, SpeechAudioModel, UpscaleFactor, UpscaleMethod, Workflow, WorkspaceContext } from '$lib/types';
 
 /** Where an image goes: an image's start image, one more reference, a video's first frame, or a video's last frame. */
@@ -39,6 +40,8 @@ export interface AssetActionHandlers {
   onextend?: (asset: GalleryAsset, point?: FramePoint) => void;
   /** A paused video frame becomes the Video tab's first or last frame. */
   onuseframe?: (asset: GalleryAsset, point: FramePoint, target: FrameTarget) => void;
+  /** An image becomes the image to edit on the Image tab's Edit kind. */
+  onedit?: (asset: GalleryAsset) => void;
   /** An audio take becomes the Video tab's audio track or the Speech tab's voice. */
   onuseaudio?: (asset: GalleryAsset, target: AudioUseTarget) => void;
   onupscale?: (asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod) => void;
@@ -56,6 +59,7 @@ const SPEECH_MODELS_UNKNOWN = 'Speech models not loaded';
 const WORKFLOW_LABELS: Record<JobWorkflow, string> = {
   txt2img: 'Text to image',
   img2img: 'Image to image',
+  edit: 'Edit image',
   txt2vid: 'Text to video',
   img2vid: 'Image to video',
   extend: 'Extend video',
@@ -119,6 +123,7 @@ const FALLBACK_REASON_TEXT: Record<string, string> = {
   missing_reference_image: 'The original start image is unknown; reuse starts a text-to-media run instead.',
   model_not_configured: 'The original model is not configured here; the default model is used.',
   missing_source_video: 'The video this one continued has moved or been deleted; choose it again to extend.',
+  missing_edit_source: 'The picture this edit started from has moved or been deleted; choose it again to edit.',
   extend_unavailable: 'Extending a video is not available here; reuse starts a text-to-video run instead.',
 };
 
@@ -168,9 +173,10 @@ function modelLabel(options: readonly { id: string; label: string }[], id: strin
  */
 export function useAsState(ctx: WorkspaceContext | null, state: DraftState): UseAsState {
   if (ctx === null) return { voice: { disabled: true, hint: SPEECH_MODELS_UNKNOWN }, save_voice: { disabled: true, hint: SPEECH_MODELS_UNKNOWN } };
-  const ownMode = workflowMode(state.workflow);
-  const imageModel = (ownMode === 'image' ? state.model : state.savedSettings.image?.model) || (ctx.current_image_model ?? '');
-  const videoModel = (ownMode === 'video' ? state.model : state.savedSettings.video?.model) || (ctx.current_video_model ?? '');
+  // Each tab keeps its own model: the open one's is in the draft, the others' in what they saved.
+  const ownTab = textTab(state.workflow);
+  const imageModel = (ownTab === 'image' ? state.model : state.savedSettings.image?.model) || (ctx.current_image_model ?? '');
+  const videoModel = (ownTab === 'video' ? state.model : state.savedSettings.video?.model) || (ctx.current_video_model ?? '');
   const imageName = modelLabel(ctx.image_models, imageModel);
   const videoName = modelLabel(ctx.video_models, videoModel);
   const imageSupports = imageSupport(ctx, imageModel, 'image');
@@ -366,6 +372,26 @@ export function frameSetNotice(
   if (target === 'last') return slotSet(state.firstFramePath, state.firstFrameUpload) ? null : { message: `Last frame set from ${pointLabel(point)}`, type: 'success' };
   const ending = stillEndingOn(state, held);
   return ending ? { message: `First frame set. Still ending on ${ending}.`, type: 'info' } : { message: `First frame set from ${pointLabel(point)}`, type: 'success' };
+}
+
+/** Return whether an image can be edited: it has a file on the host to load. */
+export function canEdit(asset: GalleryAsset): boolean {
+  return asset.media_type === 'image' && Boolean(asset.file_path);
+}
+
+/**
+ * Return the workspace prefill params that make an image the image to edit: the Image tab's Edit kind, on the model and LoRAs
+ * the image was made with. The draft takes them only where that model can edit, and the paint starts empty.
+ *
+ * `use_as=edit` marks a Use as: only the Edit slot changes (New's start image and references stay) and the prompt starts empty,
+ * as what the image was made from is not what to change.
+ */
+export function editParams(asset: GalleryAsset): Record<string, string> {
+  const params: Record<string, string> = { workflow: 'edit', edit_source_path: asset.file_path ?? '', use_as: 'edit' };
+  const model = asset.reuse_state?.resolved_model;
+  // The LoRAs belong to the model they were recorded with; without it they are left out.
+  if (model) Object.assign(params, { model, lora: asset.lora ?? '' });
+  return params;
 }
 
 /** Ask the user to approve deleting one asset; resolves true when they confirm. */

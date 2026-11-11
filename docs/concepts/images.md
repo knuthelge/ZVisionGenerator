@@ -66,6 +66,34 @@ You can use both. The start image sets the layout and **Strength** how much of i
 
 An upscale made while generating refines with the same references, so what they fix stays the same in the larger image. [Upscaling a finished image](upscaling.md#upscaling-an-existing-image) later doesn't use them, but the upscaled image records them, so **Reuse settings** brings them back. In the Web UI, a reference whose file has since moved or been deleted keeps its row, so the numbers in your prompt still match; see [References](../web-ui/workspace.md#references).
 
+## Edit a picture { #edit }
+
+Edit changes part of a picture you already have, or gives it more room, and leaves everything else as it was. You describe what should be there, the model draws it, and the result is saved as a new file beside the original.
+
+There are three ways to edit, chosen by what you give it:
+
+| You give | Models | The result |
+|---|---|---|
+| **Paint**: the area to change | FLUX.2 Klein, Z-Image, Krea 2 | The painted area is redrawn from your prompt |
+| **Extend**: one side to grow | FLUX.2 Klein, Z-Image, Krea 2 | The picture grows on that side, and the new area is drawn from your prompt |
+| **Neither** | FLUX.2 Klein | The prompt changes the whole picture ("make it night") |
+
+Paint and Extend can be used together. Z-Image and Krea 2 need one of them: without paint or an Extend, **Generate** is off and says *Paint the area to change*.
+
+**The prompt says what should be there.** With paint or an Extend, write what the area should show ("a glass vase of red tulips"). With neither, write what should change ("make it night"). Paint redraws the area from your description, so it isn't the tool for removing an object.
+
+**The rest of the picture stays as it was.** The model works on a crop around the painted area at about one megapixel. The painted area is fully the model's drawing, and the result fades into the original over about 12 pixels around it, so the join is gradual. Everything further away is untouched, pixel for pixel. A painted area that covers more than half the picture is drawn on the whole picture at that size. An Extend is always drawn on the whole picture, new area included, at its own size up to about two megapixels, so the new area keeps its detail on a large photo. A picture of one megapixel or less is drawn at about one megapixel.
+
+**What an edit uses.** The prompt, the model, **Quant**, LoRAs, **Steps**, **Seed** and **Batch size**, with a new random seed for each try unless you set one. An edit takes no size, **Strength**, **Guidance**, upscale, Enhance, sharpening, contrast or saturation. The result keeps the picture's size, or grows by the Extend amount. A whole-picture Klein edit is drawn at about one megapixel at most, so a large picture comes back smaller; [upscale](upscaling.md) it afterwards. Upscaling an edit refines it without the edit's prompt, which says what to change and not what the picture shows.
+
+**Cut-outs.** A picture with transparent parts keeps them: a painted edit gives back the original transparency exactly, and the result counts as a transparent background in the gallery and when you upscale it. Extend is off for such a picture, and a whole-picture edit of it isn't possible, so it needs paint.
+
+**Extend** grows one side at a time by 128 to 512 pixels in steps of 16. The new area counts as painted, and the model's picture fills it right up to the original's edge.
+
+**Where it is saved.** An edit is saved as `<name>_edit.png` (`_edit_2` when that exists) beside the original, and editing an edit again only counts up (`photo_edit.png` becomes `photo_edit_2.png`) (a picture you upload from this device is named after the uploaded file), and the file records the original it was made from, which the viewer shows as **Made from**. The paint itself isn't saved, so **Reuse settings** on an edit brings back the original, the prompt and the settings, and asks you to paint the area again.
+
+The Web UI paints in a full-screen painter; see [Edit an image](../web-ui/workspace.md#edit-an-image). The CLI takes a mask file; see [Edit a picture](../cli/images.md#edit-a-picture).
+
 ## Post-processing
 
 After an image is made, three optional passes adjust it:
@@ -78,7 +106,7 @@ After an image is made, three optional passes adjust it:
 
 Sharpening is CAS (contrast-adaptive sharpening). The configured amounts are `sharpening.normal` (1.0) for plain images and `sharpening.upscaled` (1.2) for upscaled ones. Amounts above 1.5 are refused, because the filter breaks down beyond that. In the Web UI, leave **Sharpen** at **auto** to use the configured amount.
 
-Post-processing is for images only.
+Post-processing is for images only, and an [edit](#edit) applies none of it.
 
 ## Transparent background
 

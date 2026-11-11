@@ -15,6 +15,8 @@ from PIL import Image, ImageOps
 # The image types the app takes as an input: references, a start or last-frame image and an upscale source.
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 _EXIF_ORIENTATION = 0x0112
+# The orientation values that turn a picture a quarter turn, so its width and height swap.
+_EXIF_QUARTER_TURNS = frozenset({5, 6, 7, 8})
 
 
 def open_image_upright(path: str | Path) -> Image.Image:
@@ -24,6 +26,18 @@ def open_image_upright(path: str | Path) -> Image.Image:
     """
     with Image.open(path) as opened:
         return flatten_alpha(ImageOps.exif_transpose(opened))
+
+
+def upright_size(path: str | Path) -> tuple[int, int]:
+    """Return the upright ``(width, height)`` of the image at *path*, reading only its header and EXIF orientation.
+
+    Raises:
+        OSError: The file cannot be read as an image.
+    """
+    with Image.open(path) as image:
+        width, height = image.size
+        turned = image.getexif().get(_EXIF_ORIENTATION) in _EXIF_QUARTER_TURNS
+    return (height, width) if turned else (width, height)
 
 
 @contextmanager

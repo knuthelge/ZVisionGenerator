@@ -52,6 +52,7 @@ from zvisiongenerator.web.gallery_index import FactsRead, GalleryIndex, ScannedF
 from zvisiongenerator.web.projects import NO_PROJECT_FILTER, asset_project, project_dir
 from zvisiongenerator.web.upload_folders import UPLOADS_FOLDER
 from zvisiongenerator.web.upscale_api import ltx_upscale_model
+from zvisiongenerator.web.edit_job import EDIT_SOURCE_FIELD, EDIT_WORKFLOW
 from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canonicalize_workflow, default_workflow_for_mode, workflow_mode
 
 
@@ -112,6 +113,8 @@ class GalleryAsset:
     image_strength: float | None = None
     generation: dict[str, Any] = field(default_factory=dict)
     source: dict[str, Any] | None = None
+    # An edit: what it did (``{mode, extend}``); its ``source`` is the picture it started from, and carries no workflow.
+    edit: dict[str, Any] | None = None
     # An extension: the clip it continued and the frames it added; ``upscaled`` marks a video that was upscaled.
     source_video: str | None = None
     extend_frames: int | None = None
@@ -319,6 +322,11 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         # The workflow stays extend: the source is chosen again in the Workspace.
         workflow_available = False
         fallback_reasons.append("missing_source_video")
+    editing = resolved_workflow == EDIT_WORKFLOW
+    if editing and not _edit_source_exists(asset.source):
+        # The workflow stays edit: the picture is chosen again in the Workspace.
+        workflow_available = False
+        fallback_reasons.append("missing_edit_source")
 
     reuse_params: dict[str, str | list[str]] = {"workflow": resolved_workflow}
     if asset.has_reusable_config:
@@ -332,10 +340,11 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
             # recorded with (a stored-quant ``<name>@q<bits>`` id is such a case), so the level is not carried over.
             level = asset.generation.get("quantize")
             reuse_params["quantize"] = str(level) if level is not None and model_available else ""
-            reuse_params.update(_reuse_image_finishing_params(asset, img2img=resolved_workflow == "img2img"))
+            if not editing:
+                reuse_params.update(_reuse_image_finishing_params(asset, img2img=resolved_workflow == "img2img"))
         if asset.steps is not None:
             reuse_params["steps"] = str(asset.steps)
-        if asset.guidance is not None and workflow_mode(resolved_workflow) == "image":
+        if asset.guidance is not None and workflow_mode(resolved_workflow) == "image" and not editing:
             reuse_params["guidance"] = f"{asset.guidance:g}"
         if asset.seed is not None:
             reuse_params["seed"] = str(asset.seed)
@@ -345,6 +354,9 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
             # Both boxes are named even when blank: a Reuse that recorded no text keeps them blank instead of taking the source's.
             reuse_params.setdefault("scene", "")
             reuse_params.setdefault("prompt", "")
+        elif editing:
+            # An edit takes its size from the picture; only the picture, what it did and the text carry over.
+            reuse_params.update(_edit_reuse_params(asset, source_missing="missing_edit_source" in fallback_reasons))
         else:
             if asset.ratio is not None:
                 reuse_params["ratio"] = asset.ratio
@@ -368,12 +380,12 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         if asset.reference_images:
             # A repeated parameter, in prompt order; the Workspace keeps what its model takes.
             reuse_params["reference_path"] = list(asset.reference_images)
-        if asset.negative_prompt and workflow_mode(resolved_workflow) == "image":
+        if asset.negative_prompt and workflow_mode(resolved_workflow) == "image" and not editing:
             reuse_params["negative_prompt"] = asset.negative_prompt
-        if asset.scheduler and workflow_mode(resolved_workflow) == "image":
+        if asset.scheduler and workflow_mode(resolved_workflow) == "image" and not editing:
             reuse_params["scheduler"] = asset.scheduler
         # An upscale is regenerated from its source settings, at the source's size.
-        if asset.source is not None:
+        if asset.source is not None and not editing:
             if asset.source.get("width") is not None:
                 reuse_params["width"] = str(asset.source["width"])
             if asset.source.get("height") is not None:
@@ -454,6 +466,32 @@ def _extend_reuse_params(asset: GalleryAsset, *, source_missing: bool) -> dict[s
         params["extend_from"] = _seconds_param(asset.extend_from)
     if source_missing:
         params["missing_source_video"] = "true"
+    return params
+
+
+def _edit_source_exists(source: dict[str, Any] | None) -> bool:
+    """Return whether the recorded source picture of an edit is still a file."""
+    return source is not None and is_existing_file(source.get("path"))
+
+
+def _edit_reuse_params(asset: GalleryAsset, *, source_missing: bool) -> dict[str, str]:
+    """Return the Reuse query params that belong to an edit: the picture, whether it painted and how far it extended.
+
+    The painted area is not stored, so ``edit_repaint`` asks the Workspace for it again. A picture that moved is named
+    blank, which empties the Workspace's slot for it: the picture is chosen again.
+    """
+    params: dict[str, str] = {}
+    if source_missing:
+        params[EDIT_SOURCE_FIELD] = ""
+    elif asset.source is not None:
+        params[EDIT_SOURCE_FIELD] = str(asset.source["path"])
+    edit = asset.edit or {}
+    if edit.get("mode") in ("paint", "both"):
+        params["edit_repaint"] = "true"
+    extend = edit.get("extend")
+    if extend:
+        params["edit_extend_side"] = str(extend["side"])
+        params["edit_extend_amount"] = str(extend["amount"])
     return params
 
 
@@ -725,6 +763,7 @@ def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any]) -
         image_strength=metadata["image_strength"],
         generation=metadata["generation"],
         source=_source_with_asset_id(root, metadata["source"]),
+        edit=metadata["edit"],
         source_video=metadata["source_video"],
         extend_frames=metadata["extend_frames"],
         extend_from=metadata["extend_from"],
@@ -742,9 +781,10 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
     image_metadata = facts.get("image") or {}
 
     prompt = recorded.prompt or image_metadata.get("prompt")
-    if not prompt and (recorded.scene or (kind == "video" and config)):
-        # A video that recorded its settings but no prompt (scene-only, or a blank-text extension) stays empty; the file
-        # name stands in only for assets with no recorded settings, where it is display text and never reusable text.
+    if not prompt and (recorded.scene or (config and (kind == "video" or recorded.workflow == UPSCALE_WORKFLOW))):
+        # A video that recorded its settings but no prompt (scene-only, or a blank-text extension) and an upscale whose
+        # source recorded none stay empty; the file name stands in only for assets with no recorded settings, where it is
+        # display text and never reusable text.
         prompt = ""
     else:
         prompt = _coerce_text(prompt or asset_path.stem.replace("_", " "))
@@ -786,6 +826,7 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
         "image_strength": recorded.image_strength,
         "generation": recorded.generation,
         "source": recorded.source,
+        "edit": recorded.edit,
         "source_video": recorded.source_video,
         "extend_frames": recorded.extend_frames,
         "extend_from": recorded.extend_from,
@@ -809,6 +850,7 @@ def _asset_details_json(asset: GalleryAsset) -> dict[str, Any]:
         "image_strength": asset.image_strength,
         "generation": dict(asset.generation),
         "source": dict(asset.source) if asset.source is not None else None,
+        "edit": dict(asset.edit) if asset.edit is not None else None,
     }
 
 

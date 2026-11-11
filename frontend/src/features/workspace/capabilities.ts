@@ -9,6 +9,10 @@ export interface WorkspaceCapabilities {
   isImageMode: boolean;
   /** The Audio tab is open: no image, no video, only the fields of its kind. */
   isAudio: boolean;
+  /** The Edit kind of the Image tab is open (`edit`): the prompt, model, Quant, LoRAs, Batch, Steps and Seed, and the Image to edit section. */
+  isEdit: boolean;
+  /** The settings Preset: the workflow lists it (New and Video, not Audio or Edit). */
+  showPreset: boolean;
   /** The kind the Audio tab shows (its workflow), or null on any other tab. */
   audioKind: AudioWorkflow | null;
   /** A sound, or a song on a model that sets its length (its row does not hide `length`): the Length (s) row. */
@@ -35,6 +39,8 @@ export interface WorkspaceCapabilities {
   dimensionStep: number;
   showPromptSource: boolean;
   showPromptInline: boolean;
+  /** The prompts come from a prompts file: the draft's source is File and the workflow offers a prompt source (the Audio tab and Edit take their text from their own boxes, whatever New last chose). */
+  promptFileMode: boolean;
   /** Video workflows: the Scene box (the Default scene in prompt-file mode). */
   showScene: boolean;
   showPromptFileControls: boolean;
@@ -100,7 +106,8 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   // Permissive fallbacks keep models without explicit capability flags unaffected.
   const supportsUpscale = imageDefaults?.supports_upscale ?? true;
   const supportsScheduler = imageDefaults?.supports_scheduler ?? true;
-  const supportsNegativePrompt = isImageMode && (imageDefaults?.supports_negative_prompt ?? false);
+  // A control shows when the workflow lists it and the model supports it.
+  const supportsNegativePrompt = visible.has('negative_prompt') && (imageDefaults?.supports_negative_prompt ?? false);
   const enhancer = context?.prompt_enhancer ?? null;
   // What the model takes for images is `imageSupport`'s; the workflow's contract decides which of it the workflow shows.
   const images = imageSupport(context, state.model, isImageMode ? 'image' : 'video');
@@ -118,6 +125,8 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   return {
     isImageMode,
     isAudio,
+    isEdit: state.workflow === 'edit',
+    showPreset: visible.has('preset'),
     audioKind,
     showLength: visible.has('length'),
     showLyrics: visible.has('lyrics'),
@@ -128,18 +137,19 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     showSoundType: visible.has('sound_type'),
     showVoice: visible.has('voice') && visible.has('voice_path') && visible.has('voice_text'),
     supportsNegativePrompt,
-    supportsJsonPrompt: isImageMode && (imageDefaults?.supports_json_prompt ?? false),
-    supportsFirstSigma: isImageMode && (imageDefaults?.supports_first_sigma ?? false),
+    supportsJsonPrompt: visible.has('json_prompt') && (imageDefaults?.supports_json_prompt ?? false),
+    supportsFirstSigma: visible.has('first_sigma') && (imageDefaults?.supports_first_sigma ?? false),
     dimensionMin: imageDefaults?.dimension_min ?? 16,
     dimensionMax: imageDefaults?.dimension_max ?? null,
     dimensionStep: imageDefaults?.dimension_step ?? 16,
     showPromptSource: visible.has('prompt_source') && (context?.prompt_sources.length ?? 0) > 0,
     showPromptInline: visible.has('prompt_inline'),
+    promptFileMode: state.promptSource === 'file' && visible.has('prompt_source'),
     showScene: visible.has('prompt_scene'),
     showSourceVideo: visible.has('source_video'),
     showExtendLength: visible.has('extend_length'),
     showPromptFileControls: ['prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit'].some((id) => visible.has(id)),
-    showNegativePrompt: visible.has('negative_prompt') && supportsNegativePrompt,
+    showNegativePrompt: supportsNegativePrompt,
     showEnhance: enhancer !== null && visible.has('prompt_enhance'),
     showEnhanceAuto: enhancer !== null && visible.has('prompt_enhance_auto'),
     enhancer,

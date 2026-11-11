@@ -24,7 +24,7 @@
   import { deleteAsset } from '$lib/api/gallery';
   import { completionToast } from '$lib/state/completionToast';
   import { moveAndReconcile } from '$lib/state/moveAndReconcile';
-  import { audioTrackParams, canExtend, extendParams, frameParams, referenceParams, reuseParams, frameSetNotice, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type FrameTarget, type ReferenceTarget } from '$lib/state/assetActions';
+  import { audioTrackParams, canEdit, canExtend, editParams, extendParams, frameParams, referenceParams, reuseParams, frameSetNotice, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type FrameTarget, type ReferenceTarget } from '$lib/state/assetActions';
   import { arrivalFor, flashArrival } from '$lib/arrivalFlash';
   import type { FramePoint } from '$lib/state/framePoint';
   import { runFrameGrab } from '$lib/state/frameGrab.svelte';
@@ -88,8 +88,16 @@
   import { voiceConsent } from '$lib/state/voiceConsent.svelte';
   import { voiceWindow } from '$lib/state/voiceWindow.svelte';
   import { voicesStore } from '$lib/state/voices.svelte';
-  import { AUDIO_KIND_INFO, VIDEO_KIND_INFO, type KindChoice } from './kindInfo';
+  import { AUDIO_KIND_INFO, IMAGE_KIND_INFO, VIDEO_KIND_INFO, type KindChoice } from './kindInfo';
   import { currentImagesView } from './imagesView';
+  import Painter from './edit/Painter.svelte';
+  import ImageToEditCard from './edit/ImageToEditCard.svelte';
+  import { followDraft } from './edit/editActions';
+  import { currentEditFacts } from './edit/currentEdit';
+  import { editFormData } from './edit/editForm';
+  import { modelsOf } from '$lib/state/workflowModels';
+  import { painterLayer } from './edit/editStore.svelte';
+  import { editPlaceholder } from './edit/editView';
   import PresetMenu from './PresetMenu.svelte';
   import VoicesWindow from './VoicesWindow.svelte';
   import { audioChips, pendingChips, settingsChips, type ChipKey } from './settingsChips';
@@ -108,7 +116,7 @@
   import { hasPendingJobSettings, takeJobSettings } from '$lib/state/pendingJobSettings.svelte';
   import { hasPendingReference, takeReference } from '$lib/state/pendingReference.svelte';
   import { heldUploads } from '$lib/state/heldUploads.svelte';
-  import { isAudioWorkflow, videoKinds, workspaceTab } from '$lib/state/workspaceTab';
+  import { IMAGE_KINDS, isAudioWorkflow, videoKinds, workspaceTab } from '$lib/state/workspaceTab';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
   import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, WorkspaceTab, Workflow, WorkspaceWorkflow, AudioWorkflow, VideoKind } from '$lib/types';
 
@@ -175,6 +183,7 @@
     uploaded_image: 'An uploaded image is named by file name; replace it with its path.',
     uploaded_audio: 'An uploaded audio track is named by file name; replace it with its path.',
     uploaded_voice: 'An uploaded voice recording is named by file name; replace it with its path.',
+    edit_mask: 'The painted area is not a file: save it as a PNG the size of the image, painted where it should change, and name it after --mask.',
   };
   const OUTPUT_GAP_PX = 12;
   const MIN_OUTPUT_CELL_PX = 160;
@@ -328,8 +337,6 @@
   // What the Audio tab sends and why Generate is off on it: the kind's text, the voice and the speaker's tick.
   const audio = $derived(context === null ? null : currentAudioView(context));
   const audioReason = $derived(audio?.reason ?? null);
-  // The one reason on the phone's composer: the Audio tab's own, else a run that is writing the text Generate sends, else a gone or unpaired image.
-  const composerReason = $derived(audio?.active ? audioReason : (textWriting.reason ?? imageBlock));
   // A voice recording's length is read once it is chosen: it must be within what the model follows.
   $effect(() => {
     if (audio?.voice.recording && audio.voice.set) trackLengths.ensure(audio.voice.path, audio.voice.file);
@@ -378,13 +385,18 @@
 
   // Mode derived from workflow
   const isImageMode = $derived(
-    draft.state.workflow === 'txt2img' || draft.state.workflow === 'img2img'
+    draft.state.workflow === 'txt2img' || draft.state.workflow === 'img2img' || draft.state.workflow === 'edit'
   );
+  // The Image tab's Edit kind: the image to edit, its paint and the prompt that says what to change.
+  const isEdit = $derived(draft.state.workflow === 'edit');
+  // What the open tab and model offer (the controls the workflow shows, and the prompt file when the tab takes one).
+  const pageCaps = $derived(workspaceCapabilities(context, draft.state));
+  // The one reason on the phone's composer: the Audio tab's own, else a run that is writing the text Generate sends, else a gone or unpaired image.
+  const composerReason = $derived(audio?.active ? audioReason : (textWriting.reason ?? imageBlock));
   // Generate waits for the stored uploads too: until they are read back a lost upload cannot be told from one still coming.
   const authorityReady = $derived(context !== null && draft.authorityReady && heldUploads.restored);
 
   const imageModels = $derived(context?.image_models ?? []);
-  const videoModels = $derived(context?.video_models ?? []);
   // The Audio tab is open: the kind's models, and the kinds this machine runs, in place of the image or video models.
   const isAudio = $derived(isAudioWorkflow(draft.state.workflow));
   const audioKinds = $derived(context ? availableKinds(context) : []);
@@ -394,11 +406,14 @@
   const kindChoice = $derived<KindChoice | null>(
     isAudio
       ? { kinds: audioKinds, info: AUDIO_KIND_INFO, value: draft.state.workflow, pick: (kind) => draft.setAudioKind(kind as AudioWorkflow, context) }
+      : isImageMode
+        ? { kinds: IMAGE_KINDS, info: IMAGE_KIND_INFO, value: isEdit ? 'edit' : 'new', pick: (kind) => draft.setEditing(kind === 'edit', context) }
       : showVideoKind
         ? { kinds: videoKindOptions, info: VIDEO_KIND_INFO, value: draft.state.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setVideoKind(kind as VideoKind, context) }
         : null,
   );
-  const currentModels = $derived<ModelOption[]>(isAudio && context ? audioModelsOf(context, draft.state.workflow as AudioWorkflow) : isImageMode ? imageModels : videoModels);
+  // The models the open tab offers: Edit's are the ones that can edit.
+  const currentModels = $derived<ModelOption[]>(!context ? [] : isAudio ? audioModelsOf(context, draft.state.workflow as AudioWorkflow) : modelsOf(context, draft.state.workflow));
   const modelOptions = $derived(currentModels.map((m) => ({ value: m.id, label: modelOptionText(m) })));
   // Matches the toolbar label, which falls back to the first model when the draft has none.
   const selectedModel = $derived(currentModels.find((m) => m.id === (draft.state.model || currentModels[0]?.id)) ?? null);
@@ -507,11 +522,12 @@
       const text = s[AUDIO_TEXT_KEYS[s.workflow]];
       return { label: kind.label, text: text || kind.empty, empty: !text };
     }
-    if (s.promptSource === 'file') return { label: 'Prompt file', text: s.promptFilePath ? `${fileName(s.promptFilePath)} · ${s.promptFileOptionIds.length} ${s.promptFileOptionIds.length === 1 ? 'prompt' : 'prompts'}` : 'Choose a prompt file', empty: !s.promptFilePath };
+    if (pageCaps.promptFileMode) return { label: 'Prompt file', text: s.promptFilePath ? `${fileName(s.promptFilePath)} · ${s.promptFileOptionIds.length} ${s.promptFileOptionIds.length === 1 ? 'prompt' : 'prompts'}` : 'Choose a prompt file', empty: !s.promptFilePath };
     const video = s.workflow === 'img2vid' || s.workflow === 'txt2vid' || s.workflow === 'extend';
     const enhanced = anyEnhancedUsed(s);
-    const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || s.scene;
-    return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || (video ? 'What happens in the clip…' : 'Describe what to make…'), empty: !text };
+    const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || (isEdit ? '' : s.scene);
+    const empty = video ? 'What happens in the clip…' : isEdit ? editPlaceholder(currentEditFacts(context)) : 'Describe what to make…';
+    return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || empty, empty: !text };
   });
   const compactSubmitDisabled = $derived(busy || !authorityReady || composerReason !== null || promptChoiceMissing() || currentExtendGuard().blocked || imageBlock !== null || trackBlock !== null || block.blocked);
   // The phone's strip and composer are drawn before the context loads (the frame first); they wake once it has.
@@ -792,6 +808,12 @@
       if (params.use_as === undefined) heldUploads.setTrack('extend', null);
       return;
     }
+    // The Edit kind holds only the image to edit and its paint; every prefill that opens it (a Reuse, a Retry, the Edit action)
+    // replaces both, and no other prefill reaches them.
+    if (tab === 'edit') {
+      heldUploads.clearTab('edit');
+      return;
+    }
     if (params.use_as === 'start') heldUploads.setStart(tab, null);
     else if (params.use_as === 'last') heldUploads.setLastFrame(null);
     else if (params.use_as === 'audio_track') heldUploads.setTrack('video', null);
@@ -896,6 +918,8 @@
     }
     if (workspaceTab(draft.state.workflow) !== 'image') {
       draft.setTab('image');
+      // References belong to New: the Image tab opens on it, also when it was left on Edit.
+      draft.setEditing(false, context);
       draft.onTabChange(context);
       _prevTab = workspaceTab(draft.state.workflow);
     }
@@ -1012,6 +1036,16 @@
       await tick();
       flashArrival(target === 'last' ? 'last-frame' : 'first-frame');
     });
+  }
+
+  /**
+   * Edit on an image (the viewer's button and M, the ⋯ menus): open the Image tab's Edit kind with that image to edit and no
+   * paint, on its recorded model and LoRAs where that model can edit. The prompt starts empty and any Enhanced text goes.
+   */
+  function editAsset(asset: GalleryAsset): void {
+    if (!context || !canEdit(asset)) return;
+    applyPrefill(editParams(asset), { keepSettings: true });
+    closeLightbox();
   }
 
   // Tried in order: the visible prompt field (the Scene box sits above it), else any text field, else any control in the pane.
@@ -1207,9 +1241,9 @@
       }
       if (hasUrlParams && !prefillApplied) {
         prefillApplied = true;
-        // A link into the workspace loads a source's settings; a saved draft keeps its own unless the link names a model.
+        // A link into the workspace loads a source's settings; a saved draft keeps its own unless the link names a model, and a Use as (the Gallery's Edit included) keeps them unless its model differs.
         // The server's context check follows right after, so the prefill does not ask for the paths too.
-        applyPrefill(urlParams, { keepSettings: !urlParams.model, recheck: false });
+        applyPrefill(urlParams, { keepSettings: !urlParams.model || urlParams.use_as !== undefined, recheck: false });
         // A frame or an Extend the Gallery sent: the slot or section it filled flashes once the page has drawn it.
         const arrival = arrivalFor(urlParams);
         if (arrival) void tick().then(() => flashArrival(arrival));
@@ -1240,6 +1274,8 @@
         const run = takePromptRun();
         if (run) {
           void (async () => {
+            // A prompt of a file is New's: Edit has no prompt file, so an Image tab left on Edit moves to New (Edit's image and paint stay).
+            draft.setEditing(false, ctx);
             await tick();
             // Generate waits for the held uploads, so the run does too.
             await heldUploads.restore();
@@ -1344,6 +1380,16 @@
   function buildFormData(form: HTMLFormElement, run: PendingPromptRun | null): FormData {
     // The Audio tab sends the fields of its open kind, built from the draft: the same ones Copy CLI reads.
     if (audio?.active) return withProject(audioFormData(audio, draft.state));
+    // The Edit kind sends the fields of the `edit` workflow, built from the draft: the form carries New's.
+    if (isEdit) {
+      return withProject(editFormData(draft.state, {
+        sourceFile: heldUploads.editSource,
+        maskFile: heldUploads.editMask,
+        prompt: submittedPair(draft.state).prompt,
+        lora: formatLoraString(loraChips),
+        quantize: supportsQuantize,
+      }));
+    }
     const formData = new FormData(form);
     // Send canonical workflow directly; backend accepts and normalises it.
     formData.set('mode', isImageMode ? 'image' : 'video');
@@ -1445,8 +1491,8 @@
 
   /** Whether prompt-file mode lacks a file or a chosen prompt, so there is nothing to run. */
   function promptChoiceMissing(): boolean {
-    // A prompt file means nothing on the Audio tab, whatever the other tabs last chose.
-    return !isAudio && draft.state.promptSource === 'file' && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0);
+    // A prompt file means nothing on the Audio tab or in Edit, whatever the other tabs last chose.
+    return pageCaps.promptFileMode && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0);
   }
 
   /** Copy the CLI command that would run what Generate submits now. */
@@ -1589,6 +1635,14 @@
     mascotHome.publish({ away: mascotAt !== null, mood: mascotMood, tool: mascotTool });
   });
   $effect(() => () => mascotHome.clear());
+  // The painter is a layer of this page; it goes with it.
+  $effect(() => () => painterLayer.hide());
+  // The image the Edit kind shows follows the draft's: after a reload, a Reuse, an Edit from the Gallery, a Reset or a delete.
+  $effect(() => {
+    if (!isEdit) return;
+    void [draft.state.editSourcePath, draft.state.editSourceUpload, heldUploads.editSource];
+    untrack(followDraft);
+  });
 
   /** Download the model chosen in the first-run dialog; once it is queued, make it the default and select it. */
   async function downloadFirstRunModel(model: ModelOption): Promise<DownloadRequestResult> {
@@ -1670,14 +1724,14 @@
           <Segmented label="Kind" testId="kind-control" value={kindChoice.value} disabled={!authorityReady} options={kindChoice.kinds.map((kind) => ({ value: kind, label: kindChoice.info[kind].label, icon: kindChoice.info[kind].icon, title: kindChoice.info[kind].title }))} onchange={kindChoice.pick} />
         </div>
       {/if}
-      {#if !isAudio}
-      <!-- Settings presets; Audio has none -->
+      {#if context === null || pageCaps.showPreset}
+      <!-- Settings presets, listed by the workflow's contract (Audio and Edit have none); a disabled placeholder until the contract has loaded -->
       <PresetMenu {context} {stacked} applied={activePreset} changed={presetChanged} />
       {/if}
 
       <!-- Model selector -->
       <div class="flex items-center gap-2 min-w-0 {stacked ? 'flex-nowrap' : 'flex-wrap'}">
-        <label class="ui-label {stacked || (tall && showVideoKind) ? 'sr-only' : ''}" for="ws-model">Model</label>
+        <label class="ui-label {stacked || (tall && (showVideoKind || isImageMode)) ? 'sr-only' : ''}" for="ws-model">Model</label>
         <Select
           id="ws-model"
           name="model"
@@ -1888,6 +1942,7 @@
                   onuseaudio={useAudio}
                   onextend={extendAsset}
                   onuseframe={useFrame}
+                  onedit={editAsset}
                   onupscale={upscaleAsset}
                   {useAs}
                   ondelete={deleteWorkspaceAsset}
@@ -1941,6 +1996,7 @@
                       onuseaudio={useAudio}
                       onextend={extendAsset}
                       onuseframe={useFrame}
+                      onedit={editAsset}
                       onupscale={upscaleAsset}
                       {useAs}
                       ondelete={deleteWorkspaceAsset}
@@ -2019,6 +2075,7 @@
               onuseaudio={useAudio}
               onextend={extendAsset}
               onuseframe={useFrame}
+              onedit={editAsset}
               onupscale={upscaleAsset}
               {useAs}
               ondelete={deleteWorkspaceAsset}
@@ -2075,6 +2132,7 @@
           onreference={useAsReference}
           onuseaudio={useAudio}
           onextend={extendAsset}
+          onedit={editAsset}
           onupscale={upscaleAsset}
           {useAs}
           ondelete={deleteWorkspaceAsset}
@@ -2109,6 +2167,7 @@
           />
         {/if}
         {#if context}<PresetMenu {context} applied={activePreset} changed={presetChanged} button={false} bind:open={presetMenuOpen} />{/if}
+        {#if isEdit && context}<ImageToEditCard {context} />{/if}
         <SettingsStrip {chips} tab={workspaceTab(draft.state.workflow)} activeKey={activeChip} {changedCount} pending={controlsPending} onopen={toggleChip} onall={() => { activeChip = null; sheetOpen = true; }} />
         <div class="composer" class:expanded={composerOpen} data-testid="composer">
           {#if block.failures.length > 0}
@@ -2268,6 +2327,11 @@
   />
 {/if}
 
+<!-- The painter of Edit: a layer of its own over the page, closed by Done or Cancel. -->
+{#if painterLayer.open}
+  <Painter onclose={() => painterLayer.hide()} />
+{/if}
+
 <!-- One viewer for history and completed outputs -->
 <AssetViewer
   assets={lightboxAssets}
@@ -2284,6 +2348,7 @@
   onuseaudio={useAudio}
   onextend={extendAsset}
   onuseframe={useFrame}
+  onedit={editAsset}
   {useAs}
   audioModels={context?.audio_models}
   audioVocabulary={context?.audio_settings}

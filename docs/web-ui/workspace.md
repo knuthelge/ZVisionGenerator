@@ -4,6 +4,8 @@ The Workspace is where you make things. Pick **Image**, **Video** or [**Audio**]
 
 **Video** has two kinds, chosen with **Kind** at the start of the toolbar: **New** makes a clip from text or a first frame, and **Extend** continues a clip you already have (see [Extending a video](../concepts/video.md#extending-a-video)). The two share the prompt, model, LoRAs, steps and seed; each keeps its own inputs. **Kind** is hidden on a computer that can't extend.
 
+**Image** has two kinds as well: **New** generates a picture, and **Edit** changes part of one you already have, or gives it more room (see [Edit an image](#edit-an-image)). Edit keeps its own prompt, model, **Quant**, LoRAs, **Steps**, **Seed** and **Batch size**: switching **Kind** swaps between the two, and each comes back as you left it. Nothing you do in Edit, a **Reset** included, changes New, and nothing in New reaches an edit.
+
 ![The Workspace: Compose and Settings on the left, the preview in the middle and the Gallery strip below](../assets/screenshots/workspace.webp)
 
 ## Project
@@ -214,14 +216,14 @@ When you choose another model, the settings you changed are kept and the rest ta
 
 ### Reset
 
-**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the tempo, key, delivery, sound type, length, the voice, the *Enhance* options, **Batch size** and **Seed**. On Extend it also clears the source video and the point to extend from. It keeps the model, LoRAs and quant and the prompts, and it never touches another tab. **Batch size** and **Seed** are shared by every tab, so each Reset puts them back.
+**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the tempo, key, delivery, sound type, length, the voice, the *Enhance* options, **Batch size** and **Seed**. On Extend it also clears the source video and the point to extend from. It keeps the model, LoRAs and quant and the prompts, and it never touches another tab. **Batch size** and **Seed** are shared by New, Video and Audio (Edit has its own), so each Reset puts them back.
 
 ### Copy as a command
 
 The terminal button in the *Settings* header copies a `ziv image`, `ziv video` or `ziv audio` command with the current model, prompt, LoRAs and settings, writing to the folder the job would save to: the Web UI's output folder, or the picked [project's](../concepts/projects.md) folder. Paste it in a terminal to run the same job from the [CLI](../cli/index.md).
 
 !!! note "When the command differs"
-    The CLI has no inline negative prompt, and runs every prompt in a prompt file rather than only the ones you selected. A notice says when the copied command would do something different. An uploaded start image or reference is named by its file name: replace it with the file's path.
+    The CLI has no inline negative prompt, and runs every prompt in a prompt file rather than only the ones you selected. A notice says when the copied command would do something different. An uploaded start image or reference is named by its file name: replace it with the file's path. An edit's command names the image with `--edit`, and a painted one names `--mask mask.png`, a placeholder for the painted area saved as a PNG the size of the image.
 
 ### Paths on the server
 
@@ -234,6 +236,38 @@ Fields that take a path on the server's machine (prompt files, the output folder
 - For images, audio tracks and source videos it shows thumbnails, can switch to a grid, and has a preview (**Preview** or ++alt+p++) that plays audio and video when you press play. Once chosen, the slot shows the file too.
 
 Typing in a path field suggests matching folders and files: ++tab++ takes the first, the arrow keys and ++enter++ pick another, and ++down++ in an empty field suggests recent paths and the usual folders.
+
+## Edit an image
+
+**Edit** is a kind of the **Image** tab, chosen with **Kind** at the start of the toolbar. It changes part of a picture you already have, or gives it more room, and leaves the rest as it was. What Paint, Extend and a whole-picture edit do, and which models take them, is in [Edit a picture](../concepts/images.md#edit).
+
+1. **Choose the image.** *Image to edit* in *Settings* holds it. With none, it offers **Browse**, **Upload** and **Latest output**, or drop an image on it. **Edit** in the [viewer](gallery.md#the-viewer) (++m++) and in a tile's **⋯** menu opens the Workspace on Edit with that image loaded and an empty prompt; it switches Edit to the image's model and LoRAs when that model can edit, and keeps Edit's settings when it is already on that model.
+2. **Paint or extend.** **Paint or extend** opens the painter. Paint the part to change, or switch to **Extend**. Press **Done** to return to the Workspace, where *Image to edit* shows how much is painted and which side is extended.
+3. **Write the prompt and press Generate.** The prompt is Edit's own and starts empty; what you wrote in New stays there. The prompt box reads *What should be here?* once something is painted or extended, and *What should change?* for a whole-picture edit. It runs as an ordinary job, with the preview, the queue and Stop, and the result is saved beside the original.
+
+![Image to edit in Settings with the painted share shown, and the Edit kind chosen in the toolbar](../assets/screenshots/placeholder.svg "edit-image-to-edit")
+
+**To try again,** press **Generate** again: the image and its paint stay. **Batch size** gives several tries, each with a random seed. **To change something in a result,** press **Edit** on that result, which loads it with no paint. **Reset** clears the image and the paint, and choosing another image clears the paint too, since paint belongs to one image.
+
+An edit shows the prompt, the model (only models that can edit), **Quant**, LoRAs, **Batch size**, **Steps** and **Seed**. Edit starts on the default model that can edit, and keeps the model you choose for it after that, whatever model New is on. A prompt file belongs to New: Edit has none, and **Use in Workspace** on the [Prompts](prompts.md) page opens New. **Generate** is off with its reason shown when it can't run: *Choose an image to edit*, or *Paint the area to change* for Z-Image, Krea 2 and any picture with transparent parts, which need paint or an Extend.
+
+### The painter
+
+The painter fills the screen on every device. It draws the picture at its full size, so zoomed in it stays sharp. **Paint** and **Extend** switch at the top, with **Cancel** and **Done** beside them. Nothing closes it by accident: the paint stays until you press **Done**, **Clear** or choose another image, and opening the painter again shows it.
+
+![The painter on Paint, with a painted area over the picture and the brush controls](../assets/screenshots/placeholder.svg "edit-painter-paint")
+
+- **Paint:** **Brush** and **Erase**, a size slider, **Undo**, **Clear** and zoom. The painted area shows as a teal fill, and a ring shows the brush's true size. ++b++ and ++e++ switch tools, <kbd>,</kbd> and <kbd>.</kbd> change the size, <kbd>+</kbd>, <kbd>-</kbd> and <kbd>0</kbd> zoom, and ++ctrl+z++ undoes.
+- **Extend:** **+ Top**, **+ Right**, **+ Bottom** and **+ Left** on the picture's edges grow one side at a time, by **Extend by** 128 to 512 pixels, with the new size shown. The new area shows as a checkerboard. Extend is off for a picture with transparent parts.
+- **Mouse and pen** paint. **On a touch screen** one finger paints, and two fingers zoom and pan; a second finger landing cancels the stroke the first began. With a mouse, hold ++space++ and drag to pan.
+
+![The painter on Extend, with the + Right pill and the new size shown](../assets/screenshots/placeholder.svg "edit-painter-extend")
+
+On a phone, *Image to edit* is a card above the settings chips, and the painter's controls sit at the foot of the screen.
+
+### Reuse and the Gallery
+
+**Reuse settings** on an edited file returns to Edit with the same image, prompt and settings. The paint isn't saved, so a painted edit shows *Paint the area again* and **Generate** stays off until you paint. An Extend comes back as it was. The viewer's details name the image an edit was **Made from**.
 
 ## The Audio tab
 

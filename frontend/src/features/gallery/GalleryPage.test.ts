@@ -469,6 +469,34 @@ describe('GalleryPage regressions', () => {
     expect(document.querySelector('[role="menu"] [data-action="extend"]')).toBeNull();
   });
 
+  it('opens an image for editing from the viewer and from its menu, and offers no Edit for a video', async () => {
+    const image = makeAsset({
+      id: 'out/a.png', filename: 'a.png', file_path: '/outputs/a.png', lora: 'detail:0.8', prompt: 'A calm shoreline',
+      reuse_state: { requested_workflow: 'txt2img', resolved_workflow: 'txt2img', workflow_available: true, requested_model: 'klein', resolved_model: 'klein', model_available: true, fallback_reasons: [] },
+    });
+    const video = makeAsset({ id: 'out/walk.mp4', filename: 'walk.mp4', media_type: 'video', file_path: '/outputs/walk.mp4' });
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [image, video], page: 1, total_pages: 1, total_count: 2 });
+    const params = { workflow: 'edit', edit_source_path: '/outputs/a.png', use_as: 'edit', model: 'klein', lora: 'detail:0.8' };
+
+    mountPage();
+    await settle();
+    (target.querySelector(`button[aria-label="More actions for ${image.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+    (document.querySelector('[role="menu"] [data-action="edit"]') as HTMLButtonElement).click();
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', params);
+    routerMocks.navigate.mockClear();
+
+    await openViewer(image.filename);
+    (getViewer()!.querySelector('[data-action="edit"]') as HTMLButtonElement).click();
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', params);
+
+    // M does the same from the keyboard; no prompt travels, so the Workspace starts it empty.
+    routerMocks.navigate.mockClear();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', params);
+    expect(Object.keys(routerMocks.navigate.mock.calls[0][1] ?? {})).not.toContain('prompt');
+  });
+
   it('removes a deleted asset from the workspace history too', async () => {
     const asset = makeAsset();
     galleryStore.seed([asset]);

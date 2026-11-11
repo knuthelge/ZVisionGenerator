@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAudioWorkflow, navTab, videoKindOf, videoKinds, visibleTabs, WORKSPACE_TABS, workflowFor, workspaceTab } from './workspaceTab';
+import { IMAGE_KINDS, isAudioWorkflow, navTab, textTab, videoKindOf, videoKinds, visibleTabs, WORKSPACE_TABS, workflowFor, workspaceTab } from './workspaceTab';
 import type { DraftState, Workflow, WorkspaceWorkflow } from '$lib/types';
 
 const NONE = { referenceImagePath: null, referenceImageUpload: null, firstFramePath: null, firstFrameUpload: null } satisfies Partial<DraftState>;
@@ -85,5 +85,35 @@ describe('workflowFor', () => {
 
   it('is extend in the Extend slot, whatever the images', () => {
     expect(workflowFor('extend', { ...NONE, referenceImagePath: '/in/a.png', firstFramePath: '/in/b.png' }, true)).toBe('extend');
+  });
+});
+
+describe('IMAGE_KINDS', () => {
+  it('offers New and Edit', () => {
+    expect(IMAGE_KINDS).toEqual(['new', 'edit']);
+  });
+
+  it('never makes Edit a tab', () => {
+    expect(visibleTabs(['txt2img', 'img2img', 'edit']).map((tab) => tab.id)).toEqual(['image', 'video']);
+  });
+});
+
+describe('Edit, a kind of the Image tab', () => {
+  it('belongs to the Image tab of the top bar, and is no kind of Video', () => {
+    expect(navTab('edit')).toBe('image');
+    expect(videoKindOf('edit')).toBeNull();
+  });
+
+  it('has a slot of its own, apart from New\'s', () => {
+    expect(workspaceTab('edit')).toBe('edit');
+    expect(workspaceTab('txt2img')).toBe('image');
+  });
+
+  it('is `edit` in the Edit slot, whatever the images', () => {
+    expect(workflowFor('edit', { ...NONE, referenceImagePath: '/in/a.png' }, true)).toBe('edit');
+  });
+
+  it('writes a text of its own, where Extend writes Video\'s', () => {
+    expect((['txt2img', 'img2img', 'edit', 'txt2vid', 'img2vid', 'extend', 'music'] as const).map(textTab)).toEqual(['image', 'image', 'edit', 'video', 'video', 'video', 'audio']);
   });
 });

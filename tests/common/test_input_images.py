@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from tests._images import SIDEWAYS_UPRIGHT_SIZE, is_bluish, is_reddish, write_cutout, write_sideways_photo
-from zvisiongenerator.utils.input_images import flatten_alpha, open_image_upright, upright_image_copies
+from zvisiongenerator.utils.input_images import flatten_alpha, open_image_upright, upright_image_copies, upright_size
 
 
 def test_an_input_image_is_opened_upright_and_keeps_its_size(tmp_path):
@@ -16,6 +16,13 @@ def test_an_input_image_is_opened_upright_and_keeps_its_size(tmp_path):
     assert loaded.mode == "RGB"
     assert loaded.size == SIDEWAYS_UPRIGHT_SIZE
     assert is_reddish(loaded.getpixel((10, 2))) and is_bluish(loaded.getpixel((10, 37)))
+
+
+def test_the_upright_size_swaps_a_quarter_turned_picture_and_leaves_the_rest(tmp_path):
+    Image.new("RGB", (30, 20)).save(tmp_path / "plain.png")
+
+    assert upright_size(write_sideways_photo(tmp_path / "phone.jpg")) == SIDEWAYS_UPRIGHT_SIZE
+    assert upright_size(tmp_path / "plain.png") == (30, 20)
 
 
 def test_an_input_image_with_transparency_goes_on_white(tmp_path):

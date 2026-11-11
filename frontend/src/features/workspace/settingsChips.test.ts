@@ -4,11 +4,12 @@ import { AUDIO_FIELD_DEFAULTS } from '$lib/state/audioDraft';
 import type { DraftState } from '$lib/types';
 import type { WorkspaceCapabilities } from './capabilities';
 import type { ImagesSummary } from './imagesSummary';
+import { makeChipFacts } from '../../test-utils/chipFacts';
 import { audioChips, pendingChips, settingsChips, type AudioChipFacts, type ChipFacts } from './settingsChips';
 
 const imageCaps = {
   isImageMode: true, showFrameCount: false, showExtendLength: false, showSteps: true, showGuidance: true, showI2IStrength: false, showSeed: true,
-  showRuns: true, showRefImage: false, showSourceVideo: false, showDimensions: true, showAudio: false, showLowMemory: false, showVideoUpscale: false, showImageUpscale: true,
+  showRuns: true, showRefImage: false, showSourceVideo: false, showDimensions: true, showAudio: false, showLowMemory: false, showVideoUpscale: false, showImageUpscale: true, showPreset: true,
 } as WorkspaceCapabilities;
 
 const state = {
@@ -17,18 +18,13 @@ const state = {
 } as DraftState;
 
 function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
-  return {
-    caps: imageCaps, state, changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null,
-    loraNames: [], videoKind: null, modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, track: null, memoryWarn: false,
-    presetName: null, presetSlug: null, presetChanged: false,
-    ...overrides,
-  };
+  return makeChipFacts({ caps: imageCaps, state, ...overrides });
 }
 
 describe('settingsChips', () => {
   it('offers placeholder chips in the workflow order, with no value, while the context loads', () => {
     const image = pendingChips('txt2img');
-    expect(image.map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'images', 'size', 'loras', 'upscale', 'model']);
+    expect(image.map((chip) => chip.key)).toEqual(['kind', 'preset', 'steps', 'guidance', 'seed', 'runs', 'images', 'size', 'loras', 'upscale', 'model']);
     expect(image.every((chip) => chip.value === '—' && !chip.changed)).toBe(true);
     expect(pendingChips('txt2vid').map((chip) => chip.key)).toEqual(['kind', 'preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
     expect(pendingChips('extend').map((chip) => chip.key).slice(0, 3)).toEqual(['kind', 'preset', 'extendSeconds']);
@@ -43,7 +39,7 @@ describe('settingsChips', () => {
   });
 
   it('orders an image workflow by how often each setting changes, model last', () => {
-    expect(settingsChips(facts()).map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'size', 'loras', 'upscale', 'model']);
+    expect(settingsChips(facts()).map((chip) => chip.key)).toEqual(['kind', 'preset', 'steps', 'guidance', 'seed', 'runs', 'size', 'loras', 'upscale', 'model']);
   });
 
   it('puts the clip length first and audio after size for video, without the image upscale', () => {
@@ -100,7 +96,7 @@ describe('settingsChips', () => {
     it('is one chip for every image, between Batch and Size, with the section summary as its value', () => {
       const keys = settingsChips(facts({ images: summary() })).map((chip) => chip.key);
 
-      expect(keys).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'images', 'size', 'loras', 'upscale', 'model']);
+      expect(keys).toEqual(['kind', 'preset', 'steps', 'guidance', 'seed', 'runs', 'images', 'size', 'loras', 'upscale', 'model']);
       expect(images({ images: summary() })).toMatchObject({ label: 'Images', value: 'pond.png · 2 references', on: true });
     });
 
@@ -177,9 +173,9 @@ describe('settingsChips', () => {
     });
   });
 
-  it('puts the preset first with its name, or none, and the changed flag', () => {
-    expect(settingsChips(facts())[0]).toMatchObject({ key: 'preset', applied: '', changed: false, on: false });
-    const applied = settingsChips(facts({ presetName: 'Soft portrait', presetSlug: 'soft-portrait', presetChanged: true }))[0];
+  it('puts the preset after the Kind with its name, or none, and the changed flag', () => {
+    expect(settingsChips(facts())[1]).toMatchObject({ key: 'preset', applied: '', changed: false, on: false });
+    const applied = settingsChips(facts({ presetName: 'Soft portrait', presetSlug: 'soft-portrait', presetChanged: true }))[1];
     expect(applied).toMatchObject({ key: 'preset', applied: 'soft-portrait', changed: true, on: true });
   });
 

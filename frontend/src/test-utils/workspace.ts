@@ -1,4 +1,4 @@
-import type { AudioEnhanceMatrix, GalleryAsset, GalleryPage, ImageModelDefaults, JobSnapshot, ModelLicence, VideoModelDefaults, WorkspaceContext } from '$lib/types';
+import type { AudioEnhanceMatrix, WorkflowContractEntry, GalleryAsset, GalleryPage, ImageModelDefaults, JobSnapshot, ModelLicence, VideoModelDefaults, WorkspaceContext } from '$lib/types';
 
 // Fixtures of the Workspace page tests: a server context with one image and one video model, and the job and asset records a page shows.
 
@@ -121,6 +121,16 @@ export const MATTE_LICENCE: ModelLicence = {
   attribution: null,
 };
 
+/** The `edit` workflow as the server lists it: the controls an edit uses. */
+export const EDIT_DEFINITION: WorkflowContractEntry = {
+  mode: 'image',
+  model_kind: 'image',
+  visible_controls: ['workflow', 'model', 'quantize', 'loras', 'prompt_inline', 'runs', 'steps', 'seed'],
+  requires_reference_image: false,
+  requires_source_video: false,
+  clear_fields: [],
+};
+
 export function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContext {
   const imageDefaults = makeImageDefaults();
   const alternateImageDefaults = makeImageDefaults({
@@ -169,17 +179,18 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
     video_size_options: { '16:9': ['m'] },
     scheduler_options: ['beta'],
     workflow_contract: {
-      values: ['txt2img', 'img2img', 'txt2vid', 'img2vid'],
+      values: ['txt2img', 'img2img', 'edit', 'txt2vid', 'img2vid'],
       definitions: {
+        edit: { ...EDIT_DEFINITION, visible_controls: [...EDIT_DEFINITION.visible_controls] },
         txt2img: {
           mode: 'image',
           model_kind: 'image',
           visible_controls: [
-            'workflow', 'model', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'negative_prompt',
+            'workflow', 'model', 'preset', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'json_prompt', 'negative_prompt',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
             'references', 'references_clear',
-            'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed', 'scheduler',
+            'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed', 'first_sigma', 'scheduler',
             'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation', 'postprocess_transparent',
             'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
             'image_upscale_guidance', 'image_upscale_sharpen', 'image_upscale_review'
@@ -192,11 +203,11 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
           mode: 'image',
           model_kind: 'image',
           visible_controls: [
-            'workflow', 'model', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'negative_prompt',
+            'workflow', 'model', 'preset', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'json_prompt', 'negative_prompt',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
             'references', 'references_clear',
-            'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed', 'scheduler',
+            'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed', 'first_sigma', 'scheduler',
             'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation', 'postprocess_transparent',
             'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
             'image_upscale_guidance', 'image_upscale_sharpen', 'image_upscale_review'
@@ -209,7 +220,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
           mode: 'video',
           model_kind: 'video',
           visible_controls: [
-            'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
+            'workflow', 'model', 'preset', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
             'end_image', 'end_image_path', 'end_image_clear',
@@ -225,7 +236,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
           mode: 'video',
           model_kind: 'video',
           visible_controls: [
-            'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
+            'workflow', 'model', 'preset', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
             'end_image', 'end_image_path', 'end_image_clear',
@@ -240,7 +251,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
         extend: {
           mode: 'video',
           model_kind: 'video',
-          visible_controls: ['workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'audio_track', 'audio_track_path', 'audio_track_start', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
+          visible_controls: ['workflow', 'model', 'preset', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'audio_track', 'audio_track_path', 'audio_track_start', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
           requires_reference_image: false,
           requires_source_video: true,
           clear_fields: ['negative_prompt', 'guidance', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor', 'transparent'],
@@ -351,4 +362,25 @@ export function withVideoEnhancer(context: WorkspaceContext): WorkspaceContext {
     context.workflow_contract.definitions[workflow].visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
   }
   return context;
+}
+
+/**
+ * A context that can edit: three image models (Flux Lite, which cannot; Z-Image, which needs paint; Klein, which also takes
+ * reference images and so edits the whole picture).
+ */
+export function makeEditContext(): WorkspaceContext {
+  const base = makeContext();
+  return {
+    ...base,
+    image_models: [
+      { id: 'flux-lite', label: 'Flux Lite', type: 'image' },
+      { id: 'zit', label: 'Z-Image', type: 'image' },
+      { id: 'klein', label: 'Klein', type: 'image' },
+    ],
+    image_model_defaults: {
+      'flux-lite': makeImageDefaults({ family: 'flux2' }),
+      zit: makeImageDefaults({ family: 'zimage', supports_mask_edit: true }),
+      klein: makeImageDefaults({ family: 'flux2_klein', supports_mask_edit: true, max_reference_images: 4 }),
+    },
+  };
 }

@@ -686,10 +686,11 @@ describe('WorkspacePage settings presets', () => {
     });
     afterEach(() => { delete (Element.prototype as Partial<Element>).animate; });
 
-    it('puts the Preset chip first, saying none, and opens the preset menu as an action sheet', async () => {
+    it('puts the Preset chip after the Kind, saying none, and opens the preset menu as an action sheet', async () => {
       await mountWithPresets();
 
-      expect(chips()[0].dataset.chip).toBe('preset');
+      expect(chips()[0].dataset.chip).toBe('kind');
+      expect(chips()[1].dataset.chip).toBe('preset');
       expect(presetChip().dataset.applied).toBe('');
       flushSync(() => presetChip().click());
       await settle();

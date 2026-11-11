@@ -8,12 +8,13 @@ import pytest
 
 from tests._factories import video_config
 from zvisiongenerator.downloads.declaration import companion_targets, declared_repo_ids, model_targets, role_targets
+from zvisiongenerator.processing.edit_region import EDIT_CELL_PIXELS
 from zvisiongenerator.utils.ltx_facts import EULER_ANCESTRAL, LTX_SAMPLERS
 from zvisiongenerator.utils.config import video_family
 from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_preset
 from zvisiongenerator.utils.ideogram4_instant import LINKED_COMPONENTS as INSTANT_LINKED
 from zvisiongenerator.utils.ideogram4_instant import LICENSE_FILES, TRANSFORMER_FORMATS
-from zvisiongenerator.utils.model_metadata import PLATFORM_KEYS, builtin_aliases, family_block, load_model_metadata, model_entry, model_ids
+from zvisiongenerator.utils.model_metadata import PLATFORM_KEYS, builtin_aliases, family_block, load_model_metadata, model_capabilities, model_entry, model_ids
 from zvisiongenerator.utils.matte import matte_pins
 from zvisiongenerator.utils.moss_build import LINKED_COMPONENTS as MOSS_LINKED
 from zvisiongenerator.utils.seedvr2 import seedvr2_files, seedvr2_tiers
@@ -208,3 +209,32 @@ def test_ideo_declares_one_components_and_one_single_file_transformer_in_a_forma
     assert len(transformer.allow_patterns) == 1
     assert {"model_index.json", "transformer/config.json", *LICENSE_FILES} <= set(components.allow_patterns)
     assert {f"{name}/*" for name in INSTANT_LINKED} <= set(components.allow_patterns)
+
+
+@pytest.mark.parametrize(
+    ("family", "variant", "expected"),
+    [
+        ("zimage", None, True),
+        ("flux2_klein", None, True),
+        ("flux2_klein", "distilled", True),
+        ("flux2_klein", "base", True),
+        ("krea2", None, True),
+        ("ideogram4", None, False),
+        ("moss", None, False),
+        ("moss", "turbo", False),
+        ("flux1", None, False),
+        ("flux2", None, False),
+        ("unknown", None, False),
+        ("a-family-the-metadata-has-never-heard-of", None, False),
+    ],
+)
+def test_only_the_families_that_redraw_a_painted_area_support_mask_edit(family: str, variant: str | None, expected: bool) -> None:
+    assert model_capabilities(family, variant)["supports_mask_edit"] is expected
+
+
+def test_the_edit_backends_cell_table_names_exactly_the_families_that_support_mask_edit() -> None:
+    """``EDIT_CELL_PIXELS`` is what both backends read; a family with the flag and no cell would fail at the backend, and a cell without the flag is unreachable."""
+    families = load_model_metadata()["image_families"]
+    flagged = {family for family, block in families.items() if block.get("supports_mask_edit") or any(variant.get("supports_mask_edit") for variant in block.get("variants", {}).values())}
+
+    assert set(EDIT_CELL_PIXELS) == flagged

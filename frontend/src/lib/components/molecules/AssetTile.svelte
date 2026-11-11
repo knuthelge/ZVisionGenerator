@@ -47,6 +47,7 @@
     onreference,
     onextend,
     onuseframe,
+    onedit,
     onupscale,
     onuseaudio,
     ondelete,
@@ -79,7 +80,7 @@
   let point = $state<FramePoint | null>(null);
   const extracting = $derived(busyFor(asset.id) !== null);
   const frameActions = $derived(point ? frameMenuEntries(asset, point, { onextend, onuseframe }, useAs) : []);
-  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onuseframe, onupscale, onuseaudio, ondelete }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined, point));
+  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onuseframe, onupscale, onuseaudio, ondelete }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined, point));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   const thumbnail = $derived(asset.thumbnail_url || asset.url);

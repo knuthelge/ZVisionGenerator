@@ -17,6 +17,19 @@ def generate_filename(set_name: str | None = None, *, now: datetime | None = Non
     return f"{safe_name}_{timestamp}" if safe_name else timestamp
 
 
+# A stem that is already an edit's: ``_edit`` with the counter ``unique_output_path`` may have added.
+_EDITED_STEM = re.compile(r"_edit(?:_\d+)?$")
+
+
+def edit_output_stem(source: str | Path) -> str:
+    """Return the output stem for an edit of the picture at *source*: its name plus ``_edit``, without stacking a second one.
+
+    A source that is already an edit (``photo_edit``, ``photo_edit_2``) gives ``photo_edit`` again, so
+    :func:`unique_output_path` adds the counter: ``photo_edit_2``, ``photo_edit_3``.
+    """
+    return f"{_EDITED_STEM.sub('', Path(source).stem)}_edit"
+
+
 def unique_output_path(directory: str | Path, stem: str, suffix: str) -> Path:
     """Return ``directory/stem+suffix``, or the first free ``stem_N+suffix`` (N from 2) when it exists."""
     folder = Path(directory)

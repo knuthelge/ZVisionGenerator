@@ -2,15 +2,53 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 import sys
 from collections.abc import Mapping
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 from PIL import Image
 
+from zvisiongenerator.core import image_backend, image_types
 from zvisiongenerator.core.image_backend import ImageBackend
+from zvisiongenerator.core.image_types import EditWork, ImageGenerationRequest, ImageWorkingArtifacts
+
+
+class TestEditCoreTypes:
+    def test_edit_region_takes_the_documented_arguments_in_order(self):
+        names = list(inspect.signature(ImageBackend.edit_region).parameters)
+
+        assert names == ["self", "model", "image", "paint", "prompt", "seed", "steps", "guidance", "scheduler", "skip_signal", "step_callback"]
+
+    def test_a_request_carries_no_edit_until_one_is_given(self):
+        request = ImageGenerationRequest(backend=MagicMock(spec=ImageBackend), model=object(), prompt="a prompt")
+
+        assert (request.edit_source, request.edit_paint, request.edit_extend) == (None, None, None)
+
+    def test_a_request_carries_its_edit_inputs(self):
+        paint = np.ones((4, 4), dtype=bool)
+        request = ImageGenerationRequest(backend=MagicMock(spec=ImageBackend), model=object(), prompt="a prompt", edit_source="a.png", edit_paint=paint, edit_extend=("top", 256))
+
+        assert (request.edit_source, request.edit_extend) == ("a.png", ("top", 256))
+        assert request.edit_paint is paint
+
+    def test_working_artifacts_hold_no_edit_until_a_stage_sets_one(self):
+        artifacts = ImageWorkingArtifacts()
+        assert artifacts.edit is None
+
+        work = EditWork(canvas=Image.new("RGB", (32, 32)))
+        artifacts.edit = work
+        work.paint = np.ones((32, 32), dtype=bool)
+
+        assert artifacts.edit is work
+        assert (work.alpha, work.crop, work.crop_paint, work.plan, work.source_box) == (None, None, None, None, None)
+
+    def test_the_heavy_edit_types_are_only_imported_for_type_checking(self):
+        assert not hasattr(image_types, "np") and not hasattr(image_types, "Plan")
+        assert not hasattr(image_backend, "np")
 
 
 class TestBackendRegistryLookup:

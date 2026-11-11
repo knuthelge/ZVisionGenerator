@@ -1,18 +1,21 @@
 """ImageBackend Protocol — explicit contract for platform-specific image inference engines.
 
-Protocol requires name, load_model, text_to_image, image_to_image, stored_quant_format, quantizes_from_files,
+Protocol requires name, load_model, text_to_image, image_to_image, edit_region, stored_quant_format, quantizes_from_files,
 save_quantized, write_quantized_files, prepare_prompts, release_model.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from PIL import Image
 
 from zvisiongenerator.core.image_types import JobPrompt
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 @runtime_checkable
@@ -24,6 +27,7 @@ class ImageBackend(Protocol):
     - load_model(): load model from path with optional quantization/LoRA
     - text_to_image(): generate image from text prompt
     - image_to_image(): refine existing image with text prompt
+    - edit_region(): redraw a painted area of an image, leaving the rest as it is
     - stored_quant_format(): tag of saved quantized weights at a level, or None when unsupported
     - quantizes_from_files(): whether a level's stored quant is written from the source files
     - save_quantized(): write a loaded quantized model's weights for reuse
@@ -100,6 +104,27 @@ class ImageBackend(Protocol):
 
         reference_images are images whose content the result reuses (see :meth:`text_to_image`); *image* stays the
         start image that sets layout. Only families with a reference capability take them (see :meth:`text_to_image`).
+        """
+        ...
+
+    def edit_region(
+        self,
+        model: Any,
+        image: Image.Image,
+        paint: np.ndarray,
+        prompt: str,
+        seed: int,
+        steps: int,
+        guidance: float,
+        scheduler: str | None = None,
+        skip_signal: Any | None = None,
+        step_callback: Any | None = None,
+    ) -> Image.Image | None:
+        """Redraw the *paint* area of *image* at strength 1.0 and return the whole picture. Returns None if skipped.
+
+        *paint* is a bool array of *image*'s height by width, and *image* is 16 px aligned. The result may be any size;
+        the caller pastes it back through its own soft mask. Only families with ``supports_mask_edit`` in the model
+        metadata take it; the caller checks before calling.
         """
         ...
 

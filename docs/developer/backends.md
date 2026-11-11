@@ -123,6 +123,24 @@ On Windows and Linux, `load_model(mode="extend")` loads `LTX2ConditionPipeline`,
 
 On macOS an audio track is held as a frozen audio state, the way the vendored `A2VidDistilledPipeline` holds it. Every Upscale load builds that pipeline, which is a `DistilledPipeline` subclass and falls back to the distilled behaviour while its `_source_audio_tokens` is `None`. With a track, the backend encodes the track the way the one-stage path does (so a track that ends early is padded with silence, where the pipeline's own reader raises), sets `_source_audio_tokens` and calls the parent `DistilledPipeline.generate_and_save` on the pipeline, resetting the attribute afterwards; the pipeline's own `generate_and_save`, with its reader and its source mux, is bypassed, and the remux stage puts the track on the clip. The review shim, the anchors, the LoRAs and the progress adapter apply unchanged. Without Upscale, and in Extend, the window's sound (`read_track`, or `window_waveform` for Extend) is read at the audio encoder's rate, encoded through `pipe.audio_conditioner` before the transformer loads, fitted to the clip's audio token count, and passed to `create_noised_state(initial_latent=tokens, frozen=True)` in place of the carried-sound pin; both denoising loops condition the model on sigma 0 for a frozen stream. Extend with a track carries no sound of its own and writes no `segment.wav`. `tests/contracts/test_ltx_mlx_contract.py` pins the names and signatures this relies on.
 
+## Image editing
+
+`ImageBackend.edit_region(model, image, paint, prompt, seed, steps, guidance, ...)` redraws the `paint` area of a 16 px aligned crop at strength 1.0 and returns an image of any size, or `None` when skipped. Both platforms do it by latent blending: after step `t` the latents sit at noise level `sigmas[t + 1]`, and outside the paint they are replaced by the source's clean latents noised to that level with the run's own starting noise, `latents = (1 - mask) * noised_clean + mask * latents`. At the last step the sigma is 0, so the latents outside the paint are the clean ones. The mask is the painted fraction of each latent cell (`soft_cell_mask`), so a cell the paint only touches is mostly kept. What differs is each family's latent layout, which is a backend fact:
+
+| Family | Latent layout | Mask cell |
+|---|---|---|
+| Z-Image | The VAE's latents with shift and scale applied, four-dimensional on diffusers and packed on mflux | 8 px |
+| FLUX.2 Klein | 128-channel patchified latents that the diffusers pipeline takes, but its step-end callback sees them packed into tokens; packed on mflux | 16 px |
+| Krea 2 | Packed tokens on diffusers, four-dimensional `(1, 16, H, W)` on mflux | 16 px |
+
+The families and their cell widths are one table, `EDIT_CELL_PIXELS` in `processing/edit_region.py`, which both backends read; each backend's `edit_region` refuses a family that is not in it.
+
+On Windows and Linux `backends/cuda/image/edit.py` prepares `noise`, `clean` and the mask per family, and `DiffusersBackend.edit_region` passes the noise as `latents=` to the pipeline, which every one of the three families accepts. The blend runs in the step-end callback before the preview reads the latents, so Stop and previews behave as for a generation. `tests/contracts/test_diffusers_image_edit_contract.py` pins the diffusers names this uses.
+
+On macOS mflux's loop callbacks return nothing, so they can't replace latents, and at strength 1.0 mflux never encodes the source and draws its noise from the seed alone. `backends/mac/image_edit.py` therefore encodes the crop itself, draws the same noise again, and hooks the step. For Z-Image and Klein, a before-loop callback wraps the run's `config.scheduler.step` for that run only. Krea 2 keeps its stepper in a local, so `blended_stepper` patches `Krea2Sampler.make_stepper` for the duration of the call and restores it, also on Stop. `MfluxBackend.edit_region` then calls `text_to_image`, so scheduler choice, previews and Stop are unchanged. The module imports `mlx` and `mflux` inside functions, so it imports on Windows and Linux.
+
+These hooks depend on mflux's private loops, so `tests/contracts/test_mflux_edit_contract.py` pins the names and signatures they use, and the dependency is bounded to `mflux<0.25`. Re-run it on every mflux bump. The contract test and the real-array test of the blend (`tests/backends/mac/test_mac_image_edit_real.py`) need real MLX arrays: they skip where `mlx` or `mflux` isn't installed and run in `make test` on a Mac.
+
 ## CUDA only
 
 The Windows/Linux video backend is CUDA-only. Validation happens lazily during backend load so importing the package or running non-video code paths does not require torch, diffusers, or a GPU.

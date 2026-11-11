@@ -21,7 +21,7 @@
 <script lang="ts">
   import { Icon, ShortcutList, Waveform } from '$lib/components/atoms';
   import { inMenu, isPlainKey, isTyping } from '$lib/keyboard';
-  import { canExtend, canUseAsAudioTrack, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
+  import { canEdit, canExtend, canUseAsAudioTrack, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
   import { takeWords, wordBlocks } from '$lib/state/audioAsset';
   import { audioPeaks } from '$lib/state/audioPeaks.svelte';
   import type { FramePoint } from '$lib/state/framePoint';
@@ -83,6 +83,7 @@
     onreference,
     onextend,
     onuseframe,
+    onedit,
     onupscale,
     onuseaudio,
     ondelete,
@@ -158,6 +159,8 @@
 
   // A video offers Extend where an image offers Use as; the button is absent without the capability.
   const showExtend = $derived(Boolean(onextend && asset?.media_type === 'video' && asset.extend));
+  // An image offers Edit beside Use as; the button is absent without the handler.
+  const showEdit = $derived(Boolean(onedit && asset && canEdit(asset)));
   const extendBlocked = $derived(asset ? extendReason(asset) : null);
 
   // The frame the shown video is paused on, which the player reports; null while it plays, at its start, or for anything but a video.
@@ -172,7 +175,7 @@
   let moreButton = $state<HTMLButtonElement | null>(null);
   const moreItems = $derived.by<ActionMenuEntry[]>(() => {
     if (!asset) return [];
-    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined);
+    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onupscale, onuseaudio, ondelete }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined);
     const copyable = copyableText(asset);
     if (!copyable) return entries;
     const copy: ActionMenuEntry = { kind: 'item', id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(copyable) };
@@ -580,6 +583,13 @@
     return true;
   }
 
+  /** Edit the shown image from the keyboard. */
+  function runEdit(): boolean {
+    if (!asset || !onedit || !showEdit) return false;
+    onedit(asset);
+    return true;
+  }
+
   function toggleDetails(): void {
     detailsOpen = !detailsOpen;
     saveDetailsOpen(detailsOpen);
@@ -624,6 +634,8 @@
         if (referenceItems.length === 0) return false;
         referenceOpen = true;
         return true;
+      case 'edit':
+        return runEdit();
       case 'copy': {
         const text = copyableText(asset);
         if (!text) return false;
@@ -769,6 +781,15 @@
           title={extendBlocked ?? 'Extend this video (E)'}
           onclick={() => onextend?.(asset)}
         ><Icon name="extend" size={14} /><span class="viewer-btn-label">Extend</span></button>
+      {/if}
+      {#if showEdit}
+        <button
+          type="button"
+          class="viewer-btn ui-btn"
+          data-action="edit"
+          title="Edit this image (M)"
+          onclick={() => onedit?.(asset)}
+        ><Icon name="edit" size={14} /><span class="viewer-btn-label">Edit</span></button>
       {/if}
       {#if upscaleItems.length > 0}
         <button
@@ -986,7 +1007,7 @@
           {/if}
           {#if source}
             <section data-testid="viewer-source">
-              <h4 class="viewer-h ui-area-label">Upscaled from</h4>
+              <h4 class="viewer-h ui-area-label">Made from</h4>
               {#snippet sourceLabel()}
                 <span class="truncate">{fileName(source.path)}</span>
                 {#if source.width && source.height}<small>{source.width}×{source.height}</small>{/if}

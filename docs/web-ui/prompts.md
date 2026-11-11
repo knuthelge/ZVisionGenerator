@@ -59,7 +59,7 @@ The options box takes focus; ++ctrl+enter++ applies and ++esc++ cancels. ++esc++
 ## Generate from here
 
 - **▶** on a prompt saves the file, then queues that one prompt with the current Workspace settings.
-- **Use in Workspace** saves the file and selects it in the Workspace as the prompt source.
+- **Use in Workspace** saves the file and selects it in the Workspace as the prompt source. A prompt file belongs to New, so an Image tab left on Edit opens on New; Edit's image and paint stay.
 
 ## Save
 

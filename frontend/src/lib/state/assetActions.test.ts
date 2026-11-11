@@ -6,7 +6,7 @@ import type { AssetUpscaleFactor, DraftState, GalleryAsset, SpeechAudioModel } f
 import { AUDIO_MODELS, makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
 import { makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
 import { EXTEND_SHORT_REASON, type FramePoint } from './framePoint';
-import { assetAspect, canExtend, canUseFrame, extendLabel, extendNote, extendPointReason, frameParams, frameSetNotice, stillEndingOn, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, describeFallbackReason, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, saveVoiceStart, seedvr2Options, upscaleFactors, upscaleOption, useAsState, voiceParams, voiceTooLongReason, workflowLabel } from './assetActions';
+import { assetAspect, canEdit, canExtend, canUseFrame, extendLabel, extendNote, extendPointReason, frameParams, frameSetNotice, stillEndingOn, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, describeFallbackReason, editParams, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, saveVoiceStart, seedvr2Options, upscaleFactors, upscaleOption, useAsState, voiceParams, voiceTooLongReason, workflowLabel } from './assetActions';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -158,11 +158,32 @@ describe('extend actions', () => {
     expect(extendParams(video({ scene: null, prompt: 'clip mp4' }))).toEqual({ workflow: 'extend', source_video: '/outputs/out/clip.mp4', lora: '' });
   });
 
+  describe('Edit', () => {
+    const image = (overrides: Partial<GalleryAsset> = {}) => makeAsset({ file_path: '/outputs/out/a.png', ...overrides });
+
+    it('is offered for an image with a file on the host, and for nothing else', () => {
+      expect(canEdit(image())).toBe(true);
+      expect(canEdit(image({ file_path: undefined }))).toBe(false);
+      expect(canEdit(image({ media_type: 'video' }))).toBe(false);
+    });
+
+    it('opens the Edit kind on the image as a Use as, on its model and LoRAs, with no text and no paint', () => {
+      const asset = image({ lora: 'detail:0.8', prompt: 'a fox', reuse_state: { resolved_model: 'klein', requested_model: 'klein' } as GalleryAsset['reuse_state'] });
+      expect(editParams(asset)).toEqual({ workflow: 'edit', edit_source_path: '/outputs/out/a.png', use_as: 'edit', model: 'klein', lora: 'detail:0.8' });
+    });
+
+    it('names no model when the image recorded none, and no LoRAs either: they belong to the model they were made with', () => {
+      expect(editParams(image({ lora: 'detail:0.8' }))).toEqual({ workflow: 'edit', edit_source_path: '/outputs/out/a.png', use_as: 'edit' });
+    });
+  });
+
   it('labels the workflow and explains the extend fallbacks', () => {
     expect(workflowLabel('extend')).toBe('Extend video');
     expect(workflowLabel('voice_design')).toBe('New voice');
+    expect(workflowLabel('edit')).toBe('Edit image');
     expect(describeFallbackReason('missing_source_video')).not.toBe('missing_source_video');
     expect(describeFallbackReason('extend_unavailable')).not.toBe('extend_unavailable');
+    expect(describeFallbackReason('missing_edit_source')).not.toBe('missing_edit_source');
   });
 });
 

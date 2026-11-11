@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { AUDIO_MODELS, withAudio } from '../../test-utils/audio';
-import { makeContext } from '../../test-utils/workspace';
+import { makeContext, makeImageDefaults } from '../../test-utils/workspace';
 import type { AudioModelOption, DraftState, VideoModelDefaults, WorkspaceContext } from '$lib/types';
 import { workspaceCapabilities } from './capabilities';
 import { stepsSpec, SPEC } from './settingsSpec';
@@ -325,5 +325,62 @@ describe('workspaceCapabilities for an audio model', () => {
   it('shows the Lyrics box only where the row of the model does not hide it', () => {
     expect(workspaceCapabilities(context, audioState('music', 'yue2')).showLyrics).toBe(true);
     expect(workspaceCapabilities(context, audioState('music', 'sa3')).showLyrics).toBe(false);
+  });
+});
+
+describe('workspaceCapabilities for the controls the contract lists per workflow', () => {
+  const FLAGS = [false, true];
+  const modelId = (negative: boolean, json: boolean, sigma: boolean): string => `m-${negative}-${json}-${sigma}`;
+  const context: WorkspaceContext = (() => {
+    const base = withAudio(makeContext());
+    const models = Object.fromEntries(FLAGS.flatMap((negative) => FLAGS.flatMap((json) => FLAGS.map((sigma) => [
+      modelId(negative, json, sigma),
+      makeImageDefaults({ supports_negative_prompt: negative, supports_json_prompt: json, supports_first_sigma: sigma }),
+    ]))));
+    return { ...base, image_model_defaults: { ...base.image_model_defaults, ...models } };
+  })();
+  const stateOf = (workflow: string, model: string): DraftState => ({ workflow, model, promptSource: 'inline', referenceImagePaths: [] }) as unknown as DraftState;
+  const workflows = Object.keys(context.workflow_contract.definitions);
+
+  /** What these capabilities were before the contract listed them: the workflow's name and mode decided. */
+  function byName(workflow: string, mode: string, flags: { negative: boolean; json: boolean; sigma: boolean }) {
+    const image = mode === 'image' && workflow !== 'edit';
+    return {
+      showPreset: mode !== 'audio' && workflow !== 'edit',
+      supportsNegativePrompt: image && flags.negative,
+      supportsJsonPrompt: image && flags.json,
+      supportsFirstSigma: image && flags.sigma,
+    };
+  }
+
+  it('lists every workflow it compares, Edit and the Audio kinds included', () => {
+    expect(workflows).toEqual(expect.arrayContaining(['txt2img', 'img2img', 'edit', 'txt2vid', 'img2vid', 'extend', 'music', 'speech', 'sound']));
+  });
+
+  it.each(workflows)('shows in %s exactly what the workflow\'s name and mode used to decide', (workflow) => {
+    const mode = context.workflow_contract.definitions[workflow as keyof typeof context.workflow_contract.definitions]!.mode;
+    for (const negative of FLAGS) for (const json of FLAGS) for (const sigma of FLAGS) {
+      const caps = workspaceCapabilities(context, stateOf(workflow, modelId(negative, json, sigma)));
+      expect({ showPreset: caps.showPreset, supportsNegativePrompt: caps.supportsNegativePrompt, supportsJsonPrompt: caps.supportsJsonPrompt, supportsFirstSigma: caps.supportsFirstSigma })
+        .toEqual(byName(workflow, mode, { negative, json, sigma }));
+      expect(caps.showNegativePrompt).toBe(caps.supportsNegativePrompt);
+    }
+  });
+
+  it('shows a control where the workflow lists it and the model supports it, and nowhere else', () => {
+    const all = modelId(true, true, true);
+    const none = modelId(false, false, false);
+    const listing = (controls: string[]) => ({
+      ...context,
+      workflow_contract: { ...context.workflow_contract, definitions: { ...context.workflow_contract.definitions, edit: { ...context.workflow_contract.definitions.edit!, visible_controls: ['workflow', 'model', 'prompt_inline', ...controls] } } },
+    });
+    const flagsOf = (ctx: WorkspaceContext, model: string) => {
+      const caps = workspaceCapabilities(ctx, stateOf('edit', model));
+      return [caps.showPreset, caps.supportsNegativePrompt, caps.supportsJsonPrompt, caps.supportsFirstSigma];
+    };
+
+    expect(flagsOf(listing([]), all)).toEqual([false, false, false, false]);
+    expect(flagsOf(listing(['preset', 'negative_prompt', 'json_prompt', 'first_sigma']), all)).toEqual([true, true, true, true]);
+    expect(flagsOf(listing(['preset', 'negative_prompt', 'json_prompt', 'first_sigma']), none)).toEqual([true, false, false, false]);
   });
 });

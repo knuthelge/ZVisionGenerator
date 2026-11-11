@@ -5,6 +5,26 @@ import { hasJobSettings, jobSettingsPrefill, outputSettingsPatch } from './jobSe
 import type { JobSettings } from '$lib/types';
 
 describe('jobSettingsPrefill', () => {
+  it('loads an edit job back into Edit: the image, the extension and the paint to do again, never the mask', () => {
+    const settings = {
+      mode: 'image', workflow: 'edit', edit_source_path: '/out/a.png', edit_mask_file: 'mask.png', edit_painted: 'true', edit_extend_side: 'top', edit_extend_amount: '256',
+      prompt: 'a red door', model: 'klein', steps: '4', seed: '9', runs: '2', lora: 'detail:0.8', quantize: '8',
+    };
+    const { params, patch } = jobSettingsPrefill(settings);
+
+    expect(params).toMatchObject({
+      workflow: 'edit', edit_source_path: '/out/a.png', edit_repaint: 'true', edit_extend_side: 'top', edit_extend_amount: '256', model: 'klein', steps: '4', seed: '9', lora: 'detail:0.8',
+    });
+    expect(Object.keys(params)).not.toContain('edit_mask_file');
+    expect(patch).toMatchObject({ prompt: 'a red door', runs: 2, quantize: 8, seed: 9 });
+  });
+
+  it('asks for no repaint from an edit that painted nothing, and names no image for an uploaded one', () => {
+    const { params } = jobSettingsPrefill({ mode: 'image', workflow: 'edit', edit_source_file: 'photo.png', prompt: 'x', model: 'klein' });
+    expect(params).not.toHaveProperty('edit_repaint');
+    expect(params).not.toHaveProperty('edit_source_path');
+  });
+
   it('loads an audio job into the Audio tab instead of reading it as an image job', () => {
     expect(jobSettingsPrefill({ mode: 'audio', workflow: 'music', prompt: 'a calm piano', lyrics: '[verse]\nla', model: 'yue2', steps: '9' })).toEqual({
       params: { workflow: 'music', prompt: 'a calm piano', lyrics: '[verse]\nla', model: 'yue2' },

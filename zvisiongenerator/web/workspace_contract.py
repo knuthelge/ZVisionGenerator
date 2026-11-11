@@ -17,7 +17,7 @@ REFERENCE_FIELD = "reference"
 
 AUDIO_WORKFLOW_VALUES = AUDIO_KINDS
 """The workflows of the audio mode, one per kind of audio (a workflow is named after its kind); the contract lists those a runnable model makes."""
-CANONICAL_WORKFLOW_VALUES = ("txt2img", "img2img", "txt2vid", "img2vid", "extend", *AUDIO_WORKFLOW_VALUES)
+CANONICAL_WORKFLOW_VALUES = ("txt2img", "img2img", "edit", "txt2vid", "img2vid", "extend", *AUDIO_WORKFLOW_VALUES)
 PROMPT_SOURCE_VALUES = ("inline", "file")
 DEFAULT_PROMPT_SOURCE = "inline"
 PROMPT_FILE_CONTRACT = {
@@ -58,10 +58,12 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
         "visible_controls": [
             "workflow",
             "model",
+            "preset",
             "quantize",
             "loras",
             "prompt_source",
             "prompt_inline",
+            "json_prompt",
             "prompt_enhance",
             "prompt_enhance_auto",
             "negative_prompt",
@@ -81,6 +83,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "steps",
             "guidance",
             "seed",
+            "first_sigma",
             "scheduler",
             "postprocess_sharpen",
             "postprocess_contrast",
@@ -104,10 +107,12 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
         "visible_controls": [
             "workflow",
             "model",
+            "preset",
             "quantize",
             "loras",
             "prompt_source",
             "prompt_inline",
+            "json_prompt",
             "prompt_enhance",
             "prompt_enhance_auto",
             "negative_prompt",
@@ -128,6 +133,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "guidance",
             "image_strength",
             "seed",
+            "first_sigma",
             "scheduler",
             "postprocess_sharpen",
             "postprocess_contrast",
@@ -145,12 +151,21 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
         "requires_source_video": False,
         "clear_fields": ["frames", "audio", "low_memory"],
     },
+    "edit": {
+        "mode": "image",
+        "model_kind": "image",
+        "visible_controls": ["workflow", "model", "quantize", "loras", "prompt_inline", "runs", "steps", "seed"],
+        "requires_reference_image": False,
+        "requires_source_video": False,
+        "clear_fields": [],
+    },
     "txt2vid": {
         "mode": "video",
         "model_kind": "video",
         "visible_controls": [
             "workflow",
             "model",
+            "preset",
             "loras",
             "prompt_source",
             "prompt_scene",
@@ -206,6 +221,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
         "visible_controls": [
             "workflow",
             "model",
+            "preset",
             "loras",
             "prompt_source",
             "prompt_scene",
@@ -261,6 +277,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
         "visible_controls": [
             "workflow",
             "model",
+            "preset",
             "loras",
             "prompt_source",
             "prompt_scene",

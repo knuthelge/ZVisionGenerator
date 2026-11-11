@@ -6,7 +6,7 @@ import importlib.metadata
 import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 from PIL import Image
@@ -14,6 +14,8 @@ from diffusers import AutoPipelineForText2Image
 
 from zvisiongenerator.backends.cuda.block_streaming import group_offload
 from zvisiongenerator.backends.cuda.driver import require_cuda
+from zvisiongenerator.backends.cuda.image.edit import blend_callback
+from zvisiongenerator.backends.cuda.image.edit import prepare as prepare_edit
 from zvisiongenerator.backends.cuda.image.ideogram4 import generate as generate_ideogram4
 from zvisiongenerator.backends.cuda.image.ideogram4 import load_pipeline as load_ideogram4_pipeline
 from zvisiongenerator.backends.cuda.image.ideogram4 import save_quantized as save_ideogram4_quantized
@@ -29,11 +31,15 @@ from zvisiongenerator.core.image_types import JobPrompt
 from zvisiongenerator.core.moss import img2img_run_steps
 from zvisiongenerator.core.moss import run_size as moss_run_size
 from zvisiongenerator.core.moss import sampler_settings as moss_sampler_settings
+from zvisiongenerator.processing.edit_region import EDIT_CELL_PIXELS
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.lora_files import normalised_lora_state
 from zvisiongenerator.utils.model_files import is_moss_model
 from zvisiongenerator.utils.moss_build import turbo_lora_for
 from zvisiongenerator.utils.stored_quant import STORED_QUANT_BITS, stored_quant_bits
+
+if TYPE_CHECKING:
+    import numpy as np
 
 # CUDA allocation and kernel tuning hints for the diffusers image backend.
 configure_allocator()
@@ -283,15 +289,16 @@ def _has_adapter(pipeline: Any, adapter_name: str, path: str) -> bool:
     return False
 
 
-def _make_step_callback(skip_signal, *, total_steps: int, step_callback=None, live_preview: LivePreview | None = None):
+def _make_step_callback(skip_signal, *, total_steps: int, step_callback=None, live_preview: LivePreview | None = None, blend=None):
     """Create a callback_on_step_end that reports progress and interrupts on skip.
 
     With ``live_preview``, every step but the last also carries a cheap preview of the predicted final image under the
-    ``preview`` key.
+    ``preview`` key. A ``blend`` (a callback_on_step_end of its own) runs first, so the preview shows the blended latents.
     """
 
     def _on_step_end(pipe, step, timestep, callback_kwargs):
-        del timestep
+        if blend is not None:
+            callback_kwargs = blend(pipe, step, timestep, callback_kwargs)
         if step_callback is not None:
             # img2img runs only the tail of the schedule; the pipeline knows how many steps that is.
             run_steps = getattr(pipe, "num_timesteps", None)
@@ -457,15 +464,15 @@ class DiffusersBackend:
             _load_loras(pipeline, lora_paths, lora_weights, family=model_info.family, cpu_offload=bits == 4 and model_info.family in _Q4_CPU_OFFLOAD_FAMILIES)
         return pipeline
 
-    def _step_callback_kwargs(self, skip_signal, step_callback, steps: int, height: int, width: int) -> dict[str, Any]:
-        """Build the pipeline's step-end callback kwargs, with live previews when progress is reported."""
+    def _step_callback_kwargs(self, skip_signal, step_callback, steps: int, height: int, width: int, *, blend=None) -> dict[str, Any]:
+        """Build the pipeline's step-end callback kwargs, with live previews when progress is reported and a latent *blend* when given."""
         live_preview = None
         if step_callback is not None and self._model_info is not None:
             live_preview = create_live_preview(self._model_info.family, steps, height, width)
         kwargs: dict[str, Any] = {
-            "callback_on_step_end": _make_step_callback(skip_signal, total_steps=steps, step_callback=step_callback, live_preview=live_preview),
+            "callback_on_step_end": _make_step_callback(skip_signal, total_steps=steps, step_callback=step_callback, live_preview=live_preview, blend=blend),
         }
-        if live_preview is not None:
+        if live_preview is not None or blend is not None:
             kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
         return kwargs
 
@@ -669,9 +676,47 @@ class DiffusersBackend:
             return self._ideogram4_text_to_image(model, prompt, width, height, seed, steps, guidance, skip_signal, step_callback, first_sigma)
         if self._model_info.family == "moss":
             return self._moss_generate(model, prompt, width, height, seed, steps, guidance, negative_prompt, skip_signal, step_callback)
-        original_scheduler = model.scheduler
+        return self._generate(
+            model,
+            prompt,
+            width,
+            height,
+            seed,
+            steps,
+            guidance,
+            scheduler,
+            skip_signal,
+            step_callback,
+            negative_prompt=negative_prompt,
+            reference_images=reference_images,
+        )
+
+    def _generate(
+        self,
+        pipe: Any,
+        prompt: str,
+        width: int,
+        height: int,
+        seed: int,
+        steps: int,
+        guidance: float | None,
+        scheduler: str | None,
+        skip_signal: Any | None,
+        step_callback: Any | None,
+        *,
+        negative_prompt: str | None = None,
+        reference_images: list[Image.Image] | None = None,
+        latents: torch.Tensor | None = None,
+        blend: Callable[..., dict] | None = None,
+    ) -> Image.Image | None:
+        """Run a diffusers text-to-image pipeline once and return its image, or None when a skip interrupted it.
+
+        *latents* replace the pipeline's starting noise; *blend* is a step-end callback that rewrites the latents each
+        step. The pipeline's scheduler is put back afterwards, even when the run raises.
+        """
+        original_scheduler = pipe.scheduler
         try:
-            scheduler_kwargs = _apply_beta_scheduler(model, steps) if scheduler == "beta" else {}
+            scheduler_kwargs = _apply_beta_scheduler(pipe, steps) if scheduler == "beta" else {}
             _is_flux = self._model_info is not None and self._model_info.family in ("flux1", "flux2", "flux2_klein")
 
             generator = torch.Generator(device="cpu").manual_seed(seed)
@@ -693,17 +738,54 @@ class DiffusersBackend:
                 kwargs["negative_prompt"] = negative_prompt
             if reference_images:
                 kwargs["image"] = reference_images
-            if skip_signal is not None or step_callback is not None:
-                kwargs.update(self._step_callback_kwargs(skip_signal, step_callback, steps, height, width))
+            if latents is not None:
+                kwargs["latents"] = latents
+            if skip_signal is not None or step_callback is not None or blend is not None:
+                kwargs.update(self._step_callback_kwargs(skip_signal, step_callback, steps, height, width, blend=blend))
 
-            result = model(**kwargs)
+            result = pipe(**kwargs)
 
-            if skip_signal is not None and model._interrupt:
-                model._interrupt = False
+            if skip_signal is not None and pipe._interrupt:
+                pipe._interrupt = False
                 torch.cuda.empty_cache()
                 return None
 
             torch.cuda.empty_cache()
             return result.images[0]
         finally:
-            model.scheduler = original_scheduler
+            pipe.scheduler = original_scheduler
+
+    @torch.inference_mode()
+    def edit_region(
+        self,
+        model: Any,
+        image: Image.Image,
+        paint: np.ndarray,
+        prompt: str,
+        seed: int,
+        steps: int,
+        guidance: float,
+        scheduler: str | None = None,
+        skip_signal: Any | None = None,
+        step_callback: Any | None = None,
+    ) -> Image.Image | None:
+        if self._model_info is None:
+            raise RuntimeError("load_model() must be called before generation")
+        family = self._model_info.family
+        if family not in EDIT_CELL_PIXELS:
+            raise ValueError(f"Region editing is not available for the {family!r} family.")
+        prepared = prepare_edit(family, model, image, paint, seed)
+        return self._generate(
+            model,
+            prompt,
+            image.width,
+            image.height,
+            seed,
+            steps,
+            guidance,
+            scheduler,
+            skip_signal,
+            step_callback,
+            latents=prepared.noise,
+            blend=blend_callback(prepared),
+        )

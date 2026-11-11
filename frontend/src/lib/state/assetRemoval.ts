@@ -4,7 +4,7 @@ import type { WorkspaceContext } from '$lib/types';
 
 /**
  * Empty the draft's single-file slots (start image, first frame, last frame, the Video and Extend audio tracks, the extend
- * source and the voice recording) that hold one of these files, because the files were deleted. A slot pointing at a
+ * source, the voice recording and the image to edit with its paint) that hold one of these files, because the files were deleted. A slot pointing at a
  * missing file would fail the next run; the workflow follows from what is left. Clearing the extend source also forgets its
  * inspection. Reference rows stay, so the prompt's "image 2" keeps meaning the same row. A moved file is not gone: the
  * slots follow it (`draft.retargetPaths`).
@@ -17,13 +17,14 @@ export function emptySlotsHolding(paths: Iterable<string | null | undefined>, co
   const gone = new Set<string>();
   for (const path of paths) if (path) gone.add(path);
   if (gone.size === 0) return false;
-  const { referenceImagePath, firstFramePath, endImagePath, referenceImagePaths, audioTrackPath, extendAudioTrackPath, extendSourcePath, voicePath } = draft.state;
+  const { referenceImagePath, firstFramePath, endImagePath, referenceImagePaths, audioTrackPath, extendAudioTrackPath, extendSourcePath, voicePath, editSourcePath } = draft.state;
   if (referenceImagePath && gone.has(referenceImagePath)) draft.setStartImage('image', null, context);
   if (firstFramePath && gone.has(firstFramePath)) draft.setStartImage('video', null, context);
   if (endImagePath && gone.has(endImagePath)) draft.setLastFrame(null);
   if (audioTrackPath && gone.has(audioTrackPath)) draft.setAudioTrack('video', null);
   if (extendAudioTrackPath && gone.has(extendAudioTrackPath)) draft.setAudioTrack('extend', null);
   if (voicePath && gone.has(voicePath)) draft.setVoice(null);
+  if (editSourcePath && gone.has(editSourcePath)) draft.setEditSource(null);
   if (extendSourcePath && gone.has(extendSourcePath)) {
     draft.setExtendSourcePath(null);
     void extendInspection.inspect(context);

@@ -127,7 +127,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         txt2img: {
           mode: 'image',
           model_kind: 'image',
-          visible_controls: ['workflow', 'model', 'prompt_inline', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed'],
+          visible_controls: ['workflow', 'model', 'prompt_source', 'prompt_inline', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed'],
           requires_reference_image: false,
           requires_source_video: false,
           clear_fields: ['frames', 'audio', 'low_memory'],
@@ -135,7 +135,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         img2img: {
           mode: 'image',
           model_kind: 'image',
-          visible_controls: ['workflow', 'model', 'prompt_inline', 'negative_prompt', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed'],
+          visible_controls: ['workflow', 'model', 'prompt_source', 'prompt_inline', 'negative_prompt', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed'],
           requires_reference_image: true,
           requires_source_video: false,
           clear_fields: ['frames', 'audio', 'low_memory'],
@@ -143,7 +143,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         txt2vid: {
           mode: 'video',
           model_kind: 'video',
-          visible_controls: ['workflow', 'model', 'prompt_inline', 'prompt_scene', 'reference_image', 'reference_image_path', 'reference_image_clear', 'end_image', 'end_image_path', 'end_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
+          visible_controls: ['workflow', 'model', 'prompt_source', 'prompt_inline', 'prompt_scene', 'reference_image', 'reference_image_path', 'reference_image_clear', 'end_image', 'end_image_path', 'end_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
           requires_reference_image: false,
           requires_source_video: false,
           clear_fields: ['negative_prompt', 'guidance', 'quantize'],
@@ -151,7 +151,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         img2vid: {
           mode: 'video',
           model_kind: 'video',
-          visible_controls: ['workflow', 'model', 'prompt_inline', 'prompt_scene', 'reference_image', 'reference_image_path', 'reference_image_clear', 'end_image', 'end_image_path', 'end_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
+          visible_controls: ['workflow', 'model', 'prompt_source', 'prompt_inline', 'prompt_scene', 'reference_image', 'reference_image_path', 'reference_image_clear', 'end_image', 'end_image_path', 'end_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
           requires_reference_image: true,
           requires_source_video: false,
           clear_fields: ['negative_prompt', 'guidance', 'quantize'],
@@ -2228,7 +2228,8 @@ describe('applyPreset', () => {
     enhanceAuto: true, enhanceModel: 'smart', describeTier: 'smart', enhanceFormat: 'json',
     extendSourcePath: '/clips/source.mp4', extendFrames: 16, extendFrom: 3.208333, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
     videoUpscaleEnabled: true, videoUpscaleFactor: 2, videoUpscaleReview: true,
-    videoKind: 'extend', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
+    editSourcePath: '/out/edit.png', editSourceUpload: 'edit.png', editMaskUpload: 'mask.png', editPaintedShare: 0.2, editExtendSide: 'top', editExtendAmount: 320, editRepaint: true,
+    videoKind: 'extend', leftOnEdit: true, audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
     audioSeconds: 30, audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
     speechDelivery: { emotion: 'sad', manner: 'whisper', pace: 'slow', pitch: 'low', expressiveness: 'high' },
     voiceMode: 'recording', speechSpeaker: 'vivian', savedVoice: 'narrator', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',

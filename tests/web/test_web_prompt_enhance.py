@@ -1197,9 +1197,9 @@ class TestWorkspaceContract:
     def test_workflows_expose_enhance_controls(self):
         from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS
 
-        for definition in WORKFLOW_DEFINITIONS.values():
+        for name, definition in WORKFLOW_DEFINITIONS.items():
             offered = {"prompt_enhance", "prompt_enhance_auto"} <= set(definition["visible_controls"])
-            assert offered is (definition["mode"] != "audio")  # the Audio tab has no prompt enhancer
+            assert offered is (definition["mode"] != "audio" and name != "edit")  # the Audio tab and Edit have no prompt enhancer
 
 
 # ── Config fields ───────────────────────────────────────────────────────────

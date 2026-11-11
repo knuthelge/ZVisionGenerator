@@ -77,6 +77,7 @@ Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for th
 | **Reuse settings** | Loads those settings into the Workspace | ++r++ |
 | **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video; opens audio as a video's audio track, a speech voice or a saved voice | ++e++ |
 | **Extend** | Opens a video in Video, on its Extend kind | ++e++ |
+| **Edit** | Opens an image in Image, on its Edit kind, with an empty prompt and no paint. See [Edit an image](workspace.md#edit-an-image) | ++m++ |
 | **Upscale** | Upscales an image 2× or 4×, or a video 2× | ++x++ then ++2++ or ++4++ |
 | **Move** | Moves the file to a project. On a phone it is **Move to project…** in the **⋯** menu | |
 | **Download** | Saves the file to this device | ++d++ |
@@ -110,7 +111,7 @@ In the Workspace preview, the **⋯** menu offers the same choices. What each on
 
 ### Details
 
-**Details** lists what the file records, starting with its **Project** (*No project* for a file at the top of the output folder): prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, start image, audio track with the span of it the clip used (*song.mp3 · 1:30–1:34*), references, quant, upscale and post-processing. An image with a [transparent background](../concepts/images.md#transparent-background) shows *Transparent background: On*. See [Output files](../concepts/data-folder.md#output-files).
+**Details** lists what the file records, starting with its **Project** (*No project* for a file at the top of the output folder): prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, start image, audio track with the span of it the clip used (*song.mp3 · 1:30–1:34*), references, quant, upscale and post-processing. An edited or upscaled image also shows **Made from**, the image it came from. An image with a [transparent background](../concepts/images.md#transparent-background) shows *Transparent background: On*. See [Output files](../concepts/data-folder.md#output-files).
 
 When the prompt was enhanced, Details shows how, as one line such as *Fast · Cinematic, Melancholic, Longer*, with **Your prompt** under it. An audio take shows the same for its Style, Text or Prompt, for example *Fast · Style · Folk*.
 

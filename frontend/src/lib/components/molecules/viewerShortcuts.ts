@@ -2,7 +2,7 @@ import { isPlainKey, stepChord, type ChordStep, type ShortcutEntry } from '$lib/
 import type { UpscaleFactor } from '$lib/types';
 
 export type ViewerAction =
-  | 'close' | 'prev' | 'next' | 'first' | 'last' | 'details' | 'reuse' | 'reference'
+  | 'close' | 'prev' | 'next' | 'first' | 'last' | 'details' | 'reuse' | 'reference' | 'edit'
   | 'download' | 'copy' | 'delete' | 'delete-now' | 'help';
 
 type KeyInput = Pick<KeyboardEvent, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey' | 'altKey'>;
@@ -17,6 +17,7 @@ export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
   FRAME_STEP_SHORTCUT,
   { keys: ['R'], label: 'Reuse settings' },
   { keys: ['E'], label: 'Use as start image or frame (image), extend (video), or audio track or voice (audio)' },
+  { keys: ['M'], label: 'Edit image' },
   { keys: ['X → 2'], label: 'Upscale 2×' },
   { keys: ['X → 4'], label: 'Upscale 4×' },
   { keys: ['D'], label: 'Download' },
@@ -28,11 +29,11 @@ export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
   { keys: ['Esc'], label: 'Close' },
 ];
 
-/** The shortcuts the viewer lists for an asset: a take cannot be upscaled, so it has no X chord, and only a video steps by frames. */
+/** The shortcuts the viewer lists for an asset: a take cannot be upscaled or edited, so it has no X chord and no M, and only a video steps by frames. */
 export function viewerShortcutsFor(media: 'image' | 'video' | 'audio'): readonly ShortcutEntry[] {
   return VIEWER_SHORTCUTS.filter((entry) => {
     if (entry === FRAME_STEP_SHORTCUT) return media === 'video';
-    return media !== 'audio' || !entry.keys[0].startsWith('X');
+    return media !== 'audio' || (!entry.keys[0].startsWith('X') && entry.keys[0] !== 'M');
   });
 }
 
@@ -45,6 +46,7 @@ const KEY_ACTIONS: Record<string, ViewerAction> = {
   i: 'details',
   r: 'reuse',
   e: 'reference',
+  m: 'edit',
   d: 'download',
   c: 'copy',
   // Mac keyboards send Backspace from the key labelled "delete".

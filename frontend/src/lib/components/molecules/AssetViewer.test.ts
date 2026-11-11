@@ -338,6 +338,36 @@ describe('AssetViewer', () => {
     expect(ondelete).not.toHaveBeenCalled();
   });
 
+  describe('edit', () => {
+    const editButton = (): HTMLButtonElement | null => document.querySelector('[data-action="edit"]');
+
+    it('shows an Edit button for an image with a file and runs it, from the button and from M, on the shown asset', () => {
+      const onedit = vi.fn();
+      const asset = makeAsset({ file_path: '/out/a.png' });
+      mountViewer({ assets: [asset], onedit });
+      expect(editButton()).not.toBeNull();
+      editButton()!.click();
+      press('m');
+      expect(onedit).toHaveBeenCalledTimes(2);
+      expect(onedit).toHaveBeenCalledWith(asset);
+    });
+
+    it('has no Edit button and no M without a handler, for a video, and for an audio take', async () => {
+      mountViewer({ assets: [makeAsset({ file_path: '/out/a.png' })] });
+      expect(editButton()).toBeNull();
+      press('m');
+
+      for (const asset of [makeAsset({ media_type: 'video', file_path: '/out/a.mp4' }), makeAsset({ media_type: 'audio', file_path: '/out/a.flac' })]) {
+        await page.unmount();
+        const onedit = vi.fn();
+        mountViewer({ assets: [asset], onedit });
+        expect(editButton()).toBeNull();
+        press('m');
+        expect(onedit).not.toHaveBeenCalled();
+      }
+    });
+  });
+
   describe('extend', () => {
     const clip = (overrides: Partial<GalleryAsset> = {}): GalleryAsset =>
       makeAsset({ id: 'out/clip.mp4', url: '/media/out/clip.mp4', filename: 'clip.mp4', media_type: 'video', extend: { available: true, reason: null }, ...overrides });
@@ -639,6 +669,19 @@ describe('AssetViewer', () => {
 
     flushSync(() => details.querySelector<HTMLButtonElement>('[data-testid="viewer-source"] button')!.click());
     expect(onnavigate).toHaveBeenCalledWith(1);
+  });
+
+  it('names the picture an edit started from as what it was made from', () => {
+    const edited = makeAsset({
+      id: 'out/a_edit.png',
+      filename: 'a_edit.png',
+      details: { recorded_workflow: 'edit', source: { path: '/outputs/out/a.png', width: 832, height: 1216, id: null } },
+    });
+    mountViewer({ assets: [edited] });
+    press('i');
+
+    const section = document.querySelector('#asset-viewer-details [data-testid="viewer-source"]')!;
+    expect(section.textContent).toContain('a.png');
   });
 
   it('lists every recorded LoRA on its own row with the full entry on hover', () => {

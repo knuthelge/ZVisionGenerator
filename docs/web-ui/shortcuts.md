@@ -60,6 +60,7 @@ Press <kbd>?</kbd> anywhere outside a text field to see every shortcut. ++cmd++ 
 | ++home++ / ++end++ | First / last asset |
 | ++r++ | Reuse settings |
 | ++e++ | Use as (image or audio) or Extend (video) |
+| ++m++ | Edit an image |
 | ++x++ then ++2++ / ++4++ | Plain upscale 2× / 4× of an image (a creative upscale where the plain one isn't offered); ++x++ then ++2++ upscales a video (Windows and Linux) |
 | ++d++ | Download |
 | ++c++ | Copy the prompt |
@@ -81,6 +82,16 @@ These work in a video or audio player, in the viewer, the Workspace preview and 
 | ++up++ / ++down++ | Volume, where the player has a volume slider |
 | ++home++ / ++end++ | The first frame / the last frame |
 | ++0++ to ++9++ | Jump to 0% to 90% of the clip |
+
+## Painter
+
+| Key | Action |
+|---|---|
+| ++b++ / ++e++ | Brush / Erase |
+| <kbd>,</kbd> / <kbd>.</kbd> | Smaller / larger brush |
+| <kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd> | Zoom in / zoom out / fit the picture |
+| ++space++ and drag | Pan (mouse) |
+| ++cmd+z++ | Undo |
 
 ## Command line
 

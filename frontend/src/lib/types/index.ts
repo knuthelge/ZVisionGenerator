@@ -1,6 +1,6 @@
 // ── Core data types ──────────────────────────────────────────────────────────
 
-export type Workflow = 'txt2img' | 'img2img' | 'txt2vid' | 'img2vid' | 'extend';
+export type Workflow = 'txt2img' | 'img2img' | 'edit' | 'txt2vid' | 'img2vid' | 'extend';
 
 /** The kinds of audio, in the order the Kind control lists them: also the workflows of the audio mode, one per kind. The server lists a workflow once a model of its kind can run. */
 export const AUDIO_KINDS = ['music', 'speech', 'sound'] as const;
@@ -85,12 +85,17 @@ export type UpscaleMethod = 'seedvr2' | 'creative' | 'ltx';
 
 export type WorkflowMode = 'image' | 'video' | 'audio';
 
-/** What the user picks in the top bar: an image, a video, or the continuation of a video. The workflow follows from it and the tab's images. */
-export type WorkspaceTab = 'image' | 'video' | 'extend' | 'audio';
-/** The tabs of the top bar. Extend is a kind of Video, not a tab; `WorkspaceTab` also names its slot. */
+/** What the user picks in the top bar, or a kind that has a slot of its own: an image, the edit of an image, a video, the continuation of a video, or audio. The workflow follows from it and the tab's images. */
+export type WorkspaceTab = 'image' | 'edit' | 'video' | 'extend' | 'audio';
+/** The tabs that keep a text of their own: Extend writes Video's. */
+export type TextTab = Exclude<WorkspaceTab, 'extend'>;
+/** The tabs of the top bar. Extend is a kind of Video and Edit a kind of Image, not tabs; `WorkspaceTab` also names their slots. */
 export type NavTab = 'image' | 'video' | 'audio';
 /** The kinds of the Video tab: a new clip (from text or a first frame) or the extension of a clip. */
 export type VideoKind = 'new' | 'extend';
+
+/** The sides of a picture an Edit can extend. */
+export type ExtendSide = 'top' | 'right' | 'bottom' | 'left';
 
 export type PromptSource = 'inline' | 'file';
 
@@ -283,8 +288,10 @@ export interface AssetDetails {
   model_family?: string | null;
   image_strength?: number | null;
   generation?: AssetGeneration;
-  /** The image an upscale started from; `id` is set while it is still in the gallery. */
+  /** The image an upscale or an edit started from; `id` is set while it is still in the gallery. */
   source?: { path: string; width: number | null; height: number | null; id: string | null } | null;
+  /** What an edit did: `paint`, `extend`, `both` or `whole` (the whole picture, from the prompt alone), and the extension; null for any other asset. */
+  edit?: { mode: 'paint' | 'extend' | 'both' | 'whole'; extend?: { side: ExtendSide; amount: number } } | null;
 }
 
 export interface AssetGeneration {
@@ -1116,6 +1123,8 @@ export interface ImageModelDefaults {
   family?: string | null;
   /** The model's size within its family (for example `4b`); null when it has none or is unknown. */
   size_variant?: string | null;
+  /** The model can redraw a painted area of an image (Edit); absent is false. */
+  supports_mask_edit?: boolean;
 }
 
 /** The frame counts a video family accepts: `alignment * k + offset` for `k >= 1`; `round` picks how another count moves to one. */
@@ -1170,7 +1179,7 @@ export interface WorkflowContractEntry {
 export interface WorkflowContract {
   values: WorkspaceWorkflow[];
   /** One entry per listed workflow; an audio workflow is listed only while a model of its kind runs on this machine. */
-  definitions: Record<Workflow, WorkflowContractEntry> & Partial<Record<AudioWorkflow, WorkflowContractEntry>>;
+  definitions: Record<Exclude<Workflow, 'edit'>, WorkflowContractEntry> & Partial<Record<AudioWorkflow | 'edit', WorkflowContractEntry>>;
   field_precedence: {
     defaults: string[];
     dimensions: string;
@@ -1225,7 +1234,7 @@ export interface WritableConfigSchema {
 
 // ── Draft / workspace form state ──────────────────────────────────────────────
 
-/** The text a tab keeps for itself: what is typed, and the Enhanced text made from it. Image and Video each hold one; Video's two kinds share it. */
+/** The text a tab keeps for itself: what is typed, and the Enhanced text made from it. Image, Edit, Video and Audio each hold one; Video's two kinds share it. */
 export interface TabText {
   prompt: string;
   scene: string;
@@ -1242,6 +1251,7 @@ export interface TabText {
 export interface DraftState {
   workflow: WorkspaceWorkflow;
   promptSource: PromptSource;
+  /** The prompt of the open tab. Edit keeps its own, apart from New's (`savedText`): what to change, never sent with New's Enhanced text. */
   prompt: string;
   /** Video scene (who and where, look, camera); the default scene in prompt-file mode. Image workflows ignore it. */
   scene: string;
@@ -1338,16 +1348,16 @@ export interface DraftState {
   /** The position (from 0) of the version Scratch emptied the Enhanced text from, which the stepper's ‹ brings back; null otherwise. */
   enhancedScratched: number | null;
   /**
-   * The text of the mode (image or video) that is not open; the fields from `prompt` to `enhancedHistory` (the same as
-   * `TabText`) hold the open one's. Opening the other mode swaps the two. Empty until the first switch.
+   * The text of the tabs that are not open (New, Edit, Video, Audio); the fields from `prompt` to `enhancedHistory` (the same as
+   * `TabText`) hold the open one's. Opening another swaps the two. Empty until the first switch.
    */
-  savedText: Partial<Record<WorkflowMode, TabText>>;
+  savedText: Partial<Record<TextTab, TabText>>;
   /**
-   * What the mode (image or video) that is not open kept: its Settings pane values, model with its LoRAs and quantization, and
-   * applied preset. The fields themselves hold the open one's; opening the other mode swaps the two, so each mode comes back as
-   * it was left. A mode not visited yet has none, and takes its model's defaults.
+   * What the tabs that are not open (New, Edit, Video) kept: their Settings pane values, model with its LoRAs and quantization, the
+   * LoRAs remembered by model family, and applied preset; Edit's also holds its own Batch and Seed. The fields themselves hold the open
+   * one's; opening another tab swaps the two, so each comes back as it was left. A tab not visited yet has none, and takes its model's defaults.
    */
-  savedSettings: Partial<Record<WorkflowMode, Partial<DraftState>>>;
+  savedSettings: Partial<Record<TextTab, Partial<DraftState>>>;
   /** Last-used enhancement options for images; null until the user picks any (backend defaults apply). */
   enhanceSettings: EnhanceSettings | null;
   /** Last-used enhancement options for video, with the Rewrite choice of each video workflow; null until any are picked. */
@@ -1372,6 +1382,22 @@ export interface DraftState {
   extendPrefill: { path: string; scene: string; prompt: string; audioTrack?: { path: string; start: number } | null } | null;
   /** Video tab: the kind last open (New or Extend); coming back to the tab restores it. */
   videoKind: VideoKind;
+  /** The Image tab was left on Edit (the Video or Audio tab is open): coming back to the tab reopens Edit. False while the Image tab is open, where `workflow` says which kind it is on. */
+  leftOnEdit: boolean;
+  /** Edit: the image to edit as a path on the host; null when none is set or it was uploaded (`editSourceUpload`). */
+  editSourcePath: string | null;
+  /** Edit: the file name of an image uploaded from this device (its file is in `heldUploads`); null when none. */
+  editSourceUpload: string | null;
+  /** Edit: the file name of the painted mask (its PNG is in `heldUploads`); null when nothing is painted. */
+  editMaskUpload: string | null;
+  /** Edit: the share of the picture that is painted, 0 to 1; 0 when nothing is. */
+  editPaintedShare: number;
+  /** Edit: the side the picture is extended on; null for no extension. */
+  editExtendSide: ExtendSide | null;
+  /** Edit: how far the extension reaches, in pixels; the amount the next extension starts with while there is none. */
+  editExtendAmount: number;
+  /** Edit: the paint of a reused edit has to be painted again (a mask is never saved), so Generate waits for paint or an extension. */
+  editRepaint: boolean;
   /** Audio tab: the kind last open (Music, Speech or Sound); coming back to the tab restores it. */
   audioKind: AudioWorkflow;
   /** Audio tab: the model last chosen for each kind. Empty before one was chosen. */

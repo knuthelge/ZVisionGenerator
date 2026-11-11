@@ -172,3 +172,26 @@ def test_check_reports_the_reference_paths_that_are_gone(tmp_path):
 def test_check_refuses_a_body_without_a_list_of_paths(body):
     with TestClient(web_server.app) as client:
         assert client.post("/api/references/check", json=body).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("family", "size", "expected"),
+    [("zimage", None, True), ("flux2_klein", "9b", True), ("krea2", None, True), ("ideogram4", None, False), ("moss", None, False), ("flux1", None, False), ("flux2", None, False)],
+)
+def test_the_image_model_defaults_carry_whether_the_model_can_edit_a_painted_area(monkeypatch, packaged_config, family, size, expected):
+    web_config = make_web_config()
+    web_config.app_config["model_presets"] = packaged_config["model_presets"]
+    web_config.app_config["generation"] = {**web_config.app_config["generation"], **packaged_config["generation"]}
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(workspace_api_module, "detect_image_model", lambda _model: ImageModelInfo(family=family, is_distilled=True, size=size))
+    monkeypatch.setattr(workspace_api_module, "get_backend_name", lambda: "diffusers")
+
+    defaults = workspace_api_module.build_workspace_bootstrap_view(web_config)["image_model_defaults"]
+
+    assert {name: entry["supports_mask_edit"] for name, entry in defaults.items()} == {"zit": expected, "local-image": expected}
+
+
+def test_a_model_that_cannot_be_detected_offers_no_mask_edit(monkeypatch):
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda *_a, **_k: (_ for _ in ()).throw(FileNotFoundError("gone")))
+
+    assert workspace_api_module._build_image_bootstrap_defaults("zit", make_web_config())["supports_mask_edit"] is False

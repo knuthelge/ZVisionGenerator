@@ -10,7 +10,10 @@ from PIL import Image
 from zvisiongenerator.core.types import StageOutcome
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from zvisiongenerator.core.matte import MatteChain
+    from zvisiongenerator.processing.edit_region import Plan
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,12 @@ class ImageGenerationRequest:
     # References: images whose content the result reuses, in prompt order; independent of the start image.
     reference_paths: tuple[str, ...] = ()
 
+    # Edit params: the image to edit, the painted area (bool, the picture's upright size; set only with ``edit_source``), and the
+    # ``(side, amount)`` to extend by
+    edit_source: str | None = None
+    edit_paint: np.ndarray | None = field(default=None, compare=False, repr=False)
+    edit_extend: tuple[str, int] | None = None
+
     # Sharpening (from config)
     sharpen_amount_normal: float = 0.8
     sharpen_amount_upscaled: float = 1.2
@@ -127,6 +136,31 @@ class ImageGenerationRequest:
 
 
 @dataclass
+class EditWork:
+    """Mutable — what the edit stages hand one another for a single edit.
+
+    Attributes:
+        canvas: The full-size RGB picture the result is pasted onto (the source, or the source on its extended canvas).
+        alpha: The cut-out's alpha at canvas size, or ``None`` when the source is opaque.
+        colours: The cut-out's own RGB at canvas size (not flattened on the backdrop), or ``None`` when the source is opaque.
+        paint: The area to redraw (bool, canvas size), or ``None`` for a whole-picture edit.
+        crop: The part of the canvas the model works on, at ``target`` size.
+        crop_paint: The paint of that crop (bool, ``target`` size).
+        plan: Where the crop sits on the canvas, and the size the model draws it at.
+        source_box: Where the source sits on an extended canvas ``(left, top, right, bottom)``, or ``None`` without an Extend.
+    """
+
+    canvas: Image.Image
+    alpha: np.ndarray | None = None
+    colours: np.ndarray | None = None
+    paint: np.ndarray | None = None
+    crop: Image.Image | None = None
+    crop_paint: np.ndarray | None = None
+    plan: Plan | None = None
+    source_box: tuple[int, int, int, int] | None = None
+
+
+@dataclass
 class ImageWorkingArtifacts:
     """Mutable — holds working state accumulated by image stages."""
 
@@ -138,6 +172,8 @@ class ImageWorkingArtifacts:
     filename: str | None = None
     filepath: str | None = None
     was_upscaled: bool = False
+    # The working state of an edit job; ``None`` for every other workflow.
+    edit: EditWork | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

@@ -14,6 +14,7 @@ import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 
 from tests._factories import make_extend_source, make_probe, packaged_metadata_copy, use_model_metadata
@@ -141,6 +142,14 @@ def test_plan_carries_recorded_settings(monkeypatch, tmp_path):
     assert request.upscale_source == "/out/portrait.png"
     assert request.output_dir == "/out"
     assert (plan.option.width, plan.option.height) == (1664, 2432)
+
+
+def test_plan_of_an_edit_refines_without_its_prompt(monkeypatch, tmp_path):
+    _patch_model_resolution(monkeypatch)
+
+    request = upscale_api.plan_upscale(_source(workflow="edit", prompt="make the door red"), 2, _web_config(tmp_path), backend_name="mflux").request
+
+    assert (request.prompt, request.resolved_prompt) == ("", None)
 
 
 @pytest.mark.parametrize(
@@ -735,6 +744,25 @@ def test_gallery_upscaled_image_links_source_and_reuses_source_size(tmp_path):
     assert payload["details"]["source"] == {"path": str(source), "width": 64, "height": 32, "workflow": None, "id": "portrait.png"}
     assert "width=64" in payload["reuse_workspace_url"]
     assert "height=32" in payload["reuse_workspace_url"]
+
+
+def test_an_upscale_whose_config_records_no_prompt_shows_and_reuses_no_prompt(tmp_path):
+    source = _write_png(tmp_path / "portrait.png", size=(64, 32))
+    config = {"workflow": "upscale", "model": "zit", "width": 128, "height": 64, "source": {"path": str(source), "width": 64, "height": 32}}
+    _write_png(tmp_path / "portrait_2x.png", size=(128, 64), config=config)
+
+    payload = _asset_json(tmp_path, "portrait_2x.png")
+
+    assert payload["prompt"] == ""
+    assert "prompt" not in parse_qs(urlsplit(payload["reuse_workspace_url"]).query)
+
+
+def test_an_image_with_no_recorded_settings_shows_its_file_name_as_display_text(tmp_path):
+    _write_png(tmp_path / "wet_street.png")
+
+    payload = _asset_json(tmp_path, "wet_street.png")
+
+    assert payload["prompt"] == "wet street"
 
 
 def test_gallery_reuses_an_upscaled_img2img_image_as_img2img_with_its_reference(tmp_path):

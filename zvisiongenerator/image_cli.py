@@ -13,6 +13,7 @@ from typing import Any
 
 from zvisiongenerator.backends import get_backend, release_accelerator_memory
 from zvisiongenerator.built_models import ensure_built_model
+from zvisiongenerator.edit_cli import add_edit_arguments, check_edit_source, edit_output_folder, refuse_edit_options
 from zvisiongenerator.enhance_cli import add_enhance_arguments, defer_format_to_entries, parse_enhance_args
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.model_metadata import alias_map, model_display_name
@@ -53,7 +54,7 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
     parser.add_argument("-s", "--size", type=str, default=None, choices=["xs", "s", "m", "l", "xl"], help="Resolution scale: xs, s, m, l, xl. Default: m.")
     parser.add_argument("-W", "--width", type=int, default=None, help="Override image width (integer). If omitted, uses size preset.")
     parser.add_argument("-H", "--height", type=int, default=None, help="Override image height (integer). If omitted, uses size preset.")
-    parser.add_argument("-o", "--output", type=str, default=".", help="Output directory for generated images (default: current directory).")
+    parser.add_argument("-o", "--output", type=str, default=None, help="Output directory for generated images (default: current directory; with --edit, the edited picture's folder).")
     prompt_group = parser.add_mutually_exclusive_group()
     prompt_group.add_argument("--prompt", type=str, default=None, help="Inline prompt string for quick one-off generation. Overrides --prompts-file when set.")
     prompt_group.add_argument(
@@ -112,6 +113,7 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
         help="Comma-separated reference images whose content the result reuses, in prompt order (image 1, image 2, ...). Klein models take up to 4. Can be combined with --image.",
     )
     parser.add_argument("--seed", type=int, default=None, help="Seed for reproducible image generation. If not set, a random seed is used each run.")
+    add_edit_arguments(parser)
     add_enhance_arguments(parser, mode="image")
     return parser
 
@@ -135,6 +137,7 @@ def main(*, prog: str = "ziv-image") -> None:
     args = parser.parse_args()
     setup_logging("image")
 
+    refuse_edit_options(parser, args)
     if args.runs is not None and args.runs < 1:
         parser.error("--runs must be at least 1")
     if args.quantize is not None and args.quantize not in (4, 8):
@@ -218,8 +221,12 @@ def main(*, prog: str = "ziv-image") -> None:
     # Expand ~ in filesystem-only path arguments. Model/LoRA tokens are resolved by shared helpers.
     if args.image_path:
         args.image_path = str(Path(args.image_path).expanduser())
+    for edit_option in ("edit_source", "edit_mask"):
+        if getattr(args, edit_option):
+            setattr(args, edit_option, str(Path(getattr(args, edit_option)).expanduser()))
     if args.output:
         args.output = str(Path(args.output).expanduser())
+    args.output = edit_output_folder(args)
     if args.prompts_file:
         args.prompts_file = str(Path(args.prompts_file).expanduser())
 
@@ -312,6 +319,9 @@ def main(*, prog: str = "ziv-image") -> None:
         check_reference_files(args.reference_paths)
     except ValueError as e:
         parser.error(str(e))
+
+    if args.edit_source is not None:
+        check_edit_source(parser, args, defaults)
 
     model_suffix = f" ({model_info.size or 'unknown size'})" if model_info.family == "flux2_klein" else ""
     print(f"Model type: {model_info.family}{model_suffix}")

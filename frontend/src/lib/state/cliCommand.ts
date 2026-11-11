@@ -14,7 +14,9 @@ export type CliCaveat =
   /** The audio track was uploaded from the browser; the command names the uploaded file, not its path. */
   | 'uploaded_audio'
   /** The voice recording was uploaded from the browser; the command names the uploaded file, not its path. */
-  | 'uploaded_voice';
+  | 'uploaded_voice'
+  /** The edit has painted paint; the command names a placeholder mask, which the CLI needs as a PNG file of the painted area. */
+  | 'edit_mask';
 
 export interface CliCommand {
   /** One shell line, with every argument quoted for a POSIX shell. */
@@ -125,6 +127,7 @@ function amountToggle(args: string[], settings: JobSettings, name: string, defau
  */
 export function cliCommand(settings: JobSettings, options: CliCommandOptions = {}): CliCommand {
   if (first(settings, 'mode') === 'audio') return audioCliCommand(settings, options);
+  if (first(settings, 'mode') === 'image' && first(settings, 'workflow') === 'edit') return editCliCommand(settings, options);
   const isVideo = first(settings, 'mode') === 'video';
   // An extension continues a chosen video and takes its size, frame rate and length from it.
   const isExtend = isVideo && first(settings, 'workflow') === 'extend';
@@ -334,5 +337,50 @@ function audioCliCommand(settings: JobSettings, options: CliCommandOptions): Cli
   if (runs !== null && runs !== 1) args.push('--runs', String(runs));
   flag('--seed', text(settings, 'seed'));
   if (options.outputDir) args.push('--output', options.outputDir);
+  return { command: args.map(shellQuote).join(' '), caveats };
+}
+
+/** The placeholder a copied edit command names for the painted area: the CLI reads the paint from a PNG file the user supplies. */
+const EDIT_MASK_PLACEHOLDER = 'mask.png';
+
+/**
+ * Build the `ziv image --edit` command for an edit job: the image, the prompt, the model with its LoRAs and quantization, the steps,
+ * the seed and batch, and the extension as `--extend side=pixels`.
+ *
+ * The CLI saves beside the image it edits, so a command for an image on the host names no `--output`; one for an uploaded image
+ * (named by its file name, with the `uploaded_image` caveat) saves where the Web UI does. A painted area goes as `--mask mask.png`
+ * with the `edit_mask` caveat: the browser's mask is not a file on the host. A whole-picture edit carries neither `--mask` nor `--extend`.
+ *
+ * @throws {Error} When the image or the prompt is missing.
+ */
+function editCliCommand(settings: JobSettings, options: CliCommandOptions): CliCommand {
+  const args: string[] = ['ziv', 'image'];
+  const caveats: CliCaveat[] = [];
+  const flag = (name: string, value: string | undefined): void => {
+    if (value !== undefined) args.push(name, value);
+  };
+  const upload = text(settings, 'edit_source_file');
+  const source = upload ?? text(settings, 'edit_source_path');
+  if (source === undefined) throw new Error('Choose an image to edit first.');
+  const prompt = text(settings, 'prompt');
+  if (prompt === undefined) throw new Error('Write a prompt first.');
+
+  flag('--model', text(settings, 'model'));
+  flag('--quantize', text(settings, 'quantize'));
+  args.push('--edit', source, '--prompt', prompt);
+  if (upload !== undefined) caveats.push('uploaded_image');
+  const runs = numberOrNull(first(settings, 'runs'));
+  if (runs !== null && runs !== 1) args.push('--runs', String(runs));
+  flag('--steps', text(settings, 'steps'));
+  flag('--seed', text(settings, 'seed'));
+  flag('--lora', text(settings, 'lora'));
+  const side = text(settings, 'edit_extend_side');
+  const amount = text(settings, 'edit_extend_amount');
+  if (side !== undefined && amount !== undefined) args.push('--extend', `${side}=${amount}`);
+  if (checked(settings, 'edit_painted')) {
+    args.push('--mask', EDIT_MASK_PLACEHOLDER);
+    caveats.push('edit_mask');
+  }
+  if (upload !== undefined && options.outputDir) args.push('--output', options.outputDir);
   return { command: args.map(shellQuote).join(' '), caveats };
 }

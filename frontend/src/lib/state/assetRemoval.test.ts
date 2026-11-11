@@ -8,6 +8,7 @@ const draftMock = vi.hoisted(() => ({
   setAudioTrack: vi.fn(),
   setVoice: vi.fn(),
   setExtendSourcePath: vi.fn(),
+  setEditSource: vi.fn(),
 }));
 const inspectionMock = vi.hoisted(() => ({ inspect: vi.fn() }));
 vi.mock('$lib/state/draft.svelte', () => ({ draft: draftMock }));
@@ -17,14 +18,22 @@ import { emptySlotsHolding } from './assetRemoval';
 
 const context = {} as WorkspaceContext;
 
-const emptyState = { referenceImagePath: null, firstFramePath: null, endImagePath: null, referenceImagePaths: [] as string[], audioTrackPath: null, extendAudioTrackPath: null, extendSourcePath: null, voicePath: null };
+const emptyState = { referenceImagePath: null, firstFramePath: null, endImagePath: null, referenceImagePaths: [] as string[], audioTrackPath: null, extendAudioTrackPath: null, extendSourcePath: null, voicePath: null, editSourcePath: null };
 
 beforeEach(() => {
   draftMock.state = { ...emptyState };
-  for (const fn of [draftMock.setStartImage, draftMock.setLastFrame, draftMock.setAudioTrack, draftMock.setVoice, draftMock.setExtendSourcePath, inspectionMock.inspect]) fn.mockReset();
+  for (const fn of [draftMock.setStartImage, draftMock.setLastFrame, draftMock.setAudioTrack, draftMock.setVoice, draftMock.setExtendSourcePath, draftMock.setEditSource, inspectionMock.inspect]) fn.mockReset();
 });
 
 describe('emptySlotsHolding', () => {
+  it('empties the image to edit, with its paint, when its file is gone, and leaves another', () => {
+    draftMock.state = { ...emptyState, editSourcePath: '/o/e.png' };
+    emptySlotsHolding(['/o/other.png'], context);
+    expect(draftMock.setEditSource).not.toHaveBeenCalled();
+    emptySlotsHolding(['/o/e.png'], context);
+    expect(draftMock.setEditSource).toHaveBeenCalledWith(null);
+  });
+
   it('empties the start image, first frame and last frame that hold a gone path', () => {
     draftMock.state = { ...emptyState, referenceImagePath: '/o/a.png', firstFramePath: '/o/b.png', endImagePath: '/o/c.png' };
     expect(emptySlotsHolding(['/o/a.png', '/o/b.png', '/o/c.png'], context)).toBe(false);

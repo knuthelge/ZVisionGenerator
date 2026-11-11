@@ -1,11 +1,12 @@
 import type { ImageTab } from './imageSlots';
 
-/** The tabs that hold uploads: Image and Video hold images, Video and its Extend kind an audio track, Audio the recording of a voice. */
-export type UploadTab = ImageTab | 'extend' | 'audio';
+/** The tabs that hold uploads: Image and Video hold images, Edit the image to edit with its mask, Video and its Extend kind an audio track, Audio the recording of a voice. */
+export type UploadTab = ImageTab | 'edit' | 'extend' | 'audio';
 
 /**
  * The files a tab holds from this device: its start image (the first frame in Video), the last frame, one entry per
- * reference row, and the audio track (Video and its Extend kind); the Audio tab's record keeps its voice recording in `track`.
+ * reference row, and the audio track (Video and its Extend kind); the Audio tab's record keeps its voice recording in `track`, and
+ * the Edit kind's keeps the image to edit in `start` and the PNG of its painted mask in `end`.
  */
 export interface TabUploads {
   start: File | null;

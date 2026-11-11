@@ -25,7 +25,7 @@ from zvisiongenerator.web.workspace_contract import (
     workflow_mode,
 )
 
-_VIDEO_AND_IMAGE = ["txt2img", "img2img", "txt2vid", "img2vid", "extend"]
+_VIDEO_AND_IMAGE = ["txt2img", "img2img", "edit", "txt2vid", "img2vid", "extend"]
 
 
 @pytest.fixture(autouse=True)

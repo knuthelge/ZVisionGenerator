@@ -130,10 +130,12 @@ licences:
 image_families:
   zimage:
     supports_negative_prompt: true
+    supports_mask_edit: true
 
   flux2_klein:
     supports_negative_prompt: false
     max_reference_images: 4  # BFL documents up to 4; neither library enforces a count
+    supports_mask_edit: true
 
   flux2:
     supports_negative_prompt: false
@@ -157,6 +159,7 @@ image_families:
     # Guidance is the standard CFG scale on both backends (1.0 = off); the diffusers
     # backend converts it to Krea 2's own scale, where 0.0 = off.
     supports_negative_prompt: false
+    supports_mask_edit: true
 
   moss:
     # Turbo and SFT are variants of one family, picked from the model folder. A variant may also set capability flags.

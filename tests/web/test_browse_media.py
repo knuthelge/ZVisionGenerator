@@ -101,8 +101,8 @@ def _webp(response) -> Image.Image:
         ("preview", "output_directory"),
         ("info", "lora_file"),
         ("info", "prompt_file"),
-        ("media", "reference_image"),
         ("media", "checkpoint_file"),
+        ("media", "output_directory"),
         ("preview", "no_such_purpose"),
     ],
 )
@@ -479,6 +479,27 @@ def test_media_answers_a_range_request_with_the_extension_s_type(client, media_d
     assert response.headers["x-content-type-options"] == "nosniff"
 
 
+@pytest.mark.parametrize(("name", "media_type"), [("fox.png", "image/png"), ("fox.webp", "image/webp")])
+def test_media_sends_an_image_itself_at_its_full_size(client, media_dir, name, media_type):
+    path = _file(media_dir, name, _png((3000, 2000)))
+
+    response = _get(client, "media", "reference_image", path)
+
+    assert response.status_code == 200
+    assert response.content == path.read_bytes()
+    assert response.headers["content-type"].split(";")[0] == media_type
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_media_applies_the_same_checks_to_an_image_as_the_preview_does(client, media_dir, tools):
+    secret = _file(media_dir, "id_rsa.pem", b"-----BEGIN PRIVATE KEY-----")
+    (media_dir / "photo.png").symlink_to(secret)
+    cases = [_file(media_dir, "notes.txt"), media_dir / "photo.png", media_dir / "missing.png", _file(media_dir, "fox.svg", b"<svg/>")]
+
+    assert [_get(client, "media", "reference_image", case).status_code for case in cases] == [404, 404, 404, 404]
+    assert _get(client, "media", "reference_image", "pictures/fox.png").status_code == 422
+
+
 def test_media_without_a_range_sends_the_whole_file(client, media_dir):
     path = _file(media_dir, "song.mp3", b"x" * 50)
 
@@ -580,7 +601,12 @@ def test_an_ffprobe_timeout_is_not_found(client, media_dir, tools):
 
 
 def _each_route(media_dir: Path) -> list[tuple[str, str, Path]]:
-    return [("preview", "reference_image", _file(media_dir, "fox.png", _png())), ("info", "reference_image", media_dir / "fox.png"), ("media", "audio_track", _file(media_dir, "song.mp3"))]
+    return [
+        ("preview", "reference_image", _file(media_dir, "fox.png", _png())),
+        ("info", "reference_image", media_dir / "fox.png"),
+        ("media", "audio_track", _file(media_dir, "song.mp3")),
+        ("media", "reference_image", media_dir / "fox.png"),
+    ]
 
 
 @pytest.mark.parametrize("site", ["cross-site", "same-site"])

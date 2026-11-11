@@ -1,5 +1,5 @@
 import {
-  AUDIO_TRACK_HINT, SAVE_VOICE_HINT, VOICE_HINT, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, canUseFrame, plainUpscaleMethod, upscaleFactors, voiceTooLongReason,
+  AUDIO_TRACK_HINT, SAVE_VOICE_HINT, VOICE_HINT, canEdit, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, canUseFrame, plainUpscaleMethod, upscaleFactors, voiceTooLongReason,
   type AssetActionHandlers, type ReferenceTarget, type UseAsState,
 } from '$lib/state/assetActions';
 import type { FramePoint } from '$lib/state/framePoint';
@@ -28,7 +28,7 @@ export function assetMenuEntries(
   point: FramePoint | null = null
 ): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
-  const { onreuse, onreference, onextend, onuseframe, onupscale, onuseaudio, ondelete } = handlers;
+  const { onreuse, onreference, onextend, onedit, onuseframe, onupscale, onuseaudio, ondelete } = handlers;
   if (onreuse) {
     const reusable = asset.has_reusable_config === true;
     entries.push(
@@ -54,6 +54,10 @@ export function assetMenuEntries(
   // frame it continues from there, and a frame too early says why it can't.
   const extend = extendEntry(asset, point, onextend);
   if (extend) entries.push(extend, { kind: 'separator' });
+  // An image can be edited: its paint and prompt change part of it, or give it more room.
+  if (onedit && canEdit(asset)) {
+    entries.push({ kind: 'item', id: 'edit', label: 'Edit', icon: 'edit', onselect: () => onedit(asset) }, { kind: 'separator' });
+  }
   const upscaleItems = onupscale ? upscaleEntries(asset, onupscale) : [];
   if (upscaleItems.length > 0) {
     entries.push({ kind: 'heading', label: 'Upscale' }, ...upscaleItems, { kind: 'separator' });
