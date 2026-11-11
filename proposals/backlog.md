@@ -59,8 +59,20 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 - Dead code: `utils/h3_memory.h3_extend_window_frames` (duplicates `video_extend.window_frames`), `web_runner.WebRunner.get_job_result_path`, `job_contract.ACTIVE_STATUSES`, the job snapshot field `supports_controls` (duplicates `supported_controls`), `backends/cuda/image/backend._make_skip_callback`, the `GET /docs/assets/{asset_name}` route (always 404 once installed), the frontend `progress_text` SSE handler, `draft.reset()`.
 - Duplicated helpers: `backends/mac/video.py` `_snapshot_download` repeats `utils/hf_snapshot.snapshot_download`; `workflows/video_stages.py` handles a `CalledProcessError` that `splice_clips` can never raise while `strip_audio` and `embed_mp4_config` still raise it.
 - `backends/cuda/video/h3/lora.py` docstring mentions a planning label ("C11's `load_copy`"); `h3/conditioning.py` imports the private `_weight_files` from `decode.py`.
-- The Windows CUDA install command is hand-copied into `docs/install.md` while the code carries it as `CUDA_INSTALL_COMMAND` in `backends/cuda/driver.py`; a later index change (cu130 to cu131) would leave the error message and the docs apart. A test in `tests/common/test_docs_reference.py` asserting the docs contain the constant would tie them. Decision: skipped for v1.
-- Docs: `docs/developer/downloads.md` names `ziv convert --model-type h3`; the command is `ziv model model --model-type h3`. `docs/install.md` says Apple Silicon (M1 or newer) but the locked mlx and torch wheels need macOS 14. `core/video_backend.py` says `mode` is accepted and ignored for LTX; the CUDA LTX backend raises on a mismatched mode.
+- The Windows CUDA install command is hand-copied into `docs/get-started/install.md` while the code carries it as `CUDA_INSTALL_COMMAND` in `backends/cuda/driver.py`; a later index change (cu130 to cu131) would leave the error message and the docs apart. A test in `tests/common/test_docs_reference.py` asserting the docs contain the constant would tie them. Decision: skipped for v1.
+
+## Found during the docs overhaul
+
+- **`--upscale-save-pre` help says `_pre`, the file gets `_preupscale`.** `image_cli.py` describes the suffix as `_pre`; `workflows/image_stages.py` writes `_preupscale`.
+- **The Vite dev proxy points at port 8765**, while `ziv ui` defaults to 8080 (`frontend/vite.config.ts`, `web/__init__.py`).
+- **The Config page shows `HF_HOME` itself as the model cache** (`web/config_api.py`), but the models live in `HF_HOME/hub`.
+- **The Workspace First sigma hint contradicts the CLI help.** `SettingsPane.svelte` says a smaller first-step sigma may reduce the grey frame; the `--first-sigma` help and the docs say higher values (1.005 to 1.006) avoid it.
+- **The convert form's "Copy instead of moving" is misnamed.** It copies the base model's files instead of linking them and never moves the checkpoint (`ModelsPage.svelte`, `converters/convert_checkpoint.py`).
+- **The missing-Web-UI-packages message suggests `uv tool install --reinstall`** (`web/__init__.py`), which on Windows drops PyTorch's CUDA index. Point it at the documented repair, with the `--index` options.
+- **The Audio tab's Reset tooltip lists fewer settings than Reset puts back.** The tooltip in `SettingsPane.svelte` names tempo, key, type, length, voice, batch and seed; the reset scope (`resetScope.ts`) also puts back the delivery and the Enhance options.
+- **`ziv-image -m`'s help undersells aliases, and the epilogs suggest folder paths.** It reads "Path to the base model (Hugging Face format)", and `-m models/my-model` (`image_cli.py`) and `-m models/ltx-mlx` (`video_cli.py`) look relative to the current folder rather than names in the data folder.
+- **The Web UI branches on model families in a few places**, against the aim that capabilities come from the metadata: `web/model_status.py`, `web/lora_fit.py`, `web/workspace_api.py`, `web/upscale_api.py` and `ModelsPage.svelte`. The developer docs name them as known exceptions.
+- **The Models page hard-codes the converter's model types** (`ModelsPage.svelte`), which must match `MODEL_TYPES` in `converters/convert_checkpoint.py` by hand; no test compares them.
 
 ## Accepted as is
 

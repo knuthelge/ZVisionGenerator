@@ -57,7 +57,7 @@ Only if the checks pass. Small, because the Music tab and the enhancer already t
 - **Backend modules** under `backends/audio/`, one per runtime, importing their library lazily, plus one pure helper that turns the request into the model's input (tags on their own lines, `[Instrumental]` for empty lyrics, tempo and key as caption words, a seed) and is shared by both.
 - **Caption rules:** a `minimax_music3` entry in `_CAPTION_RULES` with the three headings and `metadata=True`. `CaptionRules.headings` and `metadata` exist for this and no model uses them yet. Never invent a BPM or key when none is set; the Without row becomes caption words.
 - **The licence entry and credit**, the model's ⓘ (slow, sings as written, length is a ceiling) and job card progress by frame count with time left.
-- **Docs:** `docs/concepts` for what the model does and costs, its row in `docs/concepts/configuration.md`, and a CHANGELOG entry.
+- **Docs:** `docs/guides/music.md` for what the model does and costs, its row in `docs/reference/configuration.md`, and a CHANGELOG entry.
 
 ### Testing
 
