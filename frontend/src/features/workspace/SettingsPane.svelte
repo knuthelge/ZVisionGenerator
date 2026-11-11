@@ -3,7 +3,7 @@
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
   import { ActionBar, InspectorRow, InspectorSection, LicenceMark, Select } from '$lib/components/molecules';
-  import { extendGuard, extendModelSupport } from '$lib/state/extend';
+  import { extendGuard } from '$lib/state/extend';
   import { extendCutView } from '$lib/state/extendCut';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { MEMORY_FIT_CONSEQUENCES, clipTimeNote, memoryFitNote, type MemoryNote } from '$lib/state/memoryFit';
@@ -95,7 +95,7 @@
   // --- Extend: the length of the new frames (the source itself is chosen in SourceVideoSection) ---
   const info = $derived(draft.extendSource);
   const sourceStatus = $derived(extendInspection.statusFor(s.extendSourcePath));
-  const sourceGuard = $derived(extendGuard(s, info, sourceStatus, extendModelSupport(context, model)));
+  const sourceGuard = $derived(extendGuard(s, info, sourceStatus));
   const sourceFps = $derived(info?.fps ?? null);
   const silentSource = $derived(s.workflow === 'extend' && info?.has_audio === false);
   const extendStep = $derived(extendStepFor(context, model));

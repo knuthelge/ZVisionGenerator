@@ -6,6 +6,7 @@ import type { ExtendSourceInfo } from '$lib/types';
 import { draft } from './draft.svelte';
 import { legacySource, sceneSource } from './extend.fixtures';
 import { extendInspection } from './extendInspection.svelte';
+import { openKind } from '../../test-utils/draftKind';
 
 const apiMocks = vi.hoisted(() => ({ inspectExtendSource: vi.fn<(body: Record<string, unknown>) => Promise<ExtendSourceInfo>>() }));
 vi.mock('$lib/api/extend', () => ({ inspectExtendSource: apiMocks.inspectExtendSource }));
@@ -74,6 +75,22 @@ describe('extendInspection', () => {
 
     await extendInspection.inspect(null, { replaceText: true });
     expect(draft.state).toMatchObject({ scene: '', prompt: 'A woman stands in the rain and says "Hello".' });
+  });
+
+  it('does not write an answer into New video when the kind changed meanwhile, and asks again for Extend', async () => {
+    const answer = deferred<ExtendSourceInfo>();
+    apiMocks.inspectExtendSource.mockReturnValueOnce(answer.promise);
+    draft.patch({ scene: 'Extend scene.' });
+    const pending = extendInspection.inspect(null, { replaceText: true });
+    openKind('video', 'new', null);
+    draft.patch({ scene: 'New scene.' });
+
+    answer.resolve(sceneSource());
+    await pending;
+
+    expect(draft.state).toMatchObject({ workflow: 'txt2vid', scene: 'New scene.' });
+    expect(draft.extendSource).toBeNull();
+    expect(extendInspection.isCurrent()).toBe(false);
   });
 
   it('records a missing file as not found and forgets the facts', async () => {

@@ -2,7 +2,7 @@
   import { Icon, Spinner } from '$lib/components/atoms';
   import { ActionBar } from '$lib/components/molecules';
   import { draft } from '$lib/state/draft.svelte';
-  import { extendGuard, extendModelSupport } from '$lib/state/extend';
+  import { extendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { generateBlock } from '$lib/state/generateBlock.svelte';
   import { heldUploads } from '$lib/state/heldUploads.svelte';
@@ -48,7 +48,7 @@
   const collapsed = $derived(draft.state.sidebarCollapsed && !tall);
   const block = $derived(generateBlock(draft.state, context?.loras ?? []));
   // An extension waits for a source it can read; the strip's Generate follows the same rule as the footer's.
-  const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath), extendModelSupport(context, draft.state.model)));
+  const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath)));
   const imageBlock = $derived(images?.block ?? null);
   const trackBlock = $derived(audioTrack?.block ?? null);
   const audioReason = $derived(audio?.reason ?? null);

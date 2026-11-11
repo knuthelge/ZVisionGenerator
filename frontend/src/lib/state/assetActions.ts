@@ -5,7 +5,7 @@ import { EXTEND_SHORT_REASON, pointLabel, type FramePoint } from '$lib/state/fra
 import { hasPath, imageSupport, slotSet } from '$lib/state/imageSlots';
 import { workflowMode } from '$lib/state/promptEnhance';
 import { stripMarks } from '$lib/state/speechDelivery';
-import { textTab } from '$lib/state/workspaceTab';
+import { workspaceTab } from '$lib/state/workspaceTab';
 import type { AssetUpscaleFactor, DraftState, GalleryAsset, JobWorkflow, PrefillParams, SpeechAudioModel, UpscaleFactor, UpscaleMethod, Workflow, WorkspaceContext } from '$lib/types';
 
 /** Where an image goes: an image's start image, one more reference, a video's first frame, or a video's last frame. */
@@ -174,7 +174,7 @@ function modelLabel(options: readonly { id: string; label: string }[], id: strin
 export function useAsState(ctx: WorkspaceContext | null, state: DraftState): UseAsState {
   if (ctx === null) return { voice: { disabled: true, hint: SPEECH_MODELS_UNKNOWN }, save_voice: { disabled: true, hint: SPEECH_MODELS_UNKNOWN } };
   // Each tab keeps its own model: the open one's is in the draft, the others' in what they saved.
-  const ownTab = textTab(state.workflow);
+  const ownTab = workspaceTab(state.workflow);
   const imageModel = (ownTab === 'image' ? state.model : state.savedSettings.image?.model) || (ctx.current_image_model ?? '');
   const videoModel = (ownTab === 'video' ? state.model : state.savedSettings.video?.model) || (ctx.current_video_model ?? '');
   const imageName = modelLabel(ctx.image_models, imageModel);

@@ -16,6 +16,7 @@ import { createHost, mockClipboard, mountWorkspacePage, resetWorkspaceTest, sett
 import { layoutProbe, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 import { imageEdit } from './edit/editStore.svelte';
 import { sourceOfPath } from './edit/editSource';
+import { openKind } from '../../test-utils/draftKind';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
@@ -570,7 +571,7 @@ describe('Reuse and Retry of an edit', () => {
     ['speech', { speech_text: 'hello' }],
   ])('leaves the Edit slot alone for a %s prefill, and the Image tab\'s kind with it', async (workflow, extra) => {
     paintedEditDraft();
-    draft.setEditing(true, makeEditContext());
+    openKind('image', 'edit', makeEditContext());
     draft.setTab('video');
     const before = editSlot();
     workspaceApiMocks.parseUrlPrefill.mockReturnValue({ workflow, reuse: 'true', ...extra });
@@ -578,7 +579,7 @@ describe('Reuse and Retry of an edit', () => {
 
     expect(editSlot()).toEqual(before);
     if (workflow !== 'txt2img') {
-      expect(draft.state.leftOnEdit).toBe(true);
+      expect(draft.state.imageKind).toBe('edit');
       flushSync(() => draft.setTab('image'));
       expect(draft.state.workflow).toBe('edit');
     }
@@ -589,7 +590,7 @@ describe('Generate this one, from the Prompts page', () => {
   it('moves an Image tab left on Edit to New and queues the chosen prompt as a text-to-image run, keeping Edit\'s image and paint', async () => {
     requestPromptRun({ path: '/server/prompts.yaml', optionId: 'portrait:1' });
     paintedEditDraft();
-    draft.setEditing(true, makeEditContext());
+    openKind('image', 'edit', makeEditContext());
 
     app = await mountWorkspacePage(makeEditContext(), target);
     await settle();

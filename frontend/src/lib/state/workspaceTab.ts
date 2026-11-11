@@ -1,5 +1,5 @@
 import { startImageSet } from './imageSlots';
-import { AUDIO_KINDS, type AudioWorkflow, type DraftState, type NavTab, type TextTab, type VideoKind, type Workflow, type WorkspaceTab, type WorkspaceWorkflow } from '$lib/types';
+import { AUDIO_KINDS, type AudioWorkflow, type DraftState, type ImageKind, type NavTab, type VideoKind, type Workflow, type WorkspaceTab, type WorkspaceWorkflow } from '$lib/types';
 
 /** The tabs that hold images and a text prompt, which every workflow of Image and Video belongs to. */
 export type MediaTab = Exclude<WorkspaceTab, 'audio'>;
@@ -27,7 +27,13 @@ export function videoKinds(workflows: readonly WorkspaceWorkflow[] | null): read
 }
 
 /** The kinds of the Image tab: New and Edit, which every machine offers (the contract always lists the `edit` workflow). */
-export const IMAGE_KINDS: readonly ('new' | 'edit')[] = ['new', 'edit'];
+export const IMAGE_KINDS: readonly ImageKind[] = ['new', 'edit'];
+
+/** The kind of the Image tab a workflow is, or null for a workflow of another tab. */
+export function imageKindOf(workflow: WorkspaceWorkflow): ImageKind | null {
+  if (workflow === 'edit') return 'edit';
+  return workflow === 'txt2img' || workflow === 'img2img' ? 'new' : null;
+}
 
 /** The kind of the Video tab a workflow is, or null for a workflow of another tab. */
 export function videoKindOf(workflow: WorkspaceWorkflow): VideoKind | null {
@@ -53,12 +59,6 @@ export function workspaceTab(workflow: WorkspaceWorkflow): WorkspaceTab {
   if (workflow === 'extend') return 'extend';
   if (workflow === 'edit') return 'edit';
   return workflow === 'txt2vid' || workflow === 'img2vid' ? 'video' : 'image';
-}
-
-/** The tab whose text a workflow writes: Extend writes Video's, every other slot its own. */
-export function textTab(workflow: WorkspaceWorkflow): TextTab {
-  const tab = workspaceTab(workflow);
-  return tab === 'extend' ? 'video' : tab;
 }
 
 /**

@@ -10,6 +10,7 @@ import { voiceConsent } from './voiceConsent.svelte';
 import { memoryUploadStore } from './uploadStore';
 import { navTab, videoKindOf } from './workspaceTab';
 import type { DraftState, WorkspaceContext, ImageModelDefaults, SettingsPreset, VideoModelDefaults, Workflow } from '$lib/types';
+import { openKind } from '../../test-utils/draftKind';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -19,7 +20,7 @@ function openTab(workflow: Workflow, ctx: WorkspaceContext): void {
   if (kind === null) draft.setTab(navTab(workflow));
   else {
     draft.setTab('video');
-    draft.setVideoKind(kind, ctx);
+    openKind('video', kind, ctx);
   }
   draft.onTabChange(ctx);
 }
@@ -1066,24 +1067,6 @@ describe('draft store – prompt enhancer fields', () => {
         audioStyle: 'calm', audioSeconds: 20, audioTempo: null, audioKey: null, musicSeconds: 0, soundType: 'auto',
         speechDelivery: { emotion: 'neutral', manner: 'natural', pace: 'normal', pitch: 'normal', expressiveness: 'normal' },
       });
-    });
-
-    it('Extend shares the text of Video', () => {
-      const ctx = textContext();
-      ctx.workflow_contract.values.push('extend');
-      draft.hydrateFromContext(ctx, null);
-      draft.patch(imageText);
-      openTab('txt2vid', ctx);
-      draft.patch(videoText);
-      draft.setVideoKind('extend', ctx);
-      expect(draft.state).toMatchObject({ workflow: 'extend', scene: videoText.scene, prompt: videoText.prompt, enhancedScene: videoText.enhancedScene });
-      draft.patch({ prompt: 'what happens next' });
-      draft.setVideoKind('new', ctx);
-      expect(draft.state).toMatchObject({ scene: videoText.scene, prompt: 'what happens next' });
-      draft.setVideoKind('extend', ctx);
-      draft.setTab('image');
-      expect(draft.state).toMatchObject(imageText);
-      expect(draft.state.savedText.video).toMatchObject({ scene: videoText.scene, prompt: 'what happens next' });
     });
 
     it('Reuse fills only the opened tab\'s text', () => {
@@ -2229,7 +2212,7 @@ describe('applyPreset', () => {
     extendSourcePath: '/clips/source.mp4', extendFrames: 16, extendFrom: 3.208333, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
     videoUpscaleEnabled: true, videoUpscaleFactor: 2, videoUpscaleReview: true,
     editSourcePath: '/out/edit.png', editSourceUpload: 'edit.png', editMaskUpload: 'mask.png', editPaintedShare: 0.2, editExtendSide: 'top', editExtendAmount: 320, editRepaint: true,
-    videoKind: 'extend', leftOnEdit: true, audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
+    videoKind: 'extend', imageKind: 'edit', savedShared: {}, audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
     audioSeconds: 30, audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
     speechDelivery: { emotion: 'sad', manner: 'whisper', pace: 'slow', pitch: 'low', expressiveness: 'high' },
     voiceMode: 'recording', speechSpeaker: 'vivian', savedVoice: 'narrator', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
@@ -2518,9 +2501,11 @@ describe('applyPreset', () => {
     expect(draft.state.appliedPreset).toBeNull();
     draft.onTabChange(ctx);
     expect(draft.state.appliedPreset).toBeNull();
-    // New and Extend are one mode.
+    // New and Extend each keep their own preset.
     draft.setAppliedPreset('clip');
-    draft.setVideoKind('extend', ctx);
+    openKind('video', 'extend', ctx);
+    expect(draft.state.appliedPreset).toBeNull();
+    openKind('video', 'new', ctx);
     expect(draft.state.appliedPreset).toBe('clip');
   });
 
@@ -3110,7 +3095,7 @@ describe('image slots', () => {
       draft.setStartImage('video', { path: '/in/first.png' }, null);
       draft.setTab('video');
       expect(draft.state.workflow).toBe('img2vid');
-      draft.setVideoKind('extend', null);
+      openKind('video', 'extend', null);
       expect(draft.state.workflow).toBe('extend');
       draft.setTab('image');
       expect(draft.state.workflow).toBe('txt2img');
@@ -3120,14 +3105,14 @@ describe('image slots', () => {
       draft.setStartImage('video', { path: '/in/first.png' }, null);
       draft.setTab('video');
       draft.patch({ frameCount: 49 });
-      draft.setVideoKind('extend', null);
+      openKind('video', 'extend', null);
       draft.setExtendSourcePath('/clips/source.mp4');
       draft.patch({ extendFrames: 48 });
       draft.setAudioTrack('extend', { path: '/audio/extend.wav' });
-      draft.setVideoKind('new', null);
+      openKind('video', 'new', null);
       expect(draft.state).toMatchObject({ workflow: 'img2vid', videoKind: 'new', frameCount: 49, firstFramePath: '/in/first.png', extendSourcePath: '/clips/source.mp4', extendFrames: 48, extendAudioTrackPath: '/audio/extend.wav' });
 
-      draft.setVideoKind('extend', null);
+      openKind('video', 'extend', null);
       draft.setTab('audio');
       draft.setTab('video');
       expect(draft.state).toMatchObject({ workflow: 'extend', videoKind: 'extend' });
@@ -3135,7 +3120,7 @@ describe('image slots', () => {
       draft.setTab('video');
       expect(draft.state.workflow).toBe('extend');
 
-      draft.setVideoKind('new', null);
+      openKind('video', 'new', null);
       draft.setTab('image');
       draft.setTab('video');
       expect(draft.state.workflow).toBe('img2vid');
@@ -3143,7 +3128,7 @@ describe('image slots', () => {
 
     it('opens Video on the kind a prefill named, once the draft is left and entered again', () => {
       draft.setTab('video');
-      draft.setVideoKind('new', null);
+      openKind('video', 'new', null);
       draft.setTab('image');
       draft.setTab('video');
       const ctx = makeContext();
@@ -3156,7 +3141,8 @@ describe('image slots', () => {
     });
 
     it('gives the Extend kind back to New on a machine that cannot extend', () => {
-      draft.setVideoKind('extend', null);
+      draft.setTab('video');
+      openKind('video', 'extend', null);
       const ctx = makeContext();
       ctx.workflow_contract.values = ctx.workflow_contract.values.filter((value) => value !== 'extend');
       draft.hydrateFromContext(ctx, null, { keepSettings: true });

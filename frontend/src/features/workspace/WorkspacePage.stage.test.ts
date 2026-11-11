@@ -1739,6 +1739,21 @@ describe('WorkspacePage extend', () => {
       expect(toasts.map((toast) => toast.message)).toContain('walk.mp4 is now the source video');
     });
 
+    it('leaves the text and settings of New video as they were', async () => {
+      const asset = clip();
+      await mountWithClip(asset);
+      draft.patch({ scene: 'My scene.', prompt: 'My action.', steps: 4 });
+      await settle();
+
+      openMenu(asset);
+      (document.querySelector('[role="menu"] [data-action="extend"]') as HTMLButtonElement).click();
+      await settle();
+
+      expect(draft.state.workflow).toBe('extend');
+      expect(draft.state.savedText.video).toMatchObject({ scene: 'My scene.', prompt: 'My action.' });
+      expect(draft.state.savedSettings.video).toMatchObject({ steps: 4 });
+    });
+
     it('replaces the text of an earlier source when already on Extend', async () => {
       const asset = clip();
       await mountWithClip(asset, 'extend');

@@ -11,6 +11,7 @@ import { workspaceCapabilities } from '../capabilities';
 import { imagesView } from '../imagesView';
 import { settingsChips } from '../settingsChips';
 import { canEditWith, editableModels, editsWholePicture } from '$lib/state/editModels';
+import { openKind } from '../../../test-utils/draftKind';
 
 const editContext = makeEditContext;
 
@@ -22,22 +23,22 @@ describe('the Image tab\'s kind', () => {
 
   it('is New until Edit is chosen, and Edit is a workflow of its own', () => {
     expect(draft.state.workflow).toBe('txt2img');
-    draft.setEditing(true, editContext());
+    openKind('image', 'edit', editContext());
     expect(draft.state.workflow).toBe('edit');
-    draft.setEditing(false, editContext());
+    openKind('image', 'new', editContext());
     expect(draft.state.workflow).toBe('txt2img');
   });
 
   it('is not chosen off the Image tab', () => {
     const context = editContext();
     draft.setTab('video');
-    draft.setEditing(true, context);
+    openKind('image', 'edit', context);
     expect(draft.state.workflow).toBe('txt2vid');
   });
 
   it('shows Kind as the first chip on a phone, and names the open one', () => {
     const context = editContext();
-    draft.setEditing(true, context);
+    openKind('image', 'edit', context);
     const facts = (caps: ReturnType<typeof workspaceCapabilities>) => ({
       caps, state: draft.state, videoKind: null, changed: () => false, width: 832, height: 1216, seconds: null, extendSeconds: null,
       loraNames: [], modelLabel: 'Z-Image', modelDownloaded: true, sourceName: null, images: null, track: null, memoryWarn: false, presetName: null, presetSlug: null, presetChanged: false,
@@ -47,7 +48,7 @@ describe('the Image tab\'s kind', () => {
     expect(chips.map((chip) => chip.key)).not.toContain('preset');
     expect(chips.map((chip) => chip.key)).not.toContain('size');
 
-    draft.setEditing(false, context);
+    openKind('image', 'new', context);
     expect(settingsChips(facts(workspaceCapabilities(context, draft.state)))[0]).toMatchObject({ key: 'kind', value: 'New' });
   });
 });
@@ -63,7 +64,7 @@ describe('what Edit shows', () => {
     draft.hydrateFromContext(context, 'zit');
     const before = workspaceCapabilities(context, draft.state);
     expect([before.isEdit, before.showDimensions, before.showImageUpscale, before.showGuidance, before.showScheduler, before.showPreset, before.showEnhance]).toEqual([false, true, true, true, true, true, false]);
-    draft.setEditing(true, context);
+    openKind('image', 'edit', context);
     const caps = workspaceCapabilities(context, draft.state);
     expect(caps.isEdit).toBe(true);
     expect([caps.showDimensions, caps.showI2IStrength, caps.showImageUpscale, caps.showUpscaleReview, caps.showPostprocessSharpen, caps.showPostprocessTransparent]).toEqual([false, false, false, false, false, false]);
@@ -78,9 +79,9 @@ describe('what Edit shows', () => {
     draft.hydrateFromContext(context, 'zit');
     draft.patch({ promptSource: 'file' });
     expect(workspaceCapabilities(context, draft.state).promptFileMode).toBe(true);
-    draft.setEditing(true, context);
+    openKind('image', 'edit', context);
     expect(workspaceCapabilities(context, draft.state).promptFileMode).toBe(false);
-    draft.setEditing(false, context);
+    openKind('image', 'new', context);
     expect(workspaceCapabilities(context, draft.state).promptFileMode).toBe(true);
   });
 
@@ -88,14 +89,14 @@ describe('what Edit shows', () => {
     const context = editContext();
     draft.hydrateFromContext(context, 'zit');
     const before = workspaceCapabilities(context, draft.state);
-    draft.setEditing(true, context);
-    draft.setEditing(false, context);
+    openKind('image', 'edit', context);
+    openKind('image', 'new', context);
     expect(workspaceCapabilities(context, draft.state)).toEqual(before);
   });
 
   it('does not touch a video workflow', () => {
     const context = editContext();
-    draft.setEditing(true, context);
+    openKind('image', 'edit', context);
     draft.setTab('video');
     expect(workspaceCapabilities(context, draft.state).isEdit).toBe(false);
   });

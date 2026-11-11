@@ -107,6 +107,15 @@ describe('choosing the image to edit', () => {
     expect([imageEdit.source?.width, imageEdit.source?.height]).toEqual([640, 480]);
   });
 
+  it('reads the size of a gallery image too, whatever size the gallery recorded', async () => {
+    probe.readSize.mockResolvedValue({ width: 600, height: 800 });
+    chooseSource(sourceOfAsset(asset()));
+    expect(imageEdit.source).toMatchObject({ width: null, height: null });
+    await later();
+    expect(probe.readSize).toHaveBeenCalledOnce();
+    expect([imageEdit.source?.width, imageEdit.source?.height]).toEqual([600, 800]);
+  });
+
   it('forgets the image and everything done to it on Clear', () => {
     chooseSource(sourceOfPath('/out/a.png'));
     draft.commitEditPaint({ mask: new File(['png'], 'mask.png'), share: 0.3, extension: null, amount: 256 });

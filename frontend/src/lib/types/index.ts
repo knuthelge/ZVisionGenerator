@@ -87,12 +87,12 @@ export type WorkflowMode = 'image' | 'video' | 'audio';
 
 /** What the user picks in the top bar, or a kind that has a slot of its own: an image, the edit of an image, a video, the continuation of a video, or audio. The workflow follows from it and the tab's images. */
 export type WorkspaceTab = 'image' | 'edit' | 'video' | 'extend' | 'audio';
-/** The tabs that keep a text of their own: Extend writes Video's. */
-export type TextTab = Exclude<WorkspaceTab, 'extend'>;
 /** The tabs of the top bar. Extend is a kind of Video and Edit a kind of Image, not tabs; `WorkspaceTab` also names their slots. */
 export type NavTab = 'image' | 'video' | 'audio';
 /** The kinds of the Video tab: a new clip (from text or a first frame) or the extension of a clip. */
 export type VideoKind = 'new' | 'extend';
+/** The kinds of the Image tab: a new picture (from text or a start image) or the edit of a picture. */
+export type ImageKind = 'new' | 'edit';
 
 /** The sides of a picture an Edit can extend. */
 export type ExtendSide = 'top' | 'right' | 'bottom' | 'left';
@@ -1251,7 +1251,7 @@ export interface TabText {
 export interface DraftState {
   workflow: WorkspaceWorkflow;
   promptSource: PromptSource;
-  /** The prompt of the open tab. Edit keeps its own, apart from New's (`savedText`): what to change, never sent with New's Enhanced text. */
+  /** The prompt of the open tab. Each tab and kind keeps its own (`savedText`): Edit's is what to change, never sent with New's Enhanced text. */
   prompt: string;
   /** Video scene (who and where, look, camera); the default scene in prompt-file mode. Image workflows ignore it. */
   scene: string;
@@ -1348,16 +1348,22 @@ export interface DraftState {
   /** The position (from 0) of the version Scratch emptied the Enhanced text from, which the stepper's ‹ brings back; null otherwise. */
   enhancedScratched: number | null;
   /**
-   * The text of the tabs that are not open (New, Edit, Video, Audio); the fields from `prompt` to `enhancedHistory` (the same as
-   * `TabText`) hold the open one's. Opening another swaps the two. Empty until the first switch.
+   * The text of the tabs and kinds that are not open (New image, Edit, New video, Extend, Audio); the fields from `prompt` to
+   * `enhancedHistory` (the same as `TabText`) hold the open one's. Opening another swaps the two. Empty until the first switch.
    */
-  savedText: Partial<Record<TextTab, TabText>>;
+  savedText: Partial<Record<WorkspaceTab, TabText>>;
   /**
-   * What the tabs that are not open (New, Edit, Video) kept: their Settings pane values, model with its LoRAs and quantization, the
-   * LoRAs remembered by model family, and applied preset; Edit's also holds its own Batch and Seed. The fields themselves hold the open
-   * one's; opening another tab swaps the two, so each comes back as it was left. A tab not visited yet has none, and takes its model's defaults.
+   * What the tabs and kinds that are not open (New image, Edit, New video, Extend) kept: their Settings pane values, model with
+   * its LoRAs and quantization, the LoRAs remembered by model family, and applied preset; Edit's and Extend's also hold their own
+   * Batch and Seed, and Extend's its prompt source, prompts file and Enhancer options. The fields themselves hold the open one's;
+   * opening another tab swaps the two, so each comes back as it was left. A tab not visited yet has none, and takes its model's defaults.
    */
-  savedSettings: Partial<Record<TextTab, Partial<DraftState>>>;
+  savedSettings: Partial<Record<WorkspaceTab, Partial<DraftState>>>;
+  /**
+   * What New image, New video and Audio share and Edit or Extend replaces with their own: Batch and Seed, and the prompt source with
+   * its prompts file and Enhancer options. The fields hold them while one of those is open; while Edit or Extend is open they wait here.
+   */
+  savedShared: Partial<DraftState>;
   /** Last-used enhancement options for images; null until the user picks any (backend defaults apply). */
   enhanceSettings: EnhanceSettings | null;
   /** Last-used enhancement options for video, with the Rewrite choice of each video workflow; null until any are picked. */
@@ -1382,8 +1388,8 @@ export interface DraftState {
   extendPrefill: { path: string; scene: string; prompt: string; audioTrack?: { path: string; start: number } | null } | null;
   /** Video tab: the kind last open (New or Extend); coming back to the tab restores it. */
   videoKind: VideoKind;
-  /** The Image tab was left on Edit (the Video or Audio tab is open): coming back to the tab reopens Edit. False while the Image tab is open, where `workflow` says which kind it is on. */
-  leftOnEdit: boolean;
+  /** Image tab: the kind last open (New or Edit); coming back to the tab restores it. */
+  imageKind: ImageKind;
   /** Edit: the image to edit as a path on the host; null when none is set or it was uploaded (`editSourceUpload`). */
   editSourcePath: string | null;
   /** Edit: the file name of an image uploaded from this device (its file is in `heldUploads`); null when none. */

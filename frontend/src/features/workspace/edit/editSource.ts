@@ -45,7 +45,11 @@ export function sourceOfFile(file: File): EditSource {
   return { id: _nextId++, name: file.name, path: null, file, url, thumbUrl: url, width: null, height: null, cutout: null };
 }
 
-/** An image from the gallery: its real size is known, and so is a cut-out the gallery marks as one (`transparent`); another is looked at later (`readCutout`). */
+/**
+ * An image from the gallery. Its size is read separately (`readSize`), as for a browsed file: the size the gallery recorded can be
+ * the raw one, before the picture is turned upright, or out of date. A cut-out the gallery marks as one (`transparent`) is known;
+ * another is looked at later (`readCutout`).
+ */
 export function sourceOfAsset(asset: GalleryAsset): EditSource {
   return {
     id: _nextId++,
@@ -54,8 +58,8 @@ export function sourceOfAsset(asset: GalleryAsset): EditSource {
     file: null,
     url: asset.url,
     thumbUrl: asset.thumbnail_url || asset.url,
-    width: asset.width ?? null,
-    height: asset.height ?? null,
+    width: null,
+    height: null,
     cutout: asset.transparent === true ? true : null,
   };
 }

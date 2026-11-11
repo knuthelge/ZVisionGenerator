@@ -384,3 +384,26 @@ export function makeEditContext(): WorkspaceContext {
     },
   };
 }
+
+/**
+ * A context that can extend: three video models (Wan, the default, which cannot; LTX, which can; H3, which can and runs more
+ * steps), with the Extend workflow listed.
+ */
+export function makeExtendModelsContext(): WorkspaceContext {
+  const base = makeContext();
+  return {
+    ...base,
+    video_models: [
+      { id: 'wan', label: 'Wan', type: 'video' },
+      { id: 'ltx-8', label: 'LTX', type: 'video' },
+      { id: 'h3', label: 'H3', type: 'video' },
+    ],
+    video_model_defaults: {
+      wan: makeVideoDefaults({ supports_extend: false, steps: 20, max_steps: 20 }),
+      'ltx-8': makeVideoDefaults(),
+      h3: makeVideoDefaults({ steps: 12, max_steps: 12 }),
+    },
+    current_video_model: 'wan',
+    workflow_contract: { ...base.workflow_contract, values: [...base.workflow_contract.values, 'extend'] },
+  };
+}

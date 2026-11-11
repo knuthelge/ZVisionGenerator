@@ -11,7 +11,7 @@
   import { addLoraChip, removeLoraChip } from '$lib/state/loraActions';
   import { chipDownload } from '$lib/state/loraDownloads';
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames } from '$lib/state/loras';
-  import { extendGuard, extendModelSupport, extendSourceFacts, extendSourceUsable } from '$lib/state/extend';
+  import { extendGuard, extendSourceFacts, extendSourceUsable } from '$lib/state/extend';
   import { extendCutView, extendCuttable } from '$lib/state/extendCut';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { durationSpec, extendFramesFromSeconds, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
@@ -30,7 +30,7 @@
   import type { AudioTrackView } from './audioTrackView';
   import { AUDIO_KIND_INFO, IMAGE_KIND_INFO, VIDEO_KIND_INFO, type KindChoice } from './kindInfo';
   import type { AudioView } from './audioView';
-  import type { AudioWorkflow, VideoKind } from '$lib/types';
+  import type { AudioWorkflow, ImageKind, VideoKind } from '$lib/types';
   import VoicePopover from './VoicePopover.svelte';
   import DeliveryControls from './DeliveryControls.svelte';
   import FilledMark from './FilledMark.svelte';
@@ -131,8 +131,8 @@
     caps.isAudio
       ? { kinds: availableKinds(context), info: AUDIO_KIND_INFO, value: s.workflow, pick: (kind) => draft.setAudioKind(kind as AudioWorkflow, context) }
       : caps.isImageMode
-        ? { kinds: IMAGE_KINDS, info: IMAGE_KIND_INFO, value: caps.isEdit ? 'edit' : 'new', pick: (kind) => draft.setEditing(kind === 'edit', context) }
-        : { kinds: videoKinds(context.workflow_contract.values), info: VIDEO_KIND_INFO, value: s.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setVideoKind(kind as VideoKind, context) },
+        ? { kinds: IMAGE_KINDS, info: IMAGE_KIND_INFO, value: caps.isEdit ? 'edit' : 'new', pick: (kind) => draft.setKind('image', kind as ImageKind, context) }
+        : { kinds: videoKinds(context.workflow_contract.values), info: VIDEO_KIND_INFO, value: s.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setKind('video', kind as VideoKind, context) },
   );
 
   // A sound's length is blank on Auto: the field shows what the type will use, and typing or sliding locks a number.
@@ -169,7 +169,7 @@
   const extendLength = $derived(info && s.extendFrames !== null ? (extendCutView(info, s.extendFrom, s.extendFrames)?.total ?? null) : null);
   const extendMemoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
   const extendTime = $derived(clipTimeNote(info?.memory_fit ?? null));
-  const sourceGuard = $derived(extendGuard(s, info, extendInspection.statusFor(s.extendSourcePath), extendModelSupport(context, s.model)));
+  const sourceGuard = $derived(extendGuard(s, info, extendInspection.statusFor(s.extendSourcePath)));
 
   function setExtendSeconds(seconds: number | null): void {
     if (seconds !== null && sourceFps) draft.update('extendFrames', extendFramesFromSeconds(seconds, sourceFps, extendStep));

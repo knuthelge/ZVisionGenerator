@@ -11,6 +11,7 @@ import { FIELD_SCOPE, keysOf, RESET_SCOPE } from './resetScope';
 import { voiceConsent } from './voiceConsent.svelte';
 import { isAudioWorkflow, navTab, videoKindOf } from './workspaceTab';
 import type { AudioWorkflow, DownloadItem, DraftState, EnhanceSettings, WorkspaceContext, WorkspaceTab, Workflow } from '$lib/types';
+import { openKind } from '../../test-utils/draftKind';
 
 const base = makeContext();
 const ctx: WorkspaceContext = withAudio({
@@ -27,7 +28,7 @@ function openTab(workflow: Workflow | AudioWorkflow): void {
   if (kind === null) draft.setTab(navTab(workflow));
   else {
     draft.setTab('video');
-    draft.setVideoKind(kind, ctx);
+    openKind('video', kind, ctx);
   }
   draft.onTabChange(ctx);
   if (isAudioWorkflow(workflow)) draft.setAudioKind(workflow, ctx);
@@ -61,7 +62,7 @@ const MARKED: DraftState = {
   savedSettings: { video: { steps: 31, model: 'ltx-8' } },
   enhanceSettings: SETTINGS, enhanceSettingsVideo: { ...SETTINGS, style: 'dreamy', partsByWorkflow: {} }, enhanceAuto: true, enhanceModel: 'smart', describeTier: 'smart', enhanceFormat: 'json',
   extendSourcePath: '/clips/source.mp4', extendFrames: 16, extendFrom: 3.208333, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
-  appliedPreset: 'look', videoKind: 'new', leftOnEdit: true, audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' },
+  appliedPreset: 'look', videoKind: 'new', imageKind: 'edit', savedShared: {}, audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' },
   audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain', audioSeconds: 30,
   audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
   speechDelivery: { emotion: 'sad', manner: 'whisper', pace: 'slow', pitch: 'low', expressiveness: 'high' },
@@ -109,7 +110,7 @@ describe('FIELD_SCOPE', () => {
   it('lists only scopes a tab can reset or a transition keeps', () => {
     for (const tab of Object.keys(RESET_SCOPE) as WorkspaceTab[]) {
       expect(keysOf(RESET_SCOPE[tab]).length).toBeGreaterThan(0);
-      // Batch and Seed are shared by every tab, so each Reset puts them back.
+      // Every tab holds a Batch and Seed in the draft while it is open, so each Reset puts them back.
       expect(keysOf(RESET_SCOPE[tab])).toEqual(expect.arrayContaining(['runs', 'seed']));
     }
   });

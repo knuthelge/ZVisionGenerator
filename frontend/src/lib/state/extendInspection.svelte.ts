@@ -39,6 +39,11 @@ async function _inspect(ctx: WorkspaceContext | null, options: { replaceText?: b
   try {
     const info = await inspectExtendSource({ path, extend_frames: state.extendFrames, model: state.model || null, low_memory: state.lowMemory, steps: state.steps > 0 ? state.steps : null, lora: state.loraString.trim() || null });
     if (request !== _sequence || draft.state.extendSourcePath !== path) return;
+    // The answer is Extend's: with New open it must not write into New's boxes, so it is asked for again when Extend opens.
+    if (draft.state.workflow !== 'extend') {
+      _requestedKey = null;
+      return;
+    }
     draft.applyExtendSource(info, ctx, options);
     _status = 'ready';
     // The answer sized itself for the inputs it was asked about; filling the 2 s default length is not a change worth asking again.

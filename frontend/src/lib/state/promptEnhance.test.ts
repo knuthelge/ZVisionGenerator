@@ -410,7 +410,7 @@ describe('extend', () => {
       ['the source and length are the same', {}, false],
       ['the source changes', { extendSourcePath: '/clips/other.mp4' }, true],
       ['the length changes', { extendFrames: 56 }, true],
-      ['the workflow is no longer an extension', { workflow: 'txt2vid' as const }, true],
+      ['the workflow is another video workflow, whose text stays apart from Extend\'s', { workflow: 'txt2vid' as const }, false],
     ])('is out of date only when %s', (_name, overrides, stale) => {
       const reason = enhancedStaleReason({ ...enhanced(), ...overrides });
       if (stale) expect(reason).not.toBeNull();

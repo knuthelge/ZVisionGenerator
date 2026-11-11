@@ -3,7 +3,7 @@
   import { draft } from '$lib/state/draft.svelte';
   import { enhancePrompt } from '$lib/api/promptEnhance';
   import { confirmEnhancerDownload as confirmDownload, downloadedTiers, tierMissing } from '$lib/state/enhancerDownload.svelte';
-  import { extendEnhanceHint, extendGuard, type ExtendModelSupport } from '$lib/state/extend';
+  import { extendEnhanceHint, extendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { rewriteResultPatch } from '$lib/state/rewriteHistory';
   import { EnhanceChoice, EnhanceOptions, EnhanceRewrite, InspectorRow } from '$lib/components/molecules';
@@ -62,8 +62,6 @@
     onstart?: () => void;
     /** Called when a run ended in an error, so the box can show your own text again instead of an empty Enhanced tab. */
     onfail?: () => void;
-    /** Whether the chosen video model can extend a clip; an extension waits for a model that can. */
-    extendSupport?: ExtendModelSupport | null;
     /** The clip also ends on a last-frame image, so the rewrite must not invent a different ending. */
     endImage?: boolean;
     /** How many reference images are set (uploads included); the rewrite keeps the prompt's "image 1", "image 2". */
@@ -83,7 +81,6 @@
     endImage = false,
     references = 0,
     track = false,
-    extendSupport = null,
     maxWords,
     enhancing = $bindable(false),
     streamingText = $bindable(''),
@@ -110,7 +107,7 @@
   const sourceHasAudio = $derived(draft.state.workflow === 'extend' ? (draft.extendSource?.has_audio ?? null) : null);
   const audio = $derived(hasAudio(draft.state, audioSupported, sourceHasAudio, track));
   // An extension needs a source it can read before any text can be written for it.
-  const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath), extendSupport));
+  const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath)));
   const tier = $derived(effectiveTier(draft.state, contract));
   const format = $derived(effectiveFormat(draft.state, jsonCapable));
   const caption = $derived(format === 'json');

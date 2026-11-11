@@ -5,6 +5,7 @@ import { sameOps, type Stroke } from './editOps';
 import { imageEdit, painterLayer } from './editStore.svelte';
 import type { EditSource } from './editSource';
 import { makeEditContext } from '../../../test-utils/workspace';
+import { openKind } from '../../../test-utils/draftKind';
 
 let nextId = 100;
 const source = (overrides: Partial<EditSource> = {}): EditSource => ({
@@ -100,7 +101,7 @@ describe('the image to edit and its paint', () => {
     expect([imageEdit.strokes.length, imageEdit.extension, imageEdit.canUndo]).toEqual([0, null, false]);
     imageEdit.addStroke(dab());
     const context = makeEditContext();
-    draft.setEditing(true, context);
+    openKind('image', 'edit', context);
     draft.resetSelections(context);
     expect([imageEdit.strokes.length, imageEdit.canUndo]).toEqual([0, false]);
   });

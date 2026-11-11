@@ -7,15 +7,15 @@ import type { DraftState, WorkspaceTab } from '$lib/types';
  * - `slotsImage`, `slotsEdit`, `slotsVideo`, `slotsExtend`: the images, upload markers and audio track of one tab or kind (Image's also holds Strength; Edit's is the image to edit with its paint and extension).
  * - `settings`: the open mode's (image or video) values for the Settings pane; the Audio tab keeps none of these.
  * - `extendSettings`: the Extend kind's length.
- * - `shared`: Batch and Seed, one pair for New, Video and Audio; Edit has its own.
+ * - `shared`: Batch and Seed, one pair for New image, New video and Audio; Edit and Extend have their own.
  * - `model`: the model, its LoRAs and the quantization.
  * - `text`: the open mode's typed text, its Enhanced text and its prompt source.
- * - `promptFile`: the prompts file and the prompts chosen from it.
- * - `enhanceImage`, `enhanceVideo`, `enhanceAudio`: the enhancement options of each mode (Audio keeps one set per task).
+ * - `promptFile`: the prompts file and the prompts chosen from it (New image and New video share them; Extend has its own).
+ * - `enhanceImage`, `enhanceVideo`, `enhanceAudio`: the enhancement options of each mode (Audio keeps one set per task; New video and Extend each keep their own video set).
  * - `extendSource`: the video an extension continues and the point in it the extension continues from (a Reset puts both back).
  * - `audioText`, `audioSettings`, `audioDelivery`, `voice`: the four texts of the Audio tab with the Enhanced text of its boxes, its settings (the lengths, the Tempo and
  *   Key, the Sound Type), the Speech delivery and the Speech voice.
- * - `memory`: what the draft remembers for coming back to a tab or a mode.
+ * - `memory`: what the draft remembers for coming back to a tab or a kind.
  * - `ui`: layout flags and bookkeeping.
  * - `preset`: the settings preset the form started from.
  * - `derived`: values recomputed from other fields, never set by themselves.
@@ -142,12 +142,13 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   lorasByFamily: 'memory',
   savedText: 'memory',
   savedSettings: 'memory',
+  savedShared: 'memory',
   enhanceAuto: 'memory',
   enhanceModel: 'memory',
   describeTier: 'memory',
   enhanceFormat: 'memory',
   videoKind: 'memory',
-  leftOnEdit: 'memory',
+  imageKind: 'memory',
   audioKind: 'memory',
   audioModels: 'memory',
 
@@ -170,7 +171,7 @@ export const RESET_SCOPE: Record<WorkspaceTab, readonly Scope[]> = {
 
 /**
  * What applying a take's settings exactly (a Reuse, a Load settings) puts back before it sets the take's own: the tab's Reset scope,
- * its text, the model with its LoRAs and quantization and, on Extend, its source. The prompt file, the rewrites remembered for
+ * its text and the model with its LoRAs and quantization. The prompt file, the rewrites remembered for
  * the text and the choices of enhancer stay. The Audio tab's kinds each keep their own text and voice, so a take puts back
  * only Batch, Seed and the settings there (a take without a Tempo is on Auto) and sets the fields of its kind.
  */

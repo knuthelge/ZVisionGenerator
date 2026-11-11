@@ -6,6 +6,7 @@ import { draft } from './draft.svelte';
 import { REUSE_SCOPE, RESET_SCOPE, keysOf } from './resetScope';
 import { voiceConsent } from './voiceConsent.svelte';
 import type { DraftState, EnhanceSettings, WorkspaceContext } from '$lib/types';
+import { openKind } from '../../test-utils/draftKind';
 
 const base = makeContext();
 const ctx: WorkspaceContext = withAudio({
@@ -115,12 +116,13 @@ describe('an exact prefill', () => {
     expect(draft.state).toMatchObject({ prompt: 'from a link', runs: 3, seed: 9, loraString: 'detail:0.8', quantize: 4, negativePrompt: 'blurry' });
   });
 
-  it('puts an Extend take back to its source, length and track, and keeps the Video tab\'s own', () => {
+  it('puts an Extend take back to its source, length and track, and keeps New video\'s own text and settings', () => {
     draft.hydrateFromContext(ctx, null);
     draft.setTab('video');
     draft.onTabChange(ctx);
     draft.setAudioTrack('video', { path: '/audio/video.mp3' });
-    draft.setVideoKind('extend', ctx);
+    draft.patch({ prompt: 'new video prompt', runs: 2 });
+    openKind('video', 'extend', ctx);
     draft.onTabChange(ctx);
     draft.patch({ extendSourcePath: '/clips/old.mp4', extendAudioTrackPath: '/audio/old.mp3', extendFrames: 16, loraString: 'detail:0.4', runs: 4 });
 
@@ -129,6 +131,8 @@ describe('an exact prefill', () => {
     expect(draft.state).toMatchObject({
       workflow: 'extend', extendSourcePath: '/clips/new.mp4', extendFrames: 48, extendAudioTrackPath: null, loraString: '', runs: 1, audioTrackPath: '/audio/video.mp3',
     });
+    openKind('video', 'new', ctx);
+    expect(draft.state).toMatchObject({ workflow: 'txt2vid', prompt: 'new video prompt', runs: 2 });
   });
 });
 

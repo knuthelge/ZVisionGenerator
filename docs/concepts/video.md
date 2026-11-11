@@ -137,7 +137,7 @@ Extend continues a clip from where it ends: it generates what happens next, with
 
 **Start one** with **Extend** in the viewer (++e++) or a video's **⋯** menu, from **Video** set to **Extend** with **Browse**, or with `ziv-video --extend clip.mp4`. **Reuse settings** on an extension brings back its source, scene, prompt and length.
 
-The extension takes the source's size and frame rate, and starts from its model and LoRAs when they're still installed.
+The extension takes the source's size and frame rate, and starts from its model and LoRAs when they're still installed. In the Web UI, Extend keeps its own prompt, model and settings apart from **New**'s, and offers only the models that can extend: choosing a source never changes what **New** holds.
 
 ### From a point
 

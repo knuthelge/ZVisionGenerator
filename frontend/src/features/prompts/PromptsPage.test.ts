@@ -186,13 +186,13 @@ describe('PromptsPage', () => {
   });
 
   it('notes New as the kind the Image tab opens on when it was left on Edit with another tab open', async () => {
-    draft.patch({ workflow: 'txt2vid', leftOnEdit: true });
+    draft.patch({ workflow: 'txt2vid', imageKind: 'edit' });
     await mountPage();
 
     button('Use in Workspace').click();
     await settle();
 
-    expect(draft.state).toMatchObject({ workflow: 'txt2vid', leftOnEdit: false, promptSource: 'file' });
+    expect(draft.state).toMatchObject({ workflow: 'txt2vid', imageKind: 'new', promptSource: 'file' });
   });
 
   it('overwrites a file that changed on disk only after confirmation', async () => {

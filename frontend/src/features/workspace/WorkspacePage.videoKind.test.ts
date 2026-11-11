@@ -174,24 +174,27 @@ describe('WorkspacePage Video kinds', () => {
     expect(draft.state.workflow).toBe('txt2vid');
   });
 
-  it('keeps each kind\'s own inputs, and the shared text, while the kind changes', async () => {
+  it('keeps each kind\'s own inputs and text while the kind changes', async () => {
     await mountVideo('txt2vid');
     draft.setStartImage('video', { path: '/in/first.png' }, null);
     draft.patch({ frameCount: 49, scene: 'A street.', prompt: 'She walks.' });
     await settle();
 
     await pickKind('extend');
+    expect(draft.state).toMatchObject({ scene: '', prompt: '' });
     draft.setExtendSourcePath(SOURCE);
-    draft.patch({ extendFrames: 48 });
+    draft.patch({ extendFrames: 48, scene: 'A hall.', prompt: 'She runs.' });
     draft.setAudioTrack('extend', { path: '/audio/extend.wav' });
     await settle();
-    expect(draft.state).toMatchObject({ scene: 'A street.', prompt: 'She walks.' });
 
     await pickKind('new');
     expect(draft.state).toMatchObject({
-      workflow: 'img2vid', firstFramePath: '/in/first.png', frameCount: 49,
+      workflow: 'img2vid', firstFramePath: '/in/first.png', frameCount: 49, scene: 'A street.', prompt: 'She walks.',
       extendSourcePath: SOURCE, extendFrames: 48, extendAudioTrackPath: '/audio/extend.wav',
     });
+
+    await pickKind('extend');
+    expect(draft.state).toMatchObject({ workflow: 'extend', scene: 'A hall.', prompt: 'She runs.' });
   });
 
   it('opens Video on the kind it was left on', async () => {

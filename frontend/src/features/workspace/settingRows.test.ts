@@ -9,6 +9,7 @@ import { keysOf } from '$lib/state/resetScope';
 import type { DraftState, WorkspaceContext } from '$lib/types';
 import { workspaceCapabilities } from './capabilities';
 import { changedRowCount, chipChanged, chipKeys, rowChanged, SETTING_ROWS } from './settingRows';
+import { openKind } from '../../test-utils/draftKind';
 
 const base = makeContext();
 const ctx: WorkspaceContext = { ...base, workflow_contract: { ...base.workflow_contract, values: [...base.workflow_contract.values, 'extend'] } };
@@ -50,7 +51,7 @@ describe('the Extend length (C3)', () => {
   function onExtend(extendFrames: number): { state: DraftState; defaults: DraftState } {
     draft.hydrateFromContext(ctx, null);
     draft.setTab('video');
-    draft.setVideoKind('extend', ctx);
+    openKind('video', 'extend', ctx);
     draft.onTabChange(ctx);
     draft.applyExtendSource(sourceInfo(), ctx);
     draft.update('extendFrames', extendFrames);

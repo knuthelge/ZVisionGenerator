@@ -299,9 +299,9 @@ export function enhancedStaleReason(state: DraftState): string | null {
   const parts = [video && source.scene !== state.scene ? 'Scene' : null, source.prompt !== state.prompt ? (video ? 'Action' : 'Prompt') : null].filter((part) => part !== null);
   if (source.mode !== mode && parts.length === 0) return 'The workflow changed since this was written.';
   if (parts.length > 0) return `Your ${parts.join(' and ')} changed since this was written.`;
-  // Outside an extension the source and length mean nothing, so an Enhanced pair made for one is out of date once the workflow is another.
-  const extending = state.workflow === 'extend';
-  const extension = (source.sourceVideoPath ?? null) !== (extending ? state.extendSourcePath : null) || (source.extendFrames ?? null) !== (extending ? state.extendFrames : null);
+  // The source and length belong to Extend, whose Enhanced text stays in Extend.
+  if (state.workflow !== 'extend') return null;
+  const extension = (source.sourceVideoPath ?? null) !== state.extendSourcePath || (source.extendFrames ?? null) !== state.extendFrames;
   return extension ? 'The extension changed since this was written.' : null;
 }
 

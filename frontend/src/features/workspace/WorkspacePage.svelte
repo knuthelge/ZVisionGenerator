@@ -51,7 +51,7 @@
   import { cliCommand, cliOutputDir, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
   import { appliedPreset, presetDiffersFrom, presetSettingsFromDraft } from '$lib/state/presets';
   import { presetsStore } from '$lib/state/presets.svelte';
-  import { extendGuard, extendModelSupport, finalizeSceneFields, type ExtendGuard } from '$lib/state/extend';
+  import { extendGuard, finalizeSceneFields, type ExtendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
@@ -118,7 +118,7 @@
   import { heldUploads } from '$lib/state/heldUploads.svelte';
   import { IMAGE_KINDS, isAudioWorkflow, videoKinds, workspaceTab } from '$lib/state/workspaceTab';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
-  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, WorkspaceTab, Workflow, WorkspaceWorkflow, AudioWorkflow, VideoKind } from '$lib/types';
+  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, WorkspaceTab, Workflow, WorkspaceWorkflow, AudioWorkflow, ImageKind, VideoKind } from '$lib/types';
 
   interface Props {
     /** The workflows the server offers, once its context has loaded; the top bar shows a tab for each. */
@@ -183,7 +183,7 @@
     uploaded_image: 'An uploaded image is named by file name; replace it with its path.',
     uploaded_audio: 'An uploaded audio track is named by file name; replace it with its path.',
     uploaded_voice: 'An uploaded voice recording is named by file name; replace it with its path.',
-    edit_mask: 'The painted area is not a file: save it as a PNG the size of the image, painted where it should change, and name it after --mask.',
+    edit_mask: 'The painted area is not a file: save it as a PNG with the shape of the image, painted where it should change, and name it after --mask.',
   };
   const OUTPUT_GAP_PX = 12;
   const MIN_OUTPUT_CELL_PX = 160;
@@ -407,9 +407,9 @@
     isAudio
       ? { kinds: audioKinds, info: AUDIO_KIND_INFO, value: draft.state.workflow, pick: (kind) => draft.setAudioKind(kind as AudioWorkflow, context) }
       : isImageMode
-        ? { kinds: IMAGE_KINDS, info: IMAGE_KIND_INFO, value: isEdit ? 'edit' : 'new', pick: (kind) => draft.setEditing(kind === 'edit', context) }
+        ? { kinds: IMAGE_KINDS, info: IMAGE_KIND_INFO, value: isEdit ? 'edit' : 'new', pick: (kind) => draft.setKind('image', kind as ImageKind, context) }
       : showVideoKind
-        ? { kinds: videoKindOptions, info: VIDEO_KIND_INFO, value: draft.state.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setVideoKind(kind as VideoKind, context) }
+        ? { kinds: videoKindOptions, info: VIDEO_KIND_INFO, value: draft.state.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setKind('video', kind as VideoKind, context) }
         : null,
   );
   // The models the open tab offers: Edit's are the ones that can edit.
@@ -919,7 +919,7 @@
     if (workspaceTab(draft.state.workflow) !== 'image') {
       draft.setTab('image');
       // References belong to New: the Image tab opens on it, also when it was left on Edit.
-      draft.setEditing(false, context);
+      draft.setKind('image', 'new', context);
       draft.onTabChange(context);
       _prevTab = workspaceTab(draft.state.workflow);
     }
@@ -1275,7 +1275,7 @@
         if (run) {
           void (async () => {
             // A prompt of a file is New's: Edit has no prompt file, so an Image tab left on Edit moves to New (Edit's image and paint stay).
-            draft.setEditing(false, ctx);
+            draft.setKind('image', 'new', ctx);
             await tick();
             // Generate waits for the held uploads, so the run does too.
             await heldUploads.restore();
@@ -1456,7 +1456,7 @@
 
   /** Whether an extension may start now; any other workflow always may. */
   function currentExtendGuard(): ExtendGuard {
-    return extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath), extendModelSupport(context, draft.state.model));
+    return extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath));
   }
 
   /** Tell the user why an extension cannot start and bring them to the source's path field; false when nothing stands in the way. */

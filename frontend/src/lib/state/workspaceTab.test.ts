@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { IMAGE_KINDS, isAudioWorkflow, navTab, textTab, videoKindOf, videoKinds, visibleTabs, WORKSPACE_TABS, workflowFor, workspaceTab } from './workspaceTab';
+import { IMAGE_KINDS, isAudioWorkflow, navTab, videoKindOf, videoKinds, visibleTabs, WORKSPACE_TABS, workflowFor, workspaceTab } from './workspaceTab';
 import type { DraftState, Workflow, WorkspaceWorkflow } from '$lib/types';
 
 const NONE = { referenceImagePath: null, referenceImageUpload: null, firstFramePath: null, firstFrameUpload: null } satisfies Partial<DraftState>;
@@ -111,9 +111,5 @@ describe('Edit, a kind of the Image tab', () => {
 
   it('is `edit` in the Edit slot, whatever the images', () => {
     expect(workflowFor('edit', { ...NONE, referenceImagePath: '/in/a.png' }, true)).toBe('edit');
-  });
-
-  it('writes a text of its own, where Extend writes Video\'s', () => {
-    expect((['txt2img', 'img2img', 'edit', 'txt2vid', 'img2vid', 'extend', 'music'] as const).map(textTab)).toEqual(['image', 'image', 'edit', 'video', 'video', 'video', 'audio']);
   });
 });

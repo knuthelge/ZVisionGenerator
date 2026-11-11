@@ -4,7 +4,7 @@
   import { editPlaceholder } from './edit/editView';
   import { draft } from '$lib/state/draft.svelte';
   import { anyEnhancedUsed, canSubmitText, effectiveFormat, enhancedPartUsed, enhancedStaleReason, isJsonCaption, runParts, workflowMode } from '$lib/state/promptEnhance';
-  import { extendModelSupport, isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
+  import { isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { layout } from '$lib/state/layoutMode.svelte';
@@ -411,7 +411,6 @@
         references={images.references?.rows.length ?? 0}
         track={caps.audioTrackInEffect}
         jsonCapable={caps.supportsJsonPrompt}
-        extendSupport={extendModelSupport(context, s.model)}
         maxWords={caps.enhanceMaxWords}
         onstart={() => { activeTab = 'enhanced'; clearMessages(); }}
         onfail={() => { activeTab = 'mine'; }}

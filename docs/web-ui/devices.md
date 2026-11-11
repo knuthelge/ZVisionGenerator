@@ -74,7 +74,7 @@ A **Track** chip after **Images** (after **Source** in the **Extend** kind) open
 
 ### Video on a phone
 
-The workflow menu in the top strip has **Image**, **Video** and **Audio**. In **Video**, the first chip is **Kind**: **New** or **Extend**. In **Extend**, **Source** takes the place of **Images**. Each kind keeps its own inputs when you switch.
+The workflow menu in the top strip has **Image**, **Video** and **Audio**. In **Video**, the first chip is **Kind**: **New** or **Extend**. In **Extend**, **Source** takes the place of **Images**. Each kind keeps its own prompt, model, settings and inputs when you switch.
 
 ### Audio on a phone
 

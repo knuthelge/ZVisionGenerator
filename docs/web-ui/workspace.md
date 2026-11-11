@@ -2,7 +2,7 @@
 
 The Workspace is where you make things. Pick **Image**, **Video** or [**Audio**](#the-audio-tab) in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, model, settings and preset, and each comes back as you left it.
 
-**Video** has two kinds, chosen with **Kind** at the start of the toolbar: **New** makes a clip from text or a first frame, and **Extend** continues a clip you already have (see [Extending a video](../concepts/video.md#extending-a-video)). The two share the prompt, model, LoRAs, steps and seed; each keeps its own inputs. **Kind** is hidden on a computer that can't extend.
+**Video** has two kinds, chosen with **Kind** at the start of the toolbar: **New** makes a clip from text or a first frame, and **Extend** continues a clip you already have (see [Extending a video](../concepts/video.md#extending-a-video)). Extend keeps its own prompt, **Scene**, model, **Quant**, LoRAs, settings, preset, **Batch size** and **Seed**, its prompt file and its *Enhance* options, as well as its own inputs: switching **Kind** swaps between the two, and each comes back as you left it. Nothing you do in Extend, choosing a source or a **Reset** included, changes New, and nothing in New reaches an extension. Extend offers only the models that can extend; the first time you open it, it starts on the default one. **Kind** is hidden on a computer that can't extend.
 
 **Image** has two kinds as well: **New** generates a picture, and **Edit** changes part of one you already have, or gives it more room (see [Edit an image](#edit-an-image)). Edit keeps its own prompt, model, **Quant**, LoRAs, **Steps**, **Seed** and **Batch size**: switching **Kind** swaps between the two, and each comes back as you left it. Nothing you do in Edit, a **Reset** included, changes New, and nothing in New reaches an edit.
 
@@ -54,7 +54,7 @@ A **preset** saves your whole setup under a name, so you can bring it back in on
 - **The menu** has **Update** (write the current settings into the preset), **Save as…**, **Rename…** and **Delete**. A dot on the control shows when the form differs from the applied preset.
 - Image and video have their own presets; only the ones for the current kind are listed.
 - A model or LoRA that isn't installed is skipped.
-- **Reset**, starting an extend, and reusing a job's settings deselect the preset. Pick it again afterwards. Switching between Image and Video leaves each tab's preset as it was.
+- **Reset**, starting an extend, and reusing a job's settings deselect the preset. Pick it again afterwards. Switching between Image and Video, or between New and Extend, leaves each one's preset as it was.
 
 Presets are kept as files in `presets` in the [data folder](../concepts/data-folder.md), so they follow you to every browser. The CLI doesn't use them.
 
@@ -212,18 +212,18 @@ Your settings stay in the browser between visits, as long as the Web UI starts o
 
 When you choose another model, the settings you changed are kept and the rest take the new model's defaults. A size the new model doesn't offer becomes its largest preset.
 
-**Reuse settings** and **Load settings** apply a take's settings exactly: what the take did not record takes its default instead of what the form held. They replace the open tab's settings, images, prompts, LoRAs, quant and *Enhance* options and leave the other tabs alone. **Use as** changes only what it names.
+**Reuse settings** and **Load settings** apply a take's settings exactly: what the take did not record takes its default instead of what the form held. They replace the open tab's settings, images, prompts, LoRAs, quant and *Enhance* options and leave the other tabs and kinds alone. **Use as** changes only what it names.
 
 ### Reset
 
-**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the tempo, key, delivery, sound type, length, the voice, the *Enhance* options, **Batch size** and **Seed**. On Extend it also clears the source video and the point to extend from. It keeps the model, LoRAs and quant and the prompts, and it never touches another tab. **Batch size** and **Seed** are shared by New, Video and Audio (Edit has its own), so each Reset puts them back.
+**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the tempo, key, delivery, sound type, length, the voice, the *Enhance* options, **Batch size** and **Seed**. On Extend it also clears the source video and the point to extend from. It keeps the model, LoRAs and quant and the prompts, and it never touches another tab or kind. **Batch size** and **Seed** are shared by New image, New video and Audio (Edit and Extend have their own), so each Reset puts them back.
 
 ### Copy as a command
 
 The terminal button in the *Settings* header copies a `ziv image`, `ziv video` or `ziv audio` command with the current model, prompt, LoRAs and settings, writing to the folder the job would save to: the Web UI's output folder, or the picked [project's](../concepts/projects.md) folder. Paste it in a terminal to run the same job from the [CLI](../cli/index.md).
 
 !!! note "When the command differs"
-    The CLI has no inline negative prompt, and runs every prompt in a prompt file rather than only the ones you selected. A notice says when the copied command would do something different. An uploaded start image or reference is named by its file name: replace it with the file's path. An edit's command names the image with `--edit`, and a painted one names `--mask mask.png`, a placeholder for the painted area saved as a PNG the size of the image.
+    The CLI has no inline negative prompt, and runs every prompt in a prompt file rather than only the ones you selected. A notice says when the copied command would do something different. An uploaded start image or reference is named by its file name: replace it with the file's path. An edit's command names the image with `--edit`, and a painted one names `--mask mask.png`, a placeholder for the painted area saved as a PNG with the shape of the image.
 
 ### Paths on the server
 

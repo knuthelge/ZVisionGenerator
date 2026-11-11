@@ -11,13 +11,13 @@ import { outputSettingsPatch } from './jobSettings';
 import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
-import { isAudioWorkflow, navTab, textTab, videoKindOf, workflowFor, workspaceTab, type MediaTab } from './workspaceTab';
+import { imageKindOf, isAudioWorkflow, navTab, videoKindOf, workflowFor, workspaceTab, type MediaTab } from './workspaceTab';
 import { voiceConsent } from './voiceConsent.svelte';
 import { declinesModel, modelsOf } from './workflowModels';
 import { keysOf, pickScopes, RESET_SCOPE, REUSE_SCOPE, type Scope } from './resetScope';
 import { firstValues, listOf } from '$lib/prefillParams';
 import { AUDIO_KINDS } from '$lib/types';
-import type { NavTab, ExtendSide, VideoKind, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import type { NavTab, ExtendSide, ImageKind, VideoKind, TabText, WorkspaceTab, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
@@ -102,6 +102,7 @@ const DEFAULT_DRAFT: DraftState = {
   enhancedScratched: null,
   savedText: {},
   savedSettings: {},
+  savedShared: {},
   enhanceSettings: null,
   enhanceSettingsVideo: null,
   enhanceAuto: false,
@@ -115,7 +116,7 @@ const DEFAULT_DRAFT: DraftState = {
   extendPrefill: null,
   appliedPreset: null,
   videoKind: 'new',
-  leftOnEdit: false,
+  imageKind: 'new',
   ...NO_EDIT,
   audioKind: 'music',
   audioModels: { music: '', speech: '', sound: '' },
@@ -227,13 +228,13 @@ function _textOf(state: DraftState): TabText {
 }
 
 /**
- * Return the state with the text of the tab a workflow writes. New, Edit, Video and Audio each keep their own: moving to
- * another saves the open text under the tab being left and brings back what the entered one saved (nothing, for a tab not
- * visited yet). Video's two kinds share one text, so moving between them changes nothing.
+ * Return the state with the text of the tab a workflow writes. New image, Edit, New video, Extend and Audio each keep their own:
+ * moving to another saves the open text under the tab being left and brings back what the entered one saved (nothing, for a tab
+ * not visited yet).
  */
 function _withTextOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
-  const from = textTab(state.workflow);
-  const to = textTab(workflow);
+  const from = workspaceTab(state.workflow);
+  const to = workspaceTab(workflow);
   if (from === to) return state;
   const { [to]: entering, ...rest } = state.savedText;
   return { ...state, ...(entering ?? EMPTY_TEXT), savedText: { ...rest, [from]: _textOf(state) } };
@@ -241,37 +242,48 @@ function _withTextOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftS
 
 /** The fields a tab keeps for when it comes back: its Settings pane values, the model with its LoRAs and quantization, the LoRAs remembered by model family, and the applied preset. */
 const MEMORY_KEYS: readonly (keyof DraftState)[] = [...keysOf(['settings', 'model', 'preset']), 'lorasByFamily'];
-/** Batch and Seed. New, Video and Audio share one pair; Edit has its own. */
+/** Batch and Seed. New image, New video and Audio share one pair; Edit and Extend have their own. */
 const SHARED_KEYS: readonly (keyof DraftState)[] = keysOf(['shared']);
-/** What Edit keeps: the same as the others, with its own Batch and Seed. */
-const EDIT_MEMORY_KEYS: readonly (keyof DraftState)[] = [...MEMORY_KEYS, ...SHARED_KEYS];
+/** The prompt source with its prompts file and chosen prompts, and the Enhancer options of video. New image and New video share them; Extend has its own. */
+const PROMPT_KEYS: readonly (keyof DraftState)[] = [...keysOf(['promptFile']), 'promptSource', 'enhanceSettingsVideo'];
+/** What New image, New video and Audio hold in common: the values Edit or Extend replaces with its own while open. */
+const COMMON_KEYS: readonly (keyof DraftState)[] = [...SHARED_KEYS, ...PROMPT_KEYS];
+
+/** The shared values the tabs with a memory of their own keep apart: Edit its Batch and Seed, Extend those and its prompt source, prompts file and Enhancer options. */
+const OWN_SHARED_KEYS: Partial<Record<WorkspaceTab, readonly (keyof DraftState)[]>> = { edit: SHARED_KEYS, extend: COMMON_KEYS };
 
 function _pick(source: Partial<DraftState>, keys: readonly (keyof DraftState)[]): Partial<DraftState> {
   return Object.fromEntries(keys.filter((key) => key in source).map((key) => [key, source[key]]));
 }
 
-/** What Edit starts with the first time it opens: the defaults of its memory, so it takes a model, settings and LoRAs of its own and nothing of New's. */
-const FRESH_EDIT: Partial<DraftState> = _pick(DEFAULT_DRAFT, EDIT_MEMORY_KEYS);
+/** The fields a tab saves when it is left. */
+function _memoryKeys(tab: WorkspaceTab): readonly (keyof DraftState)[] {
+  return [...MEMORY_KEYS, ...(OWN_SHARED_KEYS[tab] ?? [])];
+}
 
 /**
- * Return the state with the settings of the tab a workflow belongs to. New, Edit and Video each keep their own, with their
- * model, LoRAs and preset: moving to another saves the open ones under the tab being left and brings back what the entered one
- * saved. A tab not visited yet has none: Edit starts from the defaults of its memory (its model follows from the next hydration, which
- * picks one that can edit), the others keep the model and settings for the next hydration to replace with the model's defaults.
- * Batch and Seed are one pair for New, Video and Audio, held in the fields; Edit keeps its own, and the shared pair waits in New's
- * memory while Edit is open. The Audio tab holds none of these: entering it saves the tab it leaves and changes nothing else, so
- * coming back to that tab, or on to another, finds its own.
+ * Return the state with the settings of the tab a workflow belongs to. New image, Edit, New video and Extend each keep their own,
+ * with their model, LoRAs and preset: moving to another saves the open ones under the tab being left and brings back what the
+ * entered one saved. A tab not visited yet has none: Edit and Extend, and a tab entered from one of them, start from the defaults of
+ * their memory (the model follows from the next hydration, which picks one that can edit or extend); the others keep the model and
+ * settings for the next hydration to replace with the model's defaults.
+ *
+ * Batch and Seed are one pair for New image, New video and Audio, held in the fields; Edit and Extend keep their own, and Extend
+ * also its own prompt source, prompts file and Enhancer options. The shared values wait in `savedShared` while one of them is open:
+ * they are put aside on leaving a tab that has none of its own and put back, key by key, on leaving one that has. The Audio tab holds
+ * none of these: entering it saves the tab it leaves and changes nothing else, so coming back to that tab, or on to another, finds its own.
  */
 function _withSettingsOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
-  const from = textTab(state.workflow);
-  const to = textTab(workflow);
+  const from = workspaceTab(state.workflow);
+  const to = workspaceTab(workflow);
   if (from === to) return state;
-  const left = from === 'audio' ? state.savedSettings : { ...state.savedSettings, [from]: _pick(state, from === 'edit' ? EDIT_MEMORY_KEYS : MEMORY_KEYS) };
-  const savedSettings = to === 'edit' && from !== 'edit' ? { ...left, image: { ...left.image, ..._pick(state, SHARED_KEYS) } } : left;
-  const shared = from === 'edit' && to !== 'edit' ? _pick(savedSettings.image ?? {}, SHARED_KEYS) : {};
-  if (to === 'audio') return { ...state, savedSettings, ...shared };
-  const entering = to === 'edit' ? (savedSettings.edit ?? FRESH_EDIT) : _pick(savedSettings[to] ?? {}, MEMORY_KEYS);
-  return { ...state, savedSettings, ...entering, ...shared };
+  const savedSettings = from === 'audio' ? state.savedSettings : { ...state.savedSettings, [from]: _pick(state, _memoryKeys(from)) };
+  const ownFrom = OWN_SHARED_KEYS[from];
+  const savedShared = ownFrom ? state.savedShared : _pick(state, COMMON_KEYS);
+  const restored = ownFrom ? _pick(savedShared, ownFrom) : {};
+  if (to === 'audio') return { ...state, savedSettings, savedShared, ...restored };
+  const entering = savedSettings[to] ?? (ownFrom || OWN_SHARED_KEYS[to] ? _pick(DEFAULT_DRAFT, _memoryKeys(to)) : {});
+  return { ...state, savedSettings, savedShared, ...restored, ...entering };
 }
 
 /** The defaults an exact Reuse of an audio kind puts back: the Audio scope without the settings that belong to the other kinds. */
@@ -280,18 +292,16 @@ function _audioReuseDefaults(kind: AudioWorkflow): Partial<DraftState> {
   return Object.fromEntries(Object.entries(pickScopes(DEFAULT_DRAFT, REUSE_SCOPE.audio)).filter(([key]) => !others.has(key as keyof DraftState)));
 }
 
-/**
- * Return the state noting whether the Image tab was left on Edit: opening another tab from Edit sets it, and opening the Image
- * tab clears it (the workflow says which kind it is on). Opening one tab from another leaves it alone.
- */
-function _withEditMemory(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
-  const leftOnEdit = navTab(workflow) === 'image' ? false : state.leftOnEdit || state.workflow === 'edit';
-  return leftOnEdit === state.leftOnEdit ? state : { ...state, leftOnEdit };
+/** Return the state noting the kind of the Image tab and of the Video tab: the one a workflow or, failing that, the open workflow is on, else the one last noted. */
+function _withKindsOf(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
+  const imageKind = imageKindOf(workflow) ?? imageKindOf(state.workflow) ?? state.imageKind;
+  const videoKind = videoKindOf(workflow) ?? videoKindOf(state.workflow) ?? state.videoKind;
+  return imageKind === state.imageKind && videoKind === state.videoKind ? state : { ...state, imageKind, videoKind };
 }
 
-/** Return the state with the text and the settings of the mode a workflow belongs to, as that mode left them, and the Image tab's kind noted. */
+/** Return the state with the text and the settings of the tab or kind a workflow belongs to, as that one left them, and the kinds of the Image and Video tabs noted. */
 function _withModeOf(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
-  return _withEditMemory(_withSettingsOfMode(_withTextOfMode(state, workflow), workflow), workflow);
+  return _withKindsOf(_withSettingsOfMode(_withTextOfMode(state, workflow), workflow), workflow);
 }
 
 /** The draft fields that hold an image path: one per slot, the reference rows and the image to edit. */
@@ -993,10 +1003,10 @@ export const draft = {
    * step cap) and takes its own defaults for the rest; the same model keeps everything.
    */
   hydrateFromContext(ctx: WorkspaceContext, preferredModel: string | null = null, options: { keepSettings?: boolean; keepChangedSettings?: boolean } = {}): void {
-    // A machine that cannot extend gives the Extend kind back to New.
-    if (_draft.workflow === 'extend' && !ctx.workflow_contract.values.includes('extend')) _draft = _withDerivedWorkflow(ctx, { ..._draft, workflow: 'txt2vid', videoKind: 'new' });
+    // A machine that cannot extend gives the Extend kind back to New, with New's own text and settings.
+    if (_draft.workflow === 'extend' && !ctx.workflow_contract.values.includes('extend')) _draft = _withDerivedWorkflow(ctx, { ..._withModeOf(_draft, 'txt2vid'), workflow: 'txt2vid', videoKind: 'new' });
     // The Audio tab settles on a kind and one of its models; a machine that runs no audio model gives the tab back to Image.
-    if (isAudioWorkflow(_draft.workflow) && availableKinds(ctx).length === 0) _draft = { ..._draft, workflow: 'txt2img', leftOnEdit: false };
+    if (isAudioWorkflow(_draft.workflow) && availableKinds(ctx).length === 0) _draft = { ..._draft, workflow: 'txt2img', imageKind: 'new' };
     if (isAudioWorkflow(_draft.workflow)) {
       const hydrated = hydrateAudio(ctx, _draft, preferredModel);
       _draft = { ...hydrated, ..._swapFamilyLoras(ctx, _draft, _draft.model, hydrated.model) };
@@ -1009,15 +1019,15 @@ export const draft = {
     const validModels = modelsOf(ctx, workflow);
 
     // Determine model: preferredModel > current draft model (if still valid) > context default (the first model the workflow offers
-    // when the default is not one of them). An explicit preferredModel that is not valid goes straight to the default, unless the
-    // workflow declines it (a model that cannot edit, for Edit): then the workflow keeps its own model. Coming back to a tab has
-    // already put its own model in the draft.
+    // when the default is not one of them, for Edit and Extend). An explicit preferredModel that is not valid goes straight to the
+    // default, unless the workflow declines it (a model that cannot edit, for Edit, or extend, for Extend): then the workflow keeps
+    // its own model. Coming back to a tab has already put its own model in the draft.
     const preferred = preferredModel !== null && !declinesModel(ctx, workflow, preferredModel) ? preferredModel : null;
     const candidates = preferred !== null ? [preferred] : [_draft.model];
     const defaultModel = isVideoMode ? ctx.current_video_model : ctx.current_image_model;
     const offered = (id: string | null | undefined): id is string => id != null && id !== '' && validModels.some((m) => m.id === id);
     const model = candidates.find(offered)
-      ?? (workflow === 'edit' && !offered(defaultModel) ? validModels[0]?.id ?? _draft.model : defaultModel ?? validModels[0]?.id ?? '');
+      ?? ((workflow === 'edit' || workflow === 'extend') && !offered(defaultModel) ? validModels[0]?.id ?? _draft.model : defaultModel ?? validModels[0]?.id ?? '');
 
     const sameModel = model === _draft.model;
     const keepSettings = options.keepSettings === true && sameModel;
@@ -1048,56 +1058,42 @@ export const draft = {
   },
 
   /**
-   * Open a tab: the workflow becomes the one its images call for (the Audio tab's is its kind, the Video tab's the kind it was
-   * left on). Opening the other mode (image or video) saves the open mode's text, settings, model and preset and brings back the
-   * ones that mode kept (`_withModeOf`); the Audio tab in between changes none of them. When the mode has none yet, the model and
-   * defaults follow when the Workspace calls `onTabChange` with its context.
+   * Open a tab: the workflow becomes the one its images call for (the Audio tab's is its kind, the Image and Video tabs' the kind
+   * they were left on). Opening another tab or kind saves the open one's text, settings, model and preset and brings back the ones
+   * the entered one kept (`_withModeOf`); the Audio tab in between changes none of them. When the entered one has none yet, the model
+   * and defaults follow when the Workspace calls `onTabChange` with its context.
    * Without a context the model's capabilities are unknown, so the tab's start image is assumed to be usable.
    */
   setTab(tab: NavTab): void {
     if (tab === navTab(_draft.workflow)) return;
-    // Leaving Video notes the kind it was on, so coming back opens it again.
-    const left = videoKindOf(_draft.workflow);
-    const videoKind = left ?? _draft.videoKind;
-    // The Audio tab opens on the kind it was left on, the Video tab and the Image tab on theirs.
-    const workflow = tab === 'audio' ? _draft.audioKind : tab === 'video' && videoKind === 'extend' ? 'extend' : tab === 'image' && _draft.leftOnEdit ? 'edit' : workflowFor(tab, _draft, true);
+    const workflow = tab === 'audio' ? _draft.audioKind : tab === 'video' && _draft.videoKind === 'extend' ? 'extend' : tab === 'image' && _draft.imageKind === 'edit' ? 'edit' : workflowFor(tab, _draft, true);
     // A tab opened for the first time starts without the preset of the one it comes from; the next hydration gives it its model's defaults.
-    const entering = textTab(workflow);
-    const entersFresh = entering !== 'audio' && entering !== textTab(_draft.workflow) && !_draft.savedSettings[entering];
-    _draft = { ..._withModeOf(_draft, workflow), workflow, videoKind, ...(entersFresh ? { appliedPreset: null } : {}) };
+    const entering = workspaceTab(workflow);
+    const entersFresh = entering !== 'audio' && entering !== workspaceTab(_draft.workflow) && !_draft.savedSettings[entering];
+    _draft = { ..._withModeOf(_draft, workflow), workflow, ...(entersFresh ? { appliedPreset: null } : {}) };
     this.saveDraft();
   },
 
   /**
-   * Open a kind of the Video tab: New (a text or first-frame clip) or Extend. Only the workflow changes; each kind keeps its own
-   * inputs, and the text, the model and the settings are shared. The model and defaults follow when the Workspace calls `onTabChange`.
+   * Open a kind of the Image tab (New or Edit) or of the Video tab (New or Extend). Each kind keeps its own prompt and Enhanced text
+   * (`savedText`), and its own model, LoRAs, quantization, settings and preset (`savedSettings`), Edit and Extend their Batch and Seed
+   * too, Extend its prompt source and Enhancer options; the slots stay. The first time, Edit and Extend take the default model that
+   * can edit or extend and that model's defaults, when the Workspace calls `onTabChange` with its context. Off the tab, a kind only
+   * becomes the one the tab opens on.
    *
-   * @param ctx Tells whether the model takes a first frame; without it one is assumed.
+   * @param ctx Tells whether New's model takes a start image or first frame; without it one is assumed.
    */
-  setVideoKind(kind: VideoKind, ctx: WorkspaceContext | null): void {
-    const workflow = kind === 'extend' ? 'extend' : workflowFor('video', _draft, imageSupport(ctx, _draft.model, 'video').start);
-    _draft = { ..._draft, workflow, videoKind: kind };
-    this.saveDraft();
-  },
-
-  /**
-   * Open Edit or New on the Image tab: the workflow becomes `edit`, or the one New's images call for. Each keeps its own prompt and
-   * Enhanced text (`savedText`), and its own model, LoRAs, quantization and settings (`savedSettings`), Edit its Batch and Seed too; the
-   * slots stay. The first time, Edit takes the default model that can edit and that model's defaults. Off the Image tab, opening New only clears the note that the tab was left on Edit.
-   *
-   * @param ctx Tells which models Edit can use and whether New's model takes a start image; without it the models are settled by the next hydration and a start image is assumed.
-   */
-  setEditing(editing: boolean, ctx: WorkspaceContext | null): void {
-    if (navTab(_draft.workflow) !== 'image') {
-      // Off the Image tab, New can still be made the kind it opens on.
-      if (!editing && _draft.leftOnEdit) this.patch({ leftOnEdit: false });
+  setKind(tab: 'image' | 'video', kind: ImageKind | VideoKind, ctx: WorkspaceContext | null): void {
+    const own = tab === 'image' ? 'edit' : 'extend';
+    if (navTab(_draft.workflow) !== tab) {
+      const noted: Partial<DraftState> = tab === 'image' ? { imageKind: kind as ImageKind } : { videoKind: kind as VideoKind };
+      this.patch(noted);
       return;
     }
-    if ((_draft.workflow === 'edit') === editing) return;
-    const opened = _withSettingsOfMode(_withTextOfMode(_draft, editing ? 'edit' : 'txt2img'), editing ? 'edit' : 'txt2img');
-    const workflow = editing ? 'edit' : workflowFor('image', opened, imageSupport(ctx, opened.model, 'image').start);
+    if ((_draft.workflow === own) === (kind === own)) return;
+    const opened = _withModeOf(_draft, kind === own ? own : tab === 'image' ? 'txt2img' : 'txt2vid');
+    const workflow = kind === own ? own : workflowFor(tab, opened, imageSupport(ctx, opened.model, tab).start);
     _draft = { ...opened, workflow };
-    if (ctx) this.hydrateFromContext(ctx, null, { keepSettings: true });
     this.saveDraft();
   },
 
@@ -1249,8 +1245,8 @@ export const draft = {
    * resolves, and everything else stays. The tab's images and audio track (Image: the start image and references; Video: the
    * first and last frame and the track; Extend: its source video, the point to continue from and its track) clear with their
    * upload markers and held files, so its workflow falls back to text. The Audio tab puts back its length and voice (the held recording
-   * and the tick with it). The batch and the seed are shared by every tab and reset on each. The applied preset clears.
-   * Nothing of another tab or of the other mode changes, and the model, LoRAs, quantization, text, prompt file and layout stay.
+   * and the tick with it). The batch and the seed of the open tab reset with it. The applied preset clears.
+   * Nothing of another tab, kind or mode changes, and the model, LoRAs, quantization, text, prompt file and layout stay.
    */
   resetSelections(ctx: WorkspaceContext): void {
     const s = _draft;
