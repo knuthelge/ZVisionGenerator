@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.14.0b5] - 2026-11-12
+
 ### Added
 - **Projects.** Pick a project in the top bar and the Gallery and Workspace show only its files, and new work is saved into it. **All files** shows everything, as before, and **Move to project…** sorts files into projects. Folders already in your output folder are projects at once.
 - **Audio.** A new **Audio** tab and `ziv-audio` (`ziv audio`) make songs and instrumentals with YuE2 3B (up to 6 minutes), speech with Qwen3-TTS 1.7B, and sound effects, ambience and music with Stable Audio 3 Medium (up to 380 s). Takes play in the Gallery, and **Use as → Audio track** gives one to a video. It runs on Windows and Linux with a 10 GB GPU and on macOS with Apple silicon, and needs ffmpeg like video does.
