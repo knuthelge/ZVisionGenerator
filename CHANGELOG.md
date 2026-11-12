@@ -6,118 +6,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
-## [0.14.0b5] - 2026-11-12
-
-### Added
-- **Projects.** Pick a project in the top bar and the Gallery and Workspace show only its files, and new work is saved into it. **All files** shows everything, as before, and **Move to project…** sorts files into projects. Folders already in your output folder are projects at once.
-- **Audio.** A new **Audio** tab and `ziv-audio` (`ziv audio`) make songs and instrumentals with YuE2 3B (up to 6 minutes), speech with Qwen3-TTS 1.7B, and sound effects, ambience and music with Stable Audio 3 Medium (up to 380 s). Takes play in the Gallery, and **Use as → Audio track** gives one to a video. It runs on Windows and Linux with a 10 GB GPU and on macOS with Apple silicon, and needs ffmpeg like video does.
-  - **Steering.** Set a tempo and key for a song, a delivery for speech and a type for a sound.
-  - **Voices.** Speech has nine default voices and **Your voices**, which you design from a description, save from a recording or keep from a speech take (`--voice NAME` in the CLI). Delivery works with the default voices only.
-  - **Writing helpers.** **Describe it** and **Fill in** write a song's or speech's fields from one idea, and there are helpers for lyrics, for fitting a script to a time and for rewriting a song's style or a sound's description.
-- **Edit images.** A new **Edit** kind in the Image tab changes a painted part of a picture you already have, or gives it more room; with nothing painted, it redraws the whole picture from your prompt. It works with FLUX.2 Klein on every platform. In the CLI, use `ziv-image --edit`.
-- **Extend a video from a point.** Pause a video, click the time and choose **Extend from**: the new clip keeps the video up to that frame and continues from there (`--extend-from SECONDS` in the CLI). The same menu uses the frame as a **First frame** or **Last frame** of a new clip. A last frame needs a first frame.
-- **One player and previews.** Video and audio play in the same player in the viewer, the Workspace and the file browser, whose pickers now show thumbnails and a preview and sort by name, size or date. Anyone who can open the Web UI can see and play these files, so use `--host local` only on a network you trust.
-- **Every built-in model shows its licence.** The model picker, the Models page, the download dialog and the CLIs show the licence and what it allows. YuE2 and Stable Audio 3 are non-commercial or limited, so read their terms before you use the output.
-
-### Changed
-- **The documentation is reorganised around what you want to do.** Pages moved, so old links to them no longer work.
-- **`config.yaml` holds settings only.** Which models the app offers, where they download from, their schedulers and platform labels are part of the app, so keys for them in your own `config.yaml` have no effect. See [Configuration](https://knuthelge.github.io/ZVisionGenerator/reference/configuration/).
-- **Extend is a kind of the Video tab, and every tab keeps its own settings.** Extend, New video, Image and Edit no longer share a prompt, model or preset. **Reset** acts on the open tab only, and **Reuse settings** and **Load settings** apply a file's settings exactly: what the file didn't record takes its default.
-- **The Web UI asks before a job downloads a model**, listing what will download with its size, the free space and its terms.
-- **The prompt enhancer writes about 3× faster on Windows and Linux** with an NVIDIA GPU, with nothing new to install.
-- **Prompt boxes share one header** with a Clear button and Undo. **Use mine** and the word counts are gone.
-
-### Fixed
-- **The viewer stays on the result you opened** when a new one lands or an earlier one is deleted.
-- **Saving on the Config page keeps the comments in your `config.yaml`**, as do skipping the first-run dialog and the Discover Hugging Face switch.
-- **A Windows/Linux LTX model with a file missing no longer shows as downloaded** on the Models page.
-- **The two Ideogram 4 LoRAs in Discover are marked Non-commercial**, as the model they build on is.
-- **Deleting the last LTX-2.3 model on a Mac removes its Gemma 3 text encoder too**, so it no longer stays in the cache.
-- `ziv-image -m <owner/repo>` with a built-in model's repo records the model under its short name, as `ziv-video` does.
-
-### Known issues
-- **Moving a file into a project breaks Reuse on files made from it** (extensions, edits and upscales), because they record the file's old location.
-
-## [0.14.0b4] - 2026-11-02
-
-### Added
-- **Upscale an existing video on macOS**: **Upscale → 2×** in the viewer and the **⋯** menu refines an LTX clip at twice the size with LTX, keeping its frames, frame rate and sound (`video_model_presets.ltx.upscale.existing_video_steps`)
-
-## [0.14.0b3] - 2026-11-01
-
-### Added
-- **Your own audio track for video** on LTX and MiniMax H3: the clip follows the track from the point you choose, and Extend carries it on (`--audio-file`, `--audio-start`)
-- **Transparent background** cuts the subject out and saves a PNG with transparency (**Transparent** in Post-processing, `--transparent`). It downloads 548 MB of models on first use and is for non-commercial use only
-- **Shot, angle and colour palette in Enhance**, under **Framing** and **Color**; the CLI and prompt files take `shot`, `angle`, `palette` and `colors`
-- **MOSS-Image on macOS** (`moss` and `moss-sft`)
-- **Use as → Reference** in the viewer and Gallery
-
-### Changed
-- **The Workspace has one Image and one Video tab**, beside Extend Video. Images in the new **Images** section of Settings decide whether a run starts from an image, and they stay after a reload
-- **Images are picked by browsing the server or uploading**; the Path field is gone and "Img strength" is now **Strength**
-- **Reuse settings also restores post-processing, upscale settings and strength**
-- **Krea 2 uses the `beta` scheduler by default**, so the same seed gives a different image; `simple` gives the old steps
-- **Blob is redrawn** with new animations that follow your job's steps, and the app has a new Z-Vision wordmark
-
-### Fixed
-- Tooltips in the phone's All sheet appeared in the wrong place
-- The `beta` scheduler works on FLUX.2 Klein: it failed on macOS and spaced the steps differently from ComfyUI on Windows/Linux
-
-## [0.14.0b2] - 2026-10-30
-
-### Upgrading from 0.13
-- **macOS needs macOS 14 Sonoma or newer**
-- **Windows: install again with the command in [Install](https://knuthelge.github.io/ZVisionGenerator/get-started/install/)** to move to PyTorch's CUDA 13.2 build
-- **Windows/Linux: the first `ltx-4` or `ltx-8` job needs a connection once** to pin the LTX-2.3 files; nothing downloads again
-- **Stored q4 and q8 image copies are made again once**
-- **macOS: the same seed can give a slightly different image**, and a diffusers-format LoRA can apply at a different strength
-
-### Added
-- **Discover LoRAs** in **Add LoRA**: a curated list and an optional Hugging Face search, with download and **Use in LoRAs**
-- **References on FLUX.2 Klein:** up to four images whose content the result keeps (**References** in the Web UI, `--reference` in `ziv-image`)
-- **Next, Pause and Repeat for video jobs**, in the Web UI and `ziv-video`
-- **Recent prompts** in the prompt box, kept on the server
-- **Trigger words:** a **Triggers** menu adds your LoRAs' trigger words to the prompt
-- **The last five rewrites:** a stepper in the Enhanced tab
-
-### Changed
-- **Image to Image's "Reference image" is now "Start image"**, and **Use as reference** is **Use as**
-- **The prompt box bars are reorganised**, with a status line that says what Generate sends
-- **Importing a LoRA from Hugging Face** runs as a download on the Models page
-- **macOS: LTX LoRAs apply at full strength.** A weight you raised to make up for it may now be too high
-- **macOS: image jobs use about 4–8 GB less memory**
-- **Libraries:** Pillow 13 (security fixes), diffusers 0.42, mflux 0.24, MLX 0.32.4 (fixes a crash on M1 and M2) and ltx-2-mlx 0.18
-
-### Fixed
-- An uploaded start image or last frame no longer disappears when you switch pages
-- Leaving a video tab returns to the image model you used
-- The same uploaded image is saved only once
-- Phone photos are upright, and transparent images go on white
-- More LoRA formats (PEFT, Kohya, MiniMax H3, LTX audio) are recognised and load
-- Pause after a failed image, the remaining-time estimate, and review after a Repeat
-- Windows/Linux: LTX-2.3 downloads are pinned, and the first Web UI page load no longer stalls
-- Converting a MiniMax H3 Ref2VA checkpoint is refused
-
-## [0.14.0b1] - 2026-10-26
+0.14.0 adds audio: songs, speech and sound effects, made in a new Audio tab or with `ziv-audio`. You can also edit images you already have, extend a video from any frame, and keep your work in projects. Every built-in model now shows its licence.
 
 ### Added
 
-#### Video
-- **A last frame for LTX.** `ltx-4`, `ltx-8` and `ltx25-4` take a **Last frame** in Image to Video, or `--end-image`, as MiniMax H3 does: the clip runs from the first image to the last. Use two images of the same scene, and give a big change a few seconds
+#### Audio
+- **Make music, speech and sound.** The new **Audio** tab and `ziv-audio` write songs and instrumentals with YuE2, speech with Qwen3-TTS, and sound effects, ambience and music with Stable Audio 3. You set the tempo and key of a song, the delivery of speech and the type of a sound. See [Make music](https://knuthelge.github.io/ZVisionGenerator/guides/music/) and [Make speech and sound](https://knuthelge.github.io/ZVisionGenerator/guides/speech-and-sound/).
+- **Use your own voices for speech.** Besides the nine built-in voices, you can design a voice from a description, clone one from a recording, or keep the voice of a take you like (`--voice NAME`).
+- **Let the enhancer write for you.** **Describe it** turns one idea into a song's style and lyrics or a speech script. Other helpers improve lyrics, fit a script to a length and polish a style or sound description.
 
 #### Images
-- **MOSS-Image on Windows and Linux: `moss` (Turbo, 4 steps) and `moss-sft` (50 steps, with a negative prompt).** OpenMOSS's Apache-2.0 text-to-image model, strong at rendering text in English and Chinese, and it runs on a 10 GB card at every quant level. Not available on macOS yet
+- **Edit a picture.** The new **Edit** kind in the Image tab repaints the part you paint over, extends the canvas, or redraws the whole picture from your prompt, using FLUX.2 Klein (`ziv-image --edit`). See [Edit a picture](https://knuthelge.github.io/ZVisionGenerator/guides/images/#edit).
+- **Keep a person, object or style with references.** FLUX.2 Klein takes up to four reference images and carries their content into the result (`--reference`).
+- **Make a transparent background.** **Transparent** in Post-processing cuts out the subject and saves a PNG with transparency (`--transparent`).
+- **Render text with MOSS-Image.** `moss` and `moss-sft` are an Apache-2.0 model that is especially good at lettering in English and Chinese.
+- **Find LoRAs without leaving the app.** **Discover** in **Add LoRA** lists curated LoRAs for your model, searches Hugging Face and downloads what you pick.
+- **Add trigger words in one click.** The **Triggers** menu inserts your LoRAs' trigger words into the prompt.
 
-### Changed
+#### Video
+- **Extend a video from any frame.** Pause a video, choose **Extend from**, and the new clip continues from that frame instead of the end (`--extend-from`). The same menu turns the frame into the first or last frame of a new clip. See [Extend from a point](https://knuthelge.github.io/ZVisionGenerator/guides/video/#from-a-point).
+- **Set a last frame on LTX.** `ltx-4`, `ltx-8` and `ltx25-4` run from a first image to a last one, as MiniMax H3 already did (`--end-image`).
+- **Follow your own audio track.** LTX and MiniMax H3 clips can follow a song or a voice-over you supply, starting where you choose (`--audio-file`, `--audio-start`).
+- **Upscale an existing video on macOS.** **Upscale → 2×** doubles the size of an LTX clip, as it already did on Windows and Linux.
+- **Skip, pause and repeat video jobs.** **Next**, **Pause** and **Repeat** now work for video as they do for images.
+
+#### Prompts
+- **Pick shot, angle and colour palette in Enhance**, under **Framing** and **Color**.
+- **Reuse recent prompts** from the prompt box's history.
+- **Step back through rewrites.** The Enhanced tab keeps the last five.
 
 #### Web UI
-- **The mascot lives in the logo.** He hops out to greet you in the first-run welcome, to the job card (on a phone, the job bar) while a job runs, waits beside Approve and Discard during a review, and hops back home once he has reacted to the result. His outline keeps his place in the logo while he is out, on every page. He no longer sits in a corner of the latest output
-- **A job that ends while you're on another page** shows its "Generation complete" or failure toast there too
-- **The live preview updates after every step** instead of at 25, 50 and 75%, so a 10-step Z-Image job shows 9 previews instead of 3
+- **Organise your work in projects.** Pick a project in the top bar and the Gallery and Workspace show only its files, and new results are saved into it. **Move to project…** sorts existing files, and folders already in your output folder become projects. See [Projects](https://knuthelge.github.io/ZVisionGenerator/concepts/projects/).
+- **Play video and audio anywhere.** One player serves the viewer, the Workspace and the file browser, and the file browser now shows thumbnails and previews.
+- **See each model's licence** in the model picker, on the Models page, in the download dialog and in the CLIs. See [Licences](https://knuthelge.github.io/ZVisionGenerator/reference/models/#licences).
+- **Confirm downloads first.** Before a job downloads a model, the Web UI shows what it will fetch, how much space it needs and its licence.
+- **Get job results on any page.** A job that finishes or fails while you are on another page shows its notification there.
+
+### Changed
+- **The Workspace has three tabs: Image, Video and Audio.** Image has **New** and **Edit**, and Video has **New** and **Extend**. Start images, last frames and references all go in the **Images** section.
+- **Each tab keeps its own settings.** Changing the prompt, model or preset in one tab no longer affects another, and **Reuse settings** restores exactly what a file recorded.
+- **Use as reference is now Use as.** It sends an image to any image slot, and an audio take to a video's audio track or to your voices.
+- **The live preview updates after every step**, not just three times per image.
+- **The prompt enhancer is about three times faster** on NVIDIA GPUs.
+- **Image jobs on macOS use 4–8 GB less memory.**
+- **Krea 2 uses the `beta` scheduler by default.** Choose `simple` to get the previous results.
+- **LTX LoRAs on macOS apply at full strength.** If you raised a weight to make up for it, lower it again.
+- **Blob is redrawn**, with new animations, alongside a new Z-Vision wordmark.
+- **The documentation is organised around tasks**, such as making music or editing an image.
+- **Libraries are updated**, including Pillow 13 (security fixes), diffusers 0.42, mflux 0.24 and MLX 0.32.4 (which fixes a crash on M1 and M2). On Windows, reinstall with the command in [Install](https://knuthelge.github.io/ZVisionGenerator/get-started/install/) to get PyTorch's CUDA 13.2 build.
 
 ### Fixed
-- **Ideogram 4 Instant downloads on the Models page.** Its source download no longer shows under **Other downloads** while `ideo` uses it, and deleting the `ideo` row also deletes that download and, if it isn't built yet, the transformer file waiting beside it, so the space is freed. The delete dialog lists the downloads it removes
-- **Building Ideogram 4 Instant never replaces another model.** If a folder called `ideo` that the app didn't build is already in your models folder, the first job that uses `ideo` stops with a message to rename or move it, instead of downloading and then replacing it
+- **The viewer no longer jumps** to another result when a new one arrives or an earlier one is deleted.
+- **Saving the Config page no longer strips the comments** from your `config.yaml`.
+- **Uploaded start images and last frames no longer disappear** when you switch pages, and an image uploaded twice is stored once.
+- **Phone photos used as a video's first or last frame are no longer sideways.**
+- **PEFT, Kohya, MiniMax H3 and LTX audio LoRAs now load.**
+- **Pause now works after a failed image**, the remaining-time estimate is accurate, and review works after **Repeat**.
+- **The `beta` scheduler now works on FLUX.2 Klein** on macOS and matches ComfyUI's steps on Windows and Linux.
+- **Ideogram 4 Instant's files are listed and deleted correctly** on the Models page, and building it never overwrites another model.
+- **An incomplete LTX model no longer shows as downloaded** on Windows and Linux, and the first page load no longer stalls.
+- **Deleting the last LTX-2.3 model on macOS now removes its text encoder too.**
+- **`ziv-image -m <owner/repo>` now records a built-in model by its short name**, as `ziv-video` does.
 
 ## [0.13.0] - 2026-10-25
 
