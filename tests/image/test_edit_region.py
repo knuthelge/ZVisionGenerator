@@ -12,9 +12,9 @@ from zvisiongenerator.processing.edit_region import (
     PAINT_FADE,
     Plan,
     extend_canvas,
-    blurred_canvas,
     edit_output_size,
     extend_draw_size,
+    extend_reference,
     grid_size,
     match_join,
     paste_paint,
@@ -200,37 +200,58 @@ class TestPasteStrip:
         assert np.array_equal(result[~paint], np.asarray(canvas)[~paint])
 
 
-class TestPasteStripDrawnSmaller:
-    @pytest.mark.parametrize("side", ["left", "top"])
-    def test_the_strip_and_the_source_are_mapped_apart_from_the_drawn_crop(self, side):
-        # The source is drawn at half scale and the strip at 32 px, where the real amount 128 would give 64: the strip is not the canvas scaled.
-        source = noise_picture(160, 120, seed=41)
-        canvas, paint, (left, top) = extend_canvas(source, side, 128)
-        horizontal = side == "left"
-        drawn_size = (112, 60) if horizontal else (80, 92)
-        drawn_source = (32, 0, 112, 60) if horizontal else (0, 32, 80, 92)
-        generated = Image.new("RGB", drawn_size, (0, 0, 255))
-        generated.paste((255, 0, 0), (0, 0, 32, 60) if horizontal else (0, 0, 80, 32))  # the strip is red
+class TestPasteStripAtTheSourceScale:
+    @pytest.mark.parametrize("side", ["left", "right", "top", "bottom"])
+    @pytest.mark.parametrize(("size", "amount"), [((600, 400), 100), ((1000, 700), 200), ((3000, 2000), 304), ((1000, 3240), 200), ((1600, 2000), 200)])
+    def test_what_the_model_continues_lands_where_it_continues_the_source(self, side, size, amount):
+        # An ideal model draws the true continuation of a larger picture at the source's drawn scale; the pasted strip must be that picture.
+        from scipy import ndimage
 
-        result = np.asarray(paste_strip(canvas, generated, (left, top, left + 160, top + 120), drawn_source, drawn_size))
+        horizontal = side in ("left", "right")
+        drawn, strip = extend_draw_size(size, side, amount)
+        scale = drawn[0] / size[0] if horizontal else drawn[1] / size[1]
+        reach = int(np.ceil(strip / scale))  # the real width the drawn strip shows, at least the amount
+        width, height = (size[0] + reach, size[1]) if horizontal else (size[0], size[1] + reach)
+        world = ndimage.gaussian_filter(np.random.default_rng(61).uniform(0, 255, (height, width, 3)), (4, 4, 0))
+        world = np.rint(world - world.min()).astype(np.uint8)
+        # The source sits on the far side of the world from the strip.
+        sx, sy = (reach, 0) if side == "left" else (0, reach) if side == "top" else (0, 0)
+        src = world[sy : sy + size[1], sx : sx + size[0]]
+        canvas, _, (left, top) = extend_canvas(Image.fromarray(src), side, amount)
+        drawn_canvas_size = (drawn[0] + strip, drawn[1]) if horizontal else (drawn[0], drawn[1] + strip)
+        dx, dy = (strip, 0) if side == "left" else (0, strip) if side == "top" else (0, 0)
+        kx, ky = drawn[0] / size[0], drawn[1] / size[1]  # the drawing's scale on each axis
+        shown = (sx - dx / kx, sy - dy / ky, sx + (drawn_canvas_size[0] - dx) / kx, sy + (drawn_canvas_size[1] - dy) / ky)
+        generated = Image.fromarray(world).resize(drawn_canvas_size, Image.Resampling.LANCZOS, box=shown)
 
-        far = result[:, :100] if horizontal else result[:100]  # the resampling filter may blend a few pixels at the join itself
-        assert (far == (255, 0, 0)).all()  # the real strip shows the drawn strip, not part of the drawn source
-        assert np.array_equal(result[~paint], np.asarray(canvas)[~paint])
+        result = np.asarray(paste_strip(canvas, generated, (left, top, left + size[0], top + size[1]), (dx, dy, dx + drawn[0], dy + drawn[1]), drawn_canvas_size))
+
+        truth_box = {
+            "left": (reach - amount, 0, reach, size[1]),
+            "right": (size[0], 0, size[0] + amount, size[1]),
+            "top": (0, reach - amount, size[0], reach),
+            "bottom": (0, size[1], size[0], size[1] + amount),
+        }[side]
+        x0, y0, x1, y1 = truth_box
+        truth = world[y0:y1, x0:x1].astype(float)
+        placed = {"left": result[:, :amount], "right": result[:, -amount:], "top": result[:amount], "bottom": result[-amount:]}[side].astype(float)
+        assert np.abs(placed - truth).mean() < 3  # in place everywhere, not only at the join
 
 
-class TestBlurredCanvas:
+class TestExtendReference:
     @pytest.mark.parametrize(("side", "grown"), [("left", (160 + 64, 120)), ("right", (160 + 64, 120)), ("top", (160, 120 + 64)), ("bottom", (160, 120 + 64))])
-    def test_the_source_is_in_place_and_the_new_strip_is_blurred_with_no_texture_to_copy(self, side, grown):
+    def test_the_source_is_in_place_and_the_new_strip_is_the_edge_colour_with_nothing_to_copy(self, side, grown):
         source = noise_picture(160, 120, seed=51)
-        canvas, strip, (left, top) = extend_canvas(source, side, 64)
+        canvas, strip, _ = extend_canvas(source, side, 64)
+        pixels = np.asarray(source).astype(float)
+        edge = {"left": pixels[:, :64], "right": pixels[:, -64:], "top": pixels[:64], "bottom": pixels[-64:]}[side]
 
-        reference = blurred_canvas(source, side, 64)
+        reference = extend_reference(source, side, 64)
 
-        pixels = np.asarray(reference)
+        array = np.asarray(reference)
         assert reference.size == grown == canvas.size
-        assert np.array_equal(pixels[~strip], np.asarray(canvas)[~strip])  # the source, untouched
-        assert np.asarray(canvas)[strip].std() > 20 and pixels[strip].std() < 10  # noise in the edge fill, an even blur in the reference
+        assert np.array_equal(array[~strip], np.asarray(canvas)[~strip])  # the source, untouched
+        assert (array[strip] == np.rint(edge.reshape(-1, 3).mean(axis=0))).all()  # one flat colour: the mean of the source beside it
 
 
 class TestMatchJoin:
@@ -253,13 +274,35 @@ class TestMatchJoin:
         assert before > 2  # the drift was there to find
 
     def test_the_slope_is_limited(self):
-        canvas, strip = self._canvas()
-        squashed = np.clip(canvas.astype(np.float32) * 0.3 + 100, 0, 255).astype(np.uint8)  # a slope of about 3 would be needed
+        _, strip = self._canvas()
+        canvas = np.rint(np.linspace(0, 255, 200, dtype=np.float32)[None, :, None] * np.ones((120, 1, 3), dtype=np.float32)).astype(np.uint8)
+        squashed = np.clip(canvas.astype(np.float32) * 0.4 + 80, 0, 255)  # a slope of about 2.5 would be needed
+        texture = np.random.default_rng(53).normal(0, 6, squashed.shape[:2])[..., None]
+        generated = np.clip(squashed + texture, 0, 255).astype(np.uint8)
 
-        matched = match_join(squashed, squashed, canvas, strip)
+        matched = match_join(generated, squashed.astype(np.uint8), canvas, strip)
 
-        steepest = np.abs(np.diff(matched[60, :80].astype(float).mean(axis=-1)) / np.maximum(np.diff(squashed[60, :80].astype(float).mean(axis=-1)), 1e-6)).max()
-        assert steepest < 2.0  # not the 3x the fit alone would ask
+        def detail(picture: np.ndarray) -> float:
+            grey = picture[:, :80].astype(float).mean(axis=-1)
+            return float(np.diff(grey, axis=1).std())
+
+        assert detail(matched) < 1.5 * detail(generated)  # the strip's texture is not stretched by the 2.5x the fit alone would ask
+
+    def test_a_drift_that_changes_along_the_join_is_matched_at_the_join(self):
+        rows = np.linspace(60, 180, 120, dtype=np.float32)[:, None, None]
+        canvas = np.rint(rows * np.ones((1, 200, 3), dtype=np.float32)).astype(np.uint8)  # even along each row
+        strip = np.zeros((120, 200), dtype=bool)
+        strip[:, :80] = True
+        drift = np.where(np.arange(120) < 60, 8.0, -8.0)[:, None, None]  # lighter in the top half, darker in the bottom
+        view = np.clip(canvas.astype(np.float32) + drift, 0, 255).astype(np.uint8)
+
+        matched = match_join(view, view, canvas, strip)
+
+        assert np.array_equal(matched[~strip], view[~strip])
+        steady = np.r_[10:45, 75:110]  # away from where the drift flips
+        before = np.abs(view[steady, 79].astype(int) - canvas[steady, 80].astype(int)).mean()
+        after = np.abs(matched[steady, 79].astype(int) - canvas[steady, 80].astype(int)).mean()
+        assert before > 6 and after < 2
 
     def test_a_flat_band_changes_the_strip_by_an_offset_only(self):
         canvas = np.full((120, 200, 3), 100, dtype=np.uint8)

@@ -235,7 +235,7 @@ class TestExtend:
 
 class TestTheReference:
     @pytest.mark.parametrize("side", ["left", "top", "right", "bottom"])
-    def test_an_extends_reference_is_the_drawn_canvas_with_a_blurred_strip(self, tmp_path, side):
+    def test_an_extends_reference_is_the_drawn_canvas_with_a_flat_strip(self, tmp_path, side):
         source = _photo(tmp_path / "photo.png", 320, 240)
         backend = _backend()
 
@@ -245,7 +245,7 @@ class TestTheReference:
         reference, crop, strip = np.asarray(call["reference"]), np.asarray(call["image"]), call["paint"]
         assert call["reference"].size == call["image"].size  # the same frame, so the source sits where it will be drawn
         assert np.array_equal(reference[~strip], crop[~strip])  # the source pixels, untouched
-        assert reference[strip].std() < 10 < crop[strip].std()  # an even blur in the strip, noise in the edge fill: nothing to copy
+        assert (reference[strip] == reference[strip][0]).all() and crop[strip].std() > 10  # one colour in the strip, noise in the edge fill: nothing to copy
         assert call["reference"].width % 16 == call["reference"].height % 16 == 0
 
     def test_a_paint_only_edits_reference_is_the_crop_and_it_asks_for_no_join_fix(self, tmp_path):

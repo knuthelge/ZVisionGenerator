@@ -145,7 +145,7 @@ class EditWork:
         paint: The area to redraw (bool, canvas size), or ``None`` for a whole-picture edit or an Extend.
         crop: The part of the canvas the model works on, at ``target`` size. For an Extend, the source scaled to about one megapixel with the new strip beside it, in whole 16 px cells.
         crop_paint: The paint of that crop (bool, ``target`` size).
-        reference: The picture the model sees while it draws: the crop, or for an Extend the drawn canvas with a blurred strip.
+        reference: The picture the model sees while it draws: the crop, or for an Extend the drawn canvas with a strip of one flat colour, the mean of the source beside it.
         plan: Where the crop sits on the canvas, and the size the model draws it at; ``None`` for an Extend.
         drawn_source_box: Where the source sits on the Extend's crop ``(left, top, right, bottom)``, or ``None`` without an Extend.
         source_box: Where the source sits on an extended canvas ``(left, top, right, bottom)``, or ``None`` without an Extend.

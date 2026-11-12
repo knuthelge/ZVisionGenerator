@@ -21,7 +21,7 @@ from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.image_types import EditWork, ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.processing.edit_region import PAINT_FADE, Plan, blurred_canvas, extend_canvas, extend_draw_size, grid_size, paste_paint, paste_strip, plan_region
+from zvisiongenerator.processing.edit_region import PAINT_FADE, Plan, extend_canvas, extend_reference, extend_draw_size, grid_size, paste_paint, paste_strip, plan_region
 from zvisiongenerator.processing.matte import on_backdrop
 from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.edit_request import image_is_cutout
@@ -211,7 +211,7 @@ def _prepare_extend(edit: EditWork, extend: tuple[str, int]) -> None:
     """Set up an Extend: the canvas the result is pasted onto, and what the model draws.
 
     The model draws the source scaled first (:func:`extend_draw_size`) and padded after, so the new strip and the source
-    both sit on whole 16 px cells. Its reference is the same canvas with the strip blurred (:func:`blurred_canvas`). The
+    both sit on whole 16 px cells. Its reference is the same canvas with the strip one flat colour (:func:`extend_reference`). The
     canvas is the source at its real size with the strip at the real amount; the result is pasted onto it strip and
     source apart.
     """
@@ -223,7 +223,7 @@ def _prepare_extend(edit: EditWork, extend: tuple[str, int]) -> None:
     scaled = source.resize(drawn_size, Image.Resampling.LANCZOS)
     edit.crop, edit.crop_paint, drawn_offset = extend_canvas(scaled, side, strip)
     edit.drawn_source_box = (drawn_offset[0], drawn_offset[1], drawn_offset[0] + drawn_size[0], drawn_offset[1] + drawn_size[1])
-    edit.reference = blurred_canvas(scaled, side, strip)
+    edit.reference = extend_reference(scaled, side, strip)
 
 
 def prepare_edit_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
@@ -232,7 +232,7 @@ def prepare_edit_stage(request: ImageGenerationRequest, artifacts: ImageWorkingA
     The mask is read at the source's size before any Extend. With paint the model gets a crop around it and the paint at
     the crop's size; with none (whole picture) it gets the picture at its own size on the 16 px grid. An Extend is drawn on the
     scaled source with a new strip beside it (see :func:`_prepare_extend`). The model's
-    reference is the crop, or for an Extend the drawn canvas with a blurred strip, so the strip's edge-pixel fill is never
+    reference is the crop, or for an Extend the drawn canvas with a flat strip, so the strip's edge-pixel fill is never
     shown to it.
 
     The inputs were checked where the job was made (the CLI and the Web server), before it was queued: the mask is the

@@ -31,8 +31,13 @@ BIG_MASK_FRACTION = 0.5
 PAINT_FADE = 12
 # The pixel width of one FLUX.2 Klein latent cell: the grid the paint is folded onto (``soft_cell_mask`` reads it).
 LATENT_CELL_PIXELS = 16
-# The depth in pixels of the band of source beside an Extend's strip that its colour is matched on.
+# The depth in pixels of the band of source beside an Extend's strip: its mean colour fills the strip in the model's
+# reference, and the strip's colour is matched to it across the join.
 JOIN_BAND = 64
+# The depth in pixels of the source beside the strip whose leftover colour difference is carried into the strip, and how
+# far along the join that difference is smoothed.
+JOIN_NEAR = 2
+JOIN_SMOOTH = 16.0
 
 _EXTEND_PADDING = {
     "top": lambda amount: ((amount, 0), (0, 0)),
@@ -75,15 +80,17 @@ def extend_draw_size(size: tuple[int, int], side: str, amount: int) -> tuple[tup
 
     The source is drawn at :func:`target_size`, about one megapixel, and never enlarged: a source smaller than that is
     drawn at its own size, its sides snapped down to 16 px. The strip is the *amount* at the source's scale along *side*,
-    rounded to whole 16 px cells, so the source and the strip sit on whole latent cells. The drawn canvas is the model's
-    reference, and both libraries shrink one over 1024 x 1024 px.
+    rounded up to whole 16 px cells, so the source and the strip sit on whole latent cells and the strip covers at least
+    the amount (:func:`paste_strip` leaves out the rest). The drawn canvas is the model's reference, and both libraries
+    shrink one over 1024 x 1024 px.
     """
     width, height = size
     if width * height < TARGET_MP * 1_000_000:
-        return (max(ALIGN, width // ALIGN * ALIGN), max(ALIGN, height // ALIGN * ALIGN)), _round_align(amount)
-    drawn = target_size(width, height)
+        drawn = (max(ALIGN, width // ALIGN * ALIGN), max(ALIGN, height // ALIGN * ALIGN))
+    else:
+        drawn = target_size(width, height)
     scale = drawn[0] / width if side in ("left", "right") else drawn[1] / height
-    return drawn, _round_align(amount * scale)
+    return drawn, max(ALIGN, math.ceil(round(amount * scale / ALIGN, 6)) * ALIGN)
 
 
 def edit_output_size(width: int, height: int, *, extend: tuple[str, int] | None) -> tuple[int, int]:
@@ -151,26 +158,19 @@ def extend_canvas(image: Image.Image, side: str, amount: int) -> tuple[Image.Ima
     return Image.fromarray(canvas), paint, (left, top)
 
 
-def blurred_canvas(source: Image.Image, side: str, strip: int) -> Image.Image:
-    """Return *source* on a canvas *strip* px larger on *side*, the new area a heavily blurred reflection of the source.
+def extend_reference(source: Image.Image, side: str, strip: int) -> Image.Image:
+    """Return *source* on a canvas *strip* px larger on *side*, the new area one flat colour: the mean of the ``JOIN_BAND`` px of source beside it.
 
     This is the model's reference for an Extend: it has the frame of the drawn canvas, so the source sits where it will
-    be drawn, and the blur leaves the strip with colour and tone but nothing to copy. The blur is Gaussian at sigma
-    ``max(24, strip / 4)``. The source pixels are untouched.
+    be drawn, and the flat strip gives the new area the source's tone with nothing to copy. Any picture there, even a
+    heavy blur, can be drawn back as a smear. The source pixels are untouched.
     """
-    pad = _EXTEND_PADDING[side](strip)
     pixels = np.asarray(source.convert("RGB"))
-    from scipy import ndimage
-
-    sigma = max(24.0, strip / 4)
-    padded = np.pad(pixels, (*pad, (0, 0)), mode="reflect").astype(np.float32)
-    # A blur this wide looks the same at a quarter of the resolution, and far faster there.
-    small = ndimage.gaussian_filter(padded[::4, ::4], sigma=(sigma / 4, sigma / 4, 0), mode="reflect")
-    blurred = ndimage.zoom(small, (4, 4, 1), order=1)[: padded.shape[0], : padded.shape[1]]
-    canvas = np.clip(np.rint(blurred), 0, 255).astype(np.uint8)
-    top, left = pad[0][0], pad[1][0]
-    canvas[top : top + pixels.shape[0], left : left + pixels.shape[1]] = pixels
-    return Image.fromarray(canvas)
+    edge = {"top": pixels[:JOIN_BAND], "bottom": pixels[-JOIN_BAND:], "left": pixels[:, :JOIN_BAND], "right": pixels[:, -JOIN_BAND:]}[side]
+    canvas, paint, _ = extend_canvas(source, side, strip)
+    reference = np.array(canvas)
+    reference[paint] = np.rint(edge.reshape(-1, 3).mean(axis=0)).astype(np.uint8)
+    return Image.fromarray(reference)
 
 
 # sRGB <-> CIE Lab (D65), for matching the strip's colour to the source's in a space where lightness and hue are apart.
@@ -204,6 +204,10 @@ def match_join(generated: np.ndarray, model_view: np.ndarray, canvas: np.ndarray
     source next to the strip, a per-channel affine in Lab maps the model's band onto the real one in *canvas*, and the same
     map is applied to the strip. The slope is limited to 0.8 to 1.25, and a flat band (almost no variance) takes slope 1.
 
+    The drift is not even along the join, and is largest right beside it, so what the map leaves is matched as well: the
+    difference between the real source and the mapped model view within ``JOIN_NEAR`` px of the strip, smoothed along the
+    join (:func:`_join_residual`), is added to the strip in full at the join and fades out across it.
+
     Args:
         generated: The drawn canvas as the model returned it, ``(height, width, 3)`` uint8.
         model_view: The model's own view of the whole drawn canvas, same shape.
@@ -218,10 +222,31 @@ def match_join(generated: np.ndarray, model_view: np.ndarray, canvas: np.ndarray
         x, y = model_lab[..., channel][band], real_lab[..., channel][band]
         variance = x.var()
         slope = float(np.clip(np.cov(x, y)[0, 1] / variance, 0.8, 1.25)) if variance > 4.0 else 1.0
-        made_lab[..., channel][strip] = slope * made_lab[..., channel][strip] + (y.mean() - slope * x.mean())
+        offset = y.mean() - slope * x.mean()
+        made_lab[..., channel][strip] = slope * made_lab[..., channel][strip] + offset
+        model_lab[..., channel] = slope * model_lab[..., channel] + offset
+    made_lab[strip] += _join_residual(real_lab - model_lab, strip)[strip]
     matched = generated.copy()
     matched[strip] = _from_lab(made_lab)[strip]
     return matched
+
+
+def _join_residual(difference: np.ndarray, strip: np.ndarray) -> np.ndarray:
+    """Return the correction for each *strip* pixel: *difference* (Lab, canvas-sized) near the join, faded across the strip.
+
+    *difference* is read on the source within ``JOIN_NEAR`` px of the strip and smoothed along the join over
+    ``JOIN_SMOOTH`` px, so the source's texture does not carry into the strip. Each strip pixel takes the smoothed value
+    at its nearest source pixel, weighted from 1 at the join to 0 at the strip's far side (smoothstep).
+    """
+    from scipy import ndimage
+
+    near = ~strip & (ndimage.distance_transform_edt(~strip) <= JOIN_NEAR)
+    weight = ndimage.gaussian_filter(near.astype(np.float64), JOIN_SMOOTH)
+    smoothed = np.stack([ndimage.gaussian_filter(np.where(near, difference[..., channel], 0.0), JOIN_SMOOTH) for channel in range(3)], axis=-1)
+    smoothed /= np.maximum(weight, 1e-6)[..., None]
+    distance, (rows, columns) = ndimage.distance_transform_edt(strip, return_indices=True)
+    ramp = np.clip(1.0 - distance / max(float(distance.max()), 1.0), 0.0, 1.0)
+    return smoothed[rows, columns] * (ramp * ramp * (3.0 - 2.0 * ramp))[..., None]
 
 
 def fade_alpha(painted: np.ndarray, fade: float) -> np.ndarray:
@@ -281,7 +306,8 @@ def paste_strip(canvas: Image.Image, generated: Image.Image, source_box: Box, dr
     The strip is the part of *canvas* outside *source_box* (the source's ``(left, top, right, bottom)`` on it), replaced
     whole: the model has already made its join with the source continuous, so it does not fade. The source stays exact.
     The model drew the canvas at *drawn_size*, with the source at *drawn_source_box*, at another scale than *canvas*; the
-    strip is scaled from its own part of the drawing.
+    strip is scaled at the source's own scale, so what the model continued from the source lands where it continues it.
+    The drawn strip may be wider than the amount at that scale (:func:`extend_draw_size`); its outer edge is left out.
     """
     base = np.array(canvas.convert("RGB"))
     generated = generated.convert("RGB")
@@ -289,18 +315,19 @@ def paste_strip(canvas: Image.Image, generated: Image.Image, source_box: Box, dr
     for axis in (0, 1):
         length, drawn_length = canvas.size[axis], drawn_size[axis]
         low, high = source_box[axis], source_box[axis + 2]
+        scale = (drawn_source_box[axis + 2] - drawn_source_box[axis]) / (high - low)
         if low > 0:
             spans.append((0, low))
-            drawn_spans.append((0, drawn_source_box[axis]))
+            drawn_spans.append((drawn_source_box[axis] - low * scale, drawn_source_box[axis]))
         elif high < length:
             spans.append((high, length))
-            drawn_spans.append((drawn_source_box[axis + 2], drawn_length))
+            drawn_spans.append((drawn_source_box[axis + 2], drawn_source_box[axis + 2] + (length - high) * scale))
         else:
             spans.append((0, length))
             drawn_spans.append((0, drawn_length))
     (x0, x1), (y0, y1) = spans
     scale_x, scale_y = generated.width / drawn_size[0], generated.height / drawn_size[1]
     (dx0, dx1), (dy0, dy1) = drawn_spans
-    box = (dx0 * scale_x, dy0 * scale_y, min(generated.width, dx1 * scale_x), min(generated.height, dy1 * scale_y))
+    box = (max(0.0, dx0 * scale_x), max(0.0, dy0 * scale_y), min(generated.width, dx1 * scale_x), min(generated.height, dy1 * scale_y))
     base[y0:y1, x0:x1] = np.asarray(generated.resize((x1 - x0, y1 - y0), Image.Resampling.LANCZOS, box=box))
     return Image.fromarray(base)

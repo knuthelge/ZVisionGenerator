@@ -98,7 +98,7 @@ Paint and Extend are one at a time. The rest of the picture stays as it was, and
 
 - **Trying again:** press **Generate** again; the image and the paint stay. Choosing another image clears the paint, **Clear** in the painter does too, and **Reset** puts back the whole Edit kind, the image included.
 - **Removing an object** can be unreliable: try again, or describe what should be there instead.
-- **Extend** works best on backgrounds, textures, interiors and streets; on a close-up it may not complete the subject. On a large photo the new strip is drawn at about one megapixel, so it comes out softer than the photo beside it, most visibly on textured content such as foliage or stone.
+- **Extend** works best on backgrounds, textures, interiors and streets; on a close-up it may not complete the subject. On a large photo the new strip is drawn at about one megapixel, so it comes out softer than the photo beside it, most visibly on textured content such as foliage or stone. A line in perspective that runs into the new strip, such as a window frame, can break at the join.
 - **A picture with transparent parts** (a cut-out) keeps its transparency, so anything drawn outside its outline disappears. It can't be extended, and needs paint: **Generate** waits until you paint.
 
 An edit uses the prompt, the model, **Quant**, LoRAs, **Steps**, **Seed** and **Batch size**. It uses none of the size, **Strength**, **Guidance**, upscale, **Enhance** or post-processing options. The result keeps the picture's size, or grows by the Extend amount; larger pictures take longer.
