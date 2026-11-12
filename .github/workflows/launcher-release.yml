@@ -1,0 +1,151 @@
+name: Launcher release
+
+# The desktop launcher is versioned and released apart from the app: `launcher-v*` tags only, never `v*` (that is
+# release.yml). A manual run builds and uploads the installers as workflow artifacts without publishing anything.
+on:
+  push:
+    tags: ["launcher-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-latest
+            bundles: dmg
+            # bundle directory | file glob | stable asset name
+            assets: |
+              dmg|*.dmg|Z-Vision-Generator-Launcher-macos-arm64.dmg
+          - name: windows
+            os: windows-latest
+            bundles: nsis
+            assets: |
+              nsis|*-setup.exe|Z-Vision-Generator-Launcher-windows-x64-setup.exe
+          - name: linux
+            os: ubuntu-22.04
+            bundles: appimage,deb,rpm
+            assets: |
+              appimage|*.AppImage|Z-Vision-Generator-Launcher-linux-x86_64.AppImage
+              deb|*.deb|Z-Vision-Generator-Launcher-linux-amd64.deb
+              rpm|*.rpm|Z-Vision-Generator-Launcher-linux-x86_64.rpm
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: "11.28.8"
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher/src-tauri
+
+      - name: Check the tag matches the launcher version
+        if: startsWith(github.ref, 'refs/tags/launcher-v')
+        shell: bash
+        run: |
+          tag_version="${GITHUB_REF_NAME#launcher-v}"
+          crate_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' launcher/src-tauri/Cargo.toml | head -n 1)"
+          if [ "$tag_version" != "$crate_version" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match launcher/src-tauri/Cargo.toml version ${crate_version}"
+            exit 1
+          fi
+
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Build the launcher UI
+        run: pnpm --dir frontend run build:launcher
+
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        working-directory: launcher/src-tauri
+        run: cargo fmt --check
+
+      - name: Lint
+        if: runner.os == 'Linux'
+        working-directory: launcher/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        if: runner.os == 'Linux'
+        working-directory: launcher/src-tauri
+        run: cargo test
+
+      - name: Build installers
+        working-directory: launcher
+        run: node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --bundles ${{ matrix.bundles }}
+
+      - name: Rename installers to their stable names
+        shell: bash
+        env:
+          ASSETS: ${{ matrix.assets }}
+        run: |
+          mkdir -p launcher-assets
+          while IFS='|' read -r dir pattern stable; do
+            [ -n "$dir" ] || continue
+            found=()
+            while IFS= read -r -d '' file; do found+=("$file"); done < <(
+              find "launcher/src-tauri/target/release/bundle/$dir" -maxdepth 1 -type f -name "$pattern" -print0
+            )
+            if [ "${#found[@]}" -ne 1 ]; then
+              echo "::error::Expected one $pattern in bundle/$dir, found ${#found[@]}"
+              exit 1
+            fi
+            mv "${found[0]}" "launcher-assets/$stable"
+          done <<< "$ASSETS"
+          ls -l launcher-assets
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: launcher-${{ matrix.name }}
+          path: launcher-assets/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/launcher-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: launcher-*
+          path: launcher-assets
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          make_latest: false
+          prerelease: false
+          generate_release_notes: false
+          body: |
+            Z-Vision Generator Launcher installers for macOS, Windows and Linux. Install steps, including the first-open prompts for the unsigned builds, are in the [install guide](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install-with-the-launcher).
+          files: |
+            launcher-assets/Z-Vision-Generator-Launcher-macos-arm64.dmg
+            launcher-assets/Z-Vision-Generator-Launcher-windows-x64-setup.exe
+            launcher-assets/Z-Vision-Generator-Launcher-linux-x86_64.AppImage
+            launcher-assets/Z-Vision-Generator-Launcher-linux-amd64.deb
+            launcher-assets/Z-Vision-Generator-Launcher-linux-x86_64.rpm
