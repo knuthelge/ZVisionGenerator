@@ -129,6 +129,8 @@ pub struct Snapshot {
     /// Never set together with `update_version`.
     pub needs_newer_launcher: Option<String>,
     pub autostart: bool,
+    /// Whether the user opted into pre-release versions of the app.
+    pub beta: bool,
     pub packaging: Packaging,
     /// Phase `unsupported` only.
     pub unsupported: Option<Unsupported>,
@@ -156,12 +158,14 @@ pub enum Primary {
     Quit,
 }
 
-/// An entry of the More menu.
+/// An entry of the More menu, in the order the window shows them (beta last, after a separator).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MenuItem {
     Repair,
     Uninstall,
+    /// The Get beta versions checkbox.
+    Beta,
 }
 
 /// Which controls a screen shows. A command is allowed only when its control is available here.
@@ -183,7 +187,8 @@ pub struct Controls {
     pub locked: bool,
 }
 
-const BOTH: [MenuItem; 2] = [MenuItem::Repair, MenuItem::Uninstall];
+const ALL: [MenuItem; 3] = [MenuItem::Repair, MenuItem::Uninstall, MenuItem::Beta];
+const WITHOUT_REPAIR: [MenuItem; 2] = [MenuItem::Uninstall, MenuItem::Beta];
 
 /// Show the Start at login toggle and the More menu, which every state from `starting` onward has.
 fn show_installed(c: &mut Controls, menu: &[MenuItem]) {
@@ -212,24 +217,27 @@ pub fn controls(snapshot: &Snapshot) -> Controls {
                 }
             });
         }
-        Phase::NeedsInstall => c.primary = Some(Primary::Install),
+        Phase::NeedsInstall => {
+            c.primary = Some(Primary::Install);
+            c.menu = vec![MenuItem::Beta];
+        }
         Phase::Starting => {
             c.primary = Some(Primary::Starting);
-            show_installed(&mut c, &BOTH);
+            show_installed(&mut c, &ALL);
         }
         Phase::Running => {
             c.primary = Some(Primary::Open);
             c.update = snapshot.update_version.is_some();
-            show_installed(&mut c, &BOTH);
+            show_installed(&mut c, &ALL);
         }
         Phase::Updating | Phase::Repairing => {
             c.locked = true;
-            show_installed(&mut c, &BOTH);
+            show_installed(&mut c, &ALL);
         }
         Phase::Stopped => {
             c.primary = Some(Primary::Open);
             c.log = true;
-            show_installed(&mut c, &BOTH);
+            show_installed(&mut c, &ALL);
         }
         Phase::Failed => {
             c.log = true;
@@ -237,21 +245,23 @@ pub fn controls(snapshot: &Snapshot) -> Controls {
                 Some(FailedAction::Install) => {
                     c.primary = Some(Primary::Retry);
                     // A failed install leaves a partial install behind; Windows' own uninstaller cleans it.
-                    if snapshot.packaging != Packaging::WindowsNsis {
-                        c.menu = vec![MenuItem::Uninstall];
-                    }
+                    c.menu = if snapshot.packaging == Packaging::WindowsNsis {
+                        vec![MenuItem::Beta]
+                    } else {
+                        WITHOUT_REPAIR.to_vec()
+                    };
                 }
                 Some(FailedAction::Repair) => {
                     c.primary = Some(Primary::Retry);
-                    show_installed(&mut c, &[MenuItem::Uninstall]);
+                    show_installed(&mut c, &WITHOUT_REPAIR);
                 }
                 Some(FailedAction::Update) => {
                     c.primary = Some(Primary::Repair);
-                    show_installed(&mut c, &[MenuItem::Uninstall]);
+                    show_installed(&mut c, &WITHOUT_REPAIR);
                 }
                 Some(FailedAction::Start) | None => {
                     c.primary = Some(Primary::Open);
-                    show_installed(&mut c, &BOTH);
+                    show_installed(&mut c, &ALL);
                 }
             }
         }
@@ -294,12 +304,15 @@ mod tests {
             "2b unsupported gpu_too_old",
             "3 move_to_applications",
             "4a needs_install",
+            "4a needs_install with beta",
             "4b installing",
             "4c failed install",
             "4c failed install (windows)",
             "5 starting",
             "6 running",
+            "6 running a beta version",
             "7 running with update",
+            "7 running with a beta update",
             "8a updating",
             "8a updating with updateVersion",
             "8b repairing",

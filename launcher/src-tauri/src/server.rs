@@ -195,7 +195,7 @@ pub fn start(layout: &Layout, port: u16) -> io::Result<(Child, ServerRecord)> {
     };
     if let Err(error) = write_server_record(&layout.server_json, &record) {
         let mut child = child;
-        process_tree::stop_tree(record.pid, Duration::ZERO);
+        process_tree::stop_tree(record.pid, record.start_time, Duration::ZERO);
         let _ = child.wait();
         return Err(error);
     }
@@ -304,14 +304,15 @@ pub fn read_version(layout: &Layout) -> Option<String> {
         .and_then(|_| parse_version(&output))
 }
 
-/// Stop the server `pid` and everything it started (see [`process_tree::stop_tree`], `grace` is how long the server
-/// gets to exit by itself on Unix), then delete `server.json`. Safe when nothing runs.
+/// Stop the server `record` names and everything it started (see [`process_tree::stop_tree`], `grace` is how long
+/// the server gets to exit by itself on Unix), then delete `server.json`. Only a process alive with the recorded
+/// start time is stopped; a PID another program reused is left alone. Safe when nothing runs.
 ///
 /// # Errors
 ///
 /// Fails when `server.json` exists and cannot be deleted.
-pub fn stop(layout: &Layout, pid: u32, grace: Duration) -> io::Result<()> {
-    process_tree::stop_tree(pid, grace);
+pub fn stop(layout: &Layout, record: &ServerRecord, grace: Duration) -> io::Result<()> {
+    process_tree::stop_tree(record.pid, record.start_time, grace);
     delete_server_record(&layout.server_json)
 }
 
@@ -326,7 +327,7 @@ pub fn clear_stale_record(layout: &Layout, grace: Duration) -> io::Result<()> {
         return delete_server_record(&layout.server_json);
     };
     match stale_action(&record, process_tree::start_time_of(record.pid)) {
-        StopOrDelete::Stop => stop(layout, record.pid, grace),
+        StopOrDelete::Stop => stop(layout, &record, grace),
         StopOrDelete::Delete => delete_server_record(&layout.server_json),
     }
 }
@@ -707,12 +708,12 @@ mod tests {
             } else {
                 process_tree::snapshot_tree(record.pid)
             };
-            stop(&layout, record.pid, Duration::from_millis(200)).unwrap();
+            stop(&layout, &record, Duration::from_millis(200)).unwrap();
             watcher.join().unwrap();
             assert!(process_tree::alive_members(&members).is_empty());
             assert!(!layout.server_json.exists());
             // Stopping again, with nothing running, is fine.
-            stop(&layout, record.pid, Duration::ZERO).unwrap();
+            stop(&layout, &record, Duration::ZERO).unwrap();
         }
 
         #[test]
@@ -727,7 +728,7 @@ mod tests {
             let log = wait_for_log(&layout, "to stderr");
             let root = fs::canonicalize(&layout.root).unwrap();
             assert!(log.contains(&format!("cwd: {}", root.display())), "{log}");
-            stop(&layout, record.pid, Duration::ZERO).unwrap();
+            stop(&layout, &record, Duration::ZERO).unwrap();
             assert!(!layout.server_json.exists());
         }
 
@@ -742,6 +743,28 @@ mod tests {
                 .unwrap();
             handle.join().unwrap();
             assert_eq!(status.code(), Some(3));
+        }
+
+        #[test]
+        fn stop_leaves_a_process_with_another_start_time_alone_but_deletes_the_record() {
+            let dir = tempfile::tempdir().unwrap();
+            let layout = layout_in(dir.path());
+            let mut child = Command::new("sleep").arg("309").spawn().unwrap();
+            let start_time = process_tree::start_time_of(child.id()).unwrap();
+            let record = ServerRecord {
+                pid: child.id(),
+                start_time: start_time + 1_000,
+                port: 8127,
+            };
+            write_server_record(&layout.server_json, &record).unwrap();
+            stop(&layout, &record, Duration::from_millis(100)).unwrap();
+            assert!(!layout.server_json.exists());
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "the process was stopped"
+            );
+            child.kill().unwrap();
+            child.wait().unwrap();
         }
 
         #[test]

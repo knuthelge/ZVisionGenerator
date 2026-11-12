@@ -1,8 +1,8 @@
 //! The pins: every downloaded tool by URL and SHA-256, the package, the Python version and size estimates.
 //!
 //! Nothing here is read from the network: a pin is a URL plus the lowercase SHA-256 of the file behind it, checked
-//! before anything is extracted. Every URL names a release tag (uv `0.13.8`, a dated BtbN FFmpeg-Builds tag, the
-//! osxexperts files whose names carry the FFmpeg version), never `latest`.
+//! before anything is extracted. Every URL names a release tag (uv `0.13.8`, a dated BtbN FFmpeg-Builds tag, Martin
+//! Riedl's build folder whose name carries the FFmpeg version), never `latest`.
 
 /// The platforms the launcher installs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,19 +140,20 @@ const FFMPEG_LINUX: Download = Download {
     ],
 };
 
-/// osxexperts static FFmpeg 9.0.2 for Apple Silicon (GPL, libx264); ffmpeg and ffprobe are separate zips.
+/// Martin Riedl's signed static FFmpeg 9.0.2 for Apple Silicon (GPL, libx264); ffmpeg and ffprobe are separate zips
+/// in a versioned folder that stays online.
 const FFMPEG_MACOS: Download = Download {
-    file: "ffmpeg902arm.zip",
-    url: "https://www.osxexperts.net/ffmpeg902arm.zip",
-    sha256: "4597f0f3a397cc0027bfd03dc4dd9c3066be15943cc788370846b4305d178bcb",
+    file: "ffmpeg.zip",
+    url: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip",
+    sha256: "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924",
     archive: ArchiveKind::Zip,
     members: &["ffmpeg"],
 };
 
 const FFPROBE_MACOS: Download = Download {
-    file: "ffprobe902arm.zip",
-    url: "https://www.osxexperts.net/ffprobe902arm.zip",
-    sha256: "c765d316eb210f3c98de6f9688df784552f3f8f586090e2a8cb871be9003164e",
+    file: "ffprobe.zip",
+    url: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip",
+    sha256: "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6",
     archive: ArchiveKind::Zip,
     members: &["ffprobe"],
 };
@@ -270,6 +271,22 @@ mod tests {
             );
             assert!(ffmpeg.file.contains("-gpl-"), "{platform:?}");
         }
+    }
+
+    #[test]
+    fn macos_ffmpeg_and_ffprobe_come_from_one_versioned_martin_riedl_folder() {
+        let all = downloads(Platform::MacosArm64);
+        for d in &all[1..] {
+            assert!(
+                d.url.starts_with(
+                    "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/"
+                ),
+                "{}",
+                d.file
+            );
+        }
+        assert_eq!(all[1].members, ["ffmpeg"]);
+        assert_eq!(all[2].members, ["ffprobe"]);
     }
 
     #[test]

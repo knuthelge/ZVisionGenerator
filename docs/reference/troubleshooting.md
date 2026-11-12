@@ -92,7 +92,7 @@ A Mac needs Apple silicon and macOS 14 or newer. See [Install](../get-started/in
 
 The window says **Install didn't finish** and gives the cause in its first line. What was downloaded is kept, so **Retry** carries on from there.
 
-- **The download timed out, or the connection dropped:** check the internet connection and choose **Retry**.
+- **The download didn't finish:** check the internet connection and choose **Retry**.
 - **There is no space left:** free disk space on the drive the launcher installs to, then **Retry**.
 - **A download no longer exists or doesn't match what the launcher expects:** the launcher downloads uv and ffmpeg from the addresses it was built with, and checks them before it uses them. A file that has been removed or changed upstream stops the install. Download the newest launcher from [Install](../get-started/install.md#get-the-launcher).
 - **The installer stopped with an error:** open **Show the log**, then **Retry**. If it keeps failing, [report it](#report-a-problem).

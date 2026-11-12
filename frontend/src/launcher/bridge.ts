@@ -22,6 +22,8 @@ export interface Bridge {
   uninstallApp(): Promise<void>;
   /** Resolves to the new state of start at login. */
   setAutostart(enabled: boolean): Promise<boolean>;
+  /** Resolves to the stored value of Get beta versions; rejects with "busy" while an action runs. */
+  setBeta(enabled: boolean): Promise<boolean>;
   openLink(link: LinkId): Promise<void>;
   quitLauncher(): Promise<void>;
   /** Close (hide) the window; Rust turns the close request into a hide. */
@@ -39,6 +41,7 @@ export const bridge: Bridge = {
   repairApp: () => invoke('repair_app'),
   uninstallApp: () => invoke('uninstall_app'),
   setAutostart: (enabled) => invoke<boolean>('set_autostart', { enabled }),
+  setBeta: (enabled) => invoke<boolean>('set_beta', { enabled }),
   openLink: (link) => invoke('open_link', { link }),
   quitLauncher: () => invoke('quit_launcher'),
   closeWindow: () => getCurrentWindow().close()

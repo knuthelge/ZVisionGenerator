@@ -208,10 +208,15 @@ pub fn stop_members(members: &[Member], grace: Duration) -> Vec<Member> {
     wait_gone(&mut system, members, KILL_WAIT)
 }
 
-/// Snapshot the tree below `root` (root included) and stop all of it; see [`stop_members`]. Nothing running at
-/// `root` is nothing to stop.
-pub fn stop_tree(root: u32, grace: Duration) -> Vec<Member> {
-    stop_members(&snapshot_tree(root), grace)
+/// Snapshot the tree below `root` (root included) and stop all of it; see [`stop_members`]. Nothing is stopped
+/// unless `root` is alive with `root_start_time` (as [`same_process`] reads it), so a PID the system reused for
+/// another program is left alone; nothing running at `root` is nothing to stop.
+pub fn stop_tree(root: u32, root_start_time: u64, grace: Duration) -> Vec<Member> {
+    let tree = snapshot_tree(root);
+    match tree.first() {
+        Some(top) if same_process(top.start_time, root_start_time) => stop_members(&tree, grace),
+        _ => Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -292,7 +297,7 @@ mod tests {
     fn an_unused_pid_has_no_start_time_and_no_tree() {
         assert_eq!(start_time_of(u32::MAX - 1), None);
         assert!(snapshot_tree(u32::MAX - 1).is_empty());
-        assert!(stop_tree(u32::MAX - 1, Duration::ZERO).is_empty());
+        assert!(stop_tree(u32::MAX - 1, 0, Duration::ZERO).is_empty());
         assert!(stop_members(&[], Duration::ZERO).is_empty());
     }
 
@@ -352,10 +357,27 @@ mod tests {
         fn a_nested_tree_is_stopped_entirely() {
             let mut child = sh("sh -c 'sleep 302 & wait' & wait");
             let tree = tree_of(child.id(), 3);
-            let survivors = stop_tree(child.id(), Duration::from_millis(200));
+            let survivors = stop_tree(child.id(), tree[0].start_time, Duration::from_millis(200));
             child.wait().unwrap();
             assert!(survivors.is_empty(), "{survivors:?}");
             assert!(alive_members(&tree).is_empty());
+        }
+
+        #[test]
+        fn a_root_with_another_expected_start_time_is_left_alone() {
+            let mut child = sh("sleep 305 & wait");
+            let tree = tree_of(child.id(), 2);
+            let wrong = tree[0].start_time + 1_000;
+            let survivors = stop_tree(child.id(), wrong, Duration::from_millis(100));
+            assert!(survivors.is_empty());
+            assert!(child.try_wait().unwrap().is_none(), "the root was stopped");
+            assert_eq!(
+                alive_members(&tree).len(),
+                tree.len(),
+                "a member was stopped"
+            );
+            stop_tree(child.id(), tree[0].start_time, Duration::from_millis(200));
+            child.wait().unwrap();
         }
 
         #[test]

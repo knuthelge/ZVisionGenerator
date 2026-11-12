@@ -7,6 +7,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": null,
@@ -33,6 +34,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": {
         "code": "driver_too_old",
@@ -63,6 +65,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": {
         "code": "low_disk",
@@ -93,6 +96,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "macos_app",
       "unsupported": {
         "code": "low_disk",
@@ -123,6 +127,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": {
         "code": "no_nvidia_gpu",
@@ -153,6 +158,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": {
         "code": "gpu_too_old",
@@ -183,6 +189,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "macos_app",
       "unsupported": null,
       "progress": null,
@@ -209,6 +216,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": null,
@@ -223,7 +231,38 @@
       "log": false,
       "bar": true,
       "autostart": false,
-      "menu": [],
+      "menu": [
+        "beta"
+      ],
+      "locked": false
+    }
+  },
+  {
+    "name": "4a needs_install with beta",
+    "snapshot": {
+      "phase": "needs_install",
+      "installedVersion": null,
+      "updateVersion": null,
+      "needsNewerLauncher": null,
+      "autostart": false,
+      "beta": true,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "logTail": [],
+      "stoppedAt": null
+    },
+    "controls": {
+      "primary": "install",
+      "update": false,
+      "log": false,
+      "bar": true,
+      "autostart": false,
+      "menu": [
+        "beta"
+      ],
       "locked": false
     }
   },
@@ -235,6 +274,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": {
@@ -270,6 +310,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": {
@@ -301,7 +342,8 @@
       "bar": true,
       "autostart": false,
       "menu": [
-        "uninstall"
+        "uninstall",
+        "beta"
       ],
       "locked": false
     }
@@ -314,6 +356,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "windows_nsis",
       "unsupported": null,
       "progress": {
@@ -344,7 +387,9 @@
       "log": true,
       "bar": true,
       "autostart": false,
-      "menu": [],
+      "menu": [
+        "beta"
+      ],
       "locked": false
     }
   },
@@ -356,6 +401,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "linux_package",
       "unsupported": null,
       "progress": null,
@@ -372,7 +418,8 @@
       "autostart": true,
       "menu": [
         "repair",
-        "uninstall"
+        "uninstall",
+        "beta"
       ],
       "locked": false
     }
@@ -385,6 +432,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": true,
+      "beta": false,
       "packaging": "macos_app",
       "unsupported": null,
       "progress": null,
@@ -401,7 +449,39 @@
       "autostart": true,
       "menu": [
         "repair",
-        "uninstall"
+        "uninstall",
+        "beta"
+      ],
+      "locked": false
+    }
+  },
+  {
+    "name": "6 running a beta version",
+    "snapshot": {
+      "phase": "running",
+      "installedVersion": "0.15.0b2",
+      "updateVersion": null,
+      "needsNewerLauncher": null,
+      "autostart": true,
+      "beta": true,
+      "packaging": "macos_app",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "logTail": [],
+      "stoppedAt": null
+    },
+    "controls": {
+      "primary": "open",
+      "update": false,
+      "log": false,
+      "bar": true,
+      "autostart": true,
+      "menu": [
+        "repair",
+        "uninstall",
+        "beta"
       ],
       "locked": false
     }
@@ -414,6 +494,7 @@
       "updateVersion": "0.14.1",
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": null,
@@ -430,7 +511,39 @@
       "autostart": true,
       "menu": [
         "repair",
-        "uninstall"
+        "uninstall",
+        "beta"
+      ],
+      "locked": false
+    }
+  },
+  {
+    "name": "7 running with a beta update",
+    "snapshot": {
+      "phase": "running",
+      "installedVersion": "0.15.0b2",
+      "updateVersion": "0.15.0b3",
+      "needsNewerLauncher": null,
+      "autostart": false,
+      "beta": true,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "logTail": [],
+      "stoppedAt": null
+    },
+    "controls": {
+      "primary": "open",
+      "update": true,
+      "log": false,
+      "bar": true,
+      "autostart": true,
+      "menu": [
+        "repair",
+        "uninstall",
+        "beta"
       ],
       "locked": false
     }
@@ -443,6 +556,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": {
@@ -467,7 +581,8 @@
       "autostart": true,
       "menu": [
         "repair",
-        "uninstall"
+        "uninstall",
+        "beta"
       ],
       "locked": true
     }
@@ -480,6 +595,7 @@
       "updateVersion": "0.14.1",
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": {
@@ -504,7 +620,8 @@
       "autostart": true,
       "menu": [
         "repair",
-        "uninstall"
+        "uninstall",
+        "beta"
       ],
       "locked": true
     }
@@ -517,6 +634,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": {
@@ -543,7 +661,8 @@
       "autostart": true,
       "menu": [
         "repair",
-        "uninstall"
+        "uninstall",
+        "beta"
       ],
       "locked": true
     }
@@ -556,6 +675,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": null,
@@ -575,7 +695,8 @@
       "autostart": true,
       "menu": [
         "repair",
-        "uninstall"
+        "uninstall",
+        "beta"
       ],
       "locked": false
     }
@@ -588,6 +709,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": null,
@@ -610,7 +732,8 @@
       "autostart": true,
       "menu": [
         "repair",
-        "uninstall"
+        "uninstall",
+        "beta"
       ],
       "locked": false
     }
@@ -623,6 +746,7 @@
       "updateVersion": "0.14.1",
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": null,
@@ -645,7 +769,8 @@
       "bar": true,
       "autostart": true,
       "menu": [
-        "uninstall"
+        "uninstall",
+        "beta"
       ],
       "locked": false
     }
@@ -658,6 +783,7 @@
       "updateVersion": null,
       "needsNewerLauncher": "0.15.0",
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": null,
@@ -674,7 +800,8 @@
       "autostart": true,
       "menu": [
         "repair",
-        "uninstall"
+        "uninstall",
+        "beta"
       ],
       "locked": false
     }
@@ -687,6 +814,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": {
@@ -715,7 +843,8 @@
       "bar": true,
       "autostart": true,
       "menu": [
-        "uninstall"
+        "uninstall",
+        "beta"
       ],
       "locked": false
     }
@@ -728,6 +857,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": null,
@@ -754,6 +884,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "appimage",
       "unsupported": null,
       "progress": null,
@@ -780,6 +911,7 @@
       "updateVersion": null,
       "needsNewerLauncher": null,
       "autostart": false,
+      "beta": false,
       "packaging": "macos_app",
       "unsupported": null,
       "progress": null,

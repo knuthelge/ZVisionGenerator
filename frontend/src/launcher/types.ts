@@ -68,6 +68,8 @@ export interface Snapshot {
   /** Never set together with `updateVersion`. */
   needsNewerLauncher: string | null;
   autostart: boolean;
+  /** The user opted into pre-release versions of the app. */
+  beta: boolean;
   packaging: Packaging;
   /** Phase `unsupported` only. */
   unsupported: Unsupported | null;
@@ -96,8 +98,8 @@ export interface Controls {
   log: boolean;
   bar: boolean;
   autostart: boolean;
-  /** More is shown iff non-empty. */
-  menu: ('repair' | 'uninstall')[];
+  /** More is shown iff non-empty; in this order, `beta` last after a separator. */
+  menu: ('repair' | 'uninstall' | 'beta')[];
   /** Toggle and More are shown but disabled. */
   locked: boolean;
 }

@@ -15,6 +15,7 @@ use crate::manifest::{PACKAGE, PYTHON, Platform, UV_HTTP_TIMEOUT_SECS, WINDOWS_I
 use crate::paths::Layout;
 use crate::snapshot::{ErrorCode, LauncherError};
 use crate::spawn::hidden_command;
+use crate::version::is_prerelease;
 
 /// How many of uv's last output lines a failure keeps as the log tail.
 pub const TAIL_LINES: usize = 40;
@@ -59,30 +60,77 @@ pub fn uv_env(layout: &Layout) -> Vec<(&'static str, OsString)> {
 }
 
 /// Append the Windows-only index arguments, which pick the CUDA PyTorch build.
-fn with_platform_index(mut args: Vec<&'static str>, platform: Platform) -> Vec<&'static str> {
+fn with_platform_index(mut args: Vec<String>, platform: Platform) -> Vec<String> {
     if platform == Platform::WindowsX64 {
-        args.extend(WINDOWS_INDEX_ARGS);
+        args.extend(WINDOWS_INDEX_ARGS.iter().map(|arg| (*arg).to_owned()));
     }
     args
 }
 
-/// `uv tool install z-vision-generator --python 3.14`, with `--reinstall` when repairing.
-pub fn install_args(platform: Platform, reinstall: bool) -> Vec<&'static str> {
-    let mut args = vec!["tool", "install"];
-    if reinstall {
-        args.push("--reinstall");
+/// Which versions of the app uv may pick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channel<'a> {
+    /// Stable releases only, uv's default.
+    Stable,
+    /// Pre-releases too (`--prerelease allow`), for a user who opted into betas.
+    Beta,
+    /// Exactly this installed version (`z-vision-generator==<version>`), pre-release or not.
+    Pinned(&'a str),
+}
+
+impl<'a> Channel<'a> {
+    /// The channel for reinstalling the app: with betas on, the newest including pre-releases; with betas off and a
+    /// pre-release installed, that exact version, so a repair never downgrades; otherwise stable releases.
+    pub fn for_repair(beta: bool, installed: Option<&'a str>) -> Self {
+        match installed {
+            _ if beta => Channel::Beta,
+            Some(version) if is_prerelease(version) => Channel::Pinned(version),
+            _ => Channel::Stable,
+        }
     }
-    args.extend([PACKAGE, "--python", PYTHON]);
+
+    /// The package requirement uv installs.
+    fn requirement(self) -> String {
+        match self {
+            Channel::Pinned(version) => format!("{PACKAGE}=={version}"),
+            Channel::Stable | Channel::Beta => PACKAGE.to_owned(),
+        }
+    }
+
+    /// Whether uv is told to accept pre-releases. A pinned pre-release needs it to be accepted at all.
+    fn allows_prerelease(self) -> bool {
+        self != Channel::Stable
+    }
+}
+
+/// `uv tool install z-vision-generator --python 3.14`, with `--reinstall` when repairing. A [`Channel`] other than
+/// stable adds `--prerelease allow`; a pinned one installs `z-vision-generator==<version>`.
+pub fn install_args(platform: Platform, reinstall: bool, channel: Channel<'_>) -> Vec<String> {
+    let mut args = vec!["tool".to_owned(), "install".to_owned()];
+    if reinstall {
+        args.push("--reinstall".to_owned());
+    }
+    args.extend([
+        channel.requirement(),
+        "--python".to_owned(),
+        PYTHON.to_owned(),
+    ]);
+    if channel.allows_prerelease() {
+        args.extend(["--prerelease".to_owned(), "allow".to_owned()]);
+    }
     with_platform_index(args, platform)
 }
 
 /// `uv tool upgrade z-vision-generator --refresh-package z-vision-generator`: the refresh makes uv look past its
-/// cached index for a release published after the last install.
-pub fn upgrade_args(platform: Platform) -> Vec<&'static str> {
-    with_platform_index(
-        vec!["tool", "upgrade", PACKAGE, "--refresh-package", PACKAGE],
-        platform,
-    )
+/// cached index for a release published after the last install. `beta` adds `--prerelease allow`.
+pub fn upgrade_args(platform: Platform, beta: bool) -> Vec<String> {
+    let mut args: Vec<String> = ["tool", "upgrade", PACKAGE, "--refresh-package", PACKAGE]
+        .map(str::to_owned)
+        .into();
+    if beta {
+        args.extend(["--prerelease".to_owned(), "allow".to_owned()]);
+    }
+    with_platform_index(args, platform)
 }
 
 /// `uv cache clean`.
@@ -306,13 +354,19 @@ mod tests {
         assert_eq!(env, expected);
     }
 
+    const STABLE: Channel<'static> = Channel::Stable;
+
+    fn has(args: &[String], arg: &str) -> bool {
+        args.iter().any(|a| a == arg)
+    }
+
     #[test]
     fn install_is_the_same_on_every_platform_but_windows_adds_the_index() {
         let plain = ["tool", "install", "z-vision-generator", "--python", "3.14"];
-        assert_eq!(install_args(Platform::LinuxX64, false), plain);
-        assert_eq!(install_args(Platform::MacosArm64, false), plain);
+        assert_eq!(install_args(Platform::LinuxX64, false, STABLE), plain);
+        assert_eq!(install_args(Platform::MacosArm64, false, STABLE), plain);
         assert_eq!(
-            install_args(Platform::WindowsX64, false),
+            install_args(Platform::WindowsX64, false, STABLE),
             [
                 "tool",
                 "install",
@@ -330,7 +384,7 @@ mod tests {
     #[test]
     fn reinstall_adds_the_flag_before_the_package_and_keeps_python_and_the_index() {
         assert_eq!(
-            install_args(Platform::LinuxX64, true),
+            install_args(Platform::LinuxX64, true, STABLE),
             [
                 "tool",
                 "install",
@@ -340,7 +394,7 @@ mod tests {
                 "3.14"
             ]
         );
-        let windows = install_args(Platform::WindowsX64, true);
+        let windows = install_args(Platform::WindowsX64, true, STABLE);
         assert_eq!(
             windows[..6],
             [
@@ -358,7 +412,7 @@ mod tests {
     #[test]
     fn upgrade_refreshes_the_package_and_never_names_python() {
         assert_eq!(
-            upgrade_args(Platform::LinuxX64),
+            upgrade_args(Platform::LinuxX64, false),
             [
                 "tool",
                 "upgrade",
@@ -368,29 +422,36 @@ mod tests {
             ]
         );
         assert_eq!(
-            upgrade_args(Platform::MacosArm64),
-            upgrade_args(Platform::LinuxX64)
+            upgrade_args(Platform::MacosArm64, false),
+            upgrade_args(Platform::LinuxX64, false)
         );
-        let windows = upgrade_args(Platform::WindowsX64);
-        assert_eq!(windows[..5], upgrade_args(Platform::LinuxX64)[..]);
+        let windows = upgrade_args(Platform::WindowsX64, false);
+        assert_eq!(windows[..5], upgrade_args(Platform::LinuxX64, false)[..]);
         assert_eq!(windows[5..], WINDOWS_INDEX_ARGS);
     }
 
     #[test]
     fn only_install_and_reinstall_pass_python() {
         for platform in PLATFORMS {
-            assert!(install_args(platform, false).contains(&"--python"));
-            assert!(install_args(platform, true).contains(&"--python"));
-            assert!(!upgrade_args(platform).contains(&"--python"));
+            assert!(has(&install_args(platform, false, STABLE), "--python"));
+            assert!(has(&install_args(platform, true, STABLE), "--python"));
+            assert!(!has(&upgrade_args(platform, false), "--python"));
+            assert!(!has(&upgrade_args(platform, true), "--python"));
         }
     }
 
     #[test]
     fn only_upgrade_refreshes_the_package() {
         for platform in PLATFORMS {
-            assert!(!install_args(platform, false).contains(&"--refresh-package"));
-            assert!(!install_args(platform, true).contains(&"--refresh-package"));
-            assert!(upgrade_args(platform).contains(&"--refresh-package"));
+            assert!(!has(
+                &install_args(platform, false, STABLE),
+                "--refresh-package"
+            ));
+            assert!(!has(
+                &install_args(platform, true, STABLE),
+                "--refresh-package"
+            ));
+            assert!(has(&upgrade_args(platform, false), "--refresh-package"));
         }
     }
 
@@ -398,10 +459,103 @@ mod tests {
     fn only_windows_gets_the_index_arguments() {
         for platform in PLATFORMS {
             let expected = platform == Platform::WindowsX64;
-            assert_eq!(install_args(platform, false).contains(&"--index"), expected);
-            assert_eq!(install_args(platform, true).contains(&"--index"), expected);
-            assert_eq!(upgrade_args(platform).contains(&"--index"), expected);
+            for channel in [STABLE, Channel::Beta, Channel::Pinned("0.15.0b1")] {
+                assert_eq!(
+                    has(&install_args(platform, false, channel), "--index"),
+                    expected
+                );
+                assert_eq!(
+                    has(&install_args(platform, true, channel), "--index"),
+                    expected
+                );
+            }
+            assert_eq!(has(&upgrade_args(platform, false), "--index"), expected);
+            assert_eq!(has(&upgrade_args(platform, true), "--index"), expected);
         }
+    }
+
+    #[test]
+    fn the_stable_channel_never_allows_pre_releases() {
+        for platform in PLATFORMS {
+            assert!(!has(&install_args(platform, false, STABLE), "--prerelease"));
+            assert!(!has(&install_args(platform, true, STABLE), "--prerelease"));
+            assert!(!has(&upgrade_args(platform, false), "--prerelease"));
+        }
+    }
+
+    #[test]
+    fn beta_adds_prerelease_allow_to_install_reinstall_and_upgrade_on_every_platform() {
+        let pair = ["--prerelease", "allow"];
+        for platform in PLATFORMS {
+            for reinstall in [false, true] {
+                let args = install_args(platform, reinstall, Channel::Beta);
+                let at = args.iter().position(|a| a == "--prerelease").unwrap();
+                assert_eq!(args[at..at + 2], pair);
+                assert!(has(&args, "z-vision-generator"));
+                assert!(!args.iter().any(|a| a.contains("==")));
+            }
+            let args = upgrade_args(platform, true);
+            let at = args.iter().position(|a| a == "--prerelease").unwrap();
+            assert_eq!(args[at..at + 2], pair);
+        }
+    }
+
+    #[test]
+    fn beta_keeps_the_windows_index_arguments_intact() {
+        let install = install_args(Platform::WindowsX64, false, Channel::Beta);
+        assert_eq!(
+            install[..7],
+            [
+                "tool",
+                "install",
+                "z-vision-generator",
+                "--python",
+                "3.14",
+                "--prerelease",
+                "allow"
+            ]
+        );
+        assert_eq!(install[7..], WINDOWS_INDEX_ARGS);
+        let upgrade = upgrade_args(Platform::WindowsX64, true);
+        assert_eq!(upgrade[5..7], ["--prerelease", "allow"]);
+        assert_eq!(upgrade[7..], WINDOWS_INDEX_ARGS);
+    }
+
+    #[test]
+    fn a_pinned_repair_reinstalls_exactly_the_installed_version_and_allows_pre_releases() {
+        assert_eq!(
+            install_args(Platform::LinuxX64, true, Channel::Pinned("0.15.0b2")),
+            [
+                "tool",
+                "install",
+                "--reinstall",
+                "z-vision-generator==0.15.0b2",
+                "--python",
+                "3.14",
+                "--prerelease",
+                "allow"
+            ]
+        );
+        let windows = install_args(Platform::WindowsX64, true, Channel::Pinned("0.15.0b2"));
+        assert_eq!(windows[3], "z-vision-generator==0.15.0b2");
+        assert_eq!(windows[8..], WINDOWS_INDEX_ARGS);
+    }
+
+    #[test]
+    fn repair_with_beta_off_pins_a_pre_release_and_leaves_stable_versions_alone() {
+        assert_eq!(
+            Channel::for_repair(false, Some("0.15.0rc1")),
+            Channel::Pinned("0.15.0rc1")
+        );
+        assert_eq!(Channel::for_repair(false, Some("0.14.1")), Channel::Stable);
+        assert_eq!(Channel::for_repair(false, None), Channel::Stable);
+    }
+
+    #[test]
+    fn repair_with_beta_on_takes_the_beta_channel_whatever_is_installed() {
+        assert_eq!(Channel::for_repair(true, Some("0.15.0rc1")), Channel::Beta);
+        assert_eq!(Channel::for_repair(true, Some("0.14.1")), Channel::Beta);
+        assert_eq!(Channel::for_repair(true, None), Channel::Beta);
     }
 
     #[test]

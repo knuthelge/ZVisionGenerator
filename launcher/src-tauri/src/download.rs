@@ -26,9 +26,9 @@ const MAX_DOWNLOAD_BYTES: u64 = 1 << 30;
 /// Chunk size of the streaming copy.
 const CHUNK: usize = 64 * 1024;
 
-/// `os error 28` (ENOSPC), and the Windows disk-full codes 39 (`ERROR_HANDLE_DISK_FULL`) and 112
-/// (`ERROR_DISK_FULL`).
-const DISK_FULL_OS_ERRORS: [i32; 3] = [28, 39, 112];
+/// `os error 28` (ENOSPC) and the Windows disk-full code 112 (`ERROR_DISK_FULL`). Other codes are not listed: 39 is
+/// `ENOTEMPTY` on Linux.
+const DISK_FULL_OS_ERRORS: [i32; 2] = [28, 112];
 
 /// Which end of a streaming copy failed.
 #[derive(Debug)]
@@ -345,6 +345,15 @@ mod tests {
         for status in [400, 401, 403, 429, 500, 502, 503] {
             assert_eq!(classify_http(status), ErrorCode::DownloadFailed, "{status}");
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_linux_enotempty_is_a_failed_download_not_a_full_disk() {
+        assert_eq!(
+            classify_io(&io::Error::from_raw_os_error(39)),
+            ErrorCode::DownloadFailed
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { formatBytes, launcherControls, launcherView } from './launcherView';
+import { formatBytes, isPrerelease, launcherControls, launcherView } from './launcherView';
 import type { Snapshot, SnapshotCase } from './types';
 
 // The cases `snapshot::controls()` in Rust is tested against: both sides must produce the same controls.
@@ -124,7 +124,7 @@ describe('headline and sub', () => {
   it('gives a failed install or repair its cause as an alert lead', () => {
     const install = view('4c failed install');
     expect(install.headline).toBe('Install didn’t finish');
-    expect(install.sub).toMatchObject({ lead: 'The download timed out.', leadAlert: true });
+    expect(install.sub).toMatchObject({ lead: 'The download didn’t finish.', leadAlert: true });
     const repair = view('R failed repair');
     expect(repair.headline).toBe('Repair didn’t finish');
     expect(repair.sub?.lead).toContain('free disk space');
@@ -219,9 +219,44 @@ describe('action zone', () => {
   });
 
   it('lists More entries in order, with Repair left out where it is the primary', () => {
-    expect(view('6 running').menu.map((m) => m.id)).toEqual(['repair', 'uninstall']);
-    expect(view('10a failed update').menu.map((m) => m.id)).toEqual(['uninstall']);
+    expect(view('6 running').menu.map((m) => m.id)).toEqual(['repair', 'uninstall', 'beta']);
+    expect(view('10a failed update').menu.map((m) => m.id)).toEqual(['uninstall', 'beta']);
+    expect(view('4a needs_install').menu.map((m) => m.id)).toEqual(['beta']);
+    expect(view('4c failed install (windows)').menu.map((m) => m.id)).toEqual(['beta']);
+    expect(view('4c failed install').menu.map((m) => m.id)).toEqual(['uninstall', 'beta']);
     expect(view('1 checking').menu).toEqual([]);
+  });
+
+  it('carries the stored beta choice on the beta entry only', () => {
+    const entries = (name: string) => view(name).menu;
+    expect(entries('6 running').map((m) => m.checked)).toEqual([undefined, undefined, false]);
+    expect(entries('4a needs_install with beta')[0]).toMatchObject({ id: 'beta', label: 'Get beta versions', checked: true });
+  });
+});
+
+describe('beta wording', () => {
+  it('adds a beta tag to the kicker of a pre-release install only', () => {
+    expect(view('6 running').kicker).toBe('Version 0.14.0');
+    expect(view('6 running a beta version').kicker).toBe('Version 0.15.0b2 · beta');
+  });
+
+  it('calls a pre-release update a beta, and a stable one a version', () => {
+    expect(view('7 running with update').notice).toMatchObject({ lead: 'Version 0.14.1 is out.' });
+    expect(view('7 running with a beta update').notice).toMatchObject({ kind: 'update', version: '0.15.0b3', lead: 'Beta 0.15.0b3 is out.' });
+  });
+
+  it('knows pre-release version spellings', () => {
+    for (const v of ['0.15.0b2', '1.0rc1', '1.0.0a1', '1.0.dev3', '1.0-beta.2', 'v2.0rc1', '1.0b1+local']) expect(isPrerelease(v), v).toBe(true);
+    for (const v of ['0.14.1', '1.0', '1.0.post1', 'garbage', '']) expect(isPrerelease(v), v).toBe(false);
+  });
+});
+
+describe('copy', () => {
+  it('words a failed or unavailable download without a dead end', () => {
+    const failed = launcherView({ ...snapshot('4c failed install'), error: { code: 'download_failed', detail: null } });
+    expect(failed.sub?.lead).toBe('The download didn’t finish.');
+    const gone = launcherView({ ...snapshot('4c failed install'), error: { code: 'download_unavailable', detail: 'x' } });
+    expect(gone.sub?.text).toBe('A newer launcher fixes this.');
   });
 });
 

@@ -14,7 +14,7 @@
   import LauncherLink from './LauncherLink.svelte';
   import LauncherNotice from './LauncherNotice.svelte';
   import QuietBar from './QuietBar.svelte';
-  import { UNINSTALL_DIALOG, launcherView, type PrimaryView } from './launcherView';
+  import { UNINSTALL_DIALOG, launcherView, type MenuItemView, type PrimaryView } from './launcherView';
   import type { LinkId, Primary, Snapshot } from './types';
 
   interface Props {
@@ -141,17 +141,37 @@
     void run(() => bridge.uninstallApp());
   }
 
+  // Get beta versions shows its stored value; a toggle shows at once and reverts if the command is refused.
+  let betaChecked = $state(false);
+  $effect(() => {
+    betaChecked = snapshot?.beta ?? false;
+  });
+
+  async function toggleBeta(): Promise<void> {
+    const wanted = !betaChecked;
+    betaChecked = wanted;
+    const stored = await run(() => bridge.setBeta(wanted));
+    betaChecked = stored ?? snapshot?.beta ?? false;
+  }
+
+  function menuEntry(item: MenuItemView): ActionMenuEntry {
+    const entry = { kind: 'item' as const, id: item.id, label: item.label, description: item.description };
+    switch (item.id) {
+      case 'beta':
+        return { ...entry, checked: betaChecked, onselect: () => void toggleBeta() };
+      case 'repair':
+        return { ...entry, icon: item.icon ?? undefined, onselect: () => void run(() => bridge.repairApp()) };
+      case 'uninstall':
+        return { ...entry, icon: item.icon ?? undefined, danger: item.danger, onselect: requestUninstall };
+    }
+  }
+
+  // The beta checkbox is a setting, not an action: it sits last, after a separator.
   const menuEntries = $derived<ActionMenuEntry[] | null>(
     view && view.menu.length > 0
-      ? view.menu.map((item) => ({
-          kind: 'item' as const,
-          id: item.id,
-          icon: item.icon,
-          label: item.label,
-          description: item.description,
-          danger: item.danger,
-          onselect: () => (item.id === 'repair' ? void run(() => bridge.repairApp()) : requestUninstall())
-        }))
+      ? view.menu.flatMap((item, index): ActionMenuEntry[] =>
+          item.id === 'beta' && index > 0 ? [{ kind: 'separator' }, menuEntry(item)] : [menuEntry(item)]
+        )
       : null
   );
 

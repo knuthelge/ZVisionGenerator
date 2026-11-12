@@ -22,11 +22,28 @@ enum Stage {
     Post(u64),
 }
 
+impl Stage {
+    /// Whether the stage sorts below its release: development, alpha, beta and release-candidate versions.
+    fn is_prerelease(self) -> bool {
+        matches!(
+            self,
+            Stage::Dev(_) | Stage::Alpha(_) | Stage::Beta(_) | Stage::Rc(_)
+        )
+    }
+}
+
 /// A parsed version: release segments and a stage.
 #[derive(Debug, Clone)]
 pub struct Version {
     release: Vec<u64>,
     stage: Stage,
+}
+
+impl Version {
+    /// Whether this is a development, alpha, beta or release-candidate version.
+    pub fn is_prerelease(&self) -> bool {
+        self.stage.is_prerelease()
+    }
 }
 
 impl PartialEq for Version {
@@ -161,15 +178,41 @@ pub fn offer(installed: &str, latest: &str, skip: Option<Skip<'_>>, launcher: &s
     }
 }
 
-/// The latest version in PyPI's JSON (`info.version`), when it is a version.
-pub fn latest_from_pypi_json(body: &str) -> Option<String> {
+/// Whether the version string `text` names a pre-release; `false` when it does not parse.
+pub fn is_prerelease(text: &str) -> bool {
+    parse(text).is_some_and(|version| version.is_prerelease())
+}
+
+/// The newest version in PyPI's `releases` that has at least one file that is not yanked.
+fn newest_unyanked(releases: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    releases
+        .iter()
+        .filter(|(_, files)| {
+            files.as_array().is_some_and(|files| {
+                files.iter().any(|file| {
+                    file.get("yanked").and_then(serde_json::Value::as_bool) != Some(true)
+                })
+            })
+        })
+        .filter_map(|(name, _)| parse(name).map(|version| (version, name)))
+        .max_by(|(a, _), (b, _)| a.cmp(b))
+        .map(|(_, name)| name.clone())
+}
+
+/// The latest version in PyPI's JSON. Without `beta` it is `info.version`, PyPI's own latest stable release; with
+/// `beta` it is the newest parseable release that has a file that is not yanked, pre-releases included. `None` when
+/// the body has no usable version.
+pub fn latest_from_pypi_json(body: &str, beta: bool) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    if beta {
+        return newest_unyanked(json.get("releases")?.as_object()?);
+    }
     let version = json.get("info")?.get("version")?.as_str()?;
     parse(version).map(|_| version.to_owned())
 }
 
-/// Ask PyPI for the latest version; `None` on any failure.
-pub fn fetch_latest() -> Option<String> {
+/// Ask PyPI for the latest version (see [`latest_from_pypi_json`]); `None` on any failure.
+pub fn fetch_latest(beta: bool) -> Option<String> {
     let mut response = ureq::get(PYPI_URL)
         .config()
         .timeout_global(Some(FETCH_TIMEOUT))
@@ -177,7 +220,7 @@ pub fn fetch_latest() -> Option<String> {
         .call()
         .ok()?;
     let body = response.body_mut().read_to_string().ok()?;
-    latest_from_pypi_json(&body)
+    latest_from_pypi_json(&body, beta)
 }
 
 #[cfg(test)]
@@ -313,7 +356,7 @@ mod tests {
     fn reads_the_latest_version_from_pypi_json() {
         let body =
             r#"{"info": {"name": "z-vision-generator", "version": "0.14.1"}, "releases": {}}"#;
-        assert_eq!(latest_from_pypi_json(body), Some("0.14.1".into()));
+        assert_eq!(latest_from_pypi_json(body, false), Some("0.14.1".into()));
     }
 
     #[test]
@@ -326,7 +369,142 @@ mod tests {
             r#"{"info": {"version": 14}}"#,
             r#"{"info": {"version": "latest"}}"#,
         ] {
-            assert_eq!(latest_from_pypi_json(body), None, "{body:?}");
+            assert_eq!(latest_from_pypi_json(body, false), None, "{body:?}");
         }
+    }
+
+    const RELEASES: &str = r#"{
+        "info": {"version": "0.14.1"},
+        "releases": {
+            "0.14.0": [{"yanked": false}],
+            "0.14.1": [{"yanked": false}],
+            "0.15.0rc1": [{"yanked": false}, {"yanked": false}],
+            "0.15.0b2": [{"yanked": false}],
+            "not-a-version": [{"yanked": false}],
+            "0.16.0": [{"yanked": true}],
+            "0.17.0rc1": [{"yanked": true}, {"yanked": true}],
+            "0.18.0": []
+        }
+    }"#;
+
+    #[test]
+    fn beta_off_ignores_releases_and_reads_info_version() {
+        assert_eq!(
+            latest_from_pypi_json(RELEASES, false),
+            Some("0.14.1".into())
+        );
+    }
+
+    #[test]
+    fn beta_on_takes_the_newest_release_including_pre_releases() {
+        assert_eq!(
+            latest_from_pypi_json(RELEASES, true),
+            Some("0.15.0rc1".into())
+        );
+    }
+
+    #[test]
+    fn beta_on_skips_releases_whose_files_are_all_yanked_or_missing() {
+        let body = r#"{"info": {"version": "1.0.0"}, "releases": {
+            "1.0.0": [{"yanked": false}],
+            "1.1.0b1": [{"yanked": true}],
+            "1.1.0": [{"yanked": true}, {"yanked": true}],
+            "1.2.0": []
+        }}"#;
+        assert_eq!(latest_from_pypi_json(body, true), Some("1.0.0".into()));
+    }
+
+    #[test]
+    fn a_release_with_one_file_left_is_not_yanked() {
+        let body = r#"{"releases": {
+            "1.0.0": [{"yanked": false}],
+            "1.1.0": [{"yanked": true}, {"yanked": false}],
+            "1.2.0": [{}]
+        }}"#;
+        assert_eq!(latest_from_pypi_json(body, true), Some("1.2.0".into()));
+    }
+
+    #[test]
+    fn beta_on_compares_versions_not_strings() {
+        let body = r#"{"releases": {
+            "0.9.0": [{"yanked": false}],
+            "0.10.0b1": [{"yanked": false}]
+        }}"#;
+        assert_eq!(latest_from_pypi_json(body, true), Some("0.10.0b1".into()));
+    }
+
+    #[test]
+    fn beta_on_without_usable_releases_gives_none() {
+        for body in [
+            "",
+            "{}",
+            r#"{"info": {"version": "1.0.0"}}"#,
+            r#"{"releases": {}}"#,
+            r#"{"releases": {"x": [{"yanked": false}]}}"#,
+            r#"{"releases": {"1.0.0": [{"yanked": true}]}}"#,
+            r#"{"releases": []}"#,
+        ] {
+            assert_eq!(latest_from_pypi_json(body, true), None, "{body:?}");
+        }
+    }
+
+    #[test]
+    fn dev_alpha_beta_and_rc_are_pre_releases_final_and_post_are_not() {
+        for text in ["1.0.dev1", "1.0a1", "1.0b2", "1.0rc1", "0.15.0b3"] {
+            assert!(is_prerelease(text), "{text}");
+            assert!(parse(text).unwrap().is_prerelease(), "{text}");
+        }
+        for text in ["1.0", "0.14.1", "1.0.post1", "garbage", ""] {
+            assert!(!is_prerelease(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_beta_is_offered_only_when_newer_than_what_is_installed() {
+        assert_eq!(
+            offer("0.14.1", "0.15.0b1", None, "0.1.0"),
+            Offer::Update("0.15.0b1".into())
+        );
+        assert_eq!(offer("0.15.0b2", "0.15.0b1", None, "0.1.0"), Offer::None);
+        assert_eq!(offer("0.15.0b1", "0.14.1", None, "0.1.0"), Offer::None);
+        assert_eq!(
+            offer("0.15.0b1", "0.15.0", None, "0.1.0"),
+            Offer::Update("0.15.0".into())
+        );
+    }
+
+    /// A body shaped like PyPI's: file objects with their usual fields, a stable `info.version`, betas on top and a
+    /// newer beta whose only files are yanked.
+    const PYPI_BODY: &str = r#"{
+        "info": {"name": "z-vision-generator", "version": "0.14.1", "yanked": false},
+        "releases": {
+            "0.9.0": [{"filename": "z_vision_generator-0.9.0-py3-none-any.whl", "yanked": false, "yanked_reason": null}],
+            "0.10.0": [{"filename": "z_vision_generator-0.10.0-py3-none-any.whl", "yanked": false, "yanked_reason": null}],
+            "0.14.1": [
+                {"filename": "z_vision_generator-0.14.1-py3-none-any.whl", "yanked": false, "yanked_reason": null},
+                {"filename": "z_vision_generator-0.14.1.tar.gz", "yanked": false, "yanked_reason": null}
+            ],
+            "0.15.0b1": [{"filename": "z_vision_generator-0.15.0b1-py3-none-any.whl", "yanked": false, "yanked_reason": null}],
+            "0.15.0b2": [
+                {"filename": "z_vision_generator-0.15.0b2-py3-none-any.whl", "yanked": false, "yanked_reason": null},
+                {"filename": "z_vision_generator-0.15.0b2.tar.gz", "yanked": false, "yanked_reason": null}
+            ],
+            "0.15.0b3": [
+                {"filename": "z_vision_generator-0.15.0b3-py3-none-any.whl", "yanked": true, "yanked_reason": "broken wheel"},
+                {"filename": "z_vision_generator-0.15.0b3.tar.gz", "yanked": true, "yanked_reason": "broken wheel"}
+            ]
+        }
+    }"#;
+
+    #[test]
+    fn a_pypi_shaped_body_gives_stable_when_off_and_the_newest_live_beta_when_on() {
+        assert_eq!(
+            latest_from_pypi_json(PYPI_BODY, false),
+            Some("0.14.1".into())
+        );
+        assert_eq!(
+            latest_from_pypi_json(PYPI_BODY, true),
+            Some("0.15.0b2".into())
+        );
     }
 }

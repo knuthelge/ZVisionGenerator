@@ -10,10 +10,8 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::process_tree::same_process;
 use crate::version::Skip;
-
-/// How far apart (in seconds) a process's start time and the recorded one may be and still be the same process.
-const START_TIME_TOLERANCE_SECS: u64 = 5;
 
 /// `server.json`: the server the launcher started.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,6 +33,8 @@ pub struct Prefs {
     pub skip_version: Option<String>,
     /// The launcher version that found `skip_version` unreachable.
     pub skipped_by: Option<String>,
+    /// Whether the user opted into pre-release versions of the app.
+    pub beta: bool,
 }
 
 impl Prefs {
@@ -65,9 +65,7 @@ pub enum StopOrDelete {
 /// Decide about a leftover record, given the start time of the process now holding its PID (`None` when none does).
 pub fn stale_action(record: &ServerRecord, live_start: Option<u64>) -> StopOrDelete {
     match live_start {
-        Some(start) if start.abs_diff(record.start_time) <= START_TIME_TOLERANCE_SECS => {
-            StopOrDelete::Stop
-        }
+        Some(start) if same_process(start, record.start_time) => StopOrDelete::Stop,
         _ => StopOrDelete::Delete,
     }
 }
@@ -247,8 +245,28 @@ mod tests {
         let text = serde_json::to_string(&Prefs::default()).unwrap();
         assert_eq!(
             text,
-            r#"{"lastPort":null,"skipVersion":null,"skippedBy":null}"#
+            r#"{"lastPort":null,"skipVersion":null,"skippedBy":null,"beta":false}"#
         );
+    }
+
+    #[test]
+    fn the_beta_choice_round_trips_and_defaults_to_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        assert!(!read_prefs(&path).beta);
+        fs::write(&path, r#"{"lastPort": 8090}"#).unwrap();
+        assert!(!read_prefs(&path).beta);
+        let prefs = Prefs {
+            beta: true,
+            ..Prefs::default()
+        };
+        write_prefs(&path, &prefs).unwrap();
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("\"beta\": true")
+        );
+        assert_eq!(read_prefs(&path), prefs);
     }
 
     #[test]

@@ -78,6 +78,8 @@ Tick **Start at login** in the launcher window. The app then starts in the backg
 
 When a new version is out, the window offers **Update**. The app stops, updates and starts again. Your data and models stay. If the update doesn't finish, choose **Repair**.
 
+To try pre-release versions, open **More** and tick **Get beta versions**; it is there before you install too. The window then offers betas as updates (**Beta 0.15.0b1 is out.**) and marks an installed beta next to its version. Unticking it downloads nothing and never goes back to an older version: a beta stays installed, **Repair** reinstalls that same beta, and **Update** offers the next stable version once one newer than your beta is out.
+
 The launcher doesn't update itself. If a new version of the app needs a newer launcher, the window says so; see [The launcher says an update needs a newer launcher](../reference/troubleshooting.md#launcher-needs-newer).
 
 ### Repair the launcher's install { #launcher-repair }

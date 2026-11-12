@@ -80,11 +80,14 @@ export interface CaptionView {
 }
 
 export interface MenuItemView {
-  id: 'repair' | 'uninstall';
-  icon: IconName;
+  id: Controls['menu'][number];
+  /** Null for a checkbox item, which shows its check instead. */
+  icon: IconName | null;
   label: string;
   description: string;
   danger: boolean;
+  /** Set for a checkbox item: whether it is on. */
+  checked?: boolean;
 }
 
 export interface LauncherView {
@@ -107,7 +110,8 @@ export interface ViewOptions {
   formatTime?: (ms: number) => string;
 }
 
-const MENU_BOTH: Controls['menu'] = ['repair', 'uninstall'];
+const MENU_ALL: Controls['menu'] = ['repair', 'uninstall', 'beta'];
+const MENU_WITHOUT_REPAIR: Controls['menu'] = ['uninstall', 'beta'];
 
 /** Derive which controls the snapshot's state offers (the Phase x control table of the design). */
 export function launcherControls(s: Snapshot): Controls {
@@ -122,41 +126,42 @@ export function launcherControls(s: Snapshot): Controls {
       break;
     case 'needs_install':
       c.primary = 'install';
+      c.menu = ['beta'];
       break;
     case 'starting':
       c.primary = 'starting';
-      installed(MENU_BOTH);
+      installed(MENU_ALL);
       break;
     case 'running':
       c.primary = 'open';
       c.update = s.updateVersion !== null;
-      installed(MENU_BOTH);
+      installed(MENU_ALL);
       break;
     case 'updating':
     case 'repairing':
       c.locked = true;
-      installed(MENU_BOTH);
+      installed(MENU_ALL);
       break;
     case 'stopped':
       c.primary = 'open';
       c.log = true;
-      installed(MENU_BOTH);
+      installed(MENU_ALL);
       break;
     case 'failed':
       c.log = true;
       if (s.failedAction === 'install') {
         c.primary = 'retry';
         // A failed install leaves a partial install behind; Windows' own uninstaller cleans it.
-        if (s.packaging !== 'windows_nsis') c.menu = ['uninstall'];
+        c.menu = s.packaging === 'windows_nsis' ? ['beta'] : [...MENU_WITHOUT_REPAIR];
       } else if (s.failedAction === 'repair') {
         c.primary = 'retry';
-        installed(['uninstall']);
+        installed(MENU_WITHOUT_REPAIR);
       } else if (s.failedAction === 'update') {
         c.primary = 'repair';
-        installed(['uninstall']);
+        installed(MENU_WITHOUT_REPAIR);
       } else {
         c.primary = 'open';
-        installed(MENU_BOTH);
+        installed(MENU_ALL);
       }
       break;
     case 'uninstalled':
@@ -240,12 +245,12 @@ const finishLead: Record<Packaging, string> = {
 /** The cause of a failed install or repair, and what to do next. */
 const causes: Record<ErrorCode, { lead: string; text: string }> = {
   download_failed: {
-    lead: 'The download timed out.',
+    lead: 'The download didn’t finish.',
     text: 'Check the internet connection, then retry. What’s already downloaded is kept.'
   },
   download_unavailable: {
     lead: 'A file is no longer available to download.',
-    text: 'A newer launcher fixes this. Get it from the install guide.'
+    text: 'A newer launcher fixes this.'
   },
   checksum_mismatch: {
     lead: 'A downloaded file was not the one expected.',
@@ -272,6 +277,11 @@ function causeOf(s: Snapshot): { lead: string; text: string } {
   return causes[s.error?.code ?? 'uv_failed'];
 }
 
+/** Whether a version string is a development, alpha, beta or release-candidate version (`0.15.0b2`, `1.0rc1`). */
+export function isPrerelease(version: string): boolean {
+  return /^v?\d+(\.\d+)*[._-]?(dev|a|alpha|b|beta|rc|c|pre|preview)[._-]?\d*(\+.*)?$/i.test(version.trim());
+}
+
 function stepKicker(p: Progress): string {
   return `Step ${p.index + 1} of ${p.steps.length}`;
 }
@@ -279,7 +289,8 @@ function stepKicker(p: Progress): string {
 function kickerOf(s: Snapshot): string {
   if (s.progress) return stepKicker(s.progress);
   if (s.phase === 'uninstalled') return '';
-  return s.installedVersion ? `Version ${s.installedVersion}` : 'Setup';
+  if (!s.installedVersion) return 'Setup';
+  return isPrerelease(s.installedVersion) ? `Version ${s.installedVersion} · beta` : `Version ${s.installedVersion}`;
 }
 
 const MOODS: Record<Phase, MascotMood> = {
@@ -452,7 +463,7 @@ const PRIMARIES: Record<Primary, Omit<PrimaryView, 'id'>> = {
   quit: { label: 'Quit', icon: null, variant: 'primary', loading: false }
 };
 
-const MENU_ITEMS: Record<'repair' | 'uninstall', MenuItemView> = {
+const MENU_ITEMS: Record<Controls['menu'][number], MenuItemView> = {
   repair: {
     id: 'repair',
     icon: 'reset',
@@ -466,6 +477,13 @@ const MENU_ITEMS: Record<'repair' | 'uninstall', MenuItemView> = {
     label: 'Uninstall…',
     description: 'Asks first. Your outputs, settings and models stay.',
     danger: true
+  },
+  beta: {
+    id: 'beta',
+    icon: null,
+    label: 'Get beta versions',
+    description: 'Offers pre-release versions. Turning it off keeps the version you have.',
+    danger: false
   }
 };
 
@@ -536,7 +554,7 @@ export function launcherView(s: Snapshot, options: ViewOptions = {}): LauncherVi
         notice = {
           kind: 'update',
           version: s.updateVersion,
-          lead: `Version ${s.updateVersion} is out.`,
+          lead: isPrerelease(s.updateVersion) ? `Beta ${s.updateVersion} is out.` : `Version ${s.updateVersion} is out.`,
           text: 'It restarts to update.',
           link: { id: 'whats_new', label: 'What’s new' },
           button: 'Update'
@@ -605,6 +623,6 @@ export function launcherView(s: Snapshot, options: ViewOptions = {}): LauncherVi
     notice,
     caption: step ? { label: step, line: s.progress?.line ?? null } : null,
     primary: controls.primary ? { id: controls.primary, ...PRIMARIES[controls.primary] } : null,
-    menu: controls.menu.map((id) => MENU_ITEMS[id])
+    menu: controls.menu.map((id) => (id === 'beta' ? { ...MENU_ITEMS.beta, checked: s.beta } : MENU_ITEMS[id]))
   };
 }

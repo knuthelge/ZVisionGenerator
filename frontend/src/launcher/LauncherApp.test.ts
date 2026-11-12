@@ -41,6 +41,7 @@ function fakeBridge(first: Snapshot): Fake {
     repairApp: vi.fn(done),
     uninstallApp: vi.fn(done),
     setAutostart: vi.fn((enabled: boolean) => Promise.resolve(enabled)),
+    setBeta: vi.fn((enabled: boolean) => Promise.resolve(enabled)),
     openLink: vi.fn(done),
     quitLauncher: vi.fn(done),
     closeWindow: vi.fn(done)
@@ -248,11 +249,17 @@ describe('LauncherApp actions', () => {
 });
 
 describe('LauncherApp quiet bar', () => {
-  it('offers Quit alone before install, and Start at login and More once installed', async () => {
+  it('offers Quit and More, but no Start at login, before install', async () => {
     const before = await open('4a needs_install');
     expect(before.target.querySelector('[role="switch"]')).toBeNull();
-    expect(before.target.querySelector('[aria-label="More actions"]')).toBeNull();
+    expect(before.target.querySelector('[aria-label="More actions"]')).not.toBeNull();
     expect(buttonByText('Quit', before.target.querySelector('footer') as HTMLElement)).toBeTruthy();
+  });
+
+  it('offers Quit alone while installing', async () => {
+    const { target } = await open('4b installing');
+    expect(target.querySelector('[role="switch"]')).toBeNull();
+    expect(target.querySelector('[aria-label="More actions"]')).toBeNull();
   });
 
   it('quits from the bar', async () => {
@@ -311,8 +318,9 @@ describe('LauncherApp quiet bar', () => {
 
     (target.querySelector('[aria-label="More actions"]') as HTMLButtonElement).click();
     await settle();
-    const items = Array.from(document.querySelectorAll('[role="menuitem"]')).map((el) => el.getAttribute('data-action'));
-    expect(items).toEqual(['repair', 'uninstall']);
+    const items = Array.from(document.querySelectorAll('[role^="menuitem"]')).map((el) => el.getAttribute('data-action'));
+    expect(items).toEqual(['repair', 'uninstall', 'beta']);
+    expect(document.querySelectorAll('[role="separator"]')).toHaveLength(1);
 
     (document.querySelector('[data-action="repair"]') as HTMLButtonElement).click();
     await settle();
@@ -344,6 +352,74 @@ describe('LauncherApp quiet bar', () => {
 
     expect(bridge.uninstallApp).toHaveBeenCalledOnce();
     expect(document.querySelector('[data-testid="confirm-dialog"]')).toBeNull();
+  });
+});
+
+describe('LauncherApp beta', () => {
+  const openMore = async (target: HTMLElement) => {
+    (target.querySelector('[aria-label="More actions"]') as HTMLButtonElement).click();
+    await settle();
+    return document.querySelector('[data-action="beta"]') as HTMLButtonElement;
+  };
+
+  it('offers Get beta versions as the only More entry before install, unchecked by default', async () => {
+    const { target } = await open('4a needs_install');
+    const item = await openMore(target);
+
+    expect(Array.from(document.querySelectorAll('[role^="menuitem"]'))).toHaveLength(1);
+    expect(document.querySelectorAll('[role="separator"]')).toHaveLength(0);
+    expect(item.textContent).toContain('Get beta versions');
+    expect(item.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('shows the stored choice as checked', async () => {
+    const { target } = await open('4a needs_install with beta');
+    expect((await openMore(target)).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('turns beta on through set_beta and shows what Rust stored', async () => {
+    const { target, bridge } = await open('6 running');
+    (await openMore(target)).click();
+    await settle();
+
+    expect(bridge.setBeta).toHaveBeenCalledExactlyOnceWith(true);
+    expect((await openMore(target)).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('turns beta off again from a checked item', async () => {
+    const { target, bridge } = await open('6 running a beta version');
+    (await openMore(target)).click();
+    await settle();
+
+    expect(bridge.setBeta).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  it('puts the checkbox back when Rust refuses', async () => {
+    const { target, bridge } = await open('6 running');
+    bridge.setBeta = vi.fn(() => Promise.reject('busy'));
+    (await openMore(target)).click();
+    await settle();
+
+    expect(bridge.setBeta).toHaveBeenCalledOnce();
+    expect((await openMore(target)).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('follows a snapshot that changes the stored choice', async () => {
+    const { target, emit } = await open('6 running');
+    const next = snapshot('6 running');
+    next.beta = true;
+    emit(next);
+    await settle();
+
+    expect((await openMore(target)).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('marks a beta install in the kicker and a beta update in the notice', async () => {
+    const running = await open('6 running a beta version');
+    expect(running.target.querySelector('.kicker')?.textContent).toBe('Version 0.15.0b2 · beta');
+    document.body.innerHTML = '';
+    const update = await open('7 running with a beta update');
+    expect(update.target.textContent).toContain('Beta 0.15.0b3 is out.');
   });
 });
 

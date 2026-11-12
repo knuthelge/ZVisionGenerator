@@ -64,6 +64,13 @@ describe('bridge', () => {
     expect(calls).toEqual([['set_autostart', { enabled: true }]]);
   });
 
+  it('sends Get beta versions with an enabled flag and returns the stored value', async () => {
+    const calls = mock({ set_beta: false });
+
+    await expect(bridge.setBeta(true)).resolves.toBe(false);
+    expect(calls).toEqual([['set_beta', { enabled: true }]]);
+  });
+
   it('opens a link by its id', async () => {
     const calls = mock();
 

@@ -179,8 +179,8 @@ The desktop launcher downloads a pinned release of [uv](https://github.com/astra
 
 The desktop launcher downloads pinned GPL builds of `ffmpeg` and `ffprobe` when it installs or repairs the app, and puts them where the app looks for them. They are not distributed with this package or inside the launcher. [FFmpeg](https://ffmpeg.org/) is licensed under the GNU General Public License for these builds, which include GPL components such as libx264; its license text is at https://www.gnu.org/licenses/gpl-3.0.html and its source at https://ffmpeg.org/download.html and https://github.com/FFmpeg/FFmpeg.
 
-- Windows and Linux: the `gpl` builds of [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), whose repository holds the build scripts and the versions of every library in the build.
-- macOS (Apple silicon): the builds of [osxexperts.net](https://www.osxexperts.net/).
+- Windows and Linux: the `gpl` builds of [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), release `autobuild-2026-10-31-12-59` (FFmpeg n9.0.2). The repository holds the build scripts and the versions of every library in the build. The builds are GPLv3 because they are configured with `--enable-version3`.
+- macOS (Apple silicon): FFmpeg 9.0.2 from [ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de/), a signed static build by Martin Riedl, also GPLv3 with `--enable-version3`.
 
 ## Nunito (bundled in the desktop launcher)
 
