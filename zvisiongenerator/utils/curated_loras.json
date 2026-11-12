@@ -22,7 +22,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 1721,
+   "downloads": 1745,
    "platforms": [
     "darwin",
     "win32",
@@ -58,7 +58,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 2465,
+   "downloads": 2481,
    "platforms": [
     "darwin",
     "win32",
@@ -94,7 +94,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 263,
+   "downloads": 271,
    "platforms": [
     "darwin",
     "win32",
@@ -130,7 +130,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 746,
+   "downloads": 744,
    "platforms": [
     "darwin",
     "win32",
@@ -166,7 +166,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 183,
+   "downloads": 171,
    "platforms": [
     "darwin",
     "win32",
@@ -202,7 +202,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 410,
+   "downloads": 386,
    "platforms": [
     "darwin",
     "win32",
@@ -238,7 +238,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 251,
+   "downloads": 246,
    "platforms": [
     "darwin",
     "win32",
@@ -274,7 +274,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 145,
+   "downloads": 135,
    "platforms": [
     "darwin",
     "win32",
@@ -310,7 +310,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 192,
+   "downloads": 181,
    "platforms": [
     "darwin",
     "win32",
@@ -346,7 +346,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 140,
+   "downloads": 141,
    "platforms": [
     "darwin",
     "win32",
@@ -382,7 +382,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 167,
+   "downloads": 161,
    "platforms": [
     "darwin",
     "win32",
@@ -418,7 +418,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 100,
+   "downloads": 94,
    "platforms": [
     "darwin",
     "win32",
@@ -454,7 +454,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 134,
+   "downloads": 119,
    "platforms": [
     "darwin",
     "win32",
@@ -490,7 +490,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 79,
+   "downloads": 69,
    "platforms": [
     "darwin",
     "win32",
@@ -526,7 +526,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 189,
+   "downloads": 187,
    "platforms": [
     "darwin",
     "win32",
@@ -562,7 +562,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 74,
+   "downloads": 70,
    "platforms": [
     "darwin",
     "win32",
@@ -598,7 +598,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 196,
+   "downloads": 189,
    "platforms": [
     "darwin",
     "win32",
@@ -634,7 +634,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 86,
+   "downloads": 81,
    "platforms": [
     "darwin",
     "win32",
@@ -670,7 +670,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 59,
+   "downloads": 60,
    "platforms": [
     "darwin",
     "win32",
@@ -706,7 +706,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 40,
+   "downloads": 42,
    "platforms": [
     "darwin",
     "win32",
@@ -742,7 +742,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 41,
+   "downloads": 36,
    "platforms": [
     "darwin",
     "win32",
@@ -778,7 +778,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 60,
+   "downloads": 63,
    "platforms": [
     "darwin",
     "win32",
@@ -814,7 +814,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 38,
+   "downloads": 39,
    "platforms": [
     "darwin",
     "win32",
@@ -886,7 +886,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 59,
+   "downloads": 60,
    "platforms": [
     "darwin",
     "win32",
@@ -922,7 +922,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 34,
+   "downloads": 38,
    "platforms": [
     "darwin",
     "win32",
@@ -958,7 +958,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 54,
+   "downloads": 55,
    "platforms": [
     "darwin",
     "win32",
@@ -994,7 +994,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 18,
+   "downloads": 20,
    "platforms": [
     "darwin",
     "win32",
@@ -1030,7 +1030,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 46,
+   "downloads": 51,
    "platforms": [
     "darwin",
     "win32",
@@ -1102,7 +1102,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 185,
+   "downloads": 190,
    "platforms": [
     "darwin",
     "win32",
@@ -1138,7 +1138,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 23,
+   "downloads": 24,
    "platforms": [
     "darwin",
     "win32",
@@ -1174,7 +1174,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 183,
+   "downloads": 177,
    "platforms": [
     "darwin",
     "win32",
@@ -1246,7 +1246,7 @@
    "weight": 1.0,
    "licence": "mit",
    "non_commercial": false,
-   "downloads": 672,
+   "downloads": 541,
    "platforms": [
     "darwin",
     "win32",
@@ -1282,7 +1282,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 90,
+   "downloads": 88,
    "platforms": [
     "darwin",
     "win32",
@@ -1318,7 +1318,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 114,
+   "downloads": 109,
    "platforms": [
     "darwin",
     "win32",
@@ -1353,7 +1353,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 265,
+   "downloads": 270,
    "platforms": [
     "darwin",
     "win32",
@@ -1424,7 +1424,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 277,
+   "downloads": 313,
    "platforms": [
     "darwin",
     "win32",
@@ -1460,7 +1460,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 5479,
+   "downloads": 5442,
    "platforms": [
     "darwin",
     "win32",
@@ -1496,7 +1496,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 232,
+   "downloads": 216,
    "platforms": [
     "darwin",
     "win32",
@@ -1604,7 +1604,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 131,
+   "downloads": 136,
    "platforms": [
     "darwin",
     "win32",
@@ -1747,7 +1747,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 21,
+   "downloads": 23,
    "platforms": [
     "darwin",
     "win32",
@@ -1783,7 +1783,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 144,
+   "downloads": 146,
    "platforms": [
     "darwin",
     "win32",
@@ -1819,7 +1819,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 43,
+   "downloads": 42,
    "platforms": [
     "darwin",
     "win32",
@@ -1855,7 +1855,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 488,
+   "downloads": 499,
    "platforms": [
     "darwin",
     "win32",
@@ -1891,7 +1891,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 3010,
+   "downloads": 3087,
    "platforms": [
     "darwin",
     "win32",
@@ -1962,7 +1962,7 @@
    "weight": 1.0,
    "licence": "mit",
    "non_commercial": false,
-   "downloads": 27,
+   "downloads": 26,
    "platforms": [
     "darwin",
     "win32",
@@ -1998,7 +1998,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 54,
+   "downloads": 52,
    "platforms": [
     "darwin",
     "win32",
@@ -2034,7 +2034,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 64,
+   "downloads": 66,
    "platforms": [
     "darwin",
     "win32",
@@ -2070,7 +2070,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 23,
+   "downloads": 25,
    "platforms": [
     "darwin",
     "win32",
@@ -2178,7 +2178,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 30,
+   "downloads": 31,
    "platforms": [
     "darwin",
     "win32",
@@ -2214,7 +2214,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 38,
+   "downloads": 36,
    "platforms": [
     "darwin",
     "win32",
@@ -2466,7 +2466,7 @@
    "weight": 0.9,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 133,
+   "downloads": 136,
    "platforms": [
     "darwin",
     "win32",
@@ -2502,7 +2502,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 40,
+   "downloads": 39,
    "platforms": [
     "darwin",
     "win32",
@@ -2538,7 +2538,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 43,
+   "downloads": 44,
    "platforms": [
     "darwin",
     "win32",
@@ -2574,7 +2574,7 @@
    "weight": 1.0,
    "licence": "creativeml-openrail-m",
    "non_commercial": false,
-   "downloads": 25,
+   "downloads": 27,
    "platforms": [
     "darwin",
     "win32",
@@ -2610,7 +2610,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 23,
+   "downloads": 24,
    "platforms": [
     "darwin",
     "win32",
@@ -2646,7 +2646,7 @@
    "weight": 0.8,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 293,
+   "downloads": 291,
    "platforms": [
     "darwin",
     "win32",
@@ -2682,7 +2682,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 42,
+   "downloads": 39,
    "platforms": [
     "darwin",
     "win32",
@@ -2716,7 +2716,7 @@
    "weight": 1.0,
    "licence": "mit",
    "non_commercial": false,
-   "downloads": 53,
+   "downloads": 54,
    "platforms": [
     "darwin",
     "win32",
@@ -2752,7 +2752,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 60,
+   "downloads": 61,
    "platforms": [
     "darwin",
     "win32",
@@ -2824,7 +2824,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 37,
+   "downloads": 31,
    "platforms": [
     "darwin",
     "win32",
@@ -2859,7 +2859,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 5096,
+   "downloads": 5082,
    "platforms": [
     "darwin",
     "win32",
@@ -2895,7 +2895,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 504,
+   "downloads": 502,
    "platforms": [
     "darwin",
     "win32",
@@ -2931,7 +2931,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 1925,
+   "downloads": 1862,
    "platforms": [
     "darwin",
     "win32",
@@ -2967,7 +2967,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 1078,
+   "downloads": 1074,
    "platforms": [
     "darwin",
     "win32",
@@ -3003,7 +3003,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 277,
+   "downloads": 273,
    "platforms": [
     "darwin",
     "win32",
@@ -3039,7 +3039,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 1508,
+   "downloads": 1533,
    "platforms": [
     "darwin",
     "win32",
@@ -3075,7 +3075,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 825,
+   "downloads": 814,
    "platforms": [
     "darwin",
     "win32",
@@ -3111,7 +3111,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 733,
+   "downloads": 746,
    "platforms": [
     "darwin",
     "win32",
@@ -3147,7 +3147,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 807,
+   "downloads": 802,
    "platforms": [
     "darwin",
     "win32",
@@ -3183,7 +3183,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 601,
+   "downloads": 607,
    "platforms": [
     "darwin",
     "win32",
@@ -3219,7 +3219,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 672,
+   "downloads": 682,
    "platforms": [
     "darwin",
     "win32",
@@ -3255,7 +3255,7 @@
    "weight": 1.0,
    "licence": "mit",
    "non_commercial": false,
-   "downloads": 5609,
+   "downloads": 5648,
    "platforms": [
     "darwin",
     "win32",
@@ -3291,7 +3291,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 319,
+   "downloads": 315,
    "platforms": [
     "darwin",
     "win32",
@@ -3327,7 +3327,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 729,
+   "downloads": 728,
    "platforms": [
     "darwin",
     "win32",
@@ -3363,7 +3363,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 1137,
+   "downloads": 1129,
    "platforms": [
     "darwin",
     "win32",
@@ -3399,7 +3399,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 691,
+   "downloads": 662,
    "platforms": [
     "darwin",
     "win32",
@@ -3435,7 +3435,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 140,
+   "downloads": 151,
    "platforms": [
     "darwin",
     "win32",
@@ -3471,7 +3471,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 385,
+   "downloads": 380,
    "platforms": [
     "darwin",
     "win32",
@@ -3507,7 +3507,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 8054,
+   "downloads": 7905,
    "platforms": [
     "darwin",
     "win32",
@@ -3543,7 +3543,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 342,
+   "downloads": 338,
    "platforms": [
     "darwin",
     "win32",
@@ -3579,7 +3579,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 674,
+   "downloads": 835,
    "platforms": [
     "darwin",
     "win32",
@@ -3615,7 +3615,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 142,
+   "downloads": 151,
    "platforms": [
     "darwin",
     "win32",
@@ -3723,7 +3723,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 80,
+   "downloads": 78,
    "platforms": [
     "darwin",
     "win32",
@@ -3759,7 +3759,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 16581,
+   "downloads": 16522,
    "platforms": [
     "darwin",
     "win32",
@@ -3795,7 +3795,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 81,
+   "downloads": 306,
    "platforms": [
     "darwin",
     "win32",
@@ -3831,7 +3831,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 109,
+   "downloads": 324,
    "platforms": [
     "darwin",
     "win32",
@@ -3867,7 +3867,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 126,
+   "downloads": 123,
    "platforms": [
     "darwin",
     "win32",
@@ -3939,7 +3939,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 104,
+   "downloads": 99,
    "platforms": [
     "darwin",
     "win32",
@@ -4011,7 +4011,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 55,
+   "downloads": 288,
    "platforms": [
     "darwin",
     "win32",
@@ -4047,7 +4047,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 45,
+   "downloads": 43,
    "platforms": [
     "darwin",
     "win32",
@@ -4083,7 +4083,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 91,
+   "downloads": 87,
    "platforms": [
     "darwin",
     "win32",
@@ -4119,7 +4119,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 86,
+   "downloads": 83,
    "platforms": [
     "darwin",
     "win32",
@@ -4191,7 +4191,7 @@
    "weight": 0.9,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 125,
+   "downloads": 124,
    "platforms": [
     "darwin",
     "win32",
@@ -4227,7 +4227,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 90,
+   "downloads": 79,
    "platforms": [
     "darwin",
     "win32",
@@ -4263,7 +4263,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 53,
+   "downloads": 55,
    "platforms": [
     "darwin",
     "win32",
@@ -4299,7 +4299,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 71,
+   "downloads": 65,
    "platforms": [
     "darwin",
     "win32",
@@ -4335,7 +4335,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 64,
+   "downloads": 62,
    "platforms": [
     "darwin",
     "win32",
@@ -4371,7 +4371,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 89,
+   "downloads": 81,
    "platforms": [
     "darwin",
     "win32",
@@ -4407,7 +4407,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 91,
+   "downloads": 88,
    "platforms": [
     "darwin",
     "win32",
@@ -4443,7 +4443,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 220,
+   "downloads": 219,
    "platforms": [
     "darwin",
     "win32",
@@ -4479,7 +4479,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 64,
+   "downloads": 62,
    "platforms": [
     "darwin",
     "win32",
@@ -4515,7 +4515,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 32,
+   "downloads": 30,
    "platforms": [
     "darwin",
     "win32",
@@ -4551,7 +4551,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 118,
+   "downloads": 114,
    "platforms": [
     "darwin",
     "win32",
@@ -4587,7 +4587,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 93,
+   "downloads": 91,
    "platforms": [
     "darwin",
     "win32",
@@ -4623,7 +4623,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 70,
+   "downloads": 64,
    "platforms": [
     "darwin",
     "win32",
@@ -4695,7 +4695,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 85,
+   "downloads": 81,
    "platforms": [
     "darwin",
     "win32",
@@ -4731,7 +4731,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 51,
+   "downloads": 47,
    "platforms": [
     "darwin",
     "win32",
@@ -4767,7 +4767,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 77,
+   "downloads": 301,
    "platforms": [
     "darwin",
     "win32",
@@ -4803,7 +4803,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 57,
+   "downloads": 59,
    "platforms": [
     "darwin",
     "win32",
@@ -4839,7 +4839,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 64,
+   "downloads": 62,
    "platforms": [
     "darwin",
     "win32",
@@ -4875,7 +4875,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 49,
+   "downloads": 47,
    "platforms": [
     "darwin",
     "win32",
@@ -4947,7 +4947,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 49,
+   "downloads": 50,
    "platforms": [
     "darwin",
     "win32",
@@ -4983,7 +4983,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 327,
+   "downloads": 328,
    "platforms": [
     "darwin",
     "win32",
@@ -5018,7 +5018,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 71,
+   "downloads": 74,
    "platforms": [
     "darwin",
     "win32",
@@ -5053,7 +5053,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 102,
+   "downloads": 100,
    "platforms": [
     "darwin",
     "win32",
@@ -5088,7 +5088,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 42,
+   "downloads": 37,
    "platforms": [
     "darwin",
     "win32",
@@ -5124,7 +5124,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 109,
+   "downloads": 104,
    "platforms": [
     "darwin",
     "win32",
@@ -5159,7 +5159,7 @@
    "weight": 1.0,
    "licence": "krea-2-community-license",
    "non_commercial": false,
-   "downloads": 41,
+   "downloads": 39,
    "platforms": [
     "darwin",
     "win32",
@@ -5195,7 +5195,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 59,
+   "downloads": 58,
    "platforms": [
     "darwin",
     "win32",
@@ -5230,7 +5230,7 @@
    "weight": 0.8,
    "licence": "cc-by-4.0",
    "non_commercial": false,
-   "downloads": 14,
+   "downloads": 13,
    "platforms": [
     "darwin",
     "win32",
@@ -5302,7 +5302,7 @@
    "weight": 0.9,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 364,
+   "downloads": 371,
    "platforms": [
     "darwin",
     "win32",
@@ -5374,7 +5374,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 555,
+   "downloads": 563,
    "platforms": [
     "darwin",
     "win32",
@@ -5446,7 +5446,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 89,
+   "downloads": 90,
    "platforms": [
     "darwin",
     "win32",
@@ -5482,7 +5482,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 138,
+   "downloads": 141,
    "platforms": [
     "darwin",
     "win32",
@@ -5518,7 +5518,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 214,
+   "downloads": 217,
    "platforms": [
     "darwin",
     "win32",
@@ -5554,7 +5554,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 160,
+   "downloads": 163,
    "platforms": [
     "darwin",
     "win32",
@@ -5626,7 +5626,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 109,
+   "downloads": 112,
    "platforms": [
     "darwin",
     "win32",
@@ -5662,7 +5662,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 81,
+   "downloads": 78,
    "platforms": [
     "darwin",
     "win32",
@@ -5698,7 +5698,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 176,
+   "downloads": 177,
    "platforms": [
     "darwin",
     "win32",
@@ -5734,7 +5734,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 122,
+   "downloads": 126,
    "platforms": [
     "darwin",
     "win32",
@@ -5770,7 +5770,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 88,
+   "downloads": 90,
    "platforms": [
     "darwin",
     "win32",
@@ -5806,7 +5806,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 145,
+   "downloads": 149,
    "platforms": [
     "darwin",
     "win32",
@@ -5842,7 +5842,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 65,
+   "downloads": 67,
    "platforms": [
     "darwin",
     "win32",
@@ -5878,7 +5878,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 50,
+   "downloads": 49,
    "platforms": [
     "darwin",
     "win32",
@@ -5950,7 +5950,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 72,
+   "downloads": 74,
    "platforms": [
     "darwin",
     "win32",
@@ -5986,7 +5986,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 48,
+   "downloads": 47,
    "platforms": [
     "darwin",
     "win32",
@@ -6058,7 +6058,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 66,
+   "downloads": 65,
    "platforms": [
     "darwin",
     "win32",
@@ -6094,7 +6094,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 46,
+   "downloads": 44,
    "platforms": [
     "darwin",
     "win32",
@@ -6130,7 +6130,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 55,
+   "downloads": 57,
    "platforms": [
     "darwin",
     "win32",
@@ -6166,7 +6166,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 53,
+   "downloads": 55,
    "platforms": [
     "darwin",
     "win32",
@@ -6202,7 +6202,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 68,
+   "downloads": 66,
    "platforms": [
     "darwin",
     "win32",
@@ -6490,7 +6490,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 1821,
+   "downloads": 1804,
    "platforms": [
     "darwin",
     "win32",
@@ -6742,7 +6742,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 8,
+   "downloads": 7,
    "platforms": [
     "darwin",
     "win32",
@@ -6778,7 +6778,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 230,
+   "downloads": 231,
    "platforms": [
     "darwin",
     "win32",
@@ -6850,7 +6850,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 1028,
+   "downloads": 1012,
    "platforms": [
     "darwin",
     "win32",
@@ -6886,7 +6886,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 6,
+   "downloads": 7,
    "platforms": [
     "darwin",
     "win32",
@@ -6922,7 +6922,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 148,
+   "downloads": 159,
    "platforms": [
     "darwin",
     "win32",
@@ -6958,7 +6958,7 @@
    "weight": 0.5,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 126,
+   "downloads": 133,
    "platforms": [
     "darwin",
     "win32",
@@ -6994,7 +6994,7 @@
    "weight": 1.0,
    "licence": "mit",
    "non_commercial": false,
-   "downloads": 140,
+   "downloads": 134,
    "platforms": [
     "darwin",
     "win32",
@@ -7030,7 +7030,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 82,
+   "downloads": 85,
    "platforms": [
     "darwin",
     "win32",
@@ -7066,7 +7066,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 84,
+   "downloads": 82,
    "platforms": [
     "darwin",
     "win32",
@@ -7138,7 +7138,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 70,
+   "downloads": 71,
    "platforms": [
     "darwin",
     "win32",
@@ -7173,7 +7173,7 @@
    "weight": 1.0,
    "licence": "flux-2-research",
    "non_commercial": true,
-   "downloads": 43,
+   "downloads": 41,
    "platforms": [
     "darwin",
     "win32",
@@ -7245,7 +7245,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 442,
+   "downloads": 440,
    "platforms": [
     "darwin",
     "win32",
@@ -7281,7 +7281,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 649,
+   "downloads": 656,
    "platforms": [
     "darwin",
     "win32",
@@ -7389,7 +7389,7 @@
    "weight": 1.0,
    "licence": "cc-by-nc-4.0",
    "non_commercial": true,
-   "downloads": 40,
+   "downloads": 42,
    "platforms": [
     "darwin",
     "win32",
@@ -7425,7 +7425,7 @@
    "weight": 0.8,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 69,
+   "downloads": 70,
    "platforms": [
     "darwin",
     "win32",
@@ -7461,7 +7461,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 26,
+   "downloads": 25,
    "platforms": [
     "darwin",
     "win32",
@@ -7497,7 +7497,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 1179,
+   "downloads": 1146,
    "platforms": [
     "darwin",
     "win32",
@@ -7603,7 +7603,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 177,
+   "downloads": 186,
    "platforms": [
     "darwin",
     "win32",
@@ -7639,7 +7639,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 2078,
+   "downloads": 2104,
    "platforms": [
     "darwin",
     "win32",
@@ -7674,7 +7674,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 133,
+   "downloads": 136,
    "platforms": [
     "darwin",
     "win32",
@@ -7710,7 +7710,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 69,
+   "downloads": 70,
    "platforms": [
     "darwin",
     "win32",
@@ -7745,7 +7745,7 @@
    "weight": 1.0,
    "licence": "creativeml-openrail-m",
    "non_commercial": false,
-   "downloads": 110,
+   "downloads": 117,
    "platforms": [
     "darwin",
     "win32",
@@ -7781,7 +7781,7 @@
    "weight": 1.0,
    "licence": "creativeml-openrail-m",
    "non_commercial": false,
-   "downloads": 379,
+   "downloads": 368,
    "platforms": [
     "darwin",
     "win32",
@@ -7817,7 +7817,7 @@
    "weight": 1.0,
    "licence": "creativeml-openrail-m",
    "non_commercial": false,
-   "downloads": 124,
+   "downloads": 118,
    "platforms": [
     "darwin",
     "win32",
@@ -7853,7 +7853,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 71,
+   "downloads": 76,
    "platforms": [
     "darwin",
     "win32",
@@ -7997,7 +7997,7 @@
    "weight": 0.8,
    "licence": "flux-non-commercial",
    "non_commercial": true,
-   "downloads": 60,
+   "downloads": 39,
    "platforms": [
     "darwin",
     "win32",
@@ -8033,7 +8033,7 @@
    "weight": 0.7,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 25,
+   "downloads": 24,
    "platforms": [
     "darwin",
     "win32",
@@ -8140,7 +8140,7 @@
    "weight": 1.0,
    "licence": "other",
    "non_commercial": false,
-   "downloads": 129,
+   "downloads": 128,
    "platforms": [
     "darwin",
     "win32",
@@ -8248,7 +8248,7 @@
    "weight": 1.0,
    "licence": "flux-non-commercial",
    "non_commercial": true,
-   "downloads": 61,
+   "downloads": 53,
    "platforms": [
     "darwin",
     "win32",
@@ -8284,7 +8284,7 @@
    "weight": 1.0,
    "licence": "ideogram-4-non-commercial",
    "non_commercial": true,
-   "downloads": 31,
+   "downloads": 33,
    "platforms": [
     "darwin",
     "win32",
@@ -8356,7 +8356,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 6164,
+   "downloads": 6261,
    "platforms": [
     "darwin",
     "win32",
@@ -8392,7 +8392,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 2312,
+   "downloads": 2349,
    "platforms": [
     "darwin",
     "win32",
@@ -8428,7 +8428,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 1174,
+   "downloads": 1194,
    "platforms": [
     "darwin",
     "win32",
@@ -8464,7 +8464,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 594,
+   "downloads": 599,
    "platforms": [
     "darwin",
     "win32",
@@ -8536,7 +8536,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 62532,
+   "downloads": 64728,
    "platforms": [
     "darwin",
     "win32",
@@ -8570,7 +8570,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 219,
+   "downloads": 222,
    "platforms": [
     "darwin",
     "win32",
@@ -8606,7 +8606,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 274,
+   "downloads": 275,
    "platforms": [
     "darwin",
     "win32",
@@ -8678,7 +8678,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 17313,
+   "downloads": 17751,
    "platforms": [
     "darwin",
     "win32",
@@ -8785,7 +8785,7 @@
    "weight": 1.0,
    "licence": "openrail",
    "non_commercial": false,
-   "downloads": 2404,
+   "downloads": 2277,
    "platforms": [
     "darwin",
     "win32",
@@ -8820,7 +8820,7 @@
    "weight": 1.0,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 6024,
+   "downloads": 6122,
    "platforms": [
     "darwin",
     "win32",
@@ -8929,7 +8929,7 @@
    "weight": 1.0,
    "licence": "ltx-2-community-license",
    "non_commercial": false,
-   "downloads": 9926,
+   "downloads": 10054,
    "platforms": [
     "darwin",
     "win32",
@@ -9212,7 +9212,7 @@
    "weight": 0.4,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 20802,
+   "downloads": 20332,
    "platforms": [
     "darwin",
     "win32",
@@ -9248,7 +9248,7 @@
    "weight": 1.0,
    "licence": "minimax-h3-community-license",
    "non_commercial": false,
-   "downloads": 1747,
+   "downloads": 1774,
    "platforms": [
     "darwin",
     "win32",
@@ -9320,7 +9320,7 @@
    "weight": 1.0,
    "licence": "minimax-h3-community-license",
    "non_commercial": false,
-   "downloads": 251,
+   "downloads": 174,
    "platforms": [
     "darwin",
     "win32",
@@ -9356,7 +9356,7 @@
    "weight": 1.0,
    "licence": "minimax-h3-community-license",
    "non_commercial": false,
-   "downloads": 1896,
+   "downloads": 1968,
    "platforms": [
     "darwin",
     "win32",
@@ -9392,7 +9392,7 @@
    "weight": 0.7,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 197,
+   "downloads": 189,
    "platforms": [
     "darwin",
     "win32",
@@ -9497,7 +9497,7 @@
    "weight": 0.5,
    "licence": "minimax-h3-community-license",
    "non_commercial": false,
-   "downloads": 10158,
+   "downloads": 10423,
    "platforms": [
     "darwin",
     "win32",
@@ -9532,7 +9532,7 @@
    "weight": 1.0,
    "licence": "minimax-h3-community-license",
    "non_commercial": false,
-   "downloads": 261,
+   "downloads": 265,
    "platforms": [
     "darwin",
     "win32",
@@ -9568,7 +9568,7 @@
    "weight": 1.0,
    "licence": "minimax-h3-community-license",
    "non_commercial": false,
-   "downloads": 319,
+   "downloads": 321,
    "platforms": [
     "darwin",
     "win32",
@@ -9604,7 +9604,7 @@
    "weight": 1.0,
    "licence": "minimax-h3-community-license",
    "non_commercial": false,
-   "downloads": 683,
+   "downloads": 687,
    "platforms": [
     "darwin",
     "win32",
@@ -9640,7 +9640,7 @@
    "weight": 1.0,
    "licence": "minimax-h3-community-license",
    "non_commercial": false,
-   "downloads": 132,
+   "downloads": 134,
    "platforms": [
     "darwin",
     "win32",
@@ -9676,7 +9676,7 @@
    "weight": 0.6,
    "licence": "apache-2.0",
    "non_commercial": false,
-   "downloads": 225,
+   "downloads": 228,
    "platforms": [
     "darwin",
     "win32",

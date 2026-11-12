@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-12
+
 0.14.0 adds audio: songs, speech and sound effects, made in a new Audio tab or with `ziv-audio`. You can also edit images you already have, extend a video from any frame, and keep your work in projects. Every built-in model now shows its licence.
 
 ### Added
