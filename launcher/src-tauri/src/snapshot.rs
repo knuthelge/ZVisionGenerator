@@ -223,6 +223,7 @@ pub fn controls(snapshot: &Snapshot) -> Controls {
         }
         Phase::Starting => {
             c.primary = Some(Primary::Starting);
+            c.locked = true;
             show_installed(&mut c, &ALL);
         }
         Phase::Running => {

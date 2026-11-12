@@ -421,7 +421,7 @@
         "uninstall",
         "beta"
       ],
-      "locked": false
+      "locked": true
     }
   },
   {

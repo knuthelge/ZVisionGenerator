@@ -130,6 +130,7 @@ export function launcherControls(s: Snapshot): Controls {
       break;
     case 'starting':
       c.primary = 'starting';
+      c.locked = true;
       installed(MENU_ALL);
       break;
     case 'running':
