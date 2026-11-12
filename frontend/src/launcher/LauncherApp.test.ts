@@ -303,7 +303,7 @@ describe('LauncherApp quiet bar', () => {
     const toggle = target.querySelector('[role="switch"]') as HTMLInputElement;
 
     const hint = document.getElementById(toggle.getAttribute('aria-describedby') ?? '');
-    expect(hint?.textContent).toContain('without opening your browser');
+    expect(hint?.textContent).toBe('Starts in the background at login.');
   });
 
   it('disables Start at login and More while updating', async () => {
@@ -370,6 +370,7 @@ describe('LauncherApp beta', () => {
     expect(document.querySelectorAll('[role="separator"]')).toHaveLength(0);
     expect(item.textContent).toContain('Get beta versions');
     expect(item.getAttribute('aria-checked')).toBe('false');
+    expect(item.getAttribute('role')).toBe('menuitemcheckbox');
   });
 
   it('shows the stored choice as checked', async () => {

@@ -20,7 +20,7 @@
 
   let { autostart, busy, menu, onautostart, onquit }: Props = $props();
 
-  const HINT = 'Starts in the background, without opening your browser.';
+  const HINT = 'Starts in the background at login.';
   const hintId = $props.id();
 
   let checked = $state(false);

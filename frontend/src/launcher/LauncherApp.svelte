@@ -158,7 +158,7 @@
     const entry = { kind: 'item' as const, id: item.id, label: item.label, description: item.description };
     switch (item.id) {
       case 'beta':
-        return { ...entry, checked: betaChecked, onselect: () => void toggleBeta() };
+        return { ...entry, checked: betaChecked, toggle: true, onselect: () => void toggleBeta() };
       case 'repair':
         return { ...entry, icon: item.icon ?? undefined, onselect: () => void run(() => bridge.repairApp()) };
       case 'uninstall':
