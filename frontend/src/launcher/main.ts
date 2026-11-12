@@ -1,3 +1,9 @@
-// Placeholder entry for the launcher window: loads the shared tokens and shows an empty dark page.
-// The window shell (LauncherApp) replaces this when the window UI is built.
+// Entry of the launcher window: the shared tokens, the bundled font, then the app.
 import '../app/global.css';
+import './launcher.css';
+import { mount } from 'svelte';
+import LauncherApp from './LauncherApp.svelte';
+
+const app = mount(LauncherApp, { target: document.getElementById('app')! });
+
+export default app;
