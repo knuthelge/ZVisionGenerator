@@ -2,11 +2,11 @@
 
 What an error message or a slowdown means, and what to do. Find your problem by the words of the message, or by what you see: slow, stuck, frozen, nothing happens.
 
-A message that names a file, a setting or a model, or that says "use X instead", means exactly that. Do what it says first. The data folder is `~/.ziv` by default, and `ZIV_DATA_DIR` moves it.
+A message that names a file, a setting or a model, or that says "use X instead", means exactly that. Do what it says first. The data folder is `~/.ziv` by default, and `ZIV_DATA_DIR` moves it. If you installed with the [launcher](../get-started/install.md#install-with-the-launcher), the end of its log is one click away: **Show the log** in its window shows it when something fails.
 
 ## Where to look { #where-to-look }
 
-- [Installing and starting](#installing-and-starting): `ziv ui` won't start, no NVIDIA GPU found, a package or ffmpeg missing, the browser opens on another port, another device can't connect.
+- [Installing and starting](#installing-and-starting): `ziv ui` won't start, no NVIDIA GPU found, a package or ffmpeg missing, the browser opens on another port, another device can't connect, and the launcher's own messages: this computer isn't supported, the install failed, an update needs a newer launcher.
 - [Downloads](#downloads): a model won't download, Hugging Face refuses or can't be reached, the download is slow or stops, files missing from the cache.
 - [Stuck or slow](#stuck-or-slow): the first job seems stuck, Generate is greyed out, a job failed.
 - [Memory and slowdowns](#memory-and-slowdowns): the computer is slow, crawls, freezes or beachballs, out of memory, the terminal closes while a model loads, a model is refused for lack of memory.
@@ -32,7 +32,7 @@ Windows. The install came from PyPI alone, and PyPI's Windows PyTorch is CPU-onl
 
 ### A package is missing or too old { #a-package-is-missing-or-too-old }
 
-A package the app needs is missing or out of date, usually after a partial install. Reinstall: see [Repair the install](../get-started/install.md#repair-the-install). On Windows, use the command on that page, not the one a message prints: it keeps PyTorch's CUDA index.
+A package the app needs is missing or out of date, usually after a partial install. Reinstall: see [Repair the install](../get-started/install.md#repair-the-install). On Windows, use the command on that page, not the one a message prints: it keeps PyTorch's CUDA index. With the launcher, choose **Repair** in its window instead.
 
 #### "diffusers>=… is required for Windows/Linux LTX video support."
 
@@ -60,7 +60,7 @@ The Web UI's packages, which the message lists, aren't installed.
 
 ### ffmpeg is missing { #ffmpeg-is-missing }
 
-Video and audio need ffmpeg. `ziv-video` and `ziv-audio` offer to install it and ask first. The Web UI reports it when you press **Generate**: install ffmpeg, make sure it is on your `PATH`, and try again. On Windows, open a new terminal afterwards. On Fedora, `dnf install ffmpeg` needs RPM Fusion. The message reads "ffmpeg is required but was not found on PATH." See [Install](../get-started/install.md#ffmpeg).
+Video and audio need ffmpeg. `ziv-video` and `ziv-audio` offer to install it and ask first. The Web UI reports it when you press **Generate**: install ffmpeg, make sure it is on your `PATH`, and try again. On Windows, open a new terminal afterwards. On Fedora, `dnf install ffmpeg` needs RPM Fusion. The message reads "ffmpeg is required but was not found on PATH." See [Install](../get-started/install.md#ffmpeg). With the launcher, choose **Repair** in its window: it downloads ffmpeg again, which also helps when antivirus software has removed it.
 
 ### The browser opens on a different port { #the-browser-opens-on-a-different-port }
 
@@ -77,6 +77,31 @@ Another device reached the Web UI under a name the app doesn't know. List the na
 ### Another device can't reach the Web UI { #another-device-cant-reach-the-web-ui }
 
 The app answers only on this computer unless you ask it to share. Start it with `ziv ui --host local` and open the network address it prints from the other device. Allow it when Windows Firewall or macOS asks about incoming connections. If the browser then shows "Invalid Host header", use the entry above. See [Phones, tablets and other computers](../web-ui/devices.md#open-it-from-another-device).
+
+### The launcher says this computer isn't supported { #launcher-unsupported }
+
+The launcher checked your machine before downloading anything and found something the app can't run on. The window names it, what it found and what is needed:
+
+- **NVIDIA driver:** Windows and Linux need driver 580 or newer. Install a newer driver, then choose **Check again**.
+- **Free disk space:** the launcher needs about 10 GB free on the drive it installs to. Free some space, then choose **Check again**.
+- **NVIDIA graphics card:** Windows and Linux need an RTX 20-series or newer. With no NVIDIA card, or an older one, the app can't run, and nothing was downloaded. **See the requirements** opens [Install](../get-started/install.md#check-your-machine).
+
+A Mac needs Apple silicon and macOS 14 or newer. See [Install](../get-started/install.md#check-your-machine).
+
+### The launcher's install failed { #launcher-install-failed }
+
+The window says **Install didn't finish** and gives the cause in its first line. What was downloaded is kept, so **Retry** carries on from there.
+
+- **The download timed out, or the connection dropped:** check the internet connection and choose **Retry**.
+- **There is no space left:** free disk space on the drive the launcher installs to, then **Retry**.
+- **A download no longer exists or doesn't match what the launcher expects:** the launcher downloads uv and ffmpeg from the addresses it was built with, and checks them before it uses them. A file that has been removed or changed upstream stops the install. Download the newest launcher from [Install](../get-started/install.md#get-the-launcher).
+- **The installer stopped with an error:** open **Show the log**, then **Retry**. If it keeps failing, [report it](#report-a-problem).
+
+**Show the log** opens the end of the install log. Copy it into a [bug report](#report-a-problem) if **Retry** fails again.
+
+### The launcher says an update needs a newer launcher { #launcher-needs-newer }
+
+The window says **Version … needs a newer launcher**. The new version of the app needs something this launcher can't install, such as a newer Python. The app, your settings and your models stay as they are and keep working. Download the newest launcher from [Install](../get-started/install.md#get-the-launcher) and open it. It finds the installed app and offers the update again.
 
 ### Installed with pip
 

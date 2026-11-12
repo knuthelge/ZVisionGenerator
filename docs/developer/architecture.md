@@ -51,6 +51,8 @@ The packages, from the top:
 
 Code above the backends asks capability questions, such as `supports_video_extend()` or `supports_seedvr2()`, instead of checking the platform; see [the platform rule](#invariants). The frontend lives apart, in `frontend/`, and is built into `zvisiongenerator/web/static/app/`, which is committed.
 
+The desktop launcher, in `launcher/`, sits outside the Python package: it is a separate Rust program, with its own window built from `frontend/`, that installs the package with uv and runs `ziv ui` as a child. It shares no code with the app and talks to it only through the public flags of `ziv ui`. See [Desktop launcher](launcher.md).
+
 ## Where is X
 
 | Feature | Entry point | Core | Tests |
@@ -74,6 +76,7 @@ Code above the backends asks capability questions, such as `supports_video_exten
 | Job queue, events, Stop | `web/web_runner.py` | `web/job_contract.py`, `core/progress_events.py` | `tests/web/test_web_runner.py` |
 | Gallery, job log, LoRA index | `utils/app_db.py` | `web/gallery_index.py`, `web/job_log.py`, `web/lora_index.py` | `tests/common/test_app_db.py`, `tests/web/test_web_gallery_index.py` |
 | A Web UI page | `frontend/src/features/<page>/` | `frontend/src/lib/` | `*.test.ts` beside the source |
+| Desktop launcher, see [Desktop launcher](launcher.md) | `launcher/src-tauri/src/` | `frontend/src/launcher/` | Rust tests beside each module, `launcher/contract/snapshot_cases.json`, `*.test.ts` beside the source |
 | Checkpoint converters | `converters/convert_checkpoint.py` | `converters/*_convert.py` | `tests/converters/` |
 | Vendored upstream code | `packages/` | the contract tests | `tests/contracts/` |
 

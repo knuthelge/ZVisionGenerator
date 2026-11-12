@@ -28,3 +28,21 @@ Do these in order, on the commit you will tag.
 4. **Write the release commit.** Move the `[Unreleased]` entries of `CHANGELOG.md` under a `## [<version>] - <date>` heading, in a commit named `chore(release): v<version>` whose body lists the release highlights.
 5. **Tag and push.** Create the tag on that commit and push the commit and the tag. The Release workflow takes it from there.
 6. **Check the result.** The workflow's run is green, the version is on PyPI, the GitHub Release exists, and for a final release the docs site shows the new version.
+
+## Launcher releases { #launcher-releases }
+
+The desktop launcher is released apart from the app. It has its own version, in `launcher/src-tauri/Cargo.toml`, and its own workflow, started by `launcher-v*` tags. A `v*` tag never builds it, and a `launcher-v*` tag never publishes to PyPI. Which app version it installs comes from PyPI, so an app release needs no launcher release, except when the app needs something the launcher doesn't provide, such as a newer Python. See [Desktop launcher](launcher.md) for how it is built.
+
+The launcher release is published as a GitHub release that is not marked latest, so the app's releases stay on top. Because of that, the install guide links to the exact `launcher-v…` release, and the links are updated with each launcher release. The asset names stay the same from release to release. Pushing a `launcher-v*` tag cannot be undone, so push one only when you are releasing the launcher.
+
+Do these in order.
+
+1. **Land everything.** The branch is on the newest `main`, and `make launcher-test` and `make check` pass.
+2. **Bump the version.** Set `version` in `launcher/src-tauri/Cargo.toml`. The workflow fails a tag whose version differs from it.
+3. **Update the pins** if a tool has moved or a download has gone, as in [Pins](launcher.md#pins).
+4. **Run a test build.** Start the Launcher release workflow by hand from the branch. It builds the installers for macOS, Windows and Linux and uploads them as artifacts, and publishes nothing.
+5. **Check each platform** with the installers from the test build: a fresh install, start, Quit, Update, Repair and Uninstall, and the first-open steps on the install page. Include a Windows account whose name has spaces or non-ASCII characters, the tray on stock GNOME and the AppImage on a fresh Ubuntu.
+6. **Update the install guide.** Point the download links in [Install](../get-started/install.md#get-the-launcher) at the new `launcher-v<version>` release.
+7. **Tag and push.** Create `launcher-v<version>` on the commit and push the commit and the tag. The workflow builds the installers again and creates the GitHub release with the five files.
+8. **Deploy the docs** once the release exists, so that the install page's links work: run the Deploy Docs workflow by hand, since a `launcher-v*` tag does not run it.
+9. **Check the result.** The release is not marked latest, each of the five files downloads, and the install page links to them.
