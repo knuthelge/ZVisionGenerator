@@ -1,6 +1,6 @@
 # Voices: one picker for built-in, saved and described speech voices
 
-**Status:** Done (2026-11-08, unreleased; built on `feat/speech-voices`; the Mac checks passed on a 32 GB M5 on 2026-11-09)
+**Status:** Done (2026-11-08, v0.14.0; built on `feat/speech-voices`; the Mac checks passed on a 32 GB M5 on 2026-11-09)
 
 **What shipped.** One Voice picker with Play, **Your voices** above the default voices, and a **Voices** window (Your voices, New voice, From recording); **Use as** → **Saved voice** keeps a Gallery take and `--voice NAME` uses a saved voice in the CLI. It differs from the proposal below: the default voices have a preview clip but no descriptions, the CLI cannot save or design a voice, and a designed voice is made in the tabbed window, not a separate dialog. On the Mac through mlx-audio, designing 3 candidates peaked at about 6.3 GiB and short takes at about 4.6 GiB; saved voices, stopping a run, the Web UI and the CLI worked. Uploading or recording a real voice and Use once were not tried there.
 

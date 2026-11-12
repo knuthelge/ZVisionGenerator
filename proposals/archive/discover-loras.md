@@ -1,6 +1,6 @@
 # Discover LoRAs: a curated list, and Hugging Face behind it
 
-**Status:** Done (2026-10-28, unreleased; branch feat/discover-loras). Partly checked on a 32 GB M5 on 2026-11-08; see [Mac verification](#mac-verification).
+**Status:** Done (2026-10-28, v0.14.0; branch feat/discover-loras). Partly checked on a 32 GB M5 on 2026-11-08; see [Mac verification](#mac-verification).
 
 ## Problem
 

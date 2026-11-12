@@ -1,6 +1,6 @@
 # References for FLUX.2 Klein
 
-**Status:** Done (2026-10-30, unreleased; branch feat/mac-memory-klein-kv): implemented and verified on Windows/Linux and on a 32 GB Mac (browser flows checked; Safari itself not tested); the release is left
+**Status:** Done (2026-10-30, v0.14.0; branch feat/mac-memory-klein-kv): implemented and verified on Windows/Linux and on a 32 GB Mac (browser flows checked; Safari itself not tested); the release is left
 
 ## Progress
 

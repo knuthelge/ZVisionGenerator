@@ -1,6 +1,6 @@
 # Speech on macOS through MLX
 
-**Status:** Done (2026-11-05, unreleased; checked on a 32 GB M5)
+**Status:** Done (2026-11-05, v0.14.0; checked on a 32 GB M5)
 
 ## Problem
 

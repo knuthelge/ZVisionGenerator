@@ -1,6 +1,6 @@
 # Keep config.yaml for configuration
 
-**Status:** Done (2026-11-08, unreleased; built on `refactor/config`)
+**Status:** Done (2026-11-08, v0.14.0; built on `refactor/config`)
 
 ## Idea
 

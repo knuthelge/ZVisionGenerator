@@ -1,6 +1,6 @@
 # One Image and one Video workflow
 
-**Status:** Done (2026-10-30, unreleased; branch feat/merge-workflows)
+**Status:** Done (2026-10-30, v0.14.0; branch feat/merge-workflows)
 
 ## Problem
 

@@ -1,6 +1,6 @@
 # Transparent background for every image model
 
-**Status:** Done (2026-11-01, unreleased; branch feat/transparent-background; the Mac check passed the same day): ships non-commercial, with a badge
+**Status:** Done (2026-11-01, v0.14.0; branch feat/transparent-background; the Mac check passed the same day): ships non-commercial, with a badge
 
 ## Problem
 

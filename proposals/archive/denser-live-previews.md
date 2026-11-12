@@ -1,6 +1,6 @@
 # A live preview on every step
 
-**Status:** Done (2026-10-31, unreleased)
+**Status:** Done (2026-10-31, v0.14.0)
 
 **Shipped (unreleased):** a preview on every step but the last on both platforms, the macOS preview on the step's own report, the frontend note, docs and CHANGELOG, as measured below. The macOS check passed on 2026-10-31: a `zit` job in the Web UI on a Mac showed a live preview on every step.
 

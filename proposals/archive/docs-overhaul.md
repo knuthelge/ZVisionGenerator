@@ -1,6 +1,6 @@
 # Docs overhaul: a site organised by what the user does
 
-**Status:** Done (2026-11-11, unreleased; built on `docs/overhaul`)
+**Status:** Done (2026-11-11, v0.14.0; built on `docs/overhaul`)
 
 **What shipped differs from the plan below in four ways, decided while building it:**
 - Install has no "Will it run?" table or disk and time section: the download dialog shows size, free space and licence, and every model has a memory badge. Install keeps the hard minimums.

@@ -1,6 +1,6 @@
 # Recent prompts, rewrite history and "save to a prompt file"
 
-**Status:** Done (2026-10-27, unreleased; branch `feat/workspace-prompt-recents`)
+**Status:** Done (2026-10-27, v0.14.0; branch `feat/workspace-prompt-recents`)
 
 ## Shipped in v0.13.0: save a Workspace prompt to a prompt file
 
@@ -10,7 +10,7 @@
 - The entry always goes to the end of a set named `prompts`, created at the end of the file when missing, rather than the last set or a set named after the model.
 - The route validates the whole resulting file and refuses with a message when it would have errors; the toast offers **Open in Prompts**.
 
-## Shipped in `[Unreleased]`: recent prompts and the last five rewrites
+## Shipped in v0.14.0: recent prompts and the last five rewrites
 
 The design below is the original one; what shipped differs in these points.
 

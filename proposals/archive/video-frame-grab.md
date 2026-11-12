@@ -1,6 +1,6 @@
 # Generate from a point in a video
 
-**Status:** Done (2026-11-10, unreleased; built on `feat/video-frame-grab`)
+**Status:** Done (2026-11-10, v0.14.0; built on `feat/video-frame-grab`)
 
 ## Problem
 

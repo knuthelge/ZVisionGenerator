@@ -1,6 +1,6 @@
 # Steer audio before it's generated: settings and an enhancer
 
-**Status:** Done (2026-11-08, unreleased): on `main`; the Mac checks pass (see below) and the owner heard the Mac takes as fine. Four small findings from the Mac checks went to the [backlog](../backlog.md)
+**Status:** Done (2026-11-08, v0.14.0): on `main`; the Mac checks pass (see below) and the owner heard the Mac takes as fine. Four small findings from the Mac checks went to the [backlog](../backlog.md)
 
 ## Mac checks (2026-11-08)
 

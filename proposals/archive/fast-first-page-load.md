@@ -1,6 +1,6 @@
 # A fast first page load on Windows and Linux
 
-**Status:** Done (2026-10-27, unreleased). Shipped as proposed: the first `/api/workspace` went from 5.05 s to 0.23 s, and the UI process stays at 93 MB with no torch loaded.
+**Status:** Done (2026-10-27, v0.14.0). Shipped as proposed: the first `/api/workspace` went from 5.05 s to 0.23 s, and the UI process stays at 93 MB with no torch loaded.
 
 ## Problem
 

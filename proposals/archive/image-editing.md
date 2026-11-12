@@ -1,6 +1,6 @@
 # Edit images: change part of a picture, or give it more room
 
-**Status:** Done (2026-11-09, unreleased; built on `feat/image-editing`). Partly checked on a Mac; see [Mac verification](#mac-verification). The Extend join and reference fixes found on the Mac were checked on Windows/Linux on the card (2026-11-12, Klein 4B and 9B): a plausible fill with no smear, and a smaller colour step at the join than with the blurred reference in every case compared. Tests cover the edit path with a mocked backend, and the Mac hooks with fakes, contract tests and real-array tests that run on macOS.
+**Status:** Done (2026-11-09, v0.14.0; built on `feat/image-editing`). Partly checked on a Mac; see [Mac verification](#mac-verification). The Extend join and reference fixes found on the Mac were checked on Windows/Linux on the card (2026-11-12, Klein 4B and 9B): a plausible fill with no smear, and a smaller colour step at the join than with the blurred reference in every case compared. Tests cover the edit path with a mocked backend, and the Mac hooks with fakes, contract tests and real-array tests that run on macOS.
 
 ## Problem
 

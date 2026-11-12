@@ -1,6 +1,6 @@
 # Prompt enhancer: shot, angle and colour palette
 
-**Status:** Done (2026-11-01, unreleased; branch feat/enhancer-camera-color; the real-device colour-picker check passed the same day)
+**Status:** Done (2026-11-01, v0.14.0; branch feat/enhancer-camera-color; the real-device colour-picker check passed the same day)
 
 Three new enhancer options:
 

@@ -1,6 +1,6 @@
 # Generate music, speech and sound
 
-**Status:** Done (2026-11-04, unreleased): built on `feat/audio`; the Mac gate passed on a 32 GB M5 after two fixes found by it (see [Mac results](#mac-results-2026-11-04)). Higgs parity was checked against a CPU float32 reference instead of the CUDA trajectory, and the 16 GB Mac and Safari checks were skipped by the owner's decision
+**Status:** Done (2026-11-04, v0.14.0): built on `feat/audio`; the Mac gate passed on a 32 GB M5 after two fixes found by it (see [Mac results](#mac-results-2026-11-04)). Higgs parity was checked against a CPU float32 reference instead of the CUDA trajectory, and the 16 GB Mac and Safari checks were skipped by the owner's decision
 
 **Prerequisite:** [Licences at download, and a dialog for every download](model-licences.md), built first on the same branch and done. It makes Generate ask before downloading, names restricted licences in that dialog, on the Models page and on the CLI; this proposal adds the three audio models' records and has no licence UI of its own.
 

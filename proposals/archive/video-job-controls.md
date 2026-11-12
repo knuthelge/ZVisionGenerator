@@ -1,6 +1,6 @@
 # Controls for Web UI video jobs
 
-**Status:** Done (2026-10-27, unreleased)
+**Status:** Done (2026-10-27, v0.14.0)
 
 ## Shipped
 

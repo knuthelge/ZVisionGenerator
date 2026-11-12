@@ -1,6 +1,6 @@
 # First and last frame for image-to-video
 
-**Status:** Done (2026-10-26, unreleased): LTX first and last frame is implemented on macOS, Windows and Linux and verified on a Mac (see [Mac test results](#mac-test-results)), and MiniMax H3's part shipped in v0.13.0.
+**Status:** Done (2026-10-26, v0.14.0): LTX first and last frame is implemented on macOS, Windows and Linux and verified on a Mac (see [Mac test results](#mac-test-results)), and MiniMax H3's part shipped in v0.13.0.
 
 ## Outcome
 

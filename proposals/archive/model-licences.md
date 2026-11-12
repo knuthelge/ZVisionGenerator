@@ -1,6 +1,6 @@
 # Licences at download, and a dialog for every download
 
-**Status:** Done (2026-11-02, unreleased; built on `feat/audio`)
+**Status:** Done (2026-11-02, v0.14.0; built on `feat/audio`)
 
 ## Problem
 

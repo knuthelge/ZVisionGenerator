@@ -1,6 +1,6 @@
 # A faster prompt enhancer on Windows and Linux
 
-**Status:** Done (2026-11-08, unreleased; built on `feat/enhancer-fast-runtime`)
+**Status:** Done (2026-11-08, v0.14.0; built on `feat/enhancer-fast-runtime`)
 
 ## Problem
 

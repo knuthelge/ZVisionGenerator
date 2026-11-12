@@ -1,8 +1,8 @@
 # Krea 2: beta scheduler and upscale defaults, and beta on FLUX.2 Klein
 
-**Status:** Done (2026-10-31, unreleased; commits e17f666, 7f0526b)
+**Status:** Done (2026-10-31, v0.14.0; commits e17f666, 7f0526b)
 
-**Shipped (unreleased, on `main`):**
+**Shipped (v0.14.0):**
 - Krea 2 defaults to the `beta` scheduler on both platforms and shows **Scheduler**.
 - A new `simple` scheduler gives any model's own evenly spaced steps.
 - Krea 2 upscales refine for 5 steps instead of 3, and an upscale while generating no longer sharpens first.

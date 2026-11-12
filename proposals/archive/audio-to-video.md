@@ -1,6 +1,6 @@
 # Make a video follow your own sound
 
-**Status:** Done (2026-11-01, unreleased; branch docs/higgsfield-ideas; verified on a 32 GB Mac the same day)
+**Status:** Done (2026-11-01, v0.14.0; branch docs/higgsfield-ideas; verified on a 32 GB Mac the same day)
 
 ## Problem
 

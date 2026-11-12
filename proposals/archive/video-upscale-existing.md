@@ -1,6 +1,6 @@
 # Upscale existing videos 2×
 
-**Status:** Done (2026-11-01, unreleased). Windows and Linux shipped in v0.13.0 with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS is built on branch `feat/video-upscale-mac` with LTX's own upsampler and a 2-step refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)); the spike and its blind review are in [macOS spike results](#macos-spike-results). It plugs into the SeedVR2 path's gallery item, route, runner and job card as a second method, `ltx`, instead of building parallel ones.
+**Status:** Done (2026-11-01, v0.14.0). Windows and Linux shipped in v0.13.0 with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS is built on branch `feat/video-upscale-mac` with LTX's own upsampler and a 2-step refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)); the spike and its blind review are in [macOS spike results](#macos-spike-results). It plugs into the SeedVR2 path's gallery item, route, runner and job card as a second method, `ltx`, instead of building parallel ones.
 
 ## Problem
 

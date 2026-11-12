@@ -1,6 +1,6 @@
 # Previews and sorting in the file browser
 
-**Status:** Done (2026-11-07, unreleased; built on `feat/file-picker`)
+**Status:** Done (2026-11-07, v0.14.0; built on `feat/file-picker`)
 
 ## Problem
 
