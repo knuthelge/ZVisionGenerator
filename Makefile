@@ -258,6 +258,34 @@ frontend-test: ## TypeScript check + vitest tests
 frontend-dev: ## Start Vite dev server (for development)
 	pnpm --dir frontend run dev
 
+# ——— Desktop launcher ————————————————————————————————————————
+
+# The launcher is a Tauri app in launcher/. Its window is a second Vite entry in frontend/ built into launcher/dist.
+# Not part of `make check`: it needs Rust (and WebKitGTK on Linux), and `launcher-test` runs in the release workflow.
+# cargo is looked up on PATH, then in rustup's default folder.
+LAUNCHER_BUNDLES ?=
+LAUNCHER_PATH = PATH="$$PATH:$$HOME/.cargo/bin"
+LAUNCHER_TAURI = cd launcher && $(LAUNCHER_PATH) node ../frontend/node_modules/@tauri-apps/cli/tauri.js
+
+.PHONY: launcher-ui launcher-dev launcher-build launcher-test launcher-clean
+
+launcher-ui: ## Build the launcher window UI into launcher/dist
+	pnpm --dir frontend run build:launcher
+
+launcher-dev: launcher-ui ## Run the launcher in development (rebuild the UI first)
+	$(LAUNCHER_TAURI) dev
+
+launcher-build: launcher-ui ## Build the launcher bundles (LAUNCHER_BUNDLES=appimage,deb,rpm for a subset)
+	$(LAUNCHER_TAURI) build $(if $(LAUNCHER_BUNDLES),--bundles $(LAUNCHER_BUNDLES))
+
+launcher-test: launcher-ui ## Check the launcher's Rust code: fmt, clippy, tests
+	cd launcher/src-tauri && $(LAUNCHER_PATH) cargo fmt --check
+	cd launcher/src-tauri && $(LAUNCHER_PATH) cargo clippy --all-targets -- -D warnings
+	cd launcher/src-tauri && $(LAUNCHER_PATH) cargo test
+
+launcher-clean: ## Remove the launcher's build output
+	rm -rf launcher/src-tauri/target launcher/dist
+
 # ——— Build ————————————————————————————————————————————————
 
 .PHONY: build clean

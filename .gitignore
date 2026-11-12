@@ -39,6 +39,10 @@ zvisiongenerator/_version.py
 .idea/
 .vscode/
 
+# Desktop launcher build output (launcher/dist is covered by dist/)
+launcher/src-tauri/target/
+launcher/src-tauri/gen/
+
 # Large model files
 *.safetensors
 *.gguf
