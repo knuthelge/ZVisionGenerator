@@ -90,7 +90,7 @@ A last frame needs a first frame. With a last frame set and no first frame, **Ge
 ## To verify when building
 
 - **Colour.** Clips made on Windows and Linux carry no colour tags (`cuda/video/encode.py`), and ffmpeg's default for untagged video is BT.601. Check on a real clip from each platform that an extracted frame matches the player, and set the conversion from that. Extend from a point adds no new risk here, because it reads frames as Extend does.
-- **Exact frame.** Check with a test clip made by the app, with the frame number encoded in it, that the frame used is the one on screen, in Chrome and Firefox, and Safari on a Mac and an iPhone.
+- **Exact frame.** Check with a test clip made by the app, with the frame number encoded in it, that the frame used is the one on screen, in Firefox, and Safari on a Mac and an iPhone. Chromium and WebKit pass.
 - **Cut quality.** A stream copy can break the last frames before a cut, so the cut re-encodes the kept part once, at the quality Extend's own re-encodes use (CRF 12). Measure what that costs.
 - **Scrubbing feel on a real clip.** Clips are encoded as they are today. Scrubbing is checked on a real clip in a real browser at the end; if it is actually bad we revisit it.
 
