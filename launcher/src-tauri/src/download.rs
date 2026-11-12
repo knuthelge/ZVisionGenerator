@@ -34,7 +34,7 @@ const DISK_FULL_OS_ERRORS: [i32; 2] = [28, 112];
 #[derive(Debug)]
 pub enum CopyError {
     /// The source failed: the network.
-    Read(io::Error),
+    Read,
     /// The destination failed: the disk.
     Write(io::Error),
 }
@@ -52,7 +52,7 @@ pub fn hash_copy(
             Ok(0) => break,
             Ok(read) => read,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(error) => return Err(CopyError::Read(error)),
+            Err(_) => return Err(CopyError::Read),
         };
         hasher.update(&buffer[..read]);
         writer
@@ -111,7 +111,7 @@ pub fn classify_request(error: &ureq::Error) -> ErrorCode {
 /// The code for a failed copy: the disk is `low_disk` when full, the network is `download_failed`.
 pub fn classify_copy(error: &CopyError) -> ErrorCode {
     match error {
-        CopyError::Read(_) => ErrorCode::DownloadFailed,
+        CopyError::Read => ErrorCode::DownloadFailed,
         CopyError::Write(error) => classify_io(error),
     }
 }
@@ -323,7 +323,7 @@ mod tests {
     fn hash_copy_tells_a_read_failure_from_a_write_failure() {
         let mut out = Vec::new();
         let read = hash_copy(&mut FailingReader(b"abc"), &mut out).unwrap_err();
-        assert!(matches!(read, CopyError::Read(_)));
+        assert!(matches!(read, CopyError::Read));
         let write = hash_copy(&mut Cursor::new(b"abcdef"), &mut FullDisk { room: 2 }).unwrap_err();
         assert!(matches!(write, CopyError::Write(_)));
     }
@@ -418,10 +418,7 @@ mod tests {
 
     #[test]
     fn copies_classify_by_which_end_failed() {
-        assert_eq!(
-            classify_copy(&CopyError::Read(io::Error::from(io::ErrorKind::TimedOut))),
-            ErrorCode::DownloadFailed
-        );
+        assert_eq!(classify_copy(&CopyError::Read), ErrorCode::DownloadFailed);
         assert_eq!(
             classify_copy(&CopyError::Write(io::Error::from(
                 io::ErrorKind::StorageFull

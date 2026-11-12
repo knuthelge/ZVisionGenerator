@@ -3,8 +3,6 @@
 //! `--uninstall-cleanup` runs the headless cleanup without starting Tauri; anything else starts the app, with
 //! `--autostart` marking a start-at-login launch. Every module of the crate is declared here.
 
-// The modules land before the code that calls them; the app shell removes this.
-#![allow(dead_code)]
 // A release build on Windows is a GUI program: no console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -70,7 +68,7 @@ fn main() {
     disable_dmabuf_renderer();
     match cli_mode(std::env::args_os().skip(1)) {
         Mode::UninstallCleanup => uninstall::headless(),
-        Mode::Gui { .. } => app::run(),
+        Mode::Gui { autostart } => app::run(autostart),
     }
 }
 

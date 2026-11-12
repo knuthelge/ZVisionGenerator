@@ -141,6 +141,7 @@ fn refresh_alive<'a>(system: &'a mut System, members: &[Member]) -> Vec<&'a Proc
 }
 
 /// The members of `members` that are still running.
+#[cfg(test)]
 pub fn alive_members(members: &[Member]) -> Vec<Member> {
     open_table().map_or_else(Vec::new, |mut system| alive_in(&mut system, members))
 }
