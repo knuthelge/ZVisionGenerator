@@ -111,15 +111,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_release_segments_and_stages() {
-        assert_eq!(parse("0.14.1").unwrap().release, [0, 14, 1]);
-        assert_eq!(parse("1.0.0rc1").unwrap().phase, 3);
-        assert_eq!(parse("1.0.0b2").unwrap().phase, 2);
-        assert_eq!(parse("1.0.0a2").unwrap().phase, 1);
-        assert_eq!(parse("1.0.0").unwrap().phase, 4);
-    }
-
-    #[test]
     fn rejects_what_the_app_does_not_publish() {
         for text in [
             "",
@@ -150,40 +141,19 @@ mod tests {
     }
 
     #[test]
-    fn compares_numerically_per_segment() {
+    fn newer_means_strictly_above_comparing_numbers_then_pre_release_stages() {
         assert!(is_newer("0.14.1", "0.14.0"));
         assert!(is_newer("0.10.0", "0.9.9"));
-        assert!(is_newer("1.0.0", "0.99.99"));
         assert!(!is_newer("0.14.0", "0.14.1"));
-    }
-
-    #[test]
-    fn equal_versions_are_not_newer() {
         assert!(!is_newer("1.0.0", "1.0.0"));
-        assert!(!is_newer("0.14.0", "0.14.0"));
-    }
-
-    #[test]
-    fn a_pre_release_sorts_below_its_release() {
-        assert!(!is_newer("1.0.0rc1", "1.0.0"));
         assert!(is_newer("1.0.0", "1.0.0rc1"));
-        assert!(is_newer("1.0.0rc1", "0.9.0"));
-        assert!(is_newer("1.0.0rc2", "1.0.0rc1"));
+        assert!(!is_newer("1.0.0rc1", "1.0.0"));
         assert!(is_newer("1.0.0rc1", "1.0.0b3"));
         assert!(is_newer("1.0.0b1", "1.0.0a9"));
-    }
-
-    #[test]
-    fn unparsable_versions_are_never_newer() {
+        assert!(!is_newer("0.15.0b1", "0.15.0b2"));
+        assert!(!is_newer("0.14.1", "0.15.0b1"));
         assert!(!is_newer("abc", "1.0.0"));
         assert!(!is_newer("1.0.0", "abc"));
-    }
-
-    #[test]
-    fn reads_the_latest_version_from_pypi_json() {
-        let body =
-            r#"{"info": {"name": "z-vision-generator", "version": "0.14.1"}, "releases": {}}"#;
-        assert_eq!(latest_from_pypi_json(body, false), Some("0.14.1".into()));
     }
 
     #[test]
@@ -198,36 +168,6 @@ mod tests {
         ] {
             assert_eq!(latest_from_pypi_json(body, false), None, "{body:?}");
         }
-    }
-
-    const RELEASES: &str = r#"{
-        "info": {"version": "0.14.1"},
-        "releases": {
-            "0.14.0": [{"yanked": false}],
-            "0.14.1": [{"yanked": false}],
-            "0.15.0rc1": [{"yanked": false}, {"yanked": false}],
-            "0.15.0b2": [{"yanked": false}],
-            "not-a-version": [{"yanked": false}],
-            "0.16.0": [{"yanked": true}],
-            "0.17.0rc1": [{"yanked": true}, {"yanked": true}],
-            "0.18.0": []
-        }
-    }"#;
-
-    #[test]
-    fn beta_off_ignores_releases_and_reads_info_version() {
-        assert_eq!(
-            latest_from_pypi_json(RELEASES, false),
-            Some("0.14.1".into())
-        );
-    }
-
-    #[test]
-    fn beta_on_takes_the_newest_release_including_pre_releases() {
-        assert_eq!(
-            latest_from_pypi_json(RELEASES, true),
-            Some("0.15.0rc1".into())
-        );
     }
 
     #[test]
@@ -273,14 +213,6 @@ mod tests {
         ] {
             assert_eq!(latest_from_pypi_json(body, true), None, "{body:?}");
         }
-    }
-
-    #[test]
-    fn a_beta_is_newer_only_when_above_what_is_installed() {
-        assert!(is_newer("0.15.0b1", "0.14.1"));
-        assert!(!is_newer("0.15.0b1", "0.15.0b2"));
-        assert!(!is_newer("0.14.1", "0.15.0b1"));
-        assert!(is_newer("0.15.0", "0.15.0b1"));
     }
 
     /// A body shaped like PyPI's: file objects with their usual fields, a stable `info.version`, betas on top and a

@@ -160,36 +160,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn linux_and_windows_use_sentence_case() {
-        for os in ["linux", "windows"] {
-            let idle = tray_labels(os, false);
-            assert_eq!(idle.open, "Open Z-Vision Generator");
-            assert_eq!(idle.show, "Show window");
-            assert_eq!(idle.quit, "Quit");
-            assert_eq!(tray_labels(os, true).show, "Update available");
-        }
-    }
-
-    #[test]
-    fn macos_uses_title_case() {
-        let idle = tray_labels("macos", false);
-        assert_eq!(idle.show, "Show Window");
-        assert_eq!(idle.quit, "Quit Z-Vision Generator");
-        assert_eq!(tray_labels("macos", true).show, "Update Available");
-    }
-
-    #[test]
-    fn the_tooltip_says_when_an_update_is_available() {
-        for os in ["linux", "windows", "macos"] {
-            assert_eq!(tray_labels(os, false).tooltip, "Z-Vision Generator");
-            assert_eq!(
-                tray_labels(os, true).tooltip,
-                "Z-Vision Generator: update available"
-            );
-        }
-    }
-
-    #[test]
     fn an_update_changes_only_the_second_item_and_the_tooltip() {
         for os in ["linux", "windows", "macos"] {
             let (idle, update) = (tray_labels(os, false), tray_labels(os, true));

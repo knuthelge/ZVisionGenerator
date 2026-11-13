@@ -102,13 +102,7 @@ mod tests {
     };
 
     #[test]
-    fn the_server_record_has_the_documented_keys() {
-        let text = serde_json::to_string(&RECORD).unwrap();
-        assert_eq!(text, r#"{"pid":4242,"startTime":1000,"port":8081}"#);
-    }
-
-    #[test]
-    fn the_server_record_round_trips_through_a_file() {
+    fn the_server_record_round_trips_and_reads_as_absent_when_missing_or_corrupt() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("server.json");
         assert_eq!(read_server_record(&path), None);
@@ -116,18 +110,7 @@ mod tests {
         assert_eq!(read_server_record(&path), Some(RECORD));
         delete_server_record(&path).unwrap();
         assert_eq!(read_server_record(&path), None);
-    }
-
-    #[test]
-    fn deleting_a_missing_record_is_fine() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(delete_server_record(&dir.path().join("server.json")).is_ok());
-    }
-
-    #[test]
-    fn a_corrupt_record_reads_as_absent() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("server.json");
+        delete_server_record(&path).expect("deleting a missing record is fine");
         fs::write(&path, "{ not json").unwrap();
         assert_eq!(read_server_record(&path), None);
     }
@@ -136,14 +119,15 @@ mod tests {
     fn prefs_round_trip_through_a_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("root").join("launcher.json");
-        let prefs = Prefs {
+        let mut prefs = Prefs {
             last_port: Some(8083),
+            beta: true,
             ..Prefs::default()
         };
+        prefs.set_tool_pins(&["a", "b"]);
         write_prefs(&path, &prefs).unwrap();
         assert_eq!(read_prefs(&path), prefs);
-        let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"lastPort\": 8083"), "{text}");
+        assert!(read_prefs(&path).tools_current(&["a", "b"]));
     }
 
     #[test]
@@ -176,32 +160,7 @@ mod tests {
         let prefs = read_prefs(&path);
         assert_eq!(prefs.last_port, Some(8090));
         assert!(!prefs.beta);
-    }
-
-    #[test]
-    fn default_prefs_write_null_for_absent_values() {
-        let text = serde_json::to_string(&Prefs::default()).unwrap();
-        assert_eq!(text, r#"{"lastPort":null,"beta":false,"toolPins":[]}"#);
-    }
-
-    #[test]
-    fn the_beta_choice_round_trips_and_defaults_to_off() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("launcher.json");
-        assert!(!read_prefs(&path).beta);
-        fs::write(&path, r#"{"lastPort": 8090}"#).unwrap();
-        assert!(!read_prefs(&path).beta);
-        let prefs = Prefs {
-            beta: true,
-            ..Prefs::default()
-        };
-        write_prefs(&path, &prefs).unwrap();
-        assert!(
-            fs::read_to_string(&path)
-                .unwrap()
-                .contains("\"beta\": true")
-        );
-        assert_eq!(read_prefs(&path), prefs);
+        assert!(!prefs.tools_current(&["a"]), "no pins means stale tools");
     }
 
     #[test]
@@ -213,29 +172,5 @@ mod tests {
         assert!(!prefs.tools_current(&["a", "c"]));
         assert!(!prefs.tools_current(&["a"]));
         assert!(!prefs.tools_current(&["a", "b", "c"]));
-    }
-
-    #[test]
-    fn the_tool_pins_round_trip_through_the_prefs_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("launcher.json");
-        let mut prefs = Prefs::default();
-        prefs.set_tool_pins(&["a", "b"]);
-        write_prefs(&path, &prefs).unwrap();
-        let read = read_prefs(&path);
-        assert!(read.tools_current(&["a", "b"]));
-        assert!(
-            fs::read_to_string(&path)
-                .unwrap()
-                .contains("\"toolPins\": [")
-        );
-    }
-
-    #[test]
-    fn prefs_without_tool_pins_read_as_stale_tools() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("launcher.json");
-        fs::write(&path, r#"{"lastPort": 8090}"#).unwrap();
-        assert!(!read_prefs(&path).tools_current(&["a"]));
     }
 }

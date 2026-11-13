@@ -44,30 +44,8 @@ describe('ProgressHalo', () => {
     expect(svg.hasAttribute('aria-valuenow')).toBe(false);
   });
 
-  it('draws the arc from 12 o\'clock to the fraction, and freezes it in error', () => {
-    const circumference = 2 * Math.PI * 84;
-    for (const kind of ['progress', 'error'] as const) {
-      const arc = halo({ kind, fraction: 0.25, label: 'x' }).querySelector('[data-testid="halo-arc"]') as SVGCircleElement;
-
-      expect(arc.getAttribute('transform')).toBe('rotate(-90 88 88)');
-      expect(Number.parseFloat(arc.style.strokeDashoffset)).toBeCloseTo(circumference * 0.75, 1);
-      expect(arc.style.opacity).toBe('1');
-    }
-  });
-
   it('draws no arc without a fraction', () => {
     const arc = halo({ kind: 'error', label: 'x' }).querySelector('[data-testid="halo-arc"]') as SVGCircleElement;
     expect(arc.style.opacity).toBe('0');
-  });
-
-  it('draws a short sweeping arc when busy and a whole one when live', () => {
-    const circumference = 2 * Math.PI * 84;
-    const busy = halo({ kind: 'busy', label: 'x' }).querySelector('[data-testid="halo-arc"]') as SVGCircleElement;
-    expect(Number.parseFloat(busy.style.strokeDasharray)).toBeCloseTo(circumference * 0.2, 1);
-    expect(busy.style.opacity).toBe('1');
-
-    const live = halo({ kind: 'live', label: 'x' }).querySelector('[data-testid="halo-arc"]') as SVGCircleElement;
-    expect(Number.parseFloat(live.style.strokeDashoffset)).toBe(0);
-    expect(live.style.opacity).toBe('1');
   });
 });

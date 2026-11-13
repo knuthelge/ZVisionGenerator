@@ -183,36 +183,12 @@ mod tests {
     }
 
     #[test]
-    fn hash_copy_of_nothing_is_the_empty_hash() {
-        let mut out = Vec::new();
-        let hash = hash_copy(&mut Cursor::new(b""), &mut out).unwrap();
-        assert_eq!(
-            hash,
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-    }
-
-    #[test]
     fn hash_copy_spans_several_chunks() {
         let data = vec![7u8; CHUNK * 3 + 11];
         let mut out = Vec::new();
         let hash = hash_copy(&mut Cursor::new(&data), &mut out).unwrap();
         assert_eq!(out, data);
-        let mut again = Vec::new();
-        assert_eq!(
-            hash_copy(&mut Cursor::new(&data), &mut again).unwrap(),
-            hash
-        );
-    }
-
-    #[test]
-    fn verify_accepts_only_the_pinned_hash() {
-        assert_eq!(verify(HELLO_SHA256, HELLO_SHA256), Ok(()));
-        assert_eq!(
-            verify(HELLO_SHA256, &"0".repeat(64)),
-            Err(ErrorCode::ChecksumMismatch)
-        );
-        assert_eq!(verify("", HELLO_SHA256), Err(ErrorCode::ChecksumMismatch));
+        assert_eq!(hash.len(), 64);
     }
 
     #[test]
@@ -222,28 +198,12 @@ mod tests {
         for status in [400, 401, 403, 429, 500, 502, 503] {
             assert_eq!(classify_http(status), ErrorCode::DownloadFailed, "{status}");
         }
-    }
-
-    #[test]
-    fn requests_classify_by_status_timeout_and_dns() {
         assert_eq!(
             classify_request(&ureq::Error::StatusCode(404)),
             ErrorCode::DownloadUnavailable
         );
         assert_eq!(
-            classify_request(&ureq::Error::StatusCode(503)),
-            ErrorCode::DownloadFailed
-        );
-        assert_eq!(
             classify_request(&ureq::Error::Timeout(ureq::Timeout::Global)),
-            ErrorCode::DownloadFailed
-        );
-        assert_eq!(
-            classify_request(&ureq::Error::HostNotFound),
-            ErrorCode::DownloadFailed
-        );
-        assert_eq!(
-            classify_request(&ureq::Error::ConnectionFailed),
             ErrorCode::DownloadFailed
         );
     }

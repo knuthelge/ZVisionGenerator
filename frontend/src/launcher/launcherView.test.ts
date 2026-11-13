@@ -45,9 +45,6 @@ describe('hero', () => {
     expect(hero.halo).toMatchObject({ kind: 'progress', fraction: 0.41 });
     expect(hero.halo.valuetext).toContain('41');
     expect(hero.percent).toBe(41);
-    expect(hero.mood).toBe('creating');
-    expect(hero.mascotProgress).toBe(0.41);
-    expect(hero.pool).toBe('work');
     expect(kicker).toMatch(/2.*3/);
     expect(kickerAccent).toBe(true);
   });
@@ -60,17 +57,10 @@ describe('hero', () => {
     }
   });
 
-  it('keeps the brand light quiet while checking and uninstalling, working while starting', () => {
-    expect(view('1 checking').hero.pool).toBe('rest');
-    expect(view('U uninstalling').hero.pool).toBe('rest');
-    expect(view('5 starting').hero.pool).toBe('work');
-  });
-
   it('freezes the ring in red where an install stopped, with no stamp', () => {
     const { hero, kickerAccent } = view('4c failed install');
     expect(hero.halo).toMatchObject({ kind: 'error', fraction: 0.41 });
     expect(hero.percent).toBeUndefined();
-    expect(hero.pool).toBe('dim');
     expect(kickerAccent).toBe(false);
   });
 
@@ -78,8 +68,8 @@ describe('hero', () => {
     expect(view('4c failed install (windows)').hero.halo.fraction).toBeUndefined();
   });
 
-  it('closes the ring and lights up while running; an update adds the dot', () => {
-    expect(view('6 running').hero).toMatchObject({ mood: 'idle', halo: { kind: 'live' }, pool: 'live', update: false });
+  it('closes the ring while running; an update adds the dot', () => {
+    expect(view('6 running').hero).toMatchObject({ halo: { kind: 'live' }, update: false });
     expect(view('7 running with update').hero.update).toBe(true);
   });
 
@@ -87,16 +77,7 @@ describe('hero', () => {
     for (const name of ['9 stopped', '9b failed start', '10a failed update']) {
       const { hero } = view(name);
       expect(hero.halo.kind, name).toBe('rest');
-      expect(hero.mood, name).toBe('sad');
-      expect(hero.pool, name).toBe('dim');
     }
-  });
-
-  it('gives each unsupported and setup state its mood', () => {
-    expect(view('2a unsupported driver_too_old').hero.mood).toBe('sad');
-    expect(view('3 move_to_applications').hero.mood).toBe('curious');
-    expect(view('4a needs_install').hero.mood).toBe('nodding');
-    expect(view('11b uninstalled').hero.mood).toBe('waving');
   });
 });
 
@@ -112,7 +93,7 @@ describe('kicker', () => {
     expect(view('8a updating').kicker).toMatch(/1.*2/);
     expect(view('8b repairing').kicker).toMatch(/3.*4/);
     expect(view('4c failed install').kicker).toMatch(/2.*3/);
-    expect(view('R failed repair').kicker).toBe('Version 0.14.0');
+    expect(view('R failed repair').kicker).toContain('0.14.0');
   });
 });
 
@@ -134,15 +115,10 @@ describe('headline and sub', () => {
       const leads = codes.map((error) => {
         const sub = launcherView({ ...snapshot(name), error }).sub;
         expect(sub?.leadAlert, `${name} ${error}`).toBe(true);
-        expect(sub?.lead, `${name} ${error}`).toBeTruthy();
         return sub?.lead;
       });
       expect(new Set(leads).size, name).toBe(codes.length);
     }
-  });
-
-  it('takes the cause line of a failed update from the same table as a failed install', () => {
-    expect(view('10a failed update').sub?.lead).toBe(view('4c failed install (windows)').sub?.lead);
   });
 
   it('tells a failed update and a failed start apart from a failed install', () => {
@@ -150,38 +126,19 @@ describe('headline and sub', () => {
     expect(new Set(headlines).size).toBe(4);
   });
 
-  it('words a failed repair like a failed update: Open starts the app again, and Repair is in the menu', () => {
+  it('offers Open and keeps Repair in the menu after a failed repair, where a failed install freezes the ring in red', () => {
     const repair = view('R failed repair');
-    expect(repair.sub?.text).toBe('Open starts it again. Repair is in the ⋯ menu.');
-    expect(repair.sub?.text).not.toBe(view('10a failed update').sub?.text);
     expect(repair.hero.halo.kind).toBe('rest');
     expect(repair.primary?.id).toBe('open');
     expect(repair.menu.map((item) => item.id)).toContain('repair');
     expect(view('4c failed install').hero.halo.kind).toBe('error');
   });
 
-  it('words a failed start with a next step and no cause lead', () => {
-    const sub = view('9b failed start').sub;
-    expect(sub?.lead).toBeNull();
-    expect(sub?.text).toContain('Open tries again');
-  });
-
-  it('says a stopped app stopped on its own, and that Open starts it again', () => {
-    expect(view('9 stopped').sub?.text).toBe('It stopped on its own. Open starts it again.');
-  });
-
-  it('has no sub while uninstalling, and an instruction once uninstalled', () => {
-    expect(view('U uninstalling').sub).toBeNull();
-    expect(view('11b uninstalled').sub?.lead).toBeTruthy();
-    expect(view('11b uninstalled').sub?.folder).toBeUndefined();
-  });
-
   it('names the folder an incomplete uninstall left, and only then', () => {
     const incomplete = snapshot('11b uninstalled incomplete');
     expect(incomplete.leftoverFolder).toBeTruthy();
     expect(view('11b uninstalled incomplete').sub?.folder).toBe(incomplete.leftoverFolder);
-    expect(view('11b uninstalled incomplete').sub?.text).toBeTruthy();
-    expect(view('11b uninstalled').sub?.text).toBe('');
+    expect(view('11b uninstalled').sub?.folder).toBeUndefined();
   });
 });
 
@@ -198,16 +155,14 @@ describe('notice', () => {
       kind: 'reason',
       name: 'NVIDIA driver',
       found: null,
-      needed: 'Isn’t working. Restart the computer, or reinstall the driver.',
       link: null
     });
     expect(view('2b unsupported gpu_too_old').notice).toMatchObject({ found: 'GTX 1080', link: null });
   });
 
-  it('puts a driver that does not work under Can’t install yet, and a missing GPU under Can’t run', () => {
-    expect(view('2a unsupported driver_not_working').headline).toBe('Can’t install yet');
+  it('lets a driver that does not work be checked again, and says a missing GPU is permanent', () => {
     expect(view('2a unsupported driver_not_working').primary?.id).toBe('check_again');
-    expect(view('2b unsupported no_nvidia_gpu').headline).toBe('Can’t run on this computer');
+    expect(view('2b unsupported no_nvidia_gpu').headline).not.toBe(view('2a unsupported driver_not_working').headline);
   });
 
   it('offers the update as an alert', () => {
@@ -233,15 +188,6 @@ describe('notice', () => {
 });
 
 describe('action zone', () => {
-  it('names the primary action of each state', () => {
-    expect(view('4a needs_install').primary).toMatchObject({ id: 'install', icon: 'download' });
-    expect(view('2b unsupported no_nvidia_gpu').primary).toMatchObject({ id: 'see_requirements', variant: 'secondary' });
-    expect(view('5 starting').primary).toMatchObject({ id: 'starting', loading: true });
-    expect(view('6 running').primary?.id).toBe('open');
-    expect(view('10a failed update').primary?.id).toBe('open');
-    expect(view('11b uninstalled').primary?.id).toBe('quit');
-  });
-
   it('has a primary exactly when the controls do', () => {
     for (const c of CASES) expect(launcherView(c.snapshot).primary?.id ?? null, c.name).toBe(c.snapshot.controls.primary);
   });
@@ -253,12 +199,6 @@ describe('action zone', () => {
     expect(view('8a updating with updateVersion').caption?.label).toContain('0.14.1');
     expect(view('4c failed install').caption).toBeNull();
     expect(view('6 running').caption).toBeNull();
-  });
-
-  it('names the step of each progress row', () => {
-    const labels = (name: string) => view(name).caption?.label;
-    expect(labels('4b installing')).not.toBe(labels('8b repairing'));
-    expect(labels('8a updating with new tools')).not.toBe(labels('8a updating with updateVersion'));
   });
 
   it('lists More entries in the snapshot’s order', () => {

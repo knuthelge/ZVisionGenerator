@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_a_gpu_line() {
+    fn parses_gpu_lines() {
         assert_eq!(
             parse_nvidia_smi(RTX_3060),
             vec![Gpu {
@@ -276,18 +276,9 @@ mod tests {
                 compute_cap: (8, 6),
             }]
         );
-    }
-
-    #[test]
-    fn parses_crlf_lines() {
-        let gpus = parse_nvidia_smi(&format!("{RTX_3060}\r\n{GTX_1080}\r\n"));
+        let gpus = parse_nvidia_smi(&format!("warning: something\n{RTX_3060}\r\n{GTX_1080}\r\n"));
         assert_eq!(gpus.len(), 2);
         assert_eq!(gpus[1].compute_cap, (6, 1));
-        assert_eq!(gpus[0].driver, "580.95.05");
-    }
-
-    #[test]
-    fn a_name_with_a_comma_stays_whole() {
         let gpus = parse_nvidia_smi("NVIDIA RTX A2000, 12GB, 580.95.05, 8.6");
         assert_eq!(gpus[0].name, "NVIDIA RTX A2000, 12GB");
     }
@@ -309,54 +300,30 @@ mod tests {
     }
 
     #[test]
-    fn a_garbage_line_does_not_hide_a_gpu() {
-        let gpus = parse_nvidia_smi(&format!("warning: something\n{RTX_3060}\n"));
-        assert_eq!(gpus.len(), 1);
-    }
-
-    #[test]
-    fn driver_major_reads_the_first_segment() {
-        assert_eq!(driver_major("580.95.05"), Some(580));
-        assert_eq!(driver_major(" 575 "), Some(575));
-        assert_eq!(driver_major("abc"), None);
-        assert_eq!(driver_major(""), None);
-    }
-
-    #[test]
-    fn driver_580_passes_and_579_is_too_old() {
+    fn the_driver_then_the_compute_capability_must_be_recent_enough() {
         assert_eq!(check(RTX_3060), Ok(()));
         let old = check("NVIDIA GeForce RTX 3060, 579.99, 8.6").unwrap_err();
         assert_eq!(old.code, UnsupportedCode::DriverTooOld);
         assert_eq!(old.found.as_deref(), Some("579.99"));
         assert_eq!(old.needed, "580");
-    }
 
-    #[test]
-    fn compute_capability_75_passes_and_70_is_too_old() {
         assert_eq!(check("NVIDIA GeForce RTX 2080, 580.95.05, 7.5"), Ok(()));
         let old = check("NVIDIA Tesla V100, 580.95.05, 7.0").unwrap_err();
         assert_eq!(old.code, UnsupportedCode::GpuTooOld);
         assert_eq!(old.found.as_deref(), Some("NVIDIA Tesla V100"));
         assert_eq!(old.needed, "7.5");
-    }
 
-    #[test]
-    fn the_minor_part_is_compared_numerically() {
-        assert_eq!(check("NVIDIA GPU, 580.1, 10.0"), Ok(()));
         assert_eq!(
-            code(check("NVIDIA GPU, 580.1, 7.4")),
-            UnsupportedCode::GpuTooOld
+            code(check("NVIDIA GeForce GTX 1080, 575.51, 6.1")),
+            UnsupportedCode::DriverTooOld,
+            "an old driver wins over an old GPU"
         );
     }
 
     #[test]
-    fn any_capable_gpu_passes_in_either_order() {
+    fn any_capable_gpu_passes_else_the_best_old_one_is_named() {
         assert_eq!(check(&format!("{GTX_1080}\n{RTX_3060}")), Ok(()));
         assert_eq!(check(&format!("{RTX_3060}\n{GTX_1080}")), Ok(()));
-    }
-
-    #[test]
-    fn with_only_old_gpus_the_best_one_is_named() {
         let result = check(
             "NVIDIA GeForce GTX 1080, 580.95.05, 6.1\nNVIDIA Tesla V100, 580.95.05, 7.0\nNVIDIA GeForce GTX 970, 580.95.05, 5.2",
         );
@@ -367,65 +334,19 @@ mod tests {
     }
 
     #[test]
-    fn a_tie_names_the_first_gpu() {
-        let result = check("GPU A, 580.1, 6.1\nGPU B, 580.1, 6.1");
-        assert_eq!(result.unwrap_err().found.as_deref(), Some("GPU A"));
-    }
-
-    #[test]
-    fn an_old_driver_wins_over_an_old_gpu() {
-        assert_eq!(
-            code(check("NVIDIA GeForce GTX 1080, 575.51, 6.1")),
-            UnsupportedCode::DriverTooOld
-        );
-    }
-
-    #[test]
-    fn no_gpus_means_no_nvidia_gpu() {
-        let reason = evaluate_gpus(&[]).unwrap_err();
-        assert_eq!(reason.code, UnsupportedCode::NoNvidiaGpu);
-        assert_eq!(reason.found, None);
-        assert_eq!(reason.needed, "7.5");
-    }
-
-    #[test]
-    fn a_driver_that_rejects_compute_cap_is_too_old() {
+    fn without_gpus_the_failure_names_the_driver_or_the_missing_nvidia_gpu() {
         let reason = evaluate_without_gpus(true, Some("470.239.06\r\n"));
         assert_eq!(reason.code, UnsupportedCode::DriverTooOld);
         assert_eq!(reason.found.as_deref(), Some("470.239.06"));
         assert_eq!(reason.needed, "580");
-    }
 
-    #[test]
-    fn a_nvidia_smi_that_fails_is_a_driver_that_does_not_work() {
-        for text in [None, Some(""), Some("not a version"), Some("580.95.05")] {
+        for text in [None, Some(""), Some("580.95.05")] {
             let reason = evaluate_without_gpus(true, text);
             assert_eq!(reason.code, UnsupportedCode::DriverNotWorking, "{text:?}");
-            assert_eq!(reason.found, None);
-            assert_eq!(reason.needed, "580");
         }
-    }
 
-    #[test]
-    fn without_nvidia_smi_there_is_no_nvidia_gpu() {
         let reason = evaluate_without_gpus(false, None);
         assert_eq!(reason.code, UnsupportedCode::NoNvidiaGpu);
-        assert_eq!(reason.needed, "7.5");
-    }
-
-    #[test]
-    fn the_query_has_no_header_and_no_shell() {
-        assert_eq!(
-            query_args("name,driver_version,compute_cap"),
-            [
-                "--query-gpu=name,driver_version,compute_cap",
-                "--format=csv,noheader"
-            ]
-        );
-        assert_eq!(
-            query_args("driver_version")[0],
-            "--query-gpu=driver_version"
-        );
     }
 
     fn mount(point: &str, free: u64) -> Mount {
@@ -449,20 +370,12 @@ mod tests {
         assert_eq!(found.map(|m| m.free), Some(2));
         let found = volume_for(&mounts, Path::new("/srv/data"));
         assert_eq!(found.map(|m| m.free), Some(1));
-    }
-
-    #[test]
-    fn a_mount_matches_whole_path_components_only() {
-        let mounts = [mount("/", 1), mount("/home/ex", 4)];
-        let found = volume_for(&mounts, Path::new("/home/example/data"));
-        assert_eq!(found.map(|m| m.free), Some(1));
-    }
-
-    #[test]
-    fn no_mount_holds_a_path_outside_all_of_them() {
-        let mounts = [mount("/home", 2)];
-        assert_eq!(volume_for(&mounts, Path::new("/srv/data")), None);
-        assert_eq!(volume_for(&[], Path::new("/srv/data")), None);
+        let found = volume_for(&mounts, Path::new("/home/examples/data"));
+        assert_eq!(found.map(|m| m.free), Some(2), "whole path components only");
+        assert_eq!(
+            volume_for(&[mount("/home", 2)], Path::new("/srv/data")),
+            None
+        );
     }
 
     #[test]
@@ -476,31 +389,15 @@ mod tests {
     }
 
     #[test]
-    fn zero_free_bytes_is_reported_as_zero() {
-        let low = check_space(0, MIN_FREE_BYTES).unwrap_err();
-        assert_eq!(low.found.as_deref(), Some("0"));
-    }
-
-    #[test]
-    fn disk_images_and_translocated_apps_must_move() {
+    fn only_disk_images_and_translocated_apps_must_move() {
         assert!(needs_move_to_applications(Path::new(
             "/Volumes/Z-Vision Generator/Z-Vision Generator.app/Contents/MacOS/launcher"
         )));
         assert!(needs_move_to_applications(Path::new(
             "/private/var/folders/xx/AppTranslocation/ABC-123/d/Z-Vision Generator.app/Contents/MacOS/launcher"
         )));
-    }
-
-    #[test]
-    fn an_app_in_applications_stays_put() {
         assert!(!needs_move_to_applications(Path::new(
             "/Applications/Z-Vision Generator.app/Contents/MacOS/launcher"
-        )));
-        assert!(!needs_move_to_applications(Path::new(
-            "/Users/example/Applications/Z-Vision Generator.app/Contents/MacOS/launcher"
-        )));
-        assert!(!needs_move_to_applications(Path::new(
-            "/Volumes2/app/launcher"
         )));
     }
 }

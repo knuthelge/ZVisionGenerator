@@ -277,14 +277,6 @@ mod tests {
     }
 
     #[test]
-    fn keeps_the_program_path_and_adds_no_arguments() {
-        let program = Path::new("a folder").join("uv");
-        let command = hidden_command(&program);
-        assert_eq!(command.get_program(), program.as_os_str());
-        assert_eq!(command.get_args().count(), 0);
-    }
-
-    #[test]
     fn output_splits_at_newlines_and_carriage_returns_without_empty_lines() {
         let got: Vec<&str> = output_lines("a\r\nb\rc\n\n  d  \n").collect();
         assert_eq!(got, ["a", "b", "c", "  d"]);

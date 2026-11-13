@@ -199,12 +199,6 @@ describe('LauncherApp actions', () => {
     expect(bridge.openApp).not.toHaveBeenCalled();
   });
 
-  it('shows no main button where the controls have none', async () => {
-    const { target } = await open('4b installing');
-    expect(primary(target)).toBeNull();
-    expect(target.querySelector('[data-testid="caption"]')).not.toBeNull();
-  });
-
   it('opens the requirements page from See the requirements', async () => {
     const { target, bridge } = await open('2b unsupported no_nvidia_gpu');
 
@@ -233,12 +227,6 @@ describe('LauncherApp actions', () => {
 
     expect(bridge.updateApp).toHaveBeenCalledOnce();
     expect(bridge.openLink).toHaveBeenCalledWith('whats_new');
-  });
-
-  it('offers no update where the controls offer none', async () => {
-    const { target } = await open('6 running');
-    expect(notice(target)).toBeNull();
-    expect(target.querySelector('[data-testid="update-dot"]')).toBeNull();
   });
 
   it('offers the update again once a failed update has been opened and the app runs', async () => {
@@ -285,17 +273,21 @@ describe('LauncherApp actions', () => {
 });
 
 describe('LauncherApp quiet bar', () => {
-  it('offers Quit and More, but no Start at login, before install', async () => {
-    const before = await open('4a needs_install');
-    expect(before.target.querySelector('[role="switch"]')).toBeNull();
-    expect(moreButton(before.target)).not.toBeNull();
-    expect(quitButton(before.target)).toBeTruthy();
-  });
+  it('shows the bar, the switch and More the controls ask for, and locks them while the controls say so', async () => {
+    vi.useFakeTimers();
+    for (const c of CASES) {
+      const { target } = mountComponent(LauncherApp, { bridge: fakeBridge(structuredClone(c.snapshot)).bridge });
+      await settle(300);
+      const { bar, autostart, menu, locked } = c.snapshot.controls;
+      const toggle = target.querySelector('[role="switch"]') as HTMLInputElement | null;
+      const more = moreButton(target);
 
-  it('offers Quit alone while installing', async () => {
-    const { target } = await open('4b installing');
-    expect(target.querySelector('[role="switch"]')).toBeNull();
-    expect(moreButton(target)).toBeNull();
+      expect(target.querySelector('[data-testid="quiet-bar"]') !== null, c.name).toBe(bar);
+      expect(toggle !== null, c.name).toBe(autostart);
+      expect(more !== null, c.name).toBe(menu.length > 0);
+      if (toggle) expect(toggle.disabled, c.name).toBe(locked);
+      if (more) expect(more.disabled, c.name).toBe(locked);
+    }
   });
 
   it('quits from the bar', async () => {
@@ -304,11 +296,6 @@ describe('LauncherApp quiet bar', () => {
     quitButton(target).click();
 
     expect(bridge.quitLauncher).toHaveBeenCalledOnce();
-  });
-
-  it('drops the bar once uninstalled', async () => {
-    const { target } = await open('11b uninstalled');
-    expect(target.querySelector('[data-testid="quiet-bar"]')).toBeNull();
   });
 
   it('sets start at login and shows the state Rust answers', async () => {
@@ -340,13 +327,6 @@ describe('LauncherApp quiet bar', () => {
 
     const hint = document.getElementById(toggle.getAttribute('aria-describedby') ?? '');
     expect(hint?.textContent).toBeTruthy();
-  });
-
-  it('disables Start at login and More while updating', async () => {
-    const { target } = await open('8a updating');
-
-    expect((target.querySelector('[role="switch"]') as HTMLInputElement).disabled).toBe(true);
-    expect((moreButton(target) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('lists Repair and Uninstall in More, and repairs from it', async () => {
@@ -398,36 +378,23 @@ describe('LauncherApp beta', () => {
     return document.querySelector('[data-action="beta"]') as HTMLButtonElement;
   };
 
-  it('offers Get beta versions as the only More entry before install, unchecked by default', async () => {
-    const { target } = await open('4a needs_install');
+  it.each([false, true])('offers Get beta versions as the only More entry before install, checked as stored (%s)', async (beta) => {
+    const { target } = await open('4a needs_install', (s) => { s.beta = beta; });
     const item = await openMore(target);
 
     expect(Array.from(document.querySelectorAll('[role^="menuitem"]'))).toHaveLength(1);
     expect(document.querySelectorAll('[role="separator"]')).toHaveLength(0);
-    expect(item.getAttribute('aria-checked')).toBe('false');
     expect(item.getAttribute('role')).toBe('menuitemcheckbox');
+    expect(item.getAttribute('aria-checked')).toBe(String(beta));
   });
 
-  it('shows the stored choice as checked', async () => {
-    const { target } = await open('4a needs_install with beta');
-    expect((await openMore(target)).getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('turns beta on through set_beta and shows what Rust stored', async () => {
-    const { target, bridge } = await open('6 running');
+  it.each([[false, true], [true, false]])('from %s, toggling sets beta to %s through set_beta and shows what Rust stored', async (before, after) => {
+    const { target, bridge } = await open('6 running', (s) => { s.beta = before; });
     (await openMore(target)).click();
     await settle();
 
-    expect(bridge.setBeta).toHaveBeenCalledExactlyOnceWith(true);
-    expect((await openMore(target)).getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('turns beta off again from a checked item', async () => {
-    const { target, bridge } = await open('6 running a beta version');
-    (await openMore(target)).click();
-    await settle();
-
-    expect(bridge.setBeta).toHaveBeenCalledExactlyOnceWith(false);
+    expect(bridge.setBeta).toHaveBeenCalledExactlyOnceWith(after);
+    expect((await openMore(target)).getAttribute('aria-checked')).toBe(String(after));
   });
 
   it('puts the checkbox back when Rust refuses', async () => {

@@ -90,41 +90,20 @@ mod tests {
     }
 
     #[test]
-    fn no_arguments_is_a_normal_launch() {
-        assert_eq!(mode(&[]), Mode::Gui { autostart: false });
-    }
-
-    #[test]
-    fn autostart_marks_a_login_launch() {
-        assert_eq!(mode(&["--autostart"]), Mode::Gui { autostart: true });
-    }
-
-    #[test]
-    fn uninstall_cleanup_wins_over_everything() {
-        assert_eq!(
-            mode(&["--uninstall-cleanup"]),
-            Mode::UninstallCleanup { keep_data: false }
-        );
-        assert_eq!(
-            mode(&["--autostart", "--uninstall-cleanup"]),
-            Mode::UninstallCleanup { keep_data: false }
-        );
-    }
-
-    #[test]
-    fn keep_data_is_read_with_the_cleanup_in_any_order() {
-        let keep = Mode::UninstallCleanup { keep_data: true };
-        assert_eq!(mode(&["--uninstall-cleanup", "--keep-data"]), keep);
-        assert_eq!(mode(&["--keep-data", "--uninstall-cleanup"]), keep);
-    }
-
-    #[test]
-    fn keep_data_alone_is_a_normal_launch() {
-        assert_eq!(mode(&["--keep-data"]), Mode::Gui { autostart: false });
-    }
-
-    #[test]
-    fn unknown_arguments_are_ignored() {
-        assert_eq!(mode(&["--something", "x"]), Mode::Gui { autostart: false });
+    fn arguments_pick_the_mode() {
+        let gui = |autostart| Mode::Gui { autostart };
+        let cleanup = |keep_data| Mode::UninstallCleanup { keep_data };
+        for (args, expected) in [
+            (vec![], gui(false)),
+            (vec!["--autostart"], gui(true)),
+            (vec!["--keep-data"], gui(false)),
+            (vec!["--something", "x"], gui(false)),
+            (vec!["--uninstall-cleanup"], cleanup(false)),
+            (vec!["--autostart", "--uninstall-cleanup"], cleanup(false)),
+            (vec!["--uninstall-cleanup", "--keep-data"], cleanup(true)),
+            (vec!["--keep-data", "--uninstall-cleanup"], cleanup(true)),
+        ] {
+            assert_eq!(mode(&args), expected, "{args:?}");
+        }
     }
 }

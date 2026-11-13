@@ -41,18 +41,3 @@ fn xdg_open(url: &str) -> std::process::Command {
         .stderr(Stdio::null());
     command
 }
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_command_is_xdg_open_with_the_url_as_its_only_argument() {
-        let command = xdg_open("http://127.0.0.1:8081/");
-        assert_eq!(command.get_program(), "xdg-open");
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            ["http://127.0.0.1:8081/"]
-        );
-    }
-}

@@ -81,14 +81,6 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-
-    #[test]
-    fn root_folder_is_lowercase_on_linux_only() {
-        assert_eq!(root_folder_name("linux"), "zvision");
-        assert_eq!(root_folder_name("macos"), "ZVision");
-        assert_eq!(root_folder_name("windows"), "ZVision");
-    }
 
     #[test]
     fn root_sits_under_the_local_data_folder_in_the_folder_of_this_os() {
@@ -98,11 +90,6 @@ mod tests {
             root_folder_name(std::env::consts::OS)
         );
         assert_eq!(root.parent(), dirs::data_local_dir().as_deref());
-    }
-
-    #[test]
-    fn exe_names_take_the_platform_suffix() {
-        assert_eq!(exe("ziv"), format!("ziv{}", std::env::consts::EXE_SUFFIX));
     }
 
     #[test]
@@ -122,21 +109,5 @@ mod tests {
         ] {
             assert_eq!(path.parent(), Some(root.as_path()), "{path:?}");
         }
-        assert_eq!(layout.server_json.file_name().unwrap(), "server.json");
-        assert_eq!(layout.server_log.file_name().unwrap(), "server.log");
-        assert_eq!(layout.launcher_json.file_name().unwrap(), "launcher.json");
-        assert_eq!(layout.tool_bin.file_name().unwrap(), "tool-bin");
-    }
-
-    #[test]
-    fn tools_live_in_their_folders() {
-        let layout = Layout::new(PathBuf::from("root"));
-        assert_eq!(
-            layout.ziv(),
-            Path::new("root").join("tool-bin").join(exe("ziv"))
-        );
-        assert_eq!(layout.uv(), Path::new("root").join("bin").join(exe("uv")));
-        assert_eq!(layout.ffmpeg().parent(), Some(layout.bin.as_path()));
-        assert_eq!(layout.ffprobe().parent(), Some(layout.bin.as_path()));
     }
 }

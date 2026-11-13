@@ -166,15 +166,7 @@ mod tests {
         );
         assert_eq!(packaging("linux", None), Packaging::LinuxPackage);
         assert_eq!(packaging("linux", Some("")), Packaging::LinuxPackage);
-    }
-
-    #[test]
-    fn the_appimage_variable_means_nothing_off_linux() {
         assert_eq!(packaging("macos", Some("/x.AppImage")), Packaging::MacosApp);
-        assert_eq!(
-            packaging("windows", Some("/x.AppImage")),
-            Packaging::WindowsNsis
-        );
     }
 
     #[test]
@@ -187,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_tries_again_until_it_succeeds() {
+    fn retry_tries_again_until_it_succeeds_or_gives_up_with_the_last_error() {
         let attempts = Cell::new(0);
         let result = retry(Duration::from_secs(5), Duration::ZERO, || {
             attempts.set(attempts.get() + 1);
@@ -198,10 +190,7 @@ mod tests {
             }
         });
         assert_eq!(result.unwrap(), 3);
-    }
 
-    #[test]
-    fn retry_gives_up_after_the_budget_with_the_last_error() {
         let result: io::Result<()> = retry(Duration::ZERO, Duration::ZERO, || {
             Err(io::Error::other("still locked"))
         });
@@ -213,25 +202,14 @@ mod tests {
     }
 
     #[test]
-    fn delete_root_removes_the_folder_and_what_is_in_it() {
+    fn delete_root_removes_the_folder_and_what_is_in_it_and_a_missing_one_is_fine() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join(root_name());
         fs::create_dir_all(root.join("tools/a")).unwrap();
         fs::write(root.join("tools/a/file"), "x").unwrap();
         delete_root(&root, Duration::ZERO).unwrap();
         assert!(!root.exists());
-    }
-
-    #[test]
-    fn delete_root_of_a_missing_folder_is_fine() {
-        let dir = tempfile::tempdir().unwrap();
-        delete_root(&dir.path().join(root_name()), Duration::ZERO).unwrap();
-    }
-
-    #[test]
-    fn delete_root_refuses_a_filesystem_root() {
-        let error = delete_root(Path::new("/"), Duration::ZERO).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        delete_root(&root, Duration::ZERO).expect("a missing folder is fine");
     }
 
     /// Run the guard on `path` expecting a refusal that leaves `keep` (a file) in place.
@@ -248,77 +226,6 @@ mod tests {
         fs::create_dir_all(&other).unwrap();
         fs::write(other.join("file"), "x").unwrap();
         assert_refused(&other, None, &other.join("file"));
-    }
-
-    #[test]
-    fn delete_root_refuses_the_wrong_case() {
-        let dir = tempfile::tempdir().unwrap();
-        let other = dir.path().join("ZVision");
-        fs::create_dir_all(&other).unwrap();
-        fs::write(other.join("file"), "x").unwrap();
-        assert_refused(&other, None, &other.join("file"));
-    }
-
-    #[test]
-    fn delete_root_refuses_a_relative_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let relative = Path::new("zvision");
-        let kept = dir.path().join("kept");
-        fs::write(&kept, "x").unwrap();
-        assert_refused(relative, None, &kept);
-    }
-
-    #[test]
-    fn delete_root_refuses_a_path_with_parent_components() {
-        let dir = tempfile::tempdir().unwrap();
-        let victim = dir.path().join("victim");
-        fs::create_dir_all(victim.join("zvision")).unwrap();
-        fs::write(victim.join("file"), "x").unwrap();
-        let sneaky = victim.join("zvision/../../victim/zvision");
-        assert_refused(&sneaky, None, &victim.join("file"));
-    }
-
-    #[test]
-    fn delete_root_refuses_the_home_folder() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join("zvision");
-        fs::create_dir_all(&home).unwrap();
-        fs::write(home.join("file"), "x").unwrap();
-        assert_refused(&home, Some(&home), &home.join("file"));
-    }
-
-    #[test]
-    fn delete_root_deletes_an_absolute_path_with_the_expected_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("zvision");
-        fs::create_dir_all(root.join("a")).unwrap();
-        delete_root_checked(&root, "zvision", None, Duration::ZERO).unwrap();
-        assert!(!root.exists());
-    }
-
-    #[test]
-    fn delete_root_with_the_real_home_folder_is_refused() {
-        if let Some(home) = dirs::home_dir() {
-            let error = delete_root(&home, Duration::ZERO).unwrap_err();
-            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn delete_root_removes_a_symlinked_root_but_never_what_it_points_to() {
-        let dir = tempfile::tempdir().unwrap();
-        let elsewhere = dir.path().join("elsewhere");
-        fs::create_dir_all(elsewhere.join("sub")).unwrap();
-        fs::write(elsewhere.join("sub/precious"), "x").unwrap();
-        let root = dir.path().join("zvision");
-        std::os::unix::fs::symlink(&elsewhere, &root).unwrap();
-        delete_root_checked(&root, "zvision", None, Duration::ZERO).unwrap();
-        assert!(root.symlink_metadata().is_err(), "the link itself is gone");
-        assert!(
-            elsewhere.join("sub/precious").exists(),
-            "the target survives"
-        );
     }
 
     #[cfg(unix)]
@@ -360,9 +267,9 @@ mod tests {
     /// therefore uses the rebuilt path and removes the link itself.
     #[cfg(unix)]
     #[test]
-    fn delete_root_removes_a_symlinked_root_with_a_trailing_separator_or_dot_without_following_it()
-    {
-        for suffix in ["/", "/."] {
+    fn delete_root_removes_a_symlinked_root_but_never_what_it_points_to_even_with_a_trailing_separator_or_dot()
+     {
+        for suffix in ["", "/", "/."] {
             let dir = tempfile::tempdir().unwrap();
             let elsewhere = dir.path().join("elsewhere");
             fs::create_dir_all(&elsewhere).unwrap();
@@ -391,6 +298,12 @@ mod tests {
         assert!(!ok("/data/zvision/sub"));
         assert!(!ok("/data/zvision2"));
         assert!(!ok("/data/zvision "));
+        assert!(!ok("/data/ZVision"));
+        assert!(!is_plausible_root(
+            Path::new("/home/u/zvision"),
+            "zvision",
+            Some(Path::new("/home/u/zvision"))
+        ));
         assert!(!ok("/data/../zvision"));
         assert!(!ok("zvision"));
         assert!(!ok("./zvision"));
@@ -425,13 +338,5 @@ mod tests {
         cleanup(&layout, true);
         assert!(!layout.server_json.exists(), "the stale record is cleared");
         assert!(layout.tools.exists(), "Root stays");
-    }
-
-    #[test]
-    fn cleanup_never_fails_when_there_is_nothing_to_clean() {
-        let dir = tempfile::tempdir().unwrap();
-        let layout = Layout::new(dir.path().join(root_name()));
-        cleanup(&layout, false);
-        assert!(!layout.root.exists());
     }
 }

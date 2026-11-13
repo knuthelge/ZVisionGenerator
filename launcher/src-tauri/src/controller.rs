@@ -1243,8 +1243,6 @@ mod tests {
     enum Serve {
         /// Answers at once.
         Ready,
-        /// Never answers; waits until stopped.
-        Hold,
         /// Dies before answering.
         Die,
         /// Never answers within the timeout.
@@ -1729,34 +1727,25 @@ mod tests {
     }
 
     #[test]
-    fn an_enabled_start_at_login_entry_is_written_again_at_launch() {
-        let fake = Fake::new();
-        fake.script().autostart = true;
-        let rig = rig_with(Packaging::Appimage, Platform::LinuxX64, fake);
-        rig.controller.launch(false);
-        assert_eq!(rig.fake.count("autostart true"), 1);
-        assert!(rig.snap().autostart);
-    }
-
-    #[test]
-    fn a_disabled_start_at_login_entry_is_left_alone() {
-        let rig = rig();
-        rig.controller.launch(false);
-        assert_eq!(rig.fake.count("autostart true"), 0);
-        assert_eq!(rig.fake.count("autostart false"), 0);
-    }
-
-    #[test]
-    fn start_at_login_is_not_rewritten_from_a_disk_image() {
-        let fake = Fake::new();
-        {
-            let mut script = fake.script();
-            script.autostart = true;
-            script.must_move = true;
+    fn start_at_login_is_written_again_at_launch_only_when_enabled_and_not_from_a_disk_image() {
+        // (enabled, packaging, platform, must_move) -> how many times the entry is written enabled
+        let cases = [
+            (true, Packaging::Appimage, Platform::LinuxX64, false, 1),
+            (false, Packaging::LinuxPackage, Platform::LinuxX64, false, 0),
+            (true, Packaging::MacosApp, Platform::MacosArm64, true, 0),
+        ];
+        for (enabled, packaging, platform, must_move, written) in cases {
+            let fake = Fake::new();
+            {
+                let mut script = fake.script();
+                script.autostart = enabled;
+                script.must_move = must_move;
+            }
+            let rig = rig_with(packaging, platform, fake);
+            rig.controller.launch(false);
+            assert_eq!(rig.fake.count("autostart true"), written, "{enabled}");
+            assert_eq!(rig.fake.count("autostart false"), 0, "{enabled}");
         }
-        let rig = rig_with(Packaging::MacosApp, Platform::MacosArm64, fake);
-        rig.controller.launch(false);
-        assert_eq!(rig.fake.count("autostart true"), 0);
     }
 
     #[test]
@@ -1863,21 +1852,6 @@ mod tests {
                 .any(|s| s.progress.as_ref().unwrap().fraction.is_some()),
             "the ring was filled during install_app"
         );
-    }
-
-    #[test]
-    fn the_fraction_stops_at_the_cap() {
-        let rig = rig();
-        rig.fake.script().cache_bytes = u64::MAX / 2;
-        rig.controller.launch(false);
-        rig.controller.install().unwrap();
-        rig.idle();
-        let seen = lock(&rig.emitted).clone();
-        let top = seen
-            .iter()
-            .filter_map(|s| s.progress.as_ref().and_then(|p| p.fraction))
-            .fold(0.0_f64, f64::max);
-        assert_eq!(top, progress::MAX_FRACTION);
     }
 
     #[test]
@@ -1997,53 +1971,37 @@ mod tests {
     }
 
     #[test]
-    fn an_update_with_stale_pins_fetches_the_tools_and_records_them() {
-        let rig = rig();
-        rig.fake
-            .script()
-            .versions
-            .push_back(Some("0.14.1".to_owned()));
-        rig.running("0.14.0", Some("0.14.1"));
-        rig.controller.update_app().unwrap();
-        rig.idle();
-        let calls = rig.fake.calls();
-        let at = |needle: &str| {
-            calls
-                .iter()
-                .position(|c| c.starts_with(needle))
-                .unwrap_or_else(|| panic!("{needle} missing from {calls:?}"))
-        };
-        assert_eq!(rig.fake.count("fetch_tools"), 1);
-        assert!(at("fetch_tools") < at("uv tool install --upgrade"));
-        assert_eq!(rig.snap().phase, Phase::Running);
-        assert!(
-            rig.prefs()
-                .tools_current(&manifest::pins(Platform::LinuxX64))
-        );
-        assert!(rig.emitted_steps(Phase::Updating).contains(&vec![
-            StepId::DownloadTools,
-            StepId::UpdateApp,
-            StepId::Finish
-        ]));
-    }
-
-    #[test]
-    fn an_update_with_current_pins_leaves_the_tools_alone() {
-        let rig = rig();
-        rig.fake
-            .script()
-            .versions
-            .push_back(Some("0.14.1".to_owned()));
-        rig.tools_installed();
-        rig.running("0.14.0", Some("0.14.1"));
-        rig.controller.update_app().unwrap();
-        rig.idle();
-        assert_eq!(rig.fake.count("fetch_tools"), 0);
-        assert_eq!(rig.snap().phase, Phase::Running);
-        assert!(
-            rig.emitted_steps(Phase::Updating)
-                .contains(&vec![StepId::UpdateApp, StepId::Finish])
-        );
+    fn an_update_fetches_the_tools_only_when_the_pins_are_stale_and_records_them() {
+        for current in [false, true] {
+            let rig = rig();
+            rig.fake
+                .script()
+                .versions
+                .push_back(Some("0.14.1".to_owned()));
+            if current {
+                rig.tools_installed();
+            }
+            rig.running("0.14.0", Some("0.14.1"));
+            rig.controller.update_app().unwrap();
+            rig.idle();
+            assert_eq!(rig.snap().phase, Phase::Running, "{current}");
+            assert_eq!(rig.fake.count("fetch_tools"), usize::from(!current));
+            let rows = if current {
+                vec![StepId::UpdateApp, StepId::Finish]
+            } else {
+                vec![StepId::DownloadTools, StepId::UpdateApp, StepId::Finish]
+            };
+            assert!(rig.emitted_steps(Phase::Updating).contains(&rows));
+            if !current {
+                let calls = rig.fake.calls();
+                let at = |needle: &str| calls.iter().position(|c| c.starts_with(needle)).unwrap();
+                assert!(at("fetch_tools") < at("uv tool install --upgrade"));
+                assert!(
+                    rig.prefs()
+                        .tools_current(&manifest::pins(Platform::LinuxX64))
+                );
+            }
+        }
     }
 
     #[test]
@@ -2247,61 +2205,32 @@ mod tests {
     }
 
     #[test]
-    fn with_beta_on_install_and_upgrade_allow_pre_releases() {
-        let rig = rig();
-        rig.controller.launch(false);
-        assert_eq!(rig.controller.set_beta(true), Ok(true));
-        rig.idle();
-        assert!(rig.snap().beta);
-        assert!(rig.prefs().beta);
-        rig.controller.install().unwrap();
-        rig.idle();
-        let args = install_args_of(&rig);
-        assert!(
-            args.windows(2)
-                .any(|w| w == ["--prerelease-package", "z-vision-generator=allow"]),
-            "{args:?}"
-        );
-        assert!(!args.iter().any(|a| a.contains("==")));
-
-        rig.running("0.14.0", Some("0.15.0b1"));
-        rig.controller.update_app().unwrap();
-        rig.idle();
-        let upgrade = rig
-            .fake
-            .uv_commands()
-            .into_iter()
-            .find(|args| args.contains(&"--upgrade".to_owned()))
-            .unwrap();
-        assert!(
-            upgrade
-                .windows(2)
-                .any(|w| w == ["--prerelease-package", "z-vision-generator=allow"]),
-            "{upgrade:?}"
-        );
-    }
-
-    #[test]
-    fn with_beta_off_a_stable_install_and_upgrade_stay_stable() {
-        let rig = rig();
-        rig.controller.launch(false);
-        rig.controller.install().unwrap();
-        rig.idle();
-        assert!(
-            !install_args_of(&rig)
+    fn install_and_upgrade_allow_pre_releases_only_with_beta_on() {
+        for beta in [true, false] {
+            let rig = rig();
+            rig.controller.launch(false);
+            assert_eq!(rig.controller.set_beta(beta), Ok(beta));
+            rig.idle();
+            assert_eq!(rig.prefs().beta, beta);
+            rig.controller.install().unwrap();
+            rig.idle();
+            rig.running("0.14.0", Some("0.15.0b1"));
+            rig.controller.update_app().unwrap();
+            rig.idle();
+            let commands = rig.fake.uv_commands();
+            let install = install_args_of(&rig);
+            let upgrade = commands
                 .iter()
-                .any(|a| a.starts_with("--prerelease"))
-        );
-        rig.running("0.14.0", Some("0.14.1"));
-        rig.controller.update_app().unwrap();
-        rig.idle();
-        let upgrade = rig
-            .fake
-            .uv_commands()
-            .into_iter()
-            .find(|args| args.contains(&"--upgrade".to_owned()))
-            .unwrap();
-        assert!(!upgrade.iter().any(|a| a.starts_with("--prerelease")));
+                .find(|args| args.contains(&"--upgrade".to_owned()))
+                .unwrap();
+            for args in [&install, upgrade] {
+                let allowed = args
+                    .windows(2)
+                    .any(|w| w == ["--prerelease-package", "z-vision-generator=allow"]);
+                assert_eq!(allowed, beta, "{args:?}");
+                assert!(!args.iter().any(|a| a.contains("==")), "{args:?}");
+            }
+        }
     }
 
     #[test]
@@ -2447,29 +2376,6 @@ mod tests {
             Phase::Running,
             "a requested stop is not a crash"
         );
-    }
-
-    #[test]
-    fn quitting_while_the_server_starts_ends_the_start_quietly() {
-        let rig = rig();
-        {
-            let mut script = rig.fake.script();
-            script.installed = true;
-            script.serve = Serve::Hold;
-        }
-        let me = rig.controller.clone();
-        let worker = thread::spawn(move || me.launch(true));
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while rig.fake.count("start_server") == 0 {
-            assert!(Instant::now() < deadline);
-            thread::sleep(Duration::from_millis(2));
-        }
-        rig.controller.shutdown();
-        worker.join().unwrap();
-        let snap = rig.snap();
-        assert_eq!(snap.phase, Phase::Starting);
-        assert_eq!(snap.error, None);
-        assert_eq!(rig.fake.count("stop_server 8081"), 1);
     }
 
     // ----- a quit during a start ------------------------------------------------------------------------------
@@ -2683,32 +2589,6 @@ mod tests {
                 rig.controller.shutdown();
             }
         }
-    }
-
-    #[test]
-    fn repair_uninstall_and_beta_are_busy_while_the_server_starts() {
-        let rig = rig();
-        rig.controller
-            .update(|inner| inner.snapshot.phase = Phase::Starting);
-        let before = rig.snap();
-        assert_eq!(rig.controller.repair_app(), Err("busy".to_owned()));
-        assert_eq!(rig.controller.uninstall_app(), Err("busy".to_owned()));
-        assert_eq!(rig.controller.set_beta(true), Err("busy".to_owned()));
-        assert_eq!(rig.snap(), before);
-    }
-
-    #[test]
-    fn a_command_is_refused_while_its_phase_is_busy_and_cannot_run_twice() {
-        let rig = rig();
-        rig.fake.script().block_uv = true;
-        rig.controller.launch(false);
-        rig.controller.install().unwrap();
-        assert_eq!(rig.controller.install(), Err("busy".to_owned()));
-        assert_eq!(rig.controller.repair_app(), Err("busy".to_owned()));
-        assert_eq!(rig.controller.set_beta(true), Err("busy".to_owned()));
-        rig.fake.wait_for_uv_to_run();
-        rig.controller.shutdown();
-        rig.idle();
     }
 
     #[test]

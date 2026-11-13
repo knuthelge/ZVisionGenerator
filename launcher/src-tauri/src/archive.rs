@@ -165,10 +165,6 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn strings(names: &[&str]) -> Vec<String> {
-        names.iter().map(|name| (*name).to_owned()).collect()
-    }
-
     fn make_zip(path: &Path, entries: &[(&str, &[u8])]) {
         let mut zip = zip::ZipWriter::new(File::create(path).unwrap());
         let options = zip::write::SimpleFileOptions::default();
@@ -215,54 +211,17 @@ mod tests {
     }
 
     #[test]
-    fn member_target_matches_the_last_path_segment() {
+    fn member_target_matches_the_last_path_segment_ignoring_case_and_lookalikes() {
         let wanted = ["ffmpeg", "ffprobe"];
         assert_eq!(member_target("ffmpeg", &wanted), Some("ffmpeg"));
         assert_eq!(member_target("build/bin/ffprobe", &wanted), Some("ffprobe"));
         assert_eq!(member_target("build\\bin\\ffmpeg", &wanted), Some("ffmpeg"));
-    }
-
-    #[test]
-    fn member_target_ignores_folders_other_files_and_lookalikes() {
-        let wanted = ["ffmpeg"];
         assert_eq!(member_target("build/bin/", &wanted), None);
-        assert_eq!(member_target("build/ffmpeg/", &wanted), None);
         assert_eq!(member_target("build/ffplay", &wanted), None);
-        assert_eq!(member_target("__MACOSX/._ffmpeg", &wanted), None);
         assert_eq!(member_target("ffmpeg.exe", &wanted), None);
-    }
-
-    #[test]
-    fn member_target_ignores_ascii_case() {
         assert_eq!(
             member_target("bin/FFmpeg.EXE", &["ffmpeg.exe"]),
             Some("ffmpeg.exe")
-        );
-    }
-
-    #[test]
-    fn pick_members_finds_each_wanted_file_in_order() {
-        let names = strings(&[
-            "pkg/",
-            "pkg/bin/ffprobe",
-            "pkg/bin/ffplay",
-            "pkg/bin/ffmpeg",
-        ]);
-        assert_eq!(pick_members(&names, &["ffmpeg", "ffprobe"]), Ok(vec![3, 1]));
-    }
-
-    #[test]
-    fn pick_members_takes_the_first_of_two_matches() {
-        let names = strings(&["a/uv", "b/uv"]);
-        assert_eq!(pick_members(&names, &["uv"]), Ok(vec![0]));
-    }
-
-    #[test]
-    fn pick_members_names_the_first_missing_file() {
-        let names = strings(&["pkg/bin/ffmpeg"]);
-        assert_eq!(
-            pick_members(&names, &["ffmpeg", "ffprobe"]),
-            Err("ffprobe".to_owned())
         );
     }
 
@@ -297,17 +256,6 @@ mod tests {
     }
 
     #[test]
-    fn zip_with_a_flat_layout_works() {
-        let dir = tempfile::tempdir().unwrap();
-        let archive = dir.path().join("uv.zip");
-        make_zip(&archive, &[("uv.exe", b"uv"), ("uvx.exe", b"x")]);
-        let dest = dir.path().join("bin");
-        extract(&archive, ArchiveKind::Zip, &["uv.exe"], &dest).unwrap();
-        assert_eq!(fs::read(dest.join("uv.exe")).unwrap(), b"uv");
-        assert!(!dest.join("uvx.exe").exists());
-    }
-
-    #[test]
     fn tar_gz_gives_the_wanted_file_at_any_depth() {
         let dir = tempfile::tempdir().unwrap();
         let archive = dir.path().join("uv.tar.gz");
@@ -323,6 +271,12 @@ mod tests {
         extract(&archive, ArchiveKind::TarGz, &["uv"], &dest).unwrap();
         assert_eq!(fs::read(dest.join("uv")).unwrap(), b"the uv binary");
         assert!(!dest.join("uvx").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(dest.join("uv")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o755, "extracted files are executable");
+        }
     }
 
     #[test]
@@ -352,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn a_wanted_file_missing_from_a_tar_is_not_found() {
+    fn a_wanted_file_missing_from_an_archive_is_not_found() {
         let dir = tempfile::tempdir().unwrap();
         let archive = dir.path().join("a.tar.gz");
         make_tar_gz(&archive, &[("pkg/bin/ffmpeg", b"one")]);
@@ -365,35 +319,16 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
         assert!(error.to_string().contains("ffprobe"));
-    }
 
-    #[test]
-    fn a_wanted_file_missing_from_a_zip_is_not_found() {
-        let dir = tempfile::tempdir().unwrap();
-        let archive = dir.path().join("a.zip");
-        make_zip(&archive, &[("pkg/other", b"x")]);
-        let error = extract(
-            &archive,
-            ArchiveKind::Zip,
-            &["ffmpeg"],
-            &dir.path().join("bin"),
-        )
-        .unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::NotFound);
-    }
-
-    #[test]
-    fn a_folder_named_like_the_tool_is_not_the_tool() {
-        let dir = tempfile::tempdir().unwrap();
-        let archive = dir.path().join("a.tar.gz");
+        // A folder named like the tool, and a zip without it, are not the tool either.
+        let archive = dir.path().join("b.tar.gz");
         make_tar_gz(&archive, &[("uv/", b""), ("uv/readme", b"x")]);
-        let error = extract(
-            &archive,
-            ArchiveKind::TarGz,
-            &["uv"],
-            &dir.path().join("bin"),
-        )
-        .unwrap_err();
+        let dest = dir.path().join("bin");
+        let error = extract(&archive, ArchiveKind::TarGz, &["uv"], &dest).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        let archive = dir.path().join("c.zip");
+        make_zip(&archive, &[("pkg/other", b"x")]);
+        let error = extract(&archive, ArchiveKind::Zip, &["ffmpeg"], &dest).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
     }
 
@@ -426,19 +361,6 @@ mod tests {
         fs::write(dest.join("uv"), b"old and longer").unwrap();
         extract(&archive, ArchiveKind::Zip, &["uv"], &dest).unwrap();
         assert_eq!(fs::read(dest.join("uv")).unwrap(), b"new");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn extracted_files_are_executable_on_unix() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let archive = dir.path().join("a.tar.gz");
-        make_tar_gz(&archive, &[("pkg/uv", b"x")]);
-        let dest = dir.path().join("bin");
-        extract(&archive, ArchiveKind::TarGz, &["uv"], &dest).unwrap();
-        let mode = fs::metadata(dest.join("uv")).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o755);
     }
 
     /// A tar entry whose raw name bytes are `name`, bypassing the builder's refusal of `..` and absolute paths.

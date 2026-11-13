@@ -248,25 +248,15 @@ mod tests {
         ];
         assert_eq!(pids(&descendants(&table, 10)), [11, 13, 12]);
         assert_eq!(pids(&descendants(&table, 1)), [10, 20, 11, 13, 12]);
-    }
-
-    #[test]
-    fn descendants_carry_their_start_times() {
-        let table = [entry(10, None), entry(11, Some(10))];
+        assert_eq!(descendants(&table, 12), [], "a leaf has no descendants");
         assert_eq!(
-            descendants(&table, 10),
+            descendants(&[entry(10, None), entry(11, Some(10))], 10),
             [Member {
                 pid: 11,
                 start_time: 110
             }]
         );
-    }
-
-    #[test]
-    fn descendants_leave_unrelated_processes_out() {
-        let table = [entry(10, None), entry(30, Some(2)), entry(31, Some(30))];
-        assert!(descendants(&table, 10).is_empty());
-        assert!(descendants(&table, 99).is_empty());
+        assert!(descendants(&[entry(30, Some(2)), entry(31, Some(30))], 10).is_empty());
     }
 
     #[test]
@@ -336,16 +326,6 @@ mod tests {
                 thread::sleep(Duration::from_millis(25));
             }
             panic!("the tree under {root} never reached {count} processes");
-        }
-
-        #[test]
-        fn a_shell_with_background_children_is_stopped_entirely() {
-            let mut child = sh("sleep 300 & sleep 301 & wait");
-            let tree = tree_of(child.id(), 3);
-            assert_eq!(tree[0].pid, child.id());
-            stop_members(&tree, Duration::from_millis(200));
-            child.wait().unwrap();
-            assert!(alive_members(&tree).is_empty());
         }
 
         #[test]

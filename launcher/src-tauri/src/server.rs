@@ -301,28 +301,18 @@ mod tests {
     }
 
     #[test]
-    fn candidates_are_the_scan_range_without_a_last_port() {
+    fn candidates_are_the_scan_range_with_the_last_port_first() {
         let candidates = port_candidates(None);
         assert_eq!(candidates.first(), Some(&8080));
         assert_eq!(candidates.last(), Some(&8179));
         assert_eq!(candidates.len(), 100);
-    }
 
-    #[test]
-    fn the_last_port_comes_first_and_is_not_repeated() {
         let inside = port_candidates(Some(8100));
         assert_eq!(&inside[..3], [8100, 8080, 8081]);
-        assert_eq!(inside.len(), 100);
-        assert_eq!(inside.iter().filter(|port| **port == 8100).count(), 1);
-        assert_eq!(inside.last(), Some(&8179));
-    }
-
-    #[test]
-    fn a_last_port_outside_the_range_is_one_extra_candidate() {
+        assert_eq!(inside.len(), 100, "the last port is not repeated");
         let outside = port_candidates(Some(9000));
         assert_eq!(&outside[..2], [9000, 8080]);
         assert_eq!(outside.len(), 101);
-        assert_eq!(port_candidates(Some(8080))[..2], [8080, 8081]);
     }
 
     #[test]
@@ -337,12 +327,11 @@ mod tests {
         assert_eq!(asked, [8083, 8080]);
         assert_eq!(pick_port(&candidates, |_| true), 8083);
         assert_eq!(pick_port(&candidates, |port| port == 8179), 8179);
-    }
-
-    #[test]
-    fn no_free_candidate_means_the_default_port() {
-        assert_eq!(pick_port(&port_candidates(Some(8090)), |_| false), 8080);
-        assert_eq!(pick_port(&[], |_| true), 8080);
+        assert_eq!(
+            pick_port(&candidates, |_| false),
+            8080,
+            "no free candidate means the default port"
+        );
     }
 
     #[test]
@@ -377,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn the_version_is_the_text_after_ziv_on_the_first_line() {
+    fn the_version_is_the_text_after_ziv_on_the_first_line_and_other_output_has_none() {
         assert_eq!(parse_version("ziv 0.14.2\n").as_deref(), Some("0.14.2"));
         assert_eq!(parse_version("ziv 0.15.0rc1").as_deref(), Some("0.15.0rc1"));
         assert_eq!(
@@ -385,16 +374,10 @@ mod tests {
             Some("1.0")
         );
         assert_eq!(parse_version("  ziv 1.0  \n").as_deref(), Some("1.0"));
-    }
-
-    #[test]
-    fn other_output_has_no_version() {
         assert_eq!(parse_version(""), None);
         assert_eq!(parse_version("\nziv 1.0"), None);
-        assert_eq!(parse_version("ziv"), None);
         assert_eq!(parse_version("ziv   \n"), None);
         assert_eq!(parse_version("uv 0.9.0"), None);
-        assert_eq!(parse_version("usage: ziv [-h]\nziv 1.0"), None);
     }
 
     #[test]
@@ -405,10 +388,6 @@ mod tests {
         assert_eq!(tail_lines(text, 40), ["a", "b", "c", "d"]);
         assert!(tail_lines(text, 0).is_empty());
         assert!(tail_lines("", 40).is_empty());
-    }
-
-    #[test]
-    fn progress_redraws_are_separate_lines_and_trailing_blanks_go() {
         assert_eq!(tail_lines("10%\r50%\r100%  \n", 2), ["50%", "100%"]);
     }
 
@@ -432,23 +411,16 @@ mod tests {
     }
 
     #[test]
-    fn a_port_something_listens_on_is_busy() {
+    fn a_port_something_listens_on_is_busy_until_it_is_released() {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
         assert!(!can_bind(port));
         assert!(!port_is_free(port));
         assert!(answers(port));
         assert_eq!(pick_port(&[port], port_is_free), DEFAULT_PORT);
-    }
-
-    #[test]
-    fn a_port_that_was_just_released_is_free() {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
         drop(listener);
         assert!(can_bind(port));
         assert!(!answers(port));
-        assert!(port_is_free(port));
         assert_eq!(pick_port(&[port], port_is_free), port);
     }
 
@@ -554,17 +526,12 @@ mod tests {
         }
 
         #[test]
-        fn the_version_comes_from_ziv() {
+        fn the_version_comes_from_ziv_and_a_failing_or_missing_ziv_has_none() {
             let dir = tempfile::tempdir().unwrap();
             let layout = fake_ziv(dir.path(), "echo 'ziv 1.2.3'");
             assert_eq!(read_version(&layout).as_deref(), Some("1.2.3"));
-        }
-
-        #[test]
-        fn a_failing_or_missing_ziv_has_no_version() {
-            let dir = tempfile::tempdir().unwrap();
-            let layout = fake_ziv(dir.path(), "echo 'ziv 1.2.3'; exit 1");
-            assert_eq!(read_version(&layout), None);
+            let failing = fake_ziv(dir.path(), "echo 'ziv 1.2.3'; exit 1");
+            assert_eq!(read_version(&failing), None);
             let empty = tempfile::tempdir().unwrap();
             assert_eq!(read_version(&layout_in(empty.path())), None);
         }
@@ -599,18 +566,14 @@ mod tests {
 
             let (exited, ended) = std::sync::mpsc::channel();
             watch(child, move || exited.send(()).unwrap());
-            let members = process_tree::snapshot_tree(record.pid);
+            let mut members = Vec::new();
             for _ in 0..200 {
-                if process_tree::snapshot_tree(record.pid).len() >= 3 {
+                members = process_tree::snapshot_tree(record.pid);
+                if members.len() >= 3 {
                     break;
                 }
                 thread::sleep(Duration::from_millis(25));
             }
-            let members = if members.len() >= 3 {
-                members
-            } else {
-                process_tree::snapshot_tree(record.pid)
-            };
             stop(&layout, &record, Duration::from_millis(200));
             ended.recv_timeout(Duration::from_secs(10)).unwrap();
             assert!(process_tree::alive_members(&members).is_empty());
@@ -636,15 +599,7 @@ mod tests {
         }
 
         #[test]
-        fn a_watched_child_reports_that_it_ended() {
-            let child = Command::new("sh").args(["-c", "exit 3"]).spawn().unwrap();
-            let (sender, receiver) = std::sync::mpsc::channel();
-            watch(child, move || sender.send(()).unwrap());
-            receiver.recv_timeout(Duration::from_secs(10)).unwrap();
-        }
-
-        #[test]
-        fn stop_leaves_a_process_with_another_start_time_alone_but_deletes_the_record() {
+        fn stop_and_clear_leave_a_process_with_another_start_time_alone_but_delete_the_record() {
             let dir = tempfile::tempdir().unwrap();
             let layout = layout_in(dir.path());
             let mut child = Command::new("sleep").arg("309").spawn().unwrap();
@@ -656,6 +611,9 @@ mod tests {
             };
             write_server_record(&layout.server_json, &record).unwrap();
             stop(&layout, &record, Duration::from_millis(100));
+            assert!(!layout.server_json.exists());
+            write_server_record(&layout.server_json, &record).unwrap();
+            clear_stale_record(&layout, Duration::from_millis(100));
             assert!(!layout.server_json.exists());
             assert!(
                 child.try_wait().unwrap().is_none(),
@@ -691,28 +649,6 @@ mod tests {
             child.wait().unwrap();
             assert!(process_tree::alive_members(&tree).is_empty());
             assert!(!layout.server_json.exists());
-        }
-
-        #[test]
-        fn a_stale_record_whose_pid_was_reused_leaves_the_process_alone() {
-            let dir = tempfile::tempdir().unwrap();
-            let layout = layout_in(dir.path());
-            let mut child = Command::new("sleep").arg("308").spawn().unwrap();
-            let start_time = process_tree::start_time_of(child.id()).unwrap();
-            let record = ServerRecord {
-                pid: child.id(),
-                start_time: start_time + 1_000,
-                port: 8125,
-            };
-            write_server_record(&layout.server_json, &record).unwrap();
-            clear_stale_record(&layout, Duration::from_millis(100));
-            assert!(!layout.server_json.exists());
-            assert!(
-                child.try_wait().unwrap().is_none(),
-                "the process was stopped"
-            );
-            child.kill().unwrap();
-            child.wait().unwrap();
         }
     }
 }

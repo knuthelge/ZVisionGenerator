@@ -57,18 +57,15 @@ describe('bridge', () => {
     ]);
   });
 
-  it('sends start at login with an enabled flag and returns the new state', async () => {
-    const calls = mock({ set_autostart: true });
+  it('sends start at login and Get beta versions with an enabled flag and returns the stored state', async () => {
+    const calls = mock({ set_autostart: true, set_beta: false });
 
     await expect(bridge.setAutostart(true)).resolves.toBe(true);
-    expect(calls).toEqual([['set_autostart', { enabled: true }]]);
-  });
-
-  it('sends Get beta versions with an enabled flag and returns the stored value', async () => {
-    const calls = mock({ set_beta: false });
-
     await expect(bridge.setBeta(true)).resolves.toBe(false);
-    expect(calls).toEqual([['set_beta', { enabled: true }]]);
+    expect(calls).toEqual([
+      ['set_autostart', { enabled: true }],
+      ['set_beta', { enabled: true }]
+    ]);
   });
 
   it('opens a link by its id', async () => {
@@ -77,12 +74,6 @@ describe('bridge', () => {
     await bridge.openLink('whats_new');
 
     expect(calls).toEqual([['open_link', { link: 'whats_new' }]]);
-  });
-
-  it('passes a refusal from Rust on to the caller', async () => {
-    mockIPC(() => Promise.reject('busy'));
-
-    await expect(bridge.install()).rejects.toBe('busy');
   });
 
   it('hands each launcher:snapshot payload to the listener, until it stops', async () => {

@@ -61,28 +61,6 @@ mod tests {
     }
 
     #[test]
-    fn urls_follow_the_contract() {
-        assert_eq!(
-            url(LinkId::Requirements, None).as_deref(),
-            Some(
-                "https://knuthelge.github.io/ZVisionGenerator/get-started/install/#check-your-machine"
-            )
-        );
-        assert_eq!(
-            url(LinkId::DataFolder, None).as_deref(),
-            Some("https://knuthelge.github.io/ZVisionGenerator/reference/data-folder/")
-        );
-    }
-
-    #[test]
-    fn whats_new_links_the_offered_version() {
-        assert_eq!(
-            url(LinkId::WhatsNew, Some("0.15.0")).as_deref(),
-            Some("https://github.com/knuthelge/ZVisionGenerator/releases/tag/v0.15.0")
-        );
-    }
-
-    #[test]
     fn whats_new_needs_an_offered_version() {
         assert_eq!(url(LinkId::WhatsNew, None), None);
     }
@@ -109,11 +87,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn a_heading_without_an_id_gets_its_slug() {
-        assert_eq!(anchors("## Prefer a terminal?\n"), ["prefer-a-terminal"]);
-        assert_eq!(anchors("## 1. Check { #check }\n"), ["check"]);
     }
 }

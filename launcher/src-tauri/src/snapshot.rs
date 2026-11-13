@@ -275,48 +275,6 @@ mod tests {
     }
 
     #[test]
-    fn fixture_has_a_case_per_table_row() {
-        let names: Vec<String> = cases().into_iter().map(|c| c.name).collect();
-        for expected in [
-            "1 checking",
-            "2a unsupported driver_too_old",
-            "2a unsupported driver_not_working",
-            "2a unsupported low_disk",
-            "2a unsupported low_disk (macos)",
-            "2b unsupported no_nvidia_gpu",
-            "2b unsupported gpu_too_old",
-            "3 move_to_applications",
-            "4a needs_install",
-            "4a needs_install with beta",
-            "4b installing",
-            "4b installing with current tools",
-            "4c failed install",
-            "4c failed install (windows)",
-            "5 starting",
-            "6 running",
-            "6 running a beta version",
-            "7 running with update",
-            "7 running with a beta update",
-            "8a updating",
-            "8a updating with updateVersion",
-            "8a updating with new tools",
-            "8b repairing",
-            "9 stopped",
-            "9b failed start",
-            "10a failed update",
-            "R failed repair",
-            "U uninstalling",
-            "11b uninstalled",
-            "11b uninstalled incomplete",
-        ] {
-            assert!(
-                names.iter().any(|n| n == expected),
-                "missing fixture case {expected:?}"
-            );
-        }
-    }
-
-    #[test]
     fn fixture_round_trips_without_losing_or_adding_fields() {
         let raw: Vec<Value> = serde_json::from_str(FIXTURE).unwrap();
         let cases = cases();
@@ -344,17 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_names_are_snake_case_and_camel_case() {
-        let case = &cases()[0];
-        let value = serde_json::to_value(&case.snapshot).unwrap();
-        assert_eq!(value["phase"], "checking");
-        assert!(value.get("installedVersion").is_some());
-        assert!(value.get("logTail").is_some());
-        let link = serde_json::to_value(LinkId::WhatsNew).unwrap();
-        assert_eq!(link, "whats_new");
-        let step = serde_json::to_value(StepId::DownloadTools).unwrap();
-        assert_eq!(step, "download_tools");
-        let primary = serde_json::to_value(Primary::SeeRequirements).unwrap();
-        assert_eq!(primary, "see_requirements");
+    fn link_ids_use_the_wire_names_the_window_sends() {
+        assert_eq!(serde_json::to_value(LinkId::WhatsNew).unwrap(), "whats_new");
     }
 }

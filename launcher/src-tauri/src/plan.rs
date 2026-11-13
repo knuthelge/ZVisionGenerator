@@ -124,131 +124,90 @@ mod tests {
 
     const ACTIONS: [Action; 3] = [Action::Install, Action::Update, Action::Repair];
 
-    fn steps_of(action: Action, tools_current: bool) -> Vec<Step> {
-        Plan::new(action, tools_current)
-            .steps
-            .into_iter()
-            .map(|(step, _)| step)
-            .collect()
-    }
-
-    fn only_steps(action: Action) -> Vec<Step> {
-        steps_of(action, true)
-    }
-
-    fn steps_with_stale_tools(action: Action) -> Vec<Step> {
-        steps_of(action, false)
-    }
-
-    fn position(action: Action, wanted: Step) -> usize {
-        only_steps(action)
-            .iter()
-            .position(|step| *step == wanted)
-            .unwrap_or_else(|| panic!("{wanted:?} missing from {action:?}"))
-    }
-
     #[test]
-    fn install_downloads_installs_prunes_reads_then_starts_with_the_browser() {
-        assert_eq!(
-            steps_with_stale_tools(Action::Install),
-            [
-                Step::FetchTools,
-                Step::ToolInstall { reinstall: false },
-                Step::CachePrune,
-                Step::ReadVersion,
-                Step::StartServer { open_browser: true },
-            ]
-        );
-    }
-
-    #[test]
-    fn update_stops_before_upgrading_and_restarts_without_the_browser() {
-        assert!(
-            position(Action::Update, Step::StopServer)
-                < position(Action::Update, Step::ToolUpgrade)
-        );
-        assert_eq!(
-            only_steps(Action::Update),
-            [
-                Step::StopServer,
-                Step::ToolUpgrade,
-                Step::ReadVersion,
-                Step::CachePrune,
-                Step::StartServer {
-                    open_browser: false
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn repair_cleans_the_cache_before_reinstalling_and_prunes_after() {
-        let reinstall = Step::ToolInstall { reinstall: true };
-        assert!(position(Action::Repair, Step::CacheClean) < position(Action::Repair, reinstall));
-        assert!(position(Action::Repair, reinstall) < position(Action::Repair, Step::CachePrune));
-        assert!(
-            position(Action::Repair, Step::CachePrune)
-                < position(Action::Repair, Step::ReadVersion)
-        );
-        assert_eq!(
-            only_steps(Action::Repair).last(),
-            Some(&Step::StartServer { open_browser: true })
-        );
-    }
-
-    #[test]
-    fn only_repair_reinstalls_and_only_install_and_repair_open_the_browser() {
-        let reinstalls = |action| {
-            only_steps(action)
-                .iter()
-                .any(|step| matches!(step, Step::ToolInstall { reinstall: true }))
-        };
-        assert!(reinstalls(Action::Repair));
-        assert!(!reinstalls(Action::Install));
-        assert!(
-            !only_steps(Action::Update)
-                .iter()
-                .any(|s| matches!(s, Step::ToolInstall { .. }))
-        );
-    }
-
-    #[test]
-    fn every_action_ends_by_starting_the_server_after_reading_the_version() {
-        for action in [Action::Install, Action::Update, Action::Repair] {
-            let all = only_steps(action);
-            assert!(
-                matches!(all.last(), Some(Step::StartServer { .. })),
-                "{action:?}"
-            );
-            assert!(
-                position(action, Step::ReadVersion) < position(action, *all.last().unwrap()),
-                "{action:?}"
-            );
+    fn each_action_has_exactly_these_rows_and_steps() {
+        use Step::*;
+        let start = |open_browser| StartServer { open_browser };
+        let install = ToolInstall { reinstall: false };
+        let repair = ToolInstall { reinstall: true };
+        let cases = [
+            (
+                Action::Install,
+                false,
+                vec![StepId::DownloadTools, StepId::InstallApp, StepId::Finish],
+                vec![
+                    (FetchTools, 0),
+                    (install, 1),
+                    (CachePrune, 2),
+                    (ReadVersion, 2),
+                    (start(true), 2),
+                ],
+            ),
+            (
+                Action::Install,
+                true,
+                vec![StepId::InstallApp, StepId::Finish],
+                vec![
+                    (install, 0),
+                    (CachePrune, 1),
+                    (ReadVersion, 1),
+                    (start(true), 1),
+                ],
+            ),
+            (
+                Action::Update,
+                true,
+                vec![StepId::UpdateApp, StepId::Finish],
+                vec![
+                    (StopServer, 0),
+                    (ToolUpgrade, 0),
+                    (ReadVersion, 1),
+                    (CachePrune, 1),
+                    (start(false), 1),
+                ],
+            ),
+            (
+                Action::Update,
+                false,
+                vec![StepId::DownloadTools, StepId::UpdateApp, StepId::Finish],
+                vec![
+                    (StopServer, 0),
+                    (FetchTools, 0),
+                    (ToolUpgrade, 1),
+                    (ReadVersion, 2),
+                    (CachePrune, 2),
+                    (start(false), 2),
+                ],
+            ),
+            (
+                Action::Repair,
+                true,
+                vec![
+                    StepId::DownloadTools,
+                    StepId::CleanCache,
+                    StepId::InstallApp,
+                    StepId::Finish,
+                ],
+                vec![
+                    (StopServer, 0),
+                    (FetchTools, 0),
+                    (CacheClean, 1),
+                    (repair, 2),
+                    (CachePrune, 3),
+                    (ReadVersion, 3),
+                    (start(true), 3),
+                ],
+            ),
+        ];
+        for (action, tools_current, rows, steps) in cases {
+            let plan = Plan::new(action, tools_current);
+            assert_eq!(plan.rows, rows, "{action:?} {tools_current}");
+            assert_eq!(plan.steps, steps, "{action:?} {tools_current}");
         }
-    }
-
-    #[test]
-    fn progress_rows_per_action() {
         assert_eq!(
-            Plan::new(Action::Install, false).rows,
-            [StepId::DownloadTools, StepId::InstallApp, StepId::Finish]
-        );
-        assert_eq!(
-            Plan::new(Action::Install, true).rows,
-            [StepId::InstallApp, StepId::Finish]
-        );
-        assert_eq!(
-            Plan::new(Action::Update, true).rows,
-            [StepId::UpdateApp, StepId::Finish]
-        );
-        assert_eq!(
-            Plan::new(Action::Repair, true).rows,
-            [
-                StepId::DownloadTools,
-                StepId::CleanCache,
-                StepId::InstallApp,
-                StepId::Finish
-            ]
+            Plan::new(Action::Repair, true),
+            Plan::new(Action::Repair, false),
+            "a repair downloads whatever the recorded tools are"
         );
     }
 
@@ -284,52 +243,5 @@ mod tests {
         assert_eq!(row_of_stop(Action::Update, true), StepId::UpdateApp);
         assert_eq!(row_of_stop(Action::Update, false), StepId::DownloadTools);
         assert_eq!(row_of_stop(Action::Repair, true), StepId::DownloadTools);
-    }
-
-    #[test]
-    fn an_update_with_current_tools_downloads_nothing() {
-        assert!(!only_steps(Action::Update).contains(&Step::FetchTools));
-    }
-
-    #[test]
-    fn an_update_with_stale_tools_stops_the_server_then_downloads_before_upgrading() {
-        assert_eq!(
-            steps_with_stale_tools(Action::Update),
-            [
-                Step::StopServer,
-                Step::FetchTools,
-                Step::ToolUpgrade,
-                Step::ReadVersion,
-                Step::CachePrune,
-                Step::StartServer {
-                    open_browser: false
-                },
-            ]
-        );
-        assert_eq!(
-            Plan::new(Action::Update, false).rows,
-            [StepId::DownloadTools, StepId::UpdateApp, StepId::Finish]
-        );
-    }
-
-    #[test]
-    fn an_install_with_current_tools_downloads_nothing() {
-        assert_eq!(
-            only_steps(Action::Install),
-            [
-                Step::ToolInstall { reinstall: false },
-                Step::CachePrune,
-                Step::ReadVersion,
-                Step::StartServer { open_browser: true },
-            ]
-        );
-    }
-
-    #[test]
-    fn repair_downloads_whatever_the_recorded_tools_are() {
-        assert_eq!(
-            Plan::new(Action::Repair, true),
-            Plan::new(Action::Repair, false)
-        );
     }
 }

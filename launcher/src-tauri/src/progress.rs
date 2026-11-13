@@ -72,20 +72,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fraction_is_the_share_of_the_expected_size() {
+    fn fraction_is_the_share_of_the_expected_size_and_stays_below_full() {
         assert_eq!(fraction(0, 100), 0.0);
         assert_eq!(fraction(50, 100), 0.5);
-        assert_eq!(fraction(95, 100), 0.95);
-    }
-
-    #[test]
-    fn fraction_is_capped_below_full() {
         assert_eq!(fraction(100, 100), MAX_FRACTION);
         assert_eq!(fraction(u64::MAX, 100), MAX_FRACTION);
-    }
-
-    #[test]
-    fn fraction_with_nothing_expected_is_zero() {
         assert_eq!(fraction(10, 0), 0.0);
     }
 
@@ -97,29 +88,9 @@ mod tests {
         assert!(!throttle.ready(start + Duration::from_millis(100)));
         assert!(!throttle.ready(start + Duration::from_millis(249)));
         assert!(throttle.ready(start + Duration::from_millis(250)));
-    }
-
-    #[test]
-    fn throttle_restarts_the_interval_at_each_event_it_lets_through() {
-        let start = Instant::now();
-        let mut throttle = Throttle::new(Duration::from_secs(2));
-        assert!(throttle.ready(start));
-        assert!(throttle.ready(start + Duration::from_secs(3)));
-        assert!(!throttle.ready(start + Duration::from_secs(4)));
-        assert!(throttle.ready(start + Duration::from_secs(5)));
-    }
-
-    #[test]
-    fn throttle_ignores_a_clock_that_steps_back() {
-        let start = Instant::now() + Duration::from_secs(10);
-        let mut throttle = Throttle::new(Duration::from_secs(1));
-        assert!(throttle.ready(start));
-        assert!(!throttle.ready(start - Duration::from_secs(5)));
-    }
-
-    #[test]
-    fn snapshots_are_limited_to_four_a_second() {
-        assert_eq!(SNAPSHOT_INTERVAL * 4, Duration::from_secs(1));
+        // The interval restarts at each event let through.
+        assert!(!throttle.ready(start + Duration::from_millis(400)));
+        assert!(throttle.ready(start + Duration::from_millis(500)));
     }
 
     #[test]

@@ -83,35 +83,6 @@
     }
   },
   {
-    "name": "2a unsupported low_disk",
-    "snapshot": {
-      "phase": "unsupported",
-      "installedVersion": null,
-      "updateVersion": null,
-      "autostart": false,
-      "beta": false,
-      "packaging": "appimage",
-      "unsupported": {
-        "code": "low_disk",
-        "found": "4200000000",
-        "needed": "10000000000"
-      },
-      "progress": null,
-      "failedAction": null,
-      "error": null,
-      "leftoverFolder": null,
-      "logTail": [],
-      "controls": {
-        "primary": "check_again",
-        "update": false,
-        "bar": true,
-        "autostart": false,
-        "menu": [],
-        "locked": false
-      }
-    }
-  },
-  {
     "name": "2a unsupported low_disk (macos)",
     "snapshot": {
       "phase": "unsupported",
@@ -251,33 +222,6 @@
     }
   },
   {
-    "name": "4a needs_install with beta",
-    "snapshot": {
-      "phase": "needs_install",
-      "installedVersion": null,
-      "updateVersion": null,
-      "autostart": false,
-      "beta": true,
-      "packaging": "appimage",
-      "unsupported": null,
-      "progress": null,
-      "failedAction": null,
-      "error": null,
-      "leftoverFolder": null,
-      "logTail": [],
-      "controls": {
-        "primary": "install",
-        "update": false,
-        "bar": true,
-        "autostart": false,
-        "menu": [
-          "beta"
-        ],
-        "locked": false
-      }
-    }
-  },
-  {
     "name": "4b installing",
     "snapshot": {
       "phase": "installing",
@@ -294,39 +238,6 @@
           "finish"
         ],
         "index": 1,
-        "fraction": 0.41,
-        "line": "Downloading torch (2.1GiB)"
-      },
-      "failedAction": null,
-      "error": null,
-      "leftoverFolder": null,
-      "logTail": [],
-      "controls": {
-        "primary": null,
-        "update": false,
-        "bar": true,
-        "autostart": false,
-        "menu": [],
-        "locked": false
-      }
-    }
-  },
-  {
-    "name": "4b installing with current tools",
-    "snapshot": {
-      "phase": "installing",
-      "installedVersion": null,
-      "updateVersion": null,
-      "autostart": false,
-      "beta": false,
-      "packaging": "appimage",
-      "unsupported": null,
-      "progress": {
-        "steps": [
-          "install_app",
-          "finish"
-        ],
-        "index": 0,
         "fraction": 0.41,
         "line": "Downloading torch (2.1GiB)"
       },

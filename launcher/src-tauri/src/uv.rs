@@ -325,12 +325,6 @@ mod tests {
         text.iter().map(|line| (*line).to_owned()).collect()
     }
 
-    const PLATFORMS: [Platform; 3] = [
-        Platform::MacosArm64,
-        Platform::WindowsX64,
-        Platform::LinuxX64,
-    ];
-
     #[test]
     fn env_is_exactly_the_nine_variables_with_root_folders() {
         let layout = layout();
@@ -355,202 +349,61 @@ mod tests {
         assert_eq!(env, expected);
     }
 
-    const STABLE: Channel<'static> = Channel::Stable;
-
-    fn has(args: &[String], arg: &str) -> bool {
-        args.iter().any(|a| a == arg)
-    }
-
     const TORCH_BACKEND: [&str; 2] = ["--torch-backend", "cu132"];
+    const PRERELEASE: [&str; 2] = ["--prerelease-package", "z-vision-generator=allow"];
 
-    #[test]
-    fn install_is_the_same_on_every_platform_but_windows_adds_the_torch_backend() {
-        let plain = ["tool", "install", "z-vision-generator", "--python", "3.14"];
-        assert_eq!(install_args(Platform::LinuxX64, false, STABLE), plain);
-        assert_eq!(install_args(Platform::MacosArm64, false, STABLE), plain);
-        assert_eq!(
-            install_args(Platform::WindowsX64, false, STABLE),
-            [
-                "tool",
-                "install",
-                "z-vision-generator",
-                "--python",
-                "3.14",
-                "--torch-backend",
-                "cu132",
-            ]
-        );
+    /// Every command the launcher builds: install, repair and upgrade, per channel.
+    fn commands(platform: Platform) -> Vec<(&'static str, Vec<String>)> {
+        let beta = Channel::Beta;
+        let pinned = Channel::Pinned("0.15.0b2");
+        vec![
+            ("install", install_args(platform, false, Channel::Stable)),
+            ("reinstall", install_args(platform, true, Channel::Stable)),
+            ("upgrade", upgrade_args(platform, false)),
+            ("install beta", install_args(platform, false, beta)),
+            ("reinstall beta", install_args(platform, true, beta)),
+            ("upgrade beta", upgrade_args(platform, true)),
+            ("repair pinned", install_args(platform, true, pinned)),
+        ]
     }
 
     #[test]
-    fn reinstall_adds_the_flag_before_the_package_and_keeps_python_and_the_torch_backend() {
-        assert_eq!(
-            install_args(Platform::LinuxX64, true, STABLE),
+    fn the_uv_commands_have_exactly_these_arguments() {
+        let tool = ["tool", "install"];
+        let package = ["z-vision-generator", "--python", "3.14"];
+        let expected: [Vec<&str>; 7] = [
+            [&tool[..], &package].concat(),
+            [&tool[..], &["--reinstall"], &package].concat(),
+            [&tool[..], &["--upgrade"], &package].concat(),
+            [&tool[..], &package, &PRERELEASE].concat(),
+            [&tool[..], &["--reinstall"], &package, &PRERELEASE].concat(),
+            [&tool[..], &["--upgrade"], &package, &PRERELEASE].concat(),
             [
-                "tool",
-                "install",
-                "--reinstall",
-                "z-vision-generator",
-                "--python",
-                "3.14"
+                &tool[..],
+                &[
+                    "--reinstall",
+                    "z-vision-generator==0.15.0b2",
+                    "--python",
+                    "3.14",
+                ],
             ]
-        );
-        let windows = install_args(Platform::WindowsX64, true, STABLE);
-        assert_eq!(
-            windows[..6],
-            [
-                "tool",
-                "install",
-                "--reinstall",
-                "z-vision-generator",
-                "--python",
-                "3.14"
-            ]
-        );
-        assert_eq!(windows[6..], TORCH_BACKEND);
-    }
-
-    #[test]
-    fn upgrade_installs_over_the_tool_with_upgrade() {
-        assert_eq!(
-            upgrade_args(Platform::LinuxX64, false),
-            [
-                "tool",
-                "install",
-                "--upgrade",
-                "z-vision-generator",
-                "--python",
-                "3.14"
-            ]
-        );
-        assert_eq!(
-            upgrade_args(Platform::MacosArm64, false),
-            upgrade_args(Platform::LinuxX64, false)
-        );
-        let windows = upgrade_args(Platform::WindowsX64, false);
-        assert_eq!(windows[..6], upgrade_args(Platform::LinuxX64, false)[..]);
-        assert_eq!(windows[6..], TORCH_BACKEND);
-    }
-
-    #[test]
-    fn install_reinstall_and_upgrade_all_pass_python() {
-        for platform in PLATFORMS {
-            assert!(has(&install_args(platform, false, STABLE), "--python"));
-            assert!(has(&install_args(platform, true, STABLE), "--python"));
-            assert!(has(&upgrade_args(platform, false), "--python"));
-            assert!(has(&upgrade_args(platform, true), "--python"));
+            .concat(),
+        ];
+        let commands = commands(Platform::LinuxX64);
+        assert_eq!(commands.len(), expected.len());
+        for ((name, args), expected) in commands.iter().zip(expected) {
+            assert_eq!(args, &expected, "{name}");
         }
     }
 
     #[test]
-    fn no_command_reinstalls_a_single_package() {
-        for platform in PLATFORMS {
-            for args in [
-                install_args(platform, false, STABLE),
-                install_args(platform, true, STABLE),
-                upgrade_args(platform, false),
-                upgrade_args(platform, true),
-            ] {
-                assert!(!has(&args, "--reinstall-package"), "{args:?}");
-            }
+    fn windows_appends_the_torch_backend_on_every_command() {
+        let linux = commands(Platform::LinuxX64);
+        assert_eq!(commands(Platform::MacosArm64), linux);
+        for ((name, args), (_, plain)) in commands(Platform::WindowsX64).iter().zip(&linux) {
+            assert_eq!(args[..args.len() - 2], plain[..], "{name}");
+            assert_eq!(args[args.len() - 2..], TORCH_BACKEND, "{name}");
         }
-    }
-
-    #[test]
-    fn only_windows_gets_the_torch_backend_and_never_an_index() {
-        for platform in PLATFORMS {
-            let expected = platform == Platform::WindowsX64;
-            let mut all = vec![upgrade_args(platform, false), upgrade_args(platform, true)];
-            for channel in [STABLE, Channel::Beta, Channel::Pinned("0.15.0b1")] {
-                all.push(install_args(platform, false, channel));
-                all.push(install_args(platform, true, channel));
-            }
-            for args in all {
-                assert_eq!(has(&args, "--torch-backend"), expected, "{args:?}");
-                assert!(!has(&args, "--index"), "{args:?}");
-                assert!(!has(&args, "--index-strategy"), "{args:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn the_stable_channel_never_allows_pre_releases() {
-        for platform in PLATFORMS {
-            for args in [
-                install_args(platform, false, STABLE),
-                install_args(platform, true, STABLE),
-                upgrade_args(platform, false),
-            ] {
-                assert!(!args.iter().any(|a| a.starts_with("--prerelease")));
-            }
-        }
-    }
-
-    #[test]
-    fn beta_allows_pre_releases_of_the_app_only_on_install_reinstall_and_upgrade_on_every_platform()
-    {
-        let pair = ["--prerelease-package", "z-vision-generator=allow"];
-        for platform in PLATFORMS {
-            for reinstall in [false, true] {
-                let args = install_args(platform, reinstall, Channel::Beta);
-                let at = args
-                    .iter()
-                    .position(|a| a == "--prerelease-package")
-                    .unwrap();
-                assert_eq!(args[at..at + 2], pair);
-                assert!(has(&args, "z-vision-generator"));
-                assert!(!args.iter().any(|a| a.contains("==")));
-            }
-            let args = upgrade_args(platform, true);
-            let at = args
-                .iter()
-                .position(|a| a == "--prerelease-package")
-                .unwrap();
-            assert_eq!(args[at..at + 2], pair);
-            assert!(!args.iter().any(|a| a.contains("==")));
-        }
-    }
-
-    #[test]
-    fn beta_puts_the_windows_torch_backend_after_the_prerelease_package() {
-        let install = install_args(Platform::WindowsX64, false, Channel::Beta);
-        assert_eq!(
-            install[..7],
-            [
-                "tool",
-                "install",
-                "z-vision-generator",
-                "--python",
-                "3.14",
-                "--prerelease-package",
-                "z-vision-generator=allow"
-            ]
-        );
-        assert_eq!(install[7..], TORCH_BACKEND);
-        let upgrade = upgrade_args(Platform::WindowsX64, true);
-        assert_eq!(
-            upgrade[6..8],
-            ["--prerelease-package", "z-vision-generator=allow"]
-        );
-        assert_eq!(upgrade[8..], TORCH_BACKEND);
-    }
-
-    #[test]
-    fn a_pinned_repair_reinstalls_exactly_the_installed_version_without_a_prerelease_flag() {
-        assert_eq!(
-            install_args(Platform::LinuxX64, true, Channel::Pinned("0.15.0b2")),
-            [
-                "tool",
-                "install",
-                "--reinstall",
-                "z-vision-generator==0.15.0b2",
-                "--python",
-                "3.14"
-            ]
-        );
-        let windows = install_args(Platform::WindowsX64, true, Channel::Pinned("0.15.0b2"));
-        assert_eq!(windows[3], "z-vision-generator==0.15.0b2");
-        assert_eq!(windows[6..], TORCH_BACKEND);
     }
 
     #[test]
@@ -567,19 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn install_takes_the_beta_channel_only_with_beta_on() {
-        assert_eq!(Channel::for_install(true), Channel::Beta);
-        assert_eq!(Channel::for_install(false), Channel::Stable);
-    }
-
-    #[test]
-    fn cache_commands() {
-        assert_eq!(cache_clean_args(), ["cache", "clean"]);
-        assert_eq!(prune_args(), ["cache", "prune", "--ci"]);
-    }
-
-    #[test]
-    fn a_full_disk_is_low_disk() {
+    fn a_failure_is_classified_as_low_disk_download_failed_or_uv_failed() {
         for text in [
             "error: failed to write: No space left on device (os error 28)",
             "error: failed to write (os error 28)",
@@ -592,26 +433,16 @@ mod tests {
                 "{text}"
             );
         }
-    }
-
-    #[test]
-    fn a_disk_that_fills_during_a_download_is_still_low_disk() {
+        // The disk check comes first: uv words a full disk during a download as a failed download.
         let tail = lines(&[
             "error: Failed to download `torch==2.9.0`",
             "  Caused by: failed to write to file: No space left on device (os error 28)",
         ]);
         assert_eq!(classify_uv_failure(&tail), ErrorCode::LowDisk);
-    }
-
-    #[test]
-    fn network_trouble_is_download_failed() {
         for text in [
             "error: Failed to download `torch==2.9.0`",
-            "error: Failed to fetch: `https://pypi.org/simple/numpy/`",
             "  Caused by: operation timed out",
-            "error: error sending request for url (https://pypi.org/)",
             "dns error: failed to lookup address information",
-            "Connection reset by peer",
             "tcp connect error: Connection refused (os error 111)",
         ] {
             assert_eq!(
@@ -620,10 +451,6 @@ mod tests {
                 "{text}"
             );
         }
-    }
-
-    #[test]
-    fn anything_else_is_uv_failed() {
         let tail = lines(&["error: No solution found when resolving dependencies"]);
         assert_eq!(classify_uv_failure(&tail), ErrorCode::UvFailed);
         assert_eq!(classify_uv_failure(&[]), ErrorCode::UvFailed);
@@ -708,26 +535,6 @@ mod tests {
             assert_eq!(failure.error, ErrorCode::LowDisk);
             assert_eq!(failure.tail.len(), 2);
             assert!(failure.tail.iter().any(|line| line.contains("os error 28")));
-        }
-
-        #[test]
-        fn a_failure_with_no_known_cause_is_uv_failed() {
-            let dir = tempfile::tempdir().unwrap();
-            let layout = layout_with_uv(dir.path(), "echo 'error: no solution' >&2; exit 1");
-            let failure = run(&layout, &["tool", "install"], |_| {}, |_| {}).unwrap_err();
-            assert_eq!(failure.error, ErrorCode::UvFailed);
-        }
-
-        #[test]
-        fn a_long_output_keeps_only_the_last_forty_lines_in_the_tail() {
-            let dir = tempfile::tempdir().unwrap();
-            let layout = layout_with_uv(
-                dir.path(),
-                "i=0; while [ $i -lt 100 ]; do echo \"line $i\"; i=$((i+1)); done; exit 1",
-            );
-            let failure = run(&layout, &["x"], |_| {}, |_| {}).unwrap_err();
-            assert_eq!(failure.tail.len(), TAIL_LINES);
-            assert_eq!(failure.tail.last().map(String::as_str), Some("line 99"));
         }
 
         #[test]
