@@ -9,6 +9,8 @@
     label?: string;
     /** Accessible name when there is no visible label. */
     ariaLabel?: string;
+    /** Id of the element that describes the switch. */
+    ariaDescribedby?: string;
     /** Tooltip on the whole switch, e.g. what on and off mean. */
     title?: string;
     labelSnippet?: Snippet;
@@ -23,6 +25,7 @@
     disabled = false,
     label,
     ariaLabel,
+    ariaDescribedby,
     title,
     labelSnippet,
     class: extraClass = '',
@@ -39,6 +42,7 @@
     bind:checked
     {disabled}
     aria-label={ariaLabel}
+    aria-describedby={ariaDescribedby}
     class="sr-only"
     {onchange}
   />

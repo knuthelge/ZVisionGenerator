@@ -15,7 +15,6 @@ use crate::archive;
 use crate::manifest::{self, Download, Platform};
 use crate::paths::Layout;
 use crate::snapshot::ErrorCode;
-use crate::spawn::hidden_command;
 
 /// How long connecting may take.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -26,21 +25,8 @@ const MAX_DOWNLOAD_BYTES: u64 = 1 << 30;
 /// Chunk size of the streaming copy.
 const CHUNK: usize = 64 * 1024;
 
-/// `os error 28` (ENOSPC) and the Windows disk-full code 112 (`ERROR_DISK_FULL`). Other codes are not listed: 39 is
-/// `ENOTEMPTY` on Linux.
-const DISK_FULL_OS_ERRORS: [i32; 2] = [28, 112];
-
-/// Which end of a streaming copy failed.
-#[derive(Debug)]
-enum CopyError {
-    /// The source failed: the network.
-    Read,
-    /// The destination failed: the disk.
-    Write(io::Error),
-}
-
 /// Copy `reader` to `writer` and return the lowercase hex SHA-256 of what was copied.
-fn hash_copy(reader: &mut impl Read, writer: &mut impl Write) -> Result<String, CopyError> {
+fn hash_copy(reader: &mut impl Read, writer: &mut impl Write) -> io::Result<String> {
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; CHUNK];
     loop {
@@ -48,12 +34,10 @@ fn hash_copy(reader: &mut impl Read, writer: &mut impl Write) -> Result<String, 
             Ok(0) => break,
             Ok(read) => read,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(_) => return Err(CopyError::Read),
+            Err(error) => return Err(error),
         };
         hasher.update(&buffer[..read]);
-        writer
-            .write_all(&buffer[..read])
-            .map_err(CopyError::Write)?;
+        writer.write_all(&buffer[..read])?;
     }
     Ok(hex(&hasher.finalize()))
 }
@@ -80,40 +64,19 @@ fn classify_http(status: u16) -> ErrorCode {
     }
 }
 
-/// The code for an I/O error while saving a file: a full disk is `low_disk`, anything else `download_failed`.
-fn classify_io(error: &io::Error) -> ErrorCode {
-    let disk_full = error.kind() == io::ErrorKind::StorageFull
-        || error
-            .raw_os_error()
-            .is_some_and(|code| DISK_FULL_OS_ERRORS.contains(&code));
-    if disk_full {
-        ErrorCode::LowDisk
-    } else {
-        ErrorCode::DownloadFailed
-    }
-}
-
-/// The code for a failed request: a status maps by [`classify_http`], an I/O error by [`classify_io`], and
-/// timeouts, DNS failures and the rest are `download_failed`.
+/// The code for a failed request: a status maps by [`classify_http`]; I/O errors, timeouts, DNS failures and the
+/// rest are `download_failed`.
 fn classify_request(error: &ureq::Error) -> ErrorCode {
     match error {
         ureq::Error::StatusCode(status) => classify_http(*status),
-        ureq::Error::Io(error) => classify_io(error),
         _ => ErrorCode::DownloadFailed,
-    }
-}
-
-/// The code for a failed copy: the disk is `low_disk` when full, the network is `download_failed`.
-fn classify_copy(error: &CopyError) -> ErrorCode {
-    match error {
-        CopyError::Read => ErrorCode::DownloadFailed,
-        CopyError::Write(error) => classify_io(error),
     }
 }
 
 /// Stream `reader` to `part`, check its hash against `expected` and rename it to `final_path`.
 ///
-/// `part` is deleted on every failure, so no half-written or unverified file is left under its final name.
+/// `part` is deleted on every failure, so no half-written or unverified file is left under its final name. Every I/O
+/// error is `download_failed`.
 fn store_verified(
     reader: &mut impl Read,
     expected: &str,
@@ -121,13 +84,13 @@ fn store_verified(
     final_path: &Path,
 ) -> Result<(), ErrorCode> {
     let result = (|| {
-        let file = File::create(part).map_err(|error| classify_io(&error))?;
+        let file = File::create(part).map_err(|_| ErrorCode::DownloadFailed)?;
         let mut writer = BufWriter::new(file);
-        let actual = hash_copy(reader, &mut writer).map_err(|error| classify_copy(&error))?;
-        writer.flush().map_err(|error| classify_io(&error))?;
+        let actual = hash_copy(reader, &mut writer).map_err(|_| ErrorCode::DownloadFailed)?;
+        writer.flush().map_err(|_| ErrorCode::DownloadFailed)?;
         drop(writer);
         verify(&actual, expected)?;
-        fs::rename(part, final_path).map_err(|error| classify_io(&error))
+        fs::rename(part, final_path).map_err(|_| ErrorCode::DownloadFailed)
     })();
     if result.is_err() {
         let _ = fs::remove_file(part);
@@ -149,10 +112,10 @@ pub fn agent() -> ureq::Agent {
 ///
 /// # Errors
 ///
-/// `download_unavailable` for a 404 or 410, `download_failed` for other network errors, `low_disk` when the disk
-/// fills and `checksum_mismatch` when the file is not the pinned one.
+/// `download_unavailable` for a 404 or 410, `download_failed` for other network or disk errors and
+/// `checksum_mismatch` when the file is not the pinned one.
 pub fn fetch(download: &Download, dir: &Path) -> Result<PathBuf, ErrorCode> {
-    fs::create_dir_all(dir).map_err(|error| classify_io(&error))?;
+    fs::create_dir_all(dir).map_err(|_| ErrorCode::DownloadFailed)?;
     let response = agent()
         .get(download.url)
         .call()
@@ -169,8 +132,7 @@ pub fn fetch(download: &Download, dir: &Path) -> Result<PathBuf, ErrorCode> {
 ///
 /// # Errors
 ///
-/// The errors of [`fetch`]; an archive that cannot be unpacked is `tool_broken`, or `low_disk` when the disk is
-/// full.
+/// The errors of [`fetch`]; an archive that cannot be unpacked is `tool_broken`.
 fn install_download(download: &Download, layout: &Layout) -> Result<(), ErrorCode> {
     let archive_path = fetch(download, &layout.downloads)?;
     let unpacked = archive::extract(
@@ -180,52 +142,15 @@ fn install_download(download: &Download, layout: &Layout) -> Result<(), ErrorCod
         &layout.bin,
     );
     let _ = fs::remove_file(&archive_path);
-    unpacked.map_err(|error| match classify_io(&error) {
-        ErrorCode::LowDisk => ErrorCode::LowDisk,
-        _ => ErrorCode::ToolBroken,
-    })
+    unpacked.map_err(|_| ErrorCode::ToolBroken)
 }
 
-/// The argument that makes `tool` print its version and exit: uv takes `--version`, FFmpeg's tools `-version`.
-fn version_arg(tool: &str) -> &'static str {
-    if tool.starts_with("uv") {
-        "--version"
-    } else {
-        "-version"
-    }
-}
-
-/// Run `uv --version`, `ffmpeg -version` and `ffprobe -version` from `layout.bin`.
-///
-/// # Errors
-///
-/// `tool_broken` for the first one that does not start or does not succeed.
-fn check_tools(layout: &Layout) -> Result<(), ErrorCode> {
-    for path in [layout.uv(), layout.ffmpeg(), layout.ffprobe()] {
-        let name = path
-            .file_stem()
-            .map(|stem| stem.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let ok = hidden_command(&path)
-            .arg(version_arg(&name))
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success());
-        if !ok {
-            return Err(ErrorCode::ToolBroken);
-        }
-    }
-    Ok(())
-}
-
-/// The whole `download_tools` step: fetch and unpack every pinned tool of `platform`, then check each runs.
+/// The whole `download_tools` step: fetch and unpack every pinned tool of `platform`.
 pub fn fetch_tools(layout: &Layout, platform: Platform) -> Result<(), ErrorCode> {
     for download in manifest::downloads(platform) {
         install_download(download, layout)?;
     }
-    check_tools(layout)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -246,24 +171,6 @@ mod tests {
             buf[..n].copy_from_slice(&self.0[..n]);
             self.0 = &self.0[n..];
             Ok(n)
-        }
-    }
-
-    /// A writer that accepts `room` bytes and then reports a full disk.
-    struct FullDisk {
-        room: usize,
-    }
-    impl Write for FullDisk {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            if self.room == 0 {
-                return Err(io::Error::from(io::ErrorKind::StorageFull));
-            }
-            let n = self.room.min(buf.len());
-            self.room -= n;
-            Ok(n)
-        }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
         }
     }
 
@@ -299,15 +206,6 @@ mod tests {
     }
 
     #[test]
-    fn hash_copy_tells_a_read_failure_from_a_write_failure() {
-        let mut out = Vec::new();
-        let read = hash_copy(&mut FailingReader(b"abc"), &mut out).unwrap_err();
-        assert!(matches!(read, CopyError::Read));
-        let write = hash_copy(&mut Cursor::new(b"abcdef"), &mut FullDisk { room: 2 }).unwrap_err();
-        assert!(matches!(write, CopyError::Write(_)));
-    }
-
-    #[test]
     fn verify_accepts_only_the_pinned_hash() {
         assert_eq!(verify(HELLO_SHA256, HELLO_SHA256), Ok(()));
         assert_eq!(
@@ -327,48 +225,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
-    fn a_linux_enotempty_is_a_failed_download_not_a_full_disk() {
-        assert_eq!(
-            classify_io(&io::Error::from_raw_os_error(39)),
-            ErrorCode::DownloadFailed
-        );
-    }
-
-    #[test]
-    fn a_full_disk_is_low_disk_by_kind_or_by_os_error() {
-        assert_eq!(
-            classify_io(&io::Error::from(io::ErrorKind::StorageFull)),
-            ErrorCode::LowDisk
-        );
-        for code in [28, 112] {
-            assert_eq!(
-                classify_io(&io::Error::from_raw_os_error(code)),
-                ErrorCode::LowDisk,
-                "os error {code}"
-            );
-        }
-    }
-
-    #[test]
-    fn other_io_errors_are_download_failures() {
-        for kind in [
-            io::ErrorKind::TimedOut,
-            io::ErrorKind::ConnectionReset,
-            io::ErrorKind::ConnectionRefused,
-            io::ErrorKind::UnexpectedEof,
-            io::ErrorKind::PermissionDenied,
-        ] {
-            assert_eq!(
-                classify_io(&io::Error::from(kind)),
-                ErrorCode::DownloadFailed,
-                "{kind:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn requests_classify_by_status_io_timeout_and_dns() {
+    fn requests_classify_by_status_timeout_and_dns() {
         assert_eq!(
             classify_request(&ureq::Error::StatusCode(404)),
             ErrorCode::DownloadUnavailable
@@ -376,10 +233,6 @@ mod tests {
         assert_eq!(
             classify_request(&ureq::Error::StatusCode(503)),
             ErrorCode::DownloadFailed
-        );
-        assert_eq!(
-            classify_request(&ureq::Error::Io(io::Error::from_raw_os_error(28))),
-            ErrorCode::LowDisk
         );
         assert_eq!(
             classify_request(&ureq::Error::Timeout(ureq::Timeout::Global)),
@@ -399,17 +252,6 @@ mod tests {
     fn the_download_agent_refuses_plain_http_without_connecting() {
         let error = agent().get("http://127.0.0.1:1/file").call().unwrap_err();
         assert!(matches!(error, ureq::Error::RequireHttpsOnly(_)), "{error}");
-    }
-
-    #[test]
-    fn copies_classify_by_which_end_failed() {
-        assert_eq!(classify_copy(&CopyError::Read), ErrorCode::DownloadFailed);
-        assert_eq!(
-            classify_copy(&CopyError::Write(io::Error::from(
-                io::ErrorKind::StorageFull
-            ))),
-            ErrorCode::LowDisk
-        );
     }
 
     #[test]
@@ -457,41 +299,13 @@ mod tests {
         assert!(!done.exists());
     }
 
-    #[test]
-    fn version_args_follow_each_tools_convention() {
-        assert_eq!(version_arg("uv"), "--version");
-        assert_eq!(version_arg("ffmpeg"), "-version");
-        assert_eq!(version_arg("ffprobe"), "-version");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn working_tools_pass_the_check_and_a_broken_one_fails() {
-        let dir = tempfile::tempdir().unwrap();
-        let layout = Layout::new(dir.path().to_path_buf());
-        fs::create_dir_all(&layout.bin).unwrap();
-        crate::uv::write_script(&layout.uv(), "[ \"$1\" = --version ] || exit 1");
-        crate::uv::write_script(&layout.ffmpeg(), "[ \"$1\" = -version ] || exit 1");
-        crate::uv::write_script(&layout.ffprobe(), "exit 3");
-        assert_eq!(check_tools(&layout), Err(ErrorCode::ToolBroken));
-        crate::uv::write_script(&layout.ffprobe(), "[ \"$1\" = -version ] || exit 1");
-        assert_eq!(check_tools(&layout), Ok(()));
-    }
-
-    #[test]
-    fn a_missing_tool_fails_the_check() {
-        let dir = tempfile::tempdir().unwrap();
-        let layout = Layout::new(dir.path().to_path_buf());
-        assert_eq!(check_tools(&layout), Err(ErrorCode::ToolBroken));
-    }
-
-    /// Downloads every Linux pin, checks its hash, unpacks it and runs each tool's version check.
+    /// Downloads every Linux pin, checks its hash and unpacks it.
     ///
     /// Needs the network and about 1 GB of free space in the temporary folder (set `TMPDIR` to move it). Run with
     /// `cargo test -- --ignored`.
     #[test]
     #[ignore = "downloads about 170 MB"]
-    fn the_linux_pins_download_verify_unpack_and_run() {
+    fn the_linux_pins_download_verify_and_unpack() {
         let dir = tempfile::tempdir().unwrap();
         let layout = Layout::new(dir.path().to_path_buf());
         fetch_tools(&layout, Platform::LinuxX64).unwrap_or_else(|error| panic!("{error:?}"));

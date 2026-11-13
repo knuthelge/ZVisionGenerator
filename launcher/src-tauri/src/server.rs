@@ -31,9 +31,6 @@ const CONNECT_PROBE: Duration = Duration::from_millis(500);
 /// How often readiness is polled.
 const READY_POLL: Duration = Duration::from_millis(500);
 
-/// How long one readiness request may take.
-const READY_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
-
 /// How long a starting server may take to answer before the start fails.
 const READY_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -203,30 +200,6 @@ pub fn watch(mut child: Child, on_exit: impl FnOnce() + Send + 'static) {
     });
 }
 
-/// Whether `127.0.0.1:port` answers an HTTP request for `/` within `timeout`; any status counts.
-fn http_responds_within(port: u16, timeout: Duration) -> bool {
-    use std::io::Write;
-    let attempt = || -> io::Result<bool> {
-        let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-        let mut stream = TcpStream::connect_timeout(&address, timeout)?;
-        stream.set_read_timeout(Some(timeout))?;
-        stream.set_write_timeout(Some(timeout))?;
-        write!(
-            stream,
-            "GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
-        )?;
-        let mut start = [0_u8; 5];
-        stream.read_exact(&mut start)?;
-        Ok(&start == b"HTTP/")
-    };
-    attempt().unwrap_or(false)
-}
-
-/// [`http_responds_within`] with the readiness request timeout.
-fn http_responds(port: u16) -> bool {
-    http_responds_within(port, READY_REQUEST_TIMEOUT)
-}
-
 /// How waiting for a starting server ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Readiness {
@@ -259,9 +232,10 @@ fn wait_until_ready(
     }
 }
 
-/// Wait for the server on `port` with the documented poll and timeout; see [`wait_until_ready`].
+/// Wait until the server on `port` accepts a connection (uvicorn listens only once the app has started), with the
+/// documented poll and timeout; see [`wait_until_ready`].
 pub fn wait_for_server(port: u16, stopped: impl FnMut() -> bool) -> Readiness {
-    wait_until_ready(|| http_responds(port), stopped, READY_POLL, READY_TIMEOUT)
+    wait_until_ready(|| answers(port), stopped, READY_POLL, READY_TIMEOUT)
 }
 
 /// The installed app's version from `ziv --version`, or `None` when it fails, times out or prints something else.
@@ -318,7 +292,6 @@ pub fn clear_stale_record(layout: &Layout, grace: Duration) {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
     use std::net::TcpListener;
 
     use super::*;
@@ -491,53 +464,6 @@ mod tests {
         drop(client);
         drop(listener);
         assert!(port_is_free(port));
-    }
-
-    /// A one-shot HTTP-ish server: replies with `reply` (nothing when empty) to the first connection.
-    fn serve_once(reply: &'static [u8]) -> u16 {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut request = [0_u8; 256];
-                let _ = stream.read(&mut request);
-                let _ = stream.write_all(reply);
-                thread::sleep(Duration::from_millis(300));
-            }
-        });
-        port
-    }
-
-    #[test]
-    fn any_http_status_counts_as_an_answer() {
-        for reply in [
-            &b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"[..],
-            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n",
-            b"HTTP/1.1 500 Internal Server Error\r\n\r\n",
-        ] {
-            assert!(http_responds_within(
-                serve_once(reply),
-                Duration::from_secs(2)
-            ));
-        }
-    }
-
-    #[test]
-    fn a_connection_that_does_not_speak_http_is_not_an_answer() {
-        assert!(!http_responds_within(
-            serve_once(b"SSH-2.0-x\r\n"),
-            Duration::from_secs(2)
-        ));
-        assert!(!http_responds_within(
-            serve_once(b""),
-            Duration::from_secs(2)
-        ));
-        let silent = serve_once(b"");
-        assert!(!http_responds_within(silent, Duration::from_millis(100)));
-        let closed = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = closed.local_addr().unwrap().port();
-        drop(closed);
-        assert!(!http_responds_within(port, Duration::from_millis(200)));
     }
 
     #[test]

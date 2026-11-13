@@ -1,8 +1,8 @@
 //! Versions: parsing and comparing them, the PyPI check, and whether a published version is newer.
 //!
 //! Only the versions the app publishes are understood: `X.Y.Z`, optionally followed by an alpha, beta or
-//! release-candidate marker (`a1`, `b2`, `rc3`) and a `.postN` or `.devN` marker, as in `0.15.0b2.dev1`. Anything
-//! else does not parse. A pre-release sorts below its release.
+//! release-candidate marker (`a1`, `b2`, `rc3`). Anything else does not parse. A pre-release sorts below its
+//! release.
 
 use std::time::Duration;
 
@@ -13,20 +13,15 @@ const PYPI_URL: &str = "https://pypi.org/pypi/z-vision-generator/json";
 /// How long the PyPI request may take in total.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// A parsed version. The derived order is the PEP 440 order: the release first, then the pre-release marker, the
-/// post-release marker and the development marker, each in the form of a sort key.
+/// A parsed version. The derived order is the PEP 440 order: the release first, then the pre-release marker in the
+/// form of a sort key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Version {
     release: [u64; 3],
-    /// 0 for a development build of a release with no other marker (below every pre-release), 1 to 3 for alpha, beta
-    /// and release candidate, 4 for none.
+    /// 1 to 3 for alpha, beta and release candidate, 4 for none.
     phase: u8,
     /// The number after the pre-release marker.
     pre: u64,
-    /// The number after `.post`, plus one; 0 without one.
-    post: u64,
-    /// The number after `.dev`; the largest value without one, so a development build sorts below its release.
-    dev: u64,
 }
 
 /// Take the digits at the start of `text` as a number and return the rest.
@@ -38,7 +33,7 @@ fn number(text: &str) -> Option<(u64, &str)> {
     Some((digits.parse().ok()?, rest))
 }
 
-/// Parse `X.Y.Z[(a|b|rc)N][.postN][.devN]`; `None` for any other spelling.
+/// Parse `X.Y.Z[(a|b|rc)N]`; `None` for any other spelling.
 fn parse(text: &str) -> Option<Version> {
     let (major, rest) = number(text)?;
     let (minor, rest) = number(rest.strip_prefix('.')?)?;
@@ -52,28 +47,13 @@ fn parse(text: &str) -> Option<Version> {
             break;
         }
     }
-    let mut post = 0;
-    if let Some(after) = rest.strip_prefix(".post") {
-        let (n, after) = number(after)?;
-        (post, rest) = (n.checked_add(1)?, after);
-    }
-    let mut dev = None;
-    if let Some(after) = rest.strip_prefix(".dev") {
-        let (n, after) = number(after)?;
-        (dev, rest) = (Some(n), after);
-    }
     if !rest.is_empty() {
         return None;
-    }
-    if phase == 4 && post == 0 && dev.is_some() {
-        phase = 0;
     }
     Some(Version {
         release: [major, minor, patch],
         phase,
         pre,
-        post,
-        dev: dev.unwrap_or(u64::MAX),
     })
 }
 
@@ -137,10 +117,6 @@ mod tests {
         assert_eq!(parse("1.0.0b2").unwrap().phase, 2);
         assert_eq!(parse("1.0.0a2").unwrap().phase, 1);
         assert_eq!(parse("1.0.0").unwrap().phase, 4);
-        assert_eq!(parse("1.0.0.dev3").unwrap().phase, 0);
-        assert!(parse("1.0.0.post1").is_some());
-        assert!(parse("1.0.0b2.dev1").is_some());
-        assert!(parse("1.0.0.post1.dev1").is_some());
     }
 
     #[test]
@@ -161,8 +137,9 @@ mod tests {
             "1.0.0+local",
             "1.0.0beta1",
             "1.0.0RC1",
-            "1.0.0.dev",
-            "1.0.0.post",
+            "1.0.0.dev3",
+            "1.0.0.post1",
+            "1.0.0b2.dev1",
             " 1.0.0",
             "1.0.0 ",
             "1.0.0.unknown",
@@ -194,16 +171,6 @@ mod tests {
         assert!(is_newer("1.0.0rc2", "1.0.0rc1"));
         assert!(is_newer("1.0.0rc1", "1.0.0b3"));
         assert!(is_newer("1.0.0b1", "1.0.0a9"));
-        assert!(is_newer("1.0.0a1", "1.0.0.dev5"));
-        assert!(is_newer("1.0.0a1", "1.0.0a1.dev5"));
-        assert!(is_newer("1.0.0", "1.0.0rc1.post1"));
-        assert!(is_newer("1.0.0rc1.post1", "1.0.0rc1"));
-    }
-
-    #[test]
-    fn a_post_release_sorts_above_its_release() {
-        assert!(is_newer("1.0.0.post1", "1.0.0"));
-        assert!(!is_newer("1.0.0", "1.0.0.post1"));
     }
 
     #[test]

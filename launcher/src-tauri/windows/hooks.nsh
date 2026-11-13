@@ -1,7 +1,9 @@
 ; NSIS installer hooks (bundle.windows.nsis.installerHooks).
 ;
-; Before the files are removed, run the launcher headless so it stops the server it started and the other launcher
-; processes. Whether the data root and the start-at-login registry values go too depends on why the uninstaller runs:
+; Before the files are removed, stop a running launcher with Tauri's own running-app check (CheckIfAppIsRunning, from
+; the template's utils.nsh, which is included before this file; the template calls it only after this hook), then run
+; the launcher headless so it stops the server it started. Whether the data root and the start-at-login registry
+; values go too depends on why the uninstaller runs:
 ;   - A real uninstall (Settings > Apps, or Uninstall in the app) starts uninstall.exe, which copies itself to %TEMP%
 ;     and runs from there, so $EXEDIR is not $INSTDIR. It deletes the root and the registry values.
 ;   - A reinstall over an existing install ("Uninstall before installing") runs the old uninstall.exe in place
@@ -16,6 +18,7 @@
 Var SavedAutostartCommand
 
 !macro NSIS_HOOK_PREUNINSTALL
+  !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
   ${If} $EXEDIR != $INSTDIR
     ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --uninstall-cleanup'
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"

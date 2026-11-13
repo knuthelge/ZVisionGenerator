@@ -3,7 +3,6 @@
 // tested and previewed without a Tauri runtime.
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { LinkId, Snapshot } from './types';
 
 /** Event carrying the full snapshot after every state change. */
@@ -26,8 +25,6 @@ export interface Bridge {
   setBeta(enabled: boolean): Promise<boolean>;
   openLink(link: LinkId): Promise<void>;
   quitLauncher(): Promise<void>;
-  /** Close (hide) the window; Rust turns the close request into a hide. */
-  closeWindow(): Promise<void>;
 }
 
 export const bridge: Bridge = {
@@ -43,6 +40,5 @@ export const bridge: Bridge = {
   setAutostart: (enabled) => invoke<boolean>('set_autostart', { enabled }),
   setBeta: (enabled) => invoke<boolean>('set_beta', { enabled }),
   openLink: (link) => invoke('open_link', { link }),
-  quitLauncher: () => invoke('quit_launcher'),
-  closeWindow: () => getCurrentWindow().close()
+  quitLauncher: () => invoke('quit_launcher')
 };

@@ -85,14 +85,6 @@
     animation: dot-in 200ms var(--ease-soft-out);
   }
   @keyframes dot-in { from { scale: 0; } }
-  @media (max-height: 499px) {
-    .hero { height: 132px; }
-    .pool { height: 180px; }
-    .hero :global(.halo) { width: 128px; height: 128px; }
-    .mascot, .mascot :global(svg) { width: 100px; height: 100px; }
-    .mascot { translate: 0 -10px; }
-    .update-dot { translate: 43px -43px; }
-  }
   @media (forced-colors: active) {
     .pool, .update-dot { display: none; }
   }

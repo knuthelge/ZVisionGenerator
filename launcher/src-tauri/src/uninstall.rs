@@ -1,21 +1,20 @@
 //! Uninstalling: how the launcher was packaged, deleting Root, and the headless cleanup the Windows uninstaller runs.
 //!
 //! On macOS and Linux the controller runs the uninstall in the window and uses [`delete_root`]. On Windows the
-//! NSIS uninstaller runs `--uninstall-cleanup` before it removes the launcher's own files, and [`headless`] stops
-//! whatever holds files in Root, deletes Root and exits 0 no matter what: leftovers are only reported in the window.
-//! An upgrade runs the same uninstaller in place, and then the hook adds `--keep-data` so that Root survives.
+//! NSIS uninstaller stops a running launcher, then runs `--uninstall-cleanup` before it removes the launcher's own
+//! files, and [`headless`] stops the server, deletes Root and exits 0 no matter what: leftovers are only reported in
+//! the window. An upgrade runs the same uninstaller in place, and then the hook adds `--keep-data` so that Root
+//! survives.
 //!
-//! [`packaging`] and [`other_launcher_pids`] are pure; deleting and killing are thin edge functions.
+//! [`packaging`] is pure; deleting is a thin edge function.
 
 use std::io;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-
 use crate::paths::{Layout, default_root, root_folder_name};
-use crate::process_tree::{Member, STOP_GRACE, start_time_of, stop_members};
+use crate::process_tree::STOP_GRACE;
 use crate::server::clear_stale_record;
 use crate::snapshot::Packaging;
 
@@ -40,37 +39,6 @@ pub fn packaging(os: &str, appimage: Option<&str>) -> Packaging {
 pub fn current_packaging() -> Packaging {
     let appimage = std::env::var("APPIMAGE").ok();
     packaging(std::env::consts::OS, appimage.as_deref())
-}
-
-/// A running process as far as the cleanup cares: its id and the executable it runs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Proc {
-    pub pid: u32,
-    pub exe: Option<PathBuf>,
-}
-
-/// Whether two executable paths name the same file; Windows paths ignore case.
-fn same_path(a: &Path, b: &Path, ignore_case: bool) -> bool {
-    if ignore_case {
-        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
-    } else {
-        a == b
-    }
-}
-
-/// The ids of the processes that run the executable `exe`, not counting `own_pid`.
-fn other_launcher_pids(procs: &[Proc], exe: &Path, own_pid: u32) -> Vec<u32> {
-    procs
-        .iter()
-        .filter(|process| process.pid != own_pid)
-        .filter(|process| {
-            process
-                .exe
-                .as_deref()
-                .is_some_and(|other| same_path(other, exe, cfg!(windows)))
-        })
-        .map(|process| process.pid)
-        .collect()
 }
 
 /// Run `op` until it succeeds or `budget` has passed, pausing `pause` between attempts; the last error is returned.
@@ -146,42 +114,6 @@ pub fn delete_root(root: &Path, budget: Duration) -> io::Result<()> {
     )
 }
 
-/// Every running process with its executable path; empty when the system gives no process table.
-fn running_processes() -> Vec<Proc> {
-    let Ok(mut system) = System::new() else {
-        return Vec::new();
-    };
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet),
-    );
-    system
-        .processes()
-        .values()
-        .filter(|process| process.thread_kind().is_none())
-        .map(|process| Proc {
-            pid: process.pid().as_u32(),
-            exe: process.exe().map(Path::to_path_buf),
-        })
-        .collect()
-}
-
-/// Terminate every other process running this launcher's executable (a running window of this launcher would hold
-/// files in Root and would restart the server).
-fn kill_other_launchers() {
-    let Ok(exe) = std::env::current_exe() else {
-        return;
-    };
-    let pids = other_launcher_pids(&running_processes(), &exe, std::process::id());
-    // Only the launcher processes themselves, not their children.
-    let members: Vec<Member> = pids
-        .iter()
-        .filter_map(|&pid| start_time_of(pid).map(|start_time| Member { pid, start_time }))
-        .collect();
-    stop_members(&members, Duration::ZERO);
-}
-
 /// The cleanup of `layout`: the recorded server (only when its pid is alive with the recorded start time), then Root
 /// unless `keep_data`. Every failure is ignored: the uninstaller must never be blocked by it.
 fn cleanup(layout: &Layout, keep_data: bool) {
@@ -191,12 +123,11 @@ fn cleanup(layout: &Layout, keep_data: bool) {
     }
 }
 
-/// Run the headless cleanup (`--uninstall-cleanup`): stop the other launcher processes and the launcher's server,
-/// delete Root unless `keep_data` (`--keep-data`, an upgrade), and return so the process exits 0. Starts no window
-/// and no single-instance check. The other launchers go first: a running window would hold files in Root.
+/// Run the headless cleanup (`--uninstall-cleanup`): stop the launcher's server, delete Root unless `keep_data`
+/// (`--keep-data`, an upgrade), and return so the process exits 0. Starts no window and no single-instance check.
+/// The installer's running-app check has already stopped any running launcher window.
 pub fn headless(keep_data: bool) {
     if let Some(root) = default_root() {
-        kill_other_launchers();
         cleanup(&Layout::new(root), keep_data);
     }
 }
@@ -225,13 +156,6 @@ mod tests {
 
     use super::*;
 
-    fn proc(pid: u32, exe: Option<&str>) -> Proc {
-        Proc {
-            pid,
-            exe: exe.map(PathBuf::from),
-        }
-    }
-
     #[test]
     fn packaging_follows_the_os_and_the_appimage_variable() {
         assert_eq!(packaging("macos", None), Packaging::MacosApp);
@@ -251,60 +175,6 @@ mod tests {
             packaging("windows", Some("/x.AppImage")),
             Packaging::WindowsNsis
         );
-    }
-
-    #[test]
-    fn other_launchers_are_the_same_executable_under_another_pid() {
-        let exe = Path::new("/apps/launcher");
-        let procs = [
-            proc(10, Some("/apps/launcher")),
-            proc(11, Some("/apps/launcher")),
-            proc(12, Some("/apps/other")),
-            proc(13, None),
-            proc(14, Some("/apps/launcher2")),
-        ];
-        assert_eq!(other_launcher_pids(&procs, exe, 10), [11]);
-        assert_eq!(other_launcher_pids(&procs, exe, 99), [10, 11]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn only_the_exact_executable_path_matches_off_windows() {
-        let exe = Path::new("/apps/Launcher");
-        let procs = [
-            proc(1, Some("/apps/launcher")),
-            proc(2, Some("/apps/Launcher/")),
-            proc(3, Some("/apps/Launcher/extra")),
-            proc(4, Some("/usr/bin/ziv")),
-            proc(5, Some("/apps/Launcher")),
-        ];
-        assert_eq!(other_launcher_pids(&procs, exe, 99), [2, 5]);
-    }
-
-    #[test]
-    fn the_real_process_table_never_yields_this_process_or_an_unrelated_executable() {
-        // Read-only: nothing is signalled.
-        let procs = running_processes();
-        let me = std::process::id();
-        let exe = std::env::current_exe().unwrap();
-        assert!(!other_launcher_pids(&procs, &exe, me).contains(&me));
-        let nowhere = Path::new("/nonexistent/launcher-under-test");
-        assert!(other_launcher_pids(&procs, nowhere, me).is_empty());
-    }
-
-    #[test]
-    fn no_other_launcher_means_nothing_to_kill() {
-        let exe = Path::new("/apps/launcher");
-        assert!(other_launcher_pids(&[], exe, 1).is_empty());
-        assert!(other_launcher_pids(&[proc(1, Some("/apps/launcher"))], exe, 1).is_empty());
-    }
-
-    #[test]
-    fn windows_paths_compare_without_case() {
-        let a = Path::new(r"C:\Users\x\AppData\Local\Z\Launcher.exe");
-        let b = Path::new(r"c:\users\x\appdata\local\z\launcher.EXE");
-        assert!(same_path(a, b, true));
-        assert!(!same_path(a, b, false));
     }
 
     #[test]

@@ -6,7 +6,6 @@ import type { MascotMood } from '$lib/components/atoms/Mascot.svelte';
 import type {
   Controls,
   ErrorCode,
-  FailedAction,
   LinkId,
   Packaging,
   Phase,
@@ -168,7 +167,7 @@ const finishLead: Record<Packaging, string> = {
 };
 
 /** The codes an install, repair or update can fail with. */
-type ActionErrorCode = Exclude<ErrorCode, 'start_exited' | 'start_timeout' | 'uninstall_incomplete'>;
+type ActionErrorCode = Exclude<ErrorCode, 'start_failed' | 'uninstall_incomplete'>;
 
 /** The cause of a failed install, repair or update, and what to do next after an install. */
 const causes: Record<ActionErrorCode, { lead: string; text: string }> = {
@@ -199,10 +198,7 @@ const causes: Record<ActionErrorCode, { lead: string; text: string }> = {
 };
 
 /** What a failed start says, and what to do next. */
-const startTexts: Record<'start_exited' | 'start_timeout', string> = {
-  start_exited: 'It stopped while starting. Open tries again, and Repair, in the ⋯ menu, fixes a broken install.',
-  start_timeout: 'It didn’t answer in time. Open tries again, and Repair, in the ⋯ menu, fixes a broken install.'
-};
+const START_FAILED = 'Open tries again, and Repair, in the ⋯ menu, fixes a broken install.';
 
 /** What to do after a failed update: the app was stopped for it, and the offer is still there once it runs. */
 const UPDATE_NEXT = 'Open starts it again, and the update stays on offer.';
@@ -216,12 +212,11 @@ function causeOf(s: Snapshot): { lead: string; text: string } {
 }
 
 /**
- * Whether a version the app publishes is an alpha, beta, release-candidate or development version (`0.15.0b2`,
- * `1.0.0rc1`, `1.0.0.dev3`). The app publishes `X.Y.Z`, optionally with `aN`, `bN` or `rcN`, then `.postN` and `.devN`.
+ * Whether a version the app publishes is an alpha, beta or release-candidate version (`0.15.0b2`, `1.0.0rc1`). The app
+ * publishes `X.Y.Z`, optionally with `aN`, `bN` or `rcN`.
  */
 export function isPrerelease(version: string): boolean {
-  const match = /^\d+\.\d+\.\d+((?:a|b|rc)\d+)?(?:\.post\d+)?(\.dev\d+)?$/.exec(version);
-  return match !== null && (match[1] !== undefined || match[2] !== undefined);
+  return /^\d+\.\d+\.\d+(?:a|b|rc)\d+$/.test(version);
 }
 
 function stepKicker(p: Progress): string {
@@ -367,19 +362,8 @@ function unsupportedView(u: Unsupported, controls: Controls): {
       };
 }
 
-const LOG_TITLES: Record<FailedAction, string> = {
-  install: 'End of the install log',
-  repair: 'End of the log',
-  update: 'End of the update log',
-  start: 'End of the log'
-};
-
-function logNotice(s: Snapshot): NoticeView {
-  return {
-    kind: 'log',
-    label: 'Show the log',
-    sheetTitle: s.phase === 'failed' && s.failedAction ? LOG_TITLES[s.failedAction] : 'End of the log'
-  };
+function logNotice(): NoticeView {
+  return { kind: 'log', label: 'Show the log', sheetTitle: 'End of the log' };
 }
 
 function failedView(s: Snapshot): { headline: string; sub: SubView } {
@@ -403,7 +387,7 @@ function failedView(s: Snapshot): { headline: string; sub: SubView } {
     default:
       return {
         headline: 'Didn’t start',
-        sub: { lead: null, leadAlert: false, text: startTexts[s.error === 'start_timeout' ? 'start_timeout' : 'start_exited'] }
+        sub: { lead: null, leadAlert: false, text: START_FAILED }
       };
   }
 }
@@ -442,6 +426,14 @@ const MENU_ITEMS: Record<Controls['menu'][number], MenuItemView> = {
   }
 };
 
+/** The folders an uninstall leaves, with what each holds; the uninstall dialog and the kept notice both show them. */
+const KEPT_FOLDERS = [
+  { path: '~/.ziv', what: 'Outputs, settings and prompts' },
+  { path: '~/.cache/huggingface', what: 'Models' }
+] as const;
+
+const DATA_LINK = { id: 'data_folder', label: 'Where your data lives' } satisfies LinkView;
+
 /** The words of the uninstall confirmation (macOS and Linux; Windows starts its own uninstaller). */
 export const UNINSTALL_DIALOG = {
   question: `Uninstall ${NAME}?`,
@@ -449,14 +441,9 @@ export const UNINSTALL_DIALOG = {
   confirm: 'Uninstall',
   staysBefore: 'Your outputs, settings and models stay in',
   staysAnd: 'and',
-  paths: ['~/.ziv', '~/.cache/huggingface'],
-  link: { id: 'data_folder', label: 'Where your data lives' } satisfies LinkView
+  paths: [KEPT_FOLDERS[0].path, KEPT_FOLDERS[1].path],
+  link: DATA_LINK
 } as const;
-
-/** `stoppedAt` (Unix ms) as a clock time in the browser's locale. */
-function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
 
 /** Everything the window shows for `s`. */
 export function launcherView(s: Snapshot): LauncherView {
@@ -472,12 +459,7 @@ export function launcherView(s: Snapshot): LauncherView {
       sub = plain('Before anything is downloaded.');
       break;
     case 'unsupported':
-      if (s.unsupported) {
-        ({ headline, sub, notice } = unsupportedView(s.unsupported, controls));
-      } else {
-        headline = 'Can’t install yet';
-        sub = plain('Nothing was downloaded.');
-      }
+      if (s.unsupported) ({ headline, sub, notice } = unsupportedView(s.unsupported, controls));
       break;
     case 'move_to_applications':
       headline = 'Move to Applications';
@@ -526,16 +508,12 @@ export function launcherView(s: Snapshot): LauncherView {
       break;
     case 'stopped':
       headline = 'Stopped';
-      sub = plain(
-        s.stoppedAt !== null
-          ? `It stopped on its own at ${formatTime(s.stoppedAt)}. Open starts it again.`
-          : 'It stopped on its own. Open starts it again.'
-      );
-      notice = logNotice(s);
+      sub = plain('It stopped on its own. Open starts it again.');
+      notice = logNotice();
       break;
     case 'failed':
       ({ headline, sub } = failedView(s));
-      notice = logNotice(s);
+      notice = logNotice();
       break;
     case 'uninstalling':
       headline = 'Uninstalling';
@@ -545,12 +523,9 @@ export function launcherView(s: Snapshot): LauncherView {
       sub = { lead: finishLead[s.packaging], leadAlert: false, ...leftoverSub(s) };
       notice = {
         kind: 'kept',
-        entries: [
-          { path: '~/.ziv', what: 'Outputs, settings and prompts' },
-          { path: '~/.cache/huggingface', what: 'Models' }
-        ],
+        entries: [...KEPT_FOLDERS],
         help: 'Delete them yourself if you want the space back.',
-        link: { id: 'data_folder', label: 'Where your data lives' }
+        link: DATA_LINK
       };
       break;
   }

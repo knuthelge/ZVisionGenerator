@@ -11,7 +11,7 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 
 use tauri::webview::PageLoadEvent;
-use tauri::{AppHandle, Emitter, Manager, PhysicalSize, RunEvent, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 
 use crate::commands;
@@ -65,8 +65,10 @@ pub fn run(autostart: bool) {
                 .try_state::<Controller>()
                 .is_some_and(|controller| controller.is_installed());
             // A start at login runs in the background, unless there is nothing installed to run.
-            if !(autostart && installed) {
-                fit_and_show(app);
+            if !(autostart && installed)
+                && let Some(window) = app.get_webview_window(MAIN_WINDOW)
+            {
+                let _ = window.show();
             }
         })
         .on_window_event(|window, event| {
@@ -118,7 +120,7 @@ pub fn run(autostart: bool) {
 
 /// Build the controller and the tray that follows it, wired to the window and the system.
 fn build_controller(handle: &AppHandle) -> Result<Controller, Box<dyn std::error::Error>> {
-    let config = Config::detect().ok_or("this system has no local data folder")?;
+    let config = Config::detect()?;
     let tray: Arc<OnceLock<Tray>> = Arc::new(OnceLock::new());
     let emit: Emit = {
         let (handle, tray) = (handle.clone(), tray.clone());
@@ -169,32 +171,6 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
-/// The inner height that fits the monitor's work area, in physical pixels: the wanted height, less than that when
-/// the window's frame would not fit.
-fn fit_inner_height(inner: u32, frame: u32, work_area: u32) -> u32 {
-    inner.min(work_area.saturating_sub(frame))
-}
-
-/// Show the window for the first time, shortened to fit a small screen.
-fn fit_and_show(app: &AppHandle) {
-    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
-        return;
-    };
-    if let (Ok(Some(monitor)), Ok(inner), Ok(outer)) = (
-        window.current_monitor(),
-        window.inner_size(),
-        window.outer_size(),
-    ) {
-        let frame = outer.height.saturating_sub(inner.height);
-        let height = fit_inner_height(inner.height, frame, monitor.work_area().size.height);
-        if height != inner.height {
-            let _ = window.set_size(PhysicalSize::new(inner.width, height));
-            let _ = window.center();
-        }
-    }
-    let _ = window.show();
-}
-
 /// Quit: hide the window, stop everything the launcher started, then exit. Safe to call from any thread and any
 /// number of times; the work runs on its own thread so the caller (often the main thread) never waits for it, and
 /// `Controller::shutdown` lets only the first call do it and exit.
@@ -239,23 +215,3 @@ fn watch_signals(app: &AppHandle) {
 
 #[cfg(not(unix))]
 fn watch_signals(_app: &AppHandle) {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_window_that_fits_keeps_its_height() {
-        assert_eq!(fit_inner_height(500, 30, 1000), 500);
-    }
-
-    #[test]
-    fn a_window_taller_than_the_work_area_is_shortened_by_its_frame() {
-        assert_eq!(fit_inner_height(500, 30, 400), 370);
-    }
-
-    #[test]
-    fn a_frame_larger_than_the_work_area_leaves_no_height() {
-        assert_eq!(fit_inner_height(500, 30, 20), 0);
-    }
-}

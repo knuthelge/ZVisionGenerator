@@ -26,8 +26,7 @@ export type ErrorCode =
   | 'tool_broken'
   | 'low_disk'
   | 'uv_failed'
-  | 'start_exited'
-  | 'start_timeout'
+  | 'start_failed'
   | 'uninstall_incomplete';
 
 export type LinkId = 'requirements' | 'data_folder' | 'whats_new';
@@ -73,8 +72,6 @@ export interface Snapshot {
   leftoverFolder: string | null;
   /** `failed` and `stopped` only; [] otherwise. */
   logTail: string[];
-  /** Unix milliseconds; `stopped` only. */
-  stoppedAt: number | null;
   /** What the window shows and allows in this state; derived in Rust. */
   controls: Controls;
 }
@@ -91,7 +88,6 @@ export type Primary =
 export interface Controls {
   primary: Primary | null;
   update: boolean;
-  log: boolean;
   bar: boolean;
   autostart: boolean;
   /** More is shown iff non-empty; in this order, `beta` last after a separator. */

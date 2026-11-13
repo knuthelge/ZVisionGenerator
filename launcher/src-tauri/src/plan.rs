@@ -18,8 +18,6 @@ pub enum Action {
 pub enum Step {
     /// Stop the server, so nothing holds the app's files.
     StopServer,
-    /// Check the free disk space (repair only; failing it fails the action).
-    CheckDisk,
     /// Download and unpack uv and ffmpeg.
     FetchTools,
     /// `uv cache clean`.
@@ -41,7 +39,7 @@ impl Step {
     fn row(self) -> Option<StepId> {
         match self {
             Step::StopServer => None,
-            Step::CheckDisk | Step::FetchTools => Some(StepId::DownloadTools),
+            Step::FetchTools => Some(StepId::DownloadTools),
             Step::CacheClean => Some(StepId::CleanCache),
             Step::ToolInstall { .. } => Some(StepId::InstallApp),
             Step::ToolUpgrade => Some(StepId::UpdateApp),
@@ -84,7 +82,6 @@ impl Plan {
             ],
             Action::Repair => &[
                 Step::StopServer,
-                Step::CheckDisk,
                 Step::FetchTools,
                 Step::CacheClean,
                 Step::ToolInstall { reinstall: true },
@@ -181,14 +178,6 @@ mod tests {
                     open_browser: false
                 },
             ]
-        );
-    }
-
-    #[test]
-    fn repair_checks_the_disk_before_downloading_anything() {
-        assert_eq!(
-            only_steps(Action::Repair)[..3],
-            [Step::StopServer, Step::CheckDisk, Step::FetchTools]
         );
     }
 

@@ -1,4 +1,4 @@
-import { clearMocks, mockIPC, mockWindows } from '@tauri-apps/api/mocks';
+import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -96,14 +96,5 @@ describe('bridge', () => {
     stop();
     await emit(SNAPSHOT_EVENT, SNAPSHOT);
     expect(handler).toHaveBeenCalledTimes(1);
-  });
-
-  it('closes the window through the window plugin', async () => {
-    mockWindows('main');
-    const calls = mock();
-
-    await bridge.closeWindow();
-
-    expect(calls.map(([cmd]) => cmd)).toEqual(['plugin:window|close']);
   });
 });

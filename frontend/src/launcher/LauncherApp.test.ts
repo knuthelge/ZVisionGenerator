@@ -43,8 +43,7 @@ function fakeBridge(first: Snapshot): Fake {
     setAutostart: vi.fn((enabled: boolean) => Promise.resolve(enabled)),
     setBeta: vi.fn((enabled: boolean) => Promise.resolve(enabled)),
     openLink: vi.fn(done),
-    quitLauncher: vi.fn(done),
-    closeWindow: vi.fn(done)
+    quitLauncher: vi.fn(done)
   };
   return { bridge, emit: (next) => { flushSync(() => handler?.(next)); }, unlisten };
 }
@@ -272,16 +271,6 @@ describe('LauncherApp actions', () => {
     await settle();
 
     expect(error).not.toHaveBeenCalled();
-  });
-
-  it('hides the window on Ctrl+W and Cmd+W', async () => {
-    const { bridge } = await open('6 running');
-
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, cancelable: true }));
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', metaKey: true, cancelable: true }));
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', cancelable: true }));
-
-    expect(bridge.closeWindow).toHaveBeenCalledTimes(2);
   });
 
   it('puts focus on the primary action', async () => {

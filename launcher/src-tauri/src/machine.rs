@@ -158,25 +158,6 @@ fn needs_move_to_applications(exe: &Path) -> bool {
     path.starts_with("/Volumes/") || path.contains("/AppTranslocation/")
 }
 
-/// The ways to run `nvidia-smi` in order: by name from `PATH`, then the driver's usual install location.
-fn nvidia_smi_candidates(os: &str, system_root: Option<&str>) -> Vec<PathBuf> {
-    match os {
-        "windows" => {
-            let mut list = vec![PathBuf::from("nvidia-smi.exe")];
-            if let Some(root) = system_root {
-                let root = root.trim_end_matches(['\\', '/']);
-                list.push(PathBuf::from(format!(r"{root}\System32\nvidia-smi.exe")));
-            }
-            list
-        }
-        "linux" => vec![
-            PathBuf::from("nvidia-smi"),
-            PathBuf::from("/usr/bin/nvidia-smi"),
-        ],
-        _ => Vec::new(),
-    }
-}
-
 /// Arguments for a CSV query of `fields` without a header.
 fn query_args(fields: &str) -> [String; 2] {
     [
@@ -187,7 +168,7 @@ fn query_args(fields: &str) -> [String; 2] {
 
 /// What running `nvidia-smi` came to.
 enum SmiRun {
-    /// No candidate program could be started.
+    /// `nvidia-smi` could not be started.
     NotFound,
     /// A program started but exited with an error.
     Failed,
@@ -195,29 +176,27 @@ enum SmiRun {
     Output(String),
 }
 
-/// Run the first `nvidia-smi` that starts.
-fn run_nvidia_smi(candidates: &[PathBuf], fields: &str) -> SmiRun {
-    for program in candidates {
-        let Ok(output) = hidden_command(program).args(query_args(fields)).output() else {
-            continue;
-        };
-        return if output.status.success() {
-            SmiRun::Output(String::from_utf8_lossy(&output.stdout).into_owned())
-        } else {
-            SmiRun::Failed
-        };
+/// Run `nvidia-smi` from `PATH`.
+fn run_nvidia_smi(fields: &str) -> SmiRun {
+    let Ok(output) = hidden_command(Path::new("nvidia-smi"))
+        .args(query_args(fields))
+        .output()
+    else {
+        return SmiRun::NotFound;
+    };
+    if output.status.success() {
+        SmiRun::Output(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        SmiRun::Failed
     }
-    SmiRun::NotFound
 }
 
 /// Check the NVIDIA driver and GPU (Windows and Linux); macOS has nothing to check.
 fn check_gpu() -> Result<(), Unsupported> {
-    let system_root = std::env::var("SystemRoot").ok();
-    let candidates = nvidia_smi_candidates(std::env::consts::OS, system_root.as_deref());
-    if candidates.is_empty() {
+    if !matches!(std::env::consts::OS, "windows" | "linux") {
         return Ok(());
     }
-    let first = run_nvidia_smi(&candidates, "name,driver_version,compute_cap");
+    let first = run_nvidia_smi("name,driver_version,compute_cap");
     if let SmiRun::Output(stdout) = &first {
         let gpus = parse_nvidia_smi(stdout);
         if !gpus.is_empty() {
@@ -227,7 +206,7 @@ fn check_gpu() -> Result<(), Unsupported> {
     if matches!(first, SmiRun::NotFound) {
         return Err(evaluate_without_gpus(false, None));
     }
-    let driver_only = match run_nvidia_smi(&candidates, "driver_version") {
+    let driver_only = match run_nvidia_smi("driver_version") {
         SmiRun::Output(stdout) => Some(stdout),
         SmiRun::NotFound | SmiRun::Failed => None,
     };
@@ -249,7 +228,7 @@ fn free_bytes(root: &Path) -> Option<u64> {
 
 /// Check that the volume holding `root` has [`MIN_FREE_BYTES`]. A volume that cannot be found passes: the install
 /// itself reports a full disk.
-pub fn check_disk(root: &Path) -> Result<(), Unsupported> {
+fn check_disk(root: &Path) -> Result<(), Unsupported> {
     match free_bytes(root) {
         Some(free) => check_space(free, MIN_FREE_BYTES),
         None => Ok(()),
@@ -432,21 +411,6 @@ mod tests {
         let reason = evaluate_without_gpus(false, None);
         assert_eq!(reason.code, UnsupportedCode::NoNvidiaGpu);
         assert_eq!(reason.needed, "7.5");
-    }
-
-    #[test]
-    fn nvidia_smi_is_looked_up_on_path_first() {
-        let linux = nvidia_smi_candidates("linux", None);
-        assert_eq!(linux[0], PathBuf::from("nvidia-smi"));
-        assert_eq!(linux[1], PathBuf::from("/usr/bin/nvidia-smi"));
-        let windows = nvidia_smi_candidates("windows", Some(r"C:\Windows"));
-        assert_eq!(windows[0], PathBuf::from("nvidia-smi.exe"));
-        assert_eq!(
-            windows[1],
-            PathBuf::from(r"C:\Windows\System32\nvidia-smi.exe")
-        );
-        assert_eq!(nvidia_smi_candidates("windows", None).len(), 1);
-        assert!(nvidia_smi_candidates("macos", None).is_empty());
     }
 
     #[test]

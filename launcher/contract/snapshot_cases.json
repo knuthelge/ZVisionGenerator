@@ -14,11 +14,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": null,
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -45,11 +43,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "check_again",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -76,11 +72,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "check_again",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -107,11 +101,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "check_again",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -138,11 +130,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "check_again",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -169,11 +159,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "see_requirements",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -200,11 +188,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "see_requirements",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -227,11 +213,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": null,
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -254,11 +238,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "install",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [
@@ -283,11 +265,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "install",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [
@@ -321,11 +301,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": null,
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -356,11 +334,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": null,
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -396,11 +372,9 @@
         "error: Failed to download `torch`",
         "  Caused by: request timed out"
       ],
-      "stoppedAt": null,
       "controls": {
         "primary": "retry",
         "update": false,
-        "log": true,
         "bar": true,
         "autostart": false,
         "menu": [
@@ -439,11 +413,9 @@
         "error: Failed to download `torch`",
         "  Caused by: request timed out"
       ],
-      "stoppedAt": null,
       "controls": {
         "primary": "retry",
         "update": false,
-        "log": true,
         "bar": true,
         "autostart": false,
         "menu": [
@@ -468,11 +440,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "starting",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -499,11 +469,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "open",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -530,11 +498,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "open",
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -561,11 +527,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "open",
         "update": true,
-        "log": false,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -592,11 +556,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "open",
         "update": true,
-        "log": false,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -631,11 +593,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": null,
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -670,11 +630,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": null,
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -710,11 +668,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": null,
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -751,11 +707,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": null,
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -785,11 +739,9 @@
         "MemoryError",
         "Killed"
       ],
-      "stoppedAt": 1762950000000,
       "controls": {
         "primary": "open",
         "update": false,
-        "log": true,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -813,17 +765,15 @@
       "unsupported": null,
       "progress": null,
       "failedAction": "start",
-      "error": "start_exited",
+      "error": "start_failed",
       "leftoverFolder": null,
       "logTail": [
         "Traceback (most recent call last):",
         "ImportError: libcudnn.so.9"
       ],
-      "stoppedAt": null,
       "controls": {
         "primary": "open",
         "update": false,
-        "log": true,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -854,11 +804,9 @@
         "error: Failed to download `torch`",
         "  Caused by: request timed out"
       ],
-      "stoppedAt": null,
       "controls": {
         "primary": "open",
         "update": false,
-        "log": true,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -885,11 +833,9 @@
       "error": "low_disk",
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "open",
         "update": false,
-        "log": true,
         "bar": true,
         "autostart": true,
         "menu": [
@@ -916,11 +862,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": null,
         "update": false,
-        "log": false,
         "bar": true,
         "autostart": false,
         "menu": [],
@@ -943,11 +887,9 @@
       "error": null,
       "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "quit",
         "update": false,
-        "log": false,
         "bar": false,
         "autostart": false,
         "menu": [],
@@ -970,11 +912,9 @@
       "error": "uninstall_incomplete",
       "leftoverFolder": "/home/example/.local/share/zvision",
       "logTail": [],
-      "stoppedAt": null,
       "controls": {
         "primary": "quit",
         "update": false,
-        "log": false,
         "bar": false,
         "autostart": false,
         "menu": [],

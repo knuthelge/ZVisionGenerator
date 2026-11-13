@@ -30,7 +30,6 @@
 
   let moreOpen = $state(false);
   let moreAnchor = $state<HTMLElement | null>(null);
-  let loginEl = $state<HTMLElement>();
 
   async function change(): Promise<void> {
     const wanted = checked;
@@ -40,23 +39,13 @@
       checked = autostart ?? false;
     }
   }
-
-  // The switch carries the hint for screen readers; Toggle has no prop for aria-describedby.
-  $effect(() => {
-    loginEl?.querySelector('input[role="switch"]')?.setAttribute('aria-describedby', hintId);
-  });
-
-  // Tooltip shows on its trigger's own focus; the focus here lands on the switch inside, so pass it on.
-  function relay(type: 'focus' | 'blur'): void {
-    loginEl?.querySelector('span[aria-describedby]')?.dispatchEvent(new FocusEvent(type));
-  }
 </script>
 
 <footer class="bar" data-testid="quiet-bar">
   {#if autostart !== null}
-    <span class="login" bind:this={loginEl} onfocusin={() => relay('focus')} onfocusout={() => relay('blur')}>
+    <span class="login">
       <Tooltip text={HINT} focusable={false} placement="top">
-        <Toggle bind:checked label="Start at login" disabled={busy} onchange={change} />
+        <Toggle bind:checked label="Start at login" disabled={busy} ariaDescribedby={hintId} onchange={change} />
       </Tooltip>
       <span id={hintId} class="sr-only">{HINT}</span>
     </span>

@@ -102,7 +102,7 @@ The window says **Install didn't finish** and gives the cause in its first line.
 
 ### The launcher says Didn't start { #launcher-didnt-start }
 
-The window says **Didn't start** when the app stopped while starting or didn't answer in time. **Open Z-Vision Generator** tries again. If it fails again, open **Show the log** for the reason, then choose **Repair** in **More**: it reinstalls the app and keeps your data folder and models. If it still fails, [report it](#report-a-problem) with the log.
+The window says **Didn't start** when the app did not come up after the launcher started it. **Open Z-Vision Generator** tries again. If it fails again, open **Show the log** for the reason, then choose **Repair** in **More**: it reinstalls the app and keeps your data folder and models. If it still fails, [report it](#report-a-problem) with the log.
 
 ### Installed with pip
 

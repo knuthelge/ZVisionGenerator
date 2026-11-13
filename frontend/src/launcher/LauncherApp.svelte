@@ -195,20 +195,10 @@
     });
   });
 
-  // ——— Keys ———
-  function onKeydown(event: KeyboardEvent): void {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w') {
-      event.preventDefault();
-      void run(() => bridge.closeWindow());
-    }
-  }
-
   function primaryClick(primary: PrimaryView): void {
     void run(primaryActions[primary.id]);
   }
 </script>
-
-<svelte:window onkeydown={onKeydown} />
 
 <div class="shell" bind:this={shell} data-testid="launcher" data-phase={visible ? phase : undefined}>
   {#if view && snapshot && visible}
@@ -360,8 +350,4 @@
     overflow-wrap: anywhere;
   }
   .path { font-family: var(--font-mono); color: var(--color-text-primary); }
-
-  @media (max-height: 499px) {
-    .masthead { height: 32px; }
-  }
 </style>

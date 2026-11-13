@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Permissions of the launcher window",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-close"]
+  "permissions": ["core:default"]
 }

@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use crate::manifest::{self, Platform};
 use crate::opener;
@@ -52,8 +52,6 @@ pub trait Runner: Send + Sync + 'static {
     fn must_move_to_applications(&self) -> bool;
     /// The GPU and disk check before the first install.
     fn check_machine(&self, layout: &Layout) -> Result<(), Unsupported>;
-    /// The disk check at the start of a repair.
-    fn check_disk(&self, layout: &Layout) -> Result<(), Unsupported>;
     /// Whether the app (`tool-bin/ziv`) is installed.
     fn is_installed(&self, layout: &Layout) -> bool;
     /// Whether uv, ffmpeg and ffprobe are all in place.
@@ -136,34 +134,31 @@ impl Default for Timing {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub layout: Layout,
-    /// `None` on a target the launcher has no pins for: installing then fails with `tool_broken`.
-    pub platform: Option<Platform>,
+    pub platform: Platform,
     pub packaging: Packaging,
     pub timing: Timing,
 }
 
 impl Config {
-    /// The configuration of this machine and build, or `None` when the system has no local data folder.
-    pub fn detect() -> Option<Self> {
-        Some(Self {
-            layout: Layout::new(default_root()?),
-            platform: Platform::current(),
+    /// The configuration of this machine and build.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the system has no local data folder or the launcher has no pins for this platform.
+    pub fn detect() -> Result<Self, &'static str> {
+        Ok(Self {
+            layout: Layout::new(default_root().ok_or("this system has no local data folder")?),
+            platform: Platform::current().ok_or("this system is not supported")?,
             packaging: uninstall::current_packaging(),
             timing: Timing::default(),
         })
     }
 }
 
-/// Whether the installed tools are the pinned ones of `platform` and are all in place; an unsupported platform has
-/// none. The one test an install and an update use to skip the download.
-fn tools_current(
-    inner: &Inner,
-    runner: &dyn Runner,
-    layout: &Layout,
-    platform: Option<Platform>,
-) -> bool {
-    platform.is_some_and(|platform| inner.prefs.tools_current(&manifest::pins(platform)))
-        && runner.tools_present(layout)
+/// Whether the installed tools are the pinned ones of `platform` and are all in place. The one test an install and
+/// an update use to skip the download.
+fn tools_current(inner: &Inner, runner: &dyn Runner, layout: &Layout, platform: Platform) -> bool {
+    inner.prefs.tools_current(&manifest::pins(platform)) && runner.tools_present(layout)
 }
 
 /// The failed action that belongs to a long-running action.
@@ -182,15 +177,6 @@ fn running_phase(action: Action) -> Phase {
         Action::Update => Phase::Updating,
         Action::Repair => Phase::Repairing,
     }
-}
-
-/// The current time in Unix milliseconds, for `stoppedAt`.
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
-        })
 }
 
 /// Why a flow stopped before its end.
@@ -288,7 +274,6 @@ impl Controller {
             error: None,
             leftover_folder: None,
             log_tail: Vec::new(),
-            stopped_at: None,
             controls: Controls::default(),
         };
         let mut snapshot = snapshot;
@@ -498,7 +483,6 @@ impl Controller {
             snapshot.error = Some(failure.error);
             snapshot.log_tail = failure.tail;
             snapshot.unsupported = None;
-            snapshot.stopped_at = None;
             if failure.action != FailedAction::Install {
                 snapshot.progress = None;
             }
@@ -592,7 +576,6 @@ impl Controller {
                 snapshot.failed_action = None;
                 snapshot.error = None;
                 snapshot.log_tail = Vec::new();
-                snapshot.stopped_at = None;
                 None
             },
         )?;
@@ -717,15 +700,8 @@ impl Controller {
                 self.stop_server();
                 Ok(())
             }
-            Step::CheckDisk => self.0.runner.check_disk(layout).map_err(|_| {
-                Abort::Fail(Failure {
-                    action: failed,
-                    error: ErrorCode::LowDisk,
-                    tail: Vec::new(),
-                })
-            }),
             Step::FetchTools => {
-                let platform = self.platform(failed)?;
+                let platform = self.0.config.platform;
                 self.0
                     .runner
                     .fetch_tools(layout, platform)
@@ -737,7 +713,7 @@ impl Controller {
                 .run_uv_step(failed, &uv::cache_clean_args(), false)
                 .map(drop),
             Step::ToolInstall { reinstall } => {
-                let platform = self.platform(failed)?;
+                let platform = self.0.config.platform;
                 let (beta, installed) = {
                     let inner = lock(&self.0.inner);
                     (inner.prefs.beta, inner.snapshot.installed_version.clone())
@@ -751,7 +727,7 @@ impl Controller {
                 self.run_uv_step(failed, &args, true).map(drop)
             }
             Step::ToolUpgrade => {
-                let platform = self.platform(failed)?;
+                let platform = self.0.config.platform;
                 let beta = lock(&self.0.inner).prefs.beta;
                 run.upgrade_tail =
                     self.run_uv_step(failed, &uv::upgrade_args(platform, beta), false)?;
@@ -771,16 +747,6 @@ impl Controller {
         let mut inner = lock(&self.0.inner);
         inner.prefs.set_tool_pins(&manifest::pins(platform));
         self.save_prefs(&inner);
-    }
-
-    fn platform(&self, action: FailedAction) -> Result<Platform, Abort> {
-        self.0.config.platform.ok_or_else(|| {
-            Abort::Fail(Failure {
-                action,
-                error: ErrorCode::ToolBroken,
-                tail: Vec::new(),
-            })
-        })
     }
 
     fn fetch_failure(&self, action: FailedAction, error: ErrorCode) -> Abort {
@@ -849,10 +815,7 @@ impl Controller {
 
     /// Measure the cache now and then every sample interval until `stopped` disconnects.
     fn sample_fraction(&self, stopped: mpsc::Receiver<()>) {
-        let Some(platform) = self.0.config.platform else {
-            return;
-        };
-        let expected = manifest::expected_cache_bytes(platform);
+        let expected = manifest::expected_cache_bytes(self.0.config.platform);
         loop {
             let size = self.0.runner.cache_size(&self.0.config.layout);
             let fraction = progress::fraction(size, expected);
@@ -922,7 +885,7 @@ impl Controller {
             Box::new(move || me.on_server_exit(&flags))
         };
         let Ok(record) = self.0.runner.start_server(layout, port, on_exit) else {
-            return Err(self.start_failure(ErrorCode::StartExited));
+            return Err(self.start_failure());
         };
         let registered = {
             let mut inner = lock(&self.0.inner);
@@ -974,29 +937,24 @@ impl Controller {
                 Err(Abort::Quit)
             }
             Readiness::Ready | Readiness::Stopped | Readiness::TimedOut => {
-                let code = if readiness == Readiness::TimedOut {
-                    ErrorCode::StartTimeout
-                } else {
-                    ErrorCode::StartExited
-                };
-                Err(self.start_failure(code))
+                Err(self.start_failure())
             }
         }
     }
 
     /// A failed start: the server is stopped (it may still be running after a timeout) and the log tail kept.
-    fn start_failure(&self, code: ErrorCode) -> Abort {
+    fn start_failure(&self) -> Abort {
         self.stop_server();
         let tail = self.0.runner.read_log_tail(&self.0.config.layout);
         Abort::Fail(Failure {
             action: FailedAction::Start,
-            error: code,
+            error: ErrorCode::StartFailed,
             tail,
         })
     }
 
     /// The watcher's report that the server process ended. While running and not asked to stop, that is a crash:
-    /// show `stopped` with the time and the log tail.
+    /// show `stopped` with the log tail.
     fn on_server_exit(&self, flags: &Arc<ServerFlags>) {
         flags.exited.store(true, Ordering::SeqCst);
         let mut inner = lock(&self.0.inner);
@@ -1016,7 +974,6 @@ impl Controller {
         let tail = self.0.runner.read_log_tail(&self.0.config.layout);
         let snapshot = &mut inner.snapshot;
         snapshot.phase = Phase::Stopped;
-        snapshot.stopped_at = Some(now_millis());
         snapshot.log_tail = tail;
         snapshot.failed_action = None;
         snapshot.error = None;
@@ -1173,10 +1130,6 @@ impl Runner for SystemRunner {
         machine::check_machine(&layout.root)
     }
 
-    fn check_disk(&self, layout: &Layout) -> Result<(), Unsupported> {
-        machine::check_disk(&layout.root)
-    }
-
     fn is_installed(&self, layout: &Layout) -> bool {
         layout.ziv().is_file()
     }
@@ -1300,7 +1253,6 @@ mod tests {
 
     struct Script {
         machine: Result<(), Unsupported>,
-        disk: Result<(), Unsupported>,
         installed: bool,
         must_move: bool,
         tools: VecDeque<Result<(), ErrorCode>>,
@@ -1379,7 +1331,6 @@ mod tests {
             Arc::new(Self {
                 script: Mutex::new(Script {
                     machine: Ok(()),
-                    disk: Ok(()),
                     installed: false,
                     must_move: false,
                     tools: VecDeque::new(),
@@ -1468,11 +1419,6 @@ mod tests {
         fn check_machine(&self, _: &Layout) -> Result<(), Unsupported> {
             self.note("check_machine");
             self.script().machine.clone()
-        }
-
-        fn check_disk(&self, _: &Layout) -> Result<(), Unsupported> {
-            self.note("check_disk");
-            self.script().disk.clone()
         }
 
         fn is_installed(&self, _: &Layout) -> bool {
@@ -1645,7 +1591,7 @@ mod tests {
         _dir: tempfile::TempDir,
     }
 
-    fn rig_with(packaging: Packaging, platform: Option<Platform>, fake: Arc<Fake>) -> Rig {
+    fn rig_with(packaging: Packaging, platform: Platform, fake: Arc<Fake>) -> Rig {
         let dir = tempfile::tempdir().unwrap();
         let emitted = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&emitted);
@@ -1676,11 +1622,7 @@ mod tests {
     }
 
     fn rig() -> Rig {
-        rig_with(
-            Packaging::LinuxPackage,
-            Some(Platform::LinuxX64),
-            Fake::new(),
-        )
+        rig_with(Packaging::LinuxPackage, Platform::LinuxX64, Fake::new())
     }
 
     impl Rig {
@@ -1790,7 +1732,7 @@ mod tests {
     fn an_enabled_start_at_login_entry_is_written_again_at_launch() {
         let fake = Fake::new();
         fake.script().autostart = true;
-        let rig = rig_with(Packaging::Appimage, Some(Platform::LinuxX64), fake);
+        let rig = rig_with(Packaging::Appimage, Platform::LinuxX64, fake);
         rig.controller.launch(false);
         assert_eq!(rig.fake.count("autostart true"), 1);
         assert!(rig.snap().autostart);
@@ -1812,7 +1754,7 @@ mod tests {
             script.autostart = true;
             script.must_move = true;
         }
-        let rig = rig_with(Packaging::MacosApp, Some(Platform::MacosArm64), fake);
+        let rig = rig_with(Packaging::MacosApp, Platform::MacosArm64, fake);
         rig.controller.launch(false);
         assert_eq!(rig.fake.count("autostart true"), 0);
     }
@@ -2132,11 +2074,7 @@ mod tests {
                 .tools_current(&manifest::pins(Platform::LinuxX64))
         );
 
-        let rig = rig_with(
-            Packaging::LinuxPackage,
-            Some(Platform::LinuxX64),
-            Fake::new(),
-        );
+        let rig = rig_with(Packaging::LinuxPackage, Platform::LinuxX64, Fake::new());
         rig.running("0.14.0", None);
         rig.controller.repair_app().unwrap();
         rig.idle();
@@ -2242,11 +2180,7 @@ mod tests {
         assert_eq!(snap.update_version.as_deref(), Some("0.14.1"));
         assert!(snap.controls.update, "the update is offered again");
 
-        let rig = rig_with(
-            Packaging::LinuxPackage,
-            Some(Platform::LinuxX64),
-            Fake::new(),
-        );
+        let rig = rig_with(Packaging::LinuxPackage, Platform::LinuxX64, Fake::new());
         {
             let mut script = rig.fake.script();
             script.versions.push_back(Some("0.14.1".to_owned()));
@@ -2257,12 +2191,12 @@ mod tests {
         rig.idle();
         let snap = rig.snap();
         assert_eq!(snap.failed_action, Some(FailedAction::Start));
-        assert_eq!(snap.error, Some(ErrorCode::StartExited));
+        assert_eq!(snap.error, Some(ErrorCode::StartFailed));
         assert_eq!(snap.log_tail, ["server log line"]);
     }
 
     #[test]
-    fn repair_stops_checks_the_disk_then_reinstalls_and_opens_the_browser() {
+    fn repair_stops_the_server_then_reinstalls_and_opens_the_browser() {
         let rig = rig();
         rig.fake
             .script()
@@ -2278,30 +2212,12 @@ mod tests {
                 .position(|c| c.starts_with(needle))
                 .unwrap_or_else(|| panic!("{needle} missing from {calls:?}"))
         };
-        assert!(at("check_disk") < at("fetch_tools"));
         assert!(at("fetch_tools") < at("uv cache clean"));
         assert!(at("uv cache clean") < at("uv tool install --reinstall"));
         assert!(at("uv tool install --reinstall") < at("uv cache prune"));
         assert!(at("uv cache prune") < at("start_server"));
         assert!(calls.last().unwrap().starts_with("open "));
         assert_eq!(rig.snap().phase, Phase::Running);
-    }
-
-    #[test]
-    fn a_repair_without_disk_space_fails_before_downloading_anything() {
-        let rig = rig();
-        rig.fake.script().disk = Err(Unsupported {
-            code: crate::snapshot::UnsupportedCode::LowDisk,
-            found: Some("3100000000".to_owned()),
-            needed: "10000000000".to_owned(),
-        });
-        rig.running("0.14.0", None);
-        rig.controller.repair_app().unwrap();
-        rig.idle();
-        let snap = rig.snap();
-        assert_eq!(snap.failed_action, Some(FailedAction::Repair));
-        assert_eq!(snap.error, Some(ErrorCode::LowDisk));
-        assert_eq!(rig.fake.count("fetch_tools"), 0);
     }
 
     #[test]
@@ -2409,19 +2325,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_platform_without_pins_fails_the_install_as_a_broken_tool() {
-        let rig = rig_with(Packaging::LinuxPackage, None, Fake::new());
-        rig.controller.launch(false);
-        rig.controller.install().unwrap();
-        rig.idle();
-        assert_eq!(rig.snap().error, Some(ErrorCode::ToolBroken));
-    }
-
     // ----- the server -----------------------------------------------------------------------------------------
 
     #[test]
-    fn a_server_that_exits_by_itself_is_stopped_with_the_time_and_the_log() {
+    fn a_server_that_exits_by_itself_is_stopped_with_the_log() {
         let rig = rig();
         rig.fake.script().installed = true;
         rig.controller.launch(true);
@@ -2429,7 +2336,6 @@ mod tests {
         rig.fake.crash_server();
         let snap = rig.snap();
         assert_eq!(snap.phase, Phase::Stopped);
-        assert!(snap.stopped_at.is_some());
         assert_eq!(snap.log_tail, ["server log line"]);
         assert_eq!(controls(&snap).primary, Some(Primary::Open));
         assert_eq!(
@@ -2449,7 +2355,6 @@ mod tests {
         rig.idle();
         assert!(rig.saw(Phase::Starting));
         assert_eq!(rig.snap().phase, Phase::Running);
-        assert_eq!(rig.snap().stopped_at, None);
         assert!(rig.fake.calls().last().unwrap().starts_with("open "));
     }
 
@@ -2476,9 +2381,8 @@ mod tests {
         let snap = rig.snap();
         assert_eq!(snap.phase, Phase::Failed);
         assert_eq!(snap.failed_action, Some(FailedAction::Start));
-        assert_eq!(snap.error, Some(ErrorCode::StartExited));
+        assert_eq!(snap.error, Some(ErrorCode::StartFailed));
         assert_eq!(snap.log_tail, ["server log line"]);
-        assert_eq!(snap.stopped_at, None);
     }
 
     #[test]
@@ -2491,7 +2395,7 @@ mod tests {
         }
         rig.controller.launch(true);
         let snap = rig.snap();
-        assert_eq!(snap.error, Some(ErrorCode::StartTimeout));
+        assert_eq!(snap.error, Some(ErrorCode::StartFailed));
         assert_eq!(rig.fake.count("stop_server 8081"), 1);
         // Open tries again.
         rig.fake.script().serve = Serve::Ready;
@@ -3012,11 +2916,7 @@ mod tests {
 
     #[test]
     fn on_windows_uninstall_starts_the_uninstaller_and_exits() {
-        let rig = rig_with(
-            Packaging::WindowsNsis,
-            Some(Platform::WindowsX64),
-            Fake::new(),
-        );
+        let rig = rig_with(Packaging::WindowsNsis, Platform::WindowsX64, Fake::new());
         rig.running("0.14.0", None);
         rig.controller.uninstall_app().unwrap();
         assert_eq!(rig.fake.count("start_uninstaller"), 1);

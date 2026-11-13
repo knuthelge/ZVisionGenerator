@@ -47,8 +47,7 @@ pub enum ErrorCode {
     ToolBroken,
     LowDisk,
     UvFailed,
-    StartExited,
-    StartTimeout,
+    StartFailed,
     UninstallIncomplete,
 }
 
@@ -133,8 +132,6 @@ pub struct Snapshot {
     pub leftover_folder: Option<String>,
     /// Phases `failed` and `stopped` only.
     pub log_tail: Vec<String>,
-    /// Unix milliseconds; phase `stopped` only.
-    pub stopped_at: Option<i64>,
     /// What the window shows and allows in this state; see [`controls`].
     pub controls: Controls,
 }
@@ -170,8 +167,6 @@ pub struct Controls {
     pub primary: Option<Primary>,
     /// The Update button beside the info notice.
     pub update: bool,
-    /// The "Show the log" notice.
-    pub log: bool,
     /// The quiet bar (Quit, and Start at login and More when they apply).
     pub bar: bool,
     /// The Start at login toggle.
@@ -196,7 +191,6 @@ pub fn controls(snapshot: &Snapshot) -> Controls {
     let mut c = Controls {
         primary: None,
         update: false,
-        log: false,
         bar: true,
         autostart: false,
         menu: Vec::new(),
@@ -234,11 +228,9 @@ pub fn controls(snapshot: &Snapshot) -> Controls {
         }
         Phase::Stopped => {
             c.primary = Some(Primary::Open);
-            c.log = true;
             show_installed(&mut c, &ALL);
         }
         Phase::Failed => {
-            c.log = true;
             match snapshot.failed_action {
                 Some(FailedAction::Install) => {
                     c.primary = Some(Primary::Retry);
