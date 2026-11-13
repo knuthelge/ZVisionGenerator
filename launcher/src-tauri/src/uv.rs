@@ -5,8 +5,10 @@
 //! the arguments are pure; [`spawn`], [`pump`] and [`run`] are the edge that starts uv and reads its output.
 
 use std::collections::VecDeque;
+use std::env;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead, BufReader, Read};
+use std::path::Path;
 use std::process::{Child, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -16,7 +18,7 @@ use crate::manifest::{
 };
 use crate::paths::Layout;
 use crate::snapshot::ErrorCode;
-use crate::spawn::{hidden_command, output_lines};
+use crate::spawn::{hidden_command, inherited_path, output_lines};
 
 /// How many of uv's last output lines a failure keeps as the log tail.
 pub const TAIL_LINES: usize = 40;
@@ -42,7 +44,7 @@ const NETWORK_PHRASES: [&str; 8] = [
 ];
 
 /// The environment every uv call adds: uv's folders inside Root, managed Python only, no uv configuration read,
-/// and a five-minute network timeout.
+/// the operating system's certificate store, and a five-minute network timeout.
 fn uv_env(layout: &Layout) -> Vec<(&'static str, OsString)> {
     vec![
         ("UV_TOOL_DIR", layout.tools.clone().into_os_string()),
@@ -56,6 +58,7 @@ fn uv_env(layout: &Layout) -> Vec<(&'static str, OsString)> {
         ("UV_PYTHON_INSTALL_BIN", "0".into()),
         ("UV_PYTHON_INSTALL_REGISTRY", "0".into()),
         ("UV_NO_CONFIG", "1".into()),
+        ("UV_SYSTEM_CERTS", "1".into()),
         ("UV_HTTP_TIMEOUT", UV_HTTP_TIMEOUT_SECS.to_string().into()),
     ]
 }
@@ -81,7 +84,7 @@ pub enum Channel<'a> {
     /// Pre-releases of the app only (`--prerelease-package z-vision-generator=allow`), for a user who opted into
     /// betas; its dependencies still resolve to stable releases.
     Beta,
-    /// Exactly this installed version (`z-vision-generator==<version>`). uv accepts an explicit pre-release pin
+    /// Exactly this version (`z-vision-generator==<version>`). uv accepts an explicit pre-release pin
     /// without `--prerelease`.
     Pinned(&'a str),
 }
@@ -92,10 +95,13 @@ impl<'a> Channel<'a> {
         if beta { Channel::Beta } else { Channel::Stable }
     }
 
-    /// The channel for repairing: exactly the installed version, so a repair never changes it; without a known
-    /// version, the newest stable release.
-    pub fn for_repair(installed: Option<&'a str>) -> Self {
-        installed.map_or(Channel::Stable, Channel::Pinned)
+    /// The channel for repairing: exactly the version on offer, so a version that cannot start reaches the fixed
+    /// one; with no offer, exactly the installed version, so a repair changes nothing; without either, the newest
+    /// stable release.
+    pub fn for_repair(installed: Option<&'a str>, offered: Option<&'a str>) -> Self {
+        offered
+            .or(installed)
+            .map_or(Channel::Stable, Channel::Pinned)
     }
 
     /// The package requirement uv installs.
@@ -199,13 +205,47 @@ impl Tail {
     }
 }
 
+/// `path` without its `/usr/bin` entries.
+fn without_usr_bin(path: &OsStr) -> OsString {
+    let kept: Vec<_> = env::split_paths(path)
+        .filter(|entry| entry != Path::new("/usr/bin"))
+        .collect();
+    env::join_paths(kept).unwrap_or_else(|_| path.to_owned())
+}
+
+/// Whether this Mac has no Command Line Tools: `xcode-select -p` fails. Then `/usr/bin/install_name_tool` is
+/// Apple's stub, which asks the user to install developer tools when uv runs it after downloading a Python.
+fn lacks_command_line_tools() -> bool {
+    hidden_command(Path::new("/usr/bin/xcode-select"))
+        .arg("-p")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| !status.success())
+}
+
+/// The `PATH` for uv on a Mac without Command Line Tools: the inherited one without `/usr/bin`, so uv warns that it
+/// cannot run `install_name_tool` and carries on instead of showing the install popup. Anywhere else, or with the
+/// tools, uv keeps the inherited `PATH`, because building a source distribution needs `/usr/bin/cc`.
+fn uv_path() -> Option<OsString> {
+    if !cfg!(target_os = "macos") || !lacks_command_line_tools() {
+        return None;
+    }
+    inherited_path().map(|path| without_usr_bin(&path))
+}
+
 /// Start uv from `layout` with `args` and [`uv_env`], with its output piped, no shell and no window.
 ///
 /// # Errors
 ///
 /// Fails when uv cannot be started.
 pub fn spawn<S: AsRef<OsStr>>(layout: &Layout, args: &[S]) -> io::Result<Child> {
-    hidden_command(&layout.uv())
+    let mut command = hidden_command(&layout.uv());
+    if let Some(path) = uv_path() {
+        command.env("PATH", path);
+    }
+    command
         .args(args)
         .envs(uv_env(layout))
         .current_dir(&layout.root)
@@ -326,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn env_is_exactly_the_nine_variables_with_root_folders() {
+    fn env_is_exactly_the_ten_variables_with_root_folders() {
         let layout = layout();
         let env = uv_env(&layout);
         let expected: Vec<(&str, OsString)> = vec![
@@ -344,6 +384,7 @@ mod tests {
             ("UV_PYTHON_INSTALL_BIN", "0".into()),
             ("UV_PYTHON_INSTALL_REGISTRY", "0".into()),
             ("UV_NO_CONFIG", "1".into()),
+            ("UV_SYSTEM_CERTS", "1".into()),
             ("UV_HTTP_TIMEOUT", "300".into()),
         ];
         assert_eq!(env, expected);
@@ -407,16 +448,29 @@ mod tests {
     }
 
     #[test]
-    fn repair_pins_the_installed_version_whatever_it_is_and_else_takes_stable() {
+    fn repair_pins_the_offered_version_else_the_installed_one_else_takes_stable() {
         assert_eq!(
-            Channel::for_repair(Some("0.15.0rc1")),
+            Channel::for_repair(Some("0.15.0rc1"), None),
             Channel::Pinned("0.15.0rc1")
         );
         assert_eq!(
-            Channel::for_repair(Some("0.14.1")),
-            Channel::Pinned("0.14.1")
+            Channel::for_repair(Some("0.14.1"), Some("0.15.0b1")),
+            Channel::Pinned("0.15.0b1")
         );
-        assert_eq!(Channel::for_repair(None), Channel::Stable);
+        assert_eq!(
+            Channel::for_repair(None, Some("0.15.0")),
+            Channel::Pinned("0.15.0")
+        );
+        assert_eq!(Channel::for_repair(None, None), Channel::Stable);
+    }
+
+    #[test]
+    fn usr_bin_is_removed_from_a_path_and_the_other_entries_keep_their_order() {
+        let path = env::join_paths(["/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/bin/"]).unwrap();
+        let expected = env::join_paths(["/opt/homebrew/bin", "/bin"]).unwrap();
+        assert_eq!(without_usr_bin(&path), expected);
+        let other = env::join_paths(["/usr/local/bin", "/usr/binx"]).unwrap();
+        assert_eq!(without_usr_bin(&other), other);
     }
 
     #[test]

@@ -463,7 +463,7 @@ export function launcherView(s: Snapshot): LauncherView {
     case 'move_to_applications':
       headline = 'Move to Applications';
       sub = plain('It’s running from the disk image. It needs a fixed place to start at login and to update.');
-      notice = { kind: 'note', icon: 'folder', lead: null, text: 'Drag it into Applications, then open it from there.' };
+      notice = { kind: 'note', icon: 'folder', lead: null, text: 'Quit, drag it into Applications, then open it from there.' };
       break;
     case 'needs_install':
       headline = 'Ready to install';
@@ -481,7 +481,7 @@ export function launcherView(s: Snapshot): LauncherView {
       break;
     case 'starting':
       headline = 'Starting';
-      sub = plain('The first start can take a few minutes. Your browser opens when it’s ready.');
+      sub = plain('The first start can take a few minutes.');
       break;
     case 'running':
       headline = 'Running';

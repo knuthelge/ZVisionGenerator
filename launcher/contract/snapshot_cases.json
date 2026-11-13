@@ -185,9 +185,9 @@
       "leftoverFolder": null,
       "logTail": [],
       "controls": {
-        "primary": null,
+        "primary": "quit",
         "update": false,
-        "bar": true,
+        "bar": false,
         "autostart": false,
         "menu": [],
         "locked": false

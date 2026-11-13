@@ -412,32 +412,36 @@ impl Controller {
         self.start_update_timer();
     }
 
-    /// The first thing after launch: a macOS app on a disk image does nothing; otherwise an enabled start-at-login
-    /// entry is rewritten with the current path, then an installed app starts and anything else is checked for
-    /// support.
+    /// The first thing after launch: a macOS app on a disk image does nothing; otherwise, on Linux, an enabled
+    /// start-at-login entry is rewritten with the current path, then an installed app starts and anything else is
+    /// checked for support. An installed app shows `starting` before any other work, so the first-install screen
+    /// never appears for it.
     fn launch(&self, background: bool) {
         if self.0.runner.must_move_to_applications() {
             self.update(|inner| inner.snapshot.phase = Phase::MoveToApplications);
             return;
         }
         // Writing the entry again points it at this launcher's path: an AppImage that was moved or replaced, or a
-        // package that was reinstalled elsewhere, would otherwise leave a login entry that starts nothing.
-        if self.snapshot().autostart {
+        // package that was reinstalled elsewhere, would otherwise leave a login entry that starts nothing. macOS
+        // would show a "Background Items Added" notice at every login, and Windows writes the entry when the
+        // setting is turned on.
+        if self.0.config.platform == Platform::LinuxX64 && self.snapshot().autostart {
             let _ = self.0.runner.set_autostart(true);
         }
         let layout = &self.0.config.layout;
+        let installed = self.0.runner.is_installed(layout);
+        if installed {
+            self.update(|inner| inner.snapshot.phase = Phase::Starting);
+        }
         self.0
             .runner
             .clear_stale_record(layout, self.0.config.timing.stop_grace);
-        if !self.0.runner.is_installed(layout) {
+        if !installed {
             self.check_machine();
             return;
         }
-        let installed = self.0.runner.read_version(layout);
-        self.update(|inner| {
-            inner.snapshot.installed_version = installed;
-            inner.snapshot.phase = Phase::Starting;
-        });
+        let version = self.0.runner.read_version(layout);
+        self.update(|inner| inner.snapshot.installed_version = version);
         let result = self.start_server(!background);
         self.end_flow(result);
     }
@@ -719,7 +723,7 @@ impl Controller {
                     (inner.prefs.beta, inner.snapshot.installed_version.clone())
                 };
                 let channel = if reinstall {
-                    Channel::for_repair(installed.as_deref())
+                    Channel::for_repair(installed.as_deref(), run.offered.as_deref())
                 } else {
                     Channel::for_install(beta)
                 };
@@ -1727,12 +1731,14 @@ mod tests {
     }
 
     #[test]
-    fn start_at_login_is_written_again_at_launch_only_when_enabled_and_not_from_a_disk_image() {
+    fn start_at_login_is_written_again_at_launch_only_on_linux_and_only_when_enabled() {
         // (enabled, packaging, platform, must_move) -> how many times the entry is written enabled
         let cases = [
             (true, Packaging::Appimage, Platform::LinuxX64, false, 1),
             (false, Packaging::LinuxPackage, Platform::LinuxX64, false, 0),
             (true, Packaging::MacosApp, Platform::MacosArm64, true, 0),
+            (true, Packaging::MacosApp, Platform::MacosArm64, false, 0),
+            (true, Packaging::WindowsNsis, Platform::WindowsX64, false, 0),
         ];
         for (enabled, packaging, platform, must_move, written) in cases {
             let fake = Fake::new();
@@ -1755,6 +1761,21 @@ mod tests {
         rig.controller.launch(false);
         assert_eq!(rig.snap().phase, Phase::MoveToApplications);
         assert!(rig.fake.calls().is_empty(), "{:?}", rig.fake.calls());
+    }
+
+    #[test]
+    fn an_installed_app_shows_starting_first_and_a_fresh_machine_never_does() {
+        let installed = rig();
+        installed.fake.script().installed = true;
+        installed.controller.launch(true);
+        assert_eq!(
+            lock(&installed.emitted).first().map(|s| s.phase),
+            Some(Phase::Starting)
+        );
+
+        let fresh = rig();
+        fresh.controller.launch(true);
+        assert!(!fresh.saw(Phase::Starting));
     }
 
     #[test]
@@ -2252,6 +2273,28 @@ mod tests {
                 "{args:?}"
             );
         }
+    }
+
+    #[test]
+    fn repair_with_an_update_on_offer_installs_the_offered_version_and_clears_the_offer() {
+        let rig = rig();
+        rig.fake
+            .script()
+            .versions
+            .push_back(Some("0.15.0".to_owned()));
+        rig.running("0.14.0", Some("0.15.0"));
+        rig.controller.repair_app().unwrap();
+        rig.idle();
+        let args = install_args_of(&rig);
+        assert!(args.contains(&"--reinstall".to_owned()), "{args:?}");
+        assert!(
+            args.contains(&"z-vision-generator==0.15.0".to_owned()),
+            "{args:?}"
+        );
+        let snap = rig.snap();
+        assert_eq!(snap.installed_version.as_deref(), Some("0.15.0"));
+        assert_eq!(snap.update_version, None);
+        assert_eq!(snap.phase, Phase::Running);
     }
 
     // ----- the server -----------------------------------------------------------------------------------------

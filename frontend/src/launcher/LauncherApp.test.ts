@@ -180,6 +180,7 @@ describe('LauncherApp actions', () => {
     ['9 stopped', 'open', 'openApp'],
     ['10a failed update', 'open', 'openApp'],
     ['R failed repair', 'open', 'openApp'],
+    ['3 move_to_applications', 'quit', 'quitLauncher'],
     ['11b uninstalled', 'quit', 'quitLauncher']
   ] as const)('%s: the main button is %s and calls %s', async (name, id, method) => {
     const { target, bridge } = await open(name);

@@ -101,8 +101,8 @@ fn tail_lines(text: &str, count: usize) -> Vec<String> {
 }
 
 /// Whether something can bind `127.0.0.1:port`, the way the app checks. Rust's standard library sets
-/// `SO_REUSEADDR` on Unix, so leftovers of a just-stopped server do not count as busy; on Windows a plain bind fails
-/// exactly when something listens.
+/// `SO_REUSEADDR` on Unix, so leftovers of a just-stopped server do not count as busy. On Windows and macOS a
+/// loopback bind can succeed beside a wildcard listener, so a bind alone does not prove the port is free.
 fn can_bind(port: u16) -> bool {
     TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok()
 }
@@ -116,10 +116,10 @@ fn answers(port: u16) -> bool {
     .is_ok()
 }
 
-/// Whether the app can take `port`: it binds, and on Unix nothing answers on it either (macOS lets a loopback bind
-/// succeed over a wildcard listener such as Docker's).
+/// Whether the app can take `port`: it binds, and nothing answers on it either (a wildcard listener such as Docker's
+/// does not stop a loopback bind on Windows or macOS).
 fn port_is_free(port: u16) -> bool {
-    can_bind(port) && (cfg!(windows) || !answers(port))
+    can_bind(port) && !answers(port)
 }
 
 /// The port to start the server on: the last one if free, else the first free one of 8080..=8179.

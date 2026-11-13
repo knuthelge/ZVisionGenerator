@@ -190,9 +190,9 @@ describe('notice', () => {
     expect(view('11b uninstalled').notice).toMatchObject({ kind: 'kept', link: { id: 'data_folder' } });
   });
 
-  it('only notes the move to Applications; there is no button for it', () => {
+  it('notes the move to Applications, and Quit is the one button', () => {
     expect(view('3 move_to_applications').notice?.kind).toBe('note');
-    expect(view('3 move_to_applications').primary).toBeNull();
+    expect(view('3 move_to_applications').primary?.id).toBe('quit');
   });
 });
 

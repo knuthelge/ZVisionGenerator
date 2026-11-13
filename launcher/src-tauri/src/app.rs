@@ -7,7 +7,8 @@
 //! On macOS, Cmd+Q, the Dock's Quit and logout reach `RunEvent::Exit` without `ExitRequested`; the window is hidden
 //! there and the server is stopped on the main thread.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread;
 
 use tauri::webview::PageLoadEvent;
@@ -16,7 +17,7 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 
 use crate::commands;
 use crate::controller::{Config, Controller, Emit, Exit, SystemHooks, SystemRunner};
-use crate::snapshot::Snapshot;
+use crate::snapshot::{Phase, Snapshot};
 use crate::tray::{self, Tray};
 
 /// The label of the one window, as in `tauri.conf.json`.
@@ -27,6 +28,9 @@ const SNAPSHOT_EVENT: &str = "launcher:snapshot";
 
 /// The argument the start-at-login entry passes, and the single-instance plugin looks for.
 const AUTOSTART_ARG: &str = "--autostart";
+
+/// Set once the launcher is quitting, so the window is not brought back while it shuts down.
+static QUITTING: AtomicBool = AtomicBool::new(false);
 
 /// Build and run the app; returns when it exits. `autostart` is a start-at-login launch.
 pub fn run(autostart: bool) {
@@ -80,6 +84,8 @@ pub fn run(autostart: bool) {
             }
         })
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            disable_relaunch_on_login();
             let handle = app.handle().clone();
             let controller = build_controller(&handle)?;
             app.manage(controller.clone());
@@ -105,6 +111,7 @@ pub fn run(autostart: bool) {
         // An exit that was not prevented, such as Cmd+Q, the Dock's Quit and logout on macOS; a no-op once everything
         // is stopped. The stop runs on the main thread, so the window is hidden first rather than left frozen.
         RunEvent::Exit => {
+            QUITTING.store(true, Ordering::SeqCst);
             if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
                 let _ = window.hide();
             }
@@ -124,8 +131,18 @@ fn build_controller(handle: &AppHandle) -> Result<Controller, Box<dyn std::error
     let tray: Arc<OnceLock<Tray>> = Arc::new(OnceLock::new());
     let emit: Emit = {
         let (handle, tray) = (handle.clone(), tray.clone());
+        let previous = Mutex::new(Phase::Checking);
         Arc::new(move |snapshot: &Snapshot| {
             let _ = handle.emit(SNAPSHOT_EVENT, snapshot);
+            let before = std::mem::replace(
+                &mut *previous.lock().unwrap_or_else(PoisonError::into_inner),
+                snapshot.phase,
+            );
+            if needs_attention(before, snapshot.phase) && !QUITTING.load(Ordering::SeqCst) {
+                // On the main thread, because this runs inside the controller's lock and must not wait for it.
+                let app = handle.clone();
+                let _ = handle.run_on_main_thread(move || show_main_window(&app));
+            }
             if let Some(tray) = tray.get() {
                 tray.sync(snapshot.update_version.is_some());
             }
@@ -157,9 +174,20 @@ fn system_hooks(handle: &AppHandle) -> SystemHooks {
                 launch.disable()
             }
             .map_err(|e| e.to_string())?;
+            // The plugin writes the Windows value with an unquoted path, which breaks in a folder with a space.
+            #[cfg(windows)]
+            if on {
+                crate::autostart::quote_run_value(&set.package_info().name, AUTOSTART_ARG)?;
+            }
             launch.is_enabled().map_err(|e| e.to_string())
         }),
     }
+}
+
+/// Whether a change of phase from `before` to `after` needs the user: a start or an action failed, or the server
+/// stopped on its own. Staying in the phase, as a failed install's retries do, does not bring the window back.
+fn needs_attention(before: Phase, after: Phase) -> bool {
+    before != after && matches!(after, Phase::Failed | Phase::Stopped)
 }
 
 /// Show the window, restored and focused, if it exists.
@@ -175,6 +203,7 @@ pub fn show_main_window(app: &AppHandle) {
 /// number of times; the work runs on its own thread so the caller (often the main thread) never waits for it, and
 /// `Controller::shutdown` lets only the first call do it and exit.
 pub fn begin_quit(app: &AppHandle) {
+    QUITTING.store(true, Ordering::SeqCst);
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.hide();
     }
@@ -215,3 +244,34 @@ fn watch_signals(app: &AppHandle) {
 
 #[cfg(not(unix))]
 fn watch_signals(_app: &AppHandle) {}
+
+/// Keep macOS from reopening the launcher at login because it was running at logout: the Start at login setting
+/// alone decides that. Must run on the main thread, as the setup does.
+#[cfg(target_os = "macos")]
+fn disable_relaunch_on_login() {
+    if let Some(main_thread) = objc2::MainThreadMarker::new() {
+        objc2_app_kit::NSApplication::sharedApplication(main_thread).disableRelaunchOnLogin();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_window_comes_forward_on_entering_failed_or_stopped_and_not_while_staying_there() {
+        assert!(needs_attention(Phase::Starting, Phase::Failed));
+        assert!(needs_attention(Phase::Updating, Phase::Failed));
+        assert!(needs_attention(Phase::Running, Phase::Stopped));
+        assert!(!needs_attention(Phase::Failed, Phase::Failed));
+        assert!(!needs_attention(Phase::Stopped, Phase::Stopped));
+        for after in [
+            Phase::Starting,
+            Phase::Running,
+            Phase::Installing,
+            Phase::Uninstalled,
+        ] {
+            assert!(!needs_attention(Phase::Failed, after), "{after:?}");
+        }
+    }
+}

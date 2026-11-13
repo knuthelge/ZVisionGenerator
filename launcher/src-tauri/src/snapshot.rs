@@ -197,7 +197,12 @@ pub fn controls(snapshot: &Snapshot) -> Controls {
         locked: false,
     };
     match snapshot.phase {
-        Phase::Checking | Phase::MoveToApplications | Phase::Installing | Phase::Uninstalling => {}
+        Phase::Checking | Phase::Installing | Phase::Uninstalling => {}
+        // Quit is the one way out: the user quits, drags the app into Applications and opens it from there.
+        Phase::MoveToApplications => {
+            c.primary = Some(Primary::Quit);
+            c.bar = false;
+        }
         Phase::Unsupported => {
             c.primary = snapshot.unsupported.as_ref().map(|u| match u.code {
                 UnsupportedCode::DriverNotWorking

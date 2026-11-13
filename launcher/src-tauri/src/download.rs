@@ -15,6 +15,7 @@ use crate::archive;
 use crate::manifest::{self, Download, Platform};
 use crate::paths::Layout;
 use crate::snapshot::ErrorCode;
+use ureq::tls::{RootCerts, TlsConfig};
 
 /// How long connecting may take.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -73,10 +74,20 @@ fn classify_request(error: &ureq::Error) -> ErrorCode {
     }
 }
 
+/// The code for a failed disk operation: a full disk is `low_disk`, the same code the uv steps use, and anything else
+/// is `otherwise`.
+fn disk_failure(error: &io::Error, otherwise: ErrorCode) -> ErrorCode {
+    if error.kind() == io::ErrorKind::StorageFull {
+        ErrorCode::LowDisk
+    } else {
+        otherwise
+    }
+}
+
 /// Stream `reader` to `part`, check its hash against `expected` and rename it to `final_path`.
 ///
-/// `part` is deleted on every failure, so no half-written or unverified file is left under its final name. Every I/O
-/// error is `download_failed`.
+/// `part` is deleted on every failure, so no half-written or unverified file is left under its final name. A full
+/// disk is `low_disk` and every other I/O error `download_failed`.
 fn store_verified(
     reader: &mut impl Read,
     expected: &str,
@@ -84,13 +95,14 @@ fn store_verified(
     final_path: &Path,
 ) -> Result<(), ErrorCode> {
     let result = (|| {
-        let file = File::create(part).map_err(|_| ErrorCode::DownloadFailed)?;
+        let failed = |error: io::Error| disk_failure(&error, ErrorCode::DownloadFailed);
+        let file = File::create(part).map_err(failed)?;
         let mut writer = BufWriter::new(file);
-        let actual = hash_copy(reader, &mut writer).map_err(|_| ErrorCode::DownloadFailed)?;
-        writer.flush().map_err(|_| ErrorCode::DownloadFailed)?;
+        let actual = hash_copy(reader, &mut writer).map_err(failed)?;
+        writer.flush().map_err(failed)?;
         drop(writer);
         verify(&actual, expected)?;
-        fs::rename(part, final_path).map_err(|_| ErrorCode::DownloadFailed)
+        fs::rename(part, final_path).map_err(failed)
     })();
     if result.is_err() {
         let _ = fs::remove_file(part);
@@ -98,10 +110,16 @@ fn store_verified(
     result
 }
 
-/// The one HTTP agent for every launcher request: https only, with connect and read timeouts.
+/// The one HTTP agent for every launcher request: https only, with connect and read timeouts, and the operating
+/// system's certificate store, so a company or school proxy that re-signs traffic with its own certificate works.
 pub fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .https_only(true)
+        .tls_config(
+            TlsConfig::builder()
+                .root_certs(RootCerts::PlatformVerifier)
+                .build(),
+        )
         .timeout_connect(Some(CONNECT_TIMEOUT))
         .timeout_per_read(Some(READ_TIMEOUT))
         .build()
@@ -112,8 +130,8 @@ pub fn agent() -> ureq::Agent {
 ///
 /// # Errors
 ///
-/// `download_unavailable` for a 404 or 410, `download_failed` for other network or disk errors and
-/// `checksum_mismatch` when the file is not the pinned one.
+/// `download_unavailable` for a 404 or 410, `low_disk` for a full disk, `download_failed` for other network or disk
+/// errors and `checksum_mismatch` when the file is not the pinned one.
 pub fn fetch(download: &Download, dir: &Path) -> Result<PathBuf, ErrorCode> {
     fs::create_dir_all(dir).map_err(|_| ErrorCode::DownloadFailed)?;
     let response = agent()
@@ -132,7 +150,8 @@ pub fn fetch(download: &Download, dir: &Path) -> Result<PathBuf, ErrorCode> {
 ///
 /// # Errors
 ///
-/// The errors of [`fetch`]; an archive that cannot be unpacked is `tool_broken`.
+/// The errors of [`fetch`]; a full disk while unpacking is `low_disk`, and an archive that cannot be unpacked
+/// otherwise is `tool_broken`.
 fn install_download(download: &Download, layout: &Layout) -> Result<(), ErrorCode> {
     let archive_path = fetch(download, &layout.downloads)?;
     let unpacked = archive::extract(
@@ -142,7 +161,7 @@ fn install_download(download: &Download, layout: &Layout) -> Result<(), ErrorCod
         &layout.bin,
     );
     let _ = fs::remove_file(&archive_path);
-    unpacked.map_err(|_| ErrorCode::ToolBroken)
+    unpacked.map_err(|error| disk_failure(&error, ErrorCode::ToolBroken))
 }
 
 /// The whole `download_tools` step: fetch and unpack every pinned tool of `platform`.
@@ -244,6 +263,33 @@ mod tests {
         let error =
             store_verified(&mut FailingReader(b"hel"), HELLO_SHA256, &part, &done).unwrap_err();
         assert_eq!(error, ErrorCode::DownloadFailed);
+        assert!(!part.exists());
+        assert!(!done.exists());
+    }
+
+    #[test]
+    fn a_full_disk_is_low_disk_and_any_other_error_keeps_its_code() {
+        let full = io::Error::from(io::ErrorKind::StorageFull);
+        let other = io::Error::from(io::ErrorKind::PermissionDenied);
+        for otherwise in [ErrorCode::DownloadFailed, ErrorCode::ToolBroken] {
+            assert_eq!(disk_failure(&full, otherwise), ErrorCode::LowDisk);
+            assert_eq!(disk_failure(&other, otherwise), otherwise);
+        }
+    }
+
+    #[test]
+    fn a_download_that_fills_the_disk_is_low_disk_and_leaves_no_part_file() {
+        struct FullDisk;
+        impl Read for FullDisk {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::from(io::ErrorKind::StorageFull))
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("a.zip.part");
+        let done = dir.path().join("a.zip");
+        let error = store_verified(&mut FullDisk, HELLO_SHA256, &part, &done).unwrap_err();
+        assert_eq!(error, ErrorCode::LowDisk);
         assert!(!part.exists());
         assert!(!done.exists());
     }

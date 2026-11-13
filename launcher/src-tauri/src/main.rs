@@ -9,6 +9,7 @@
 
 mod app;
 mod archive;
+mod autostart;
 mod commands;
 mod controller;
 mod download;
