@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::archive;
 use crate::manifest::{self, Download, Platform};
 use crate::paths::Layout;
-use crate::snapshot::{ErrorCode, LauncherError};
+use crate::snapshot::ErrorCode;
 use crate::spawn::hidden_command;
 
 /// How long connecting may take.
@@ -116,14 +116,6 @@ pub fn classify_copy(error: &CopyError) -> ErrorCode {
     }
 }
 
-/// A failure with its code; the detail names the file concerned, except for a full disk.
-fn failure(code: ErrorCode, file: &str) -> LauncherError {
-    LauncherError {
-        code,
-        detail: (code != ErrorCode::LowDisk).then(|| file.to_owned()),
-    }
-}
-
 /// Stream `reader` to `part`, check its hash against `expected` and rename it to `final_path`.
 ///
 /// `part` is deleted on every failure, so no half-written or unverified file is left under its final name.
@@ -164,18 +156,17 @@ pub fn agent() -> ureq::Agent {
 ///
 /// `download_unavailable` for a 404 or 410, `download_failed` for other network errors, `low_disk` when the disk
 /// fills and `checksum_mismatch` when the file is not the pinned one.
-pub fn fetch(download: &Download, dir: &Path) -> Result<PathBuf, LauncherError> {
-    let fail = |code| failure(code, download.file);
-    fs::create_dir_all(dir).map_err(|error| fail(classify_io(&error)))?;
+pub fn fetch(download: &Download, dir: &Path) -> Result<PathBuf, ErrorCode> {
+    fs::create_dir_all(dir).map_err(|error| classify_io(&error))?;
     let response = agent()
         .get(download.url)
         .call()
-        .map_err(|error| fail(classify_request(&error)))?;
+        .map_err(|error| classify_request(&error))?;
     let mut body = response.into_body();
     let mut reader = body.with_config().limit(MAX_DOWNLOAD_BYTES).reader();
     let final_path = dir.join(download.file);
     let part = dir.join(format!("{}.part", download.file));
-    store_verified(&mut reader, download.sha256, &part, &final_path).map_err(fail)?;
+    store_verified(&mut reader, download.sha256, &part, &final_path)?;
     Ok(final_path)
 }
 
@@ -185,7 +176,7 @@ pub fn fetch(download: &Download, dir: &Path) -> Result<PathBuf, LauncherError> 
 ///
 /// The errors of [`fetch`]; an archive that cannot be unpacked is `tool_broken`, or `low_disk` when the disk is
 /// full.
-pub fn install_download(download: &Download, layout: &Layout) -> Result<(), LauncherError> {
+pub fn install_download(download: &Download, layout: &Layout) -> Result<(), ErrorCode> {
     let archive_path = fetch(download, &layout.downloads)?;
     let unpacked = archive::extract(
         &archive_path,
@@ -194,12 +185,9 @@ pub fn install_download(download: &Download, layout: &Layout) -> Result<(), Laun
         &layout.bin,
     );
     let _ = fs::remove_file(&archive_path);
-    unpacked.map_err(|error| {
-        let code = match classify_io(&error) {
-            ErrorCode::LowDisk => ErrorCode::LowDisk,
-            _ => ErrorCode::ToolBroken,
-        };
-        failure(code, download.file)
+    unpacked.map_err(|error| match classify_io(&error) {
+        ErrorCode::LowDisk => ErrorCode::LowDisk,
+        _ => ErrorCode::ToolBroken,
     })
 }
 
@@ -216,8 +204,8 @@ pub fn version_arg(tool: &str) -> &'static str {
 ///
 /// # Errors
 ///
-/// `tool_broken`, with the tool's name as the detail, for the first one that does not start or does not succeed.
-pub fn check_tools(layout: &Layout) -> Result<(), LauncherError> {
+/// `tool_broken` for the first one that does not start or does not succeed.
+pub fn check_tools(layout: &Layout) -> Result<(), ErrorCode> {
     for path in [layout.uv(), layout.ffmpeg(), layout.ffprobe()] {
         let name = path
             .file_stem()
@@ -231,17 +219,14 @@ pub fn check_tools(layout: &Layout) -> Result<(), LauncherError> {
             .status()
             .is_ok_and(|status| status.success());
         if !ok {
-            return Err(LauncherError {
-                code: ErrorCode::ToolBroken,
-                detail: Some(name),
-            });
+            return Err(ErrorCode::ToolBroken);
         }
     }
     Ok(())
 }
 
 /// The whole `download_tools` step: fetch and unpack every pinned tool of `platform`, then check each runs.
-pub fn fetch_tools(layout: &Layout, platform: Platform) -> Result<(), LauncherError> {
+pub fn fetch_tools(layout: &Layout, platform: Platform) -> Result<(), ErrorCode> {
     for download in manifest::downloads(platform) {
         install_download(download, layout)?;
     }
@@ -436,18 +421,6 @@ mod tests {
     }
 
     #[test]
-    fn failures_name_the_file_except_for_a_full_disk() {
-        assert_eq!(
-            failure(ErrorCode::ChecksumMismatch, "uv.zip"),
-            LauncherError {
-                code: ErrorCode::ChecksumMismatch,
-                detail: Some("uv.zip".to_owned())
-            }
-        );
-        assert_eq!(failure(ErrorCode::LowDisk, "uv.zip").detail, None);
-    }
-
-    #[test]
     fn a_matching_file_is_renamed_to_its_final_name() {
         let dir = tempfile::tempdir().unwrap();
         let part = dir.path().join("a.zip.part");
@@ -501,16 +474,14 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn working_tools_pass_the_check_and_a_broken_one_is_named() {
+    fn working_tools_pass_the_check_and_a_broken_one_fails() {
         let dir = tempfile::tempdir().unwrap();
         let layout = Layout::new(dir.path().to_path_buf());
         fs::create_dir_all(&layout.bin).unwrap();
         crate::uv::write_script(&layout.uv(), "[ \"$1\" = --version ] || exit 1");
         crate::uv::write_script(&layout.ffmpeg(), "[ \"$1\" = -version ] || exit 1");
         crate::uv::write_script(&layout.ffprobe(), "exit 3");
-        let error = check_tools(&layout).unwrap_err();
-        assert_eq!(error.code, ErrorCode::ToolBroken);
-        assert_eq!(error.detail.as_deref(), Some("ffprobe"));
+        assert_eq!(check_tools(&layout), Err(ErrorCode::ToolBroken));
         crate::uv::write_script(&layout.ffprobe(), "[ \"$1\" = -version ] || exit 1");
         assert_eq!(check_tools(&layout), Ok(()));
     }
@@ -519,9 +490,7 @@ mod tests {
     fn a_missing_tool_fails_the_check() {
         let dir = tempfile::tempdir().unwrap();
         let layout = Layout::new(dir.path().to_path_buf());
-        let error = check_tools(&layout).unwrap_err();
-        assert_eq!(error.code, ErrorCode::ToolBroken);
-        assert_eq!(error.detail.as_deref(), Some("uv"));
+        assert_eq!(check_tools(&layout), Err(ErrorCode::ToolBroken));
     }
 
     /// Downloads every Linux pin, checks its hash, unpacks it and runs each tool's version check.

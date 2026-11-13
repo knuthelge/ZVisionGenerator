@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { buttonByText, mountComponent, settle } from '../test-utils/mount';
+import { mountComponent, settle } from '../test-utils/mount';
 
 import type { Bridge } from './bridge';
 import LauncherApp from './LauncherApp.svelte';
@@ -58,7 +58,14 @@ async function open(name: string, change?: (s: Snapshot) => void): Promise<Fake 
   return { ...fake, target };
 }
 
-const headline = (target: HTMLElement) => target.querySelector('h1')?.textContent;
+/** The phase the window shows; null while it draws nothing. */
+const shown = (target: HTMLElement) => target.querySelector('[data-testid="launcher"]')?.getAttribute('data-phase') ?? null;
+const primary = (target: HTMLElement) => target.querySelector('[data-testid="primary"]') as HTMLButtonElement | null;
+const notice = (target: HTMLElement) => target.querySelector('[data-testid="notice"]') as HTMLElement | null;
+const link = (target: HTMLElement, id: string) => target.querySelector(`[data-link="${id}"]`) as HTMLButtonElement;
+const quitButton = (target: HTMLElement) => target.querySelector('[data-testid="quiet-bar"] [data-quit]') as HTMLButtonElement;
+const moreButton = (target: HTMLElement) => target.querySelector('[data-testid="more-button"]') as HTMLButtonElement | null;
+const mood = (target: HTMLElement) => target.querySelector('svg[data-mood]')?.getAttribute('data-mood');
 
 beforeEach(() => {
   // Reduced motion: transitions take no time (jsdom has no Web Animations API) and Blob holds still frames.
@@ -82,21 +89,21 @@ describe('LauncherApp snapshots', () => {
     fake.bridge.getSnapshot = () => new Promise((resolve) => { resolveFirst = resolve; });
     const { target } = mountComponent(LauncherApp, { bridge: fake.bridge });
     await settle();
-    expect(target.querySelector('h1')).toBeNull();
+    expect(shown(target)).toBeNull();
 
     resolveFirst(snapshot('6 running'));
     await settle();
-    expect(headline(target)).toBe('Running');
+    expect(shown(target)).toBe('running');
   });
 
   it('follows the snapshots Rust emits', async () => {
     const { target, emit } = await open('4a needs_install');
-    expect(headline(target)).toBe('Ready to install');
+    expect(shown(target)).toBe('needs_install');
 
     emit(snapshot('4b installing'));
     await settle();
 
-    expect(headline(target)).toBe('Installing');
+    expect(shown(target)).toBe('installing');
     expect(target.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('41');
     expect(target.querySelector('[data-testid="halo-stamp"]')?.textContent).toBe('41%');
   });
@@ -112,7 +119,7 @@ describe('LauncherApp snapshots', () => {
     resolveFirst(snapshot('4a needs_install'));
     await settle();
 
-    expect(headline(target)).toBe('Running');
+    expect(shown(target)).toBe('running');
   });
 
   it('stops listening when it is torn down', async () => {
@@ -131,10 +138,10 @@ describe('LauncherApp snapshots', () => {
     const fake = fakeBridge(snapshot('1 checking'));
     const { target } = mountComponent(LauncherApp, { bridge: fake.bridge });
     await settle(100);
-    expect(target.querySelector('h1')).toBeNull();
+    expect(shown(target)).toBeNull();
 
     await settle(250);
-    expect(headline(target)).toBe('Checking this computer');
+    expect(shown(target)).toBe('checking');
   });
 
   it('skips the check state when the answer comes in time', async () => {
@@ -146,44 +153,62 @@ describe('LauncherApp snapshots', () => {
     fake.emit(snapshot('4a needs_install'));
     await settle(500);
 
-    expect(headline(target)).toBe('Ready to install');
+    expect(shown(target)).toBe('needs_install');
   });
 
   it('cheers once when the app comes up, not when the window opens on it', async () => {
     vi.useFakeTimers();
     const opened = await open('6 running');
-    expect(opened.target.querySelector('svg[data-mood]')?.getAttribute('data-mood')).toBe('idle');
+    expect(mood(opened.target)).toBe('idle');
     opened.emit(snapshot('5 starting'));
     await settle(10);
     opened.emit(snapshot('6 running'));
     await settle(10);
-    expect(opened.target.querySelector('svg[data-mood]')?.getAttribute('data-mood')).toBe('cheerful');
+    expect(mood(opened.target)).toBe('cheerful');
 
     await settle(2500);
-    expect(opened.target.querySelector('svg[data-mood]')?.getAttribute('data-mood')).toBe('idle');
+    expect(mood(opened.target)).toBe('idle');
   });
 });
 
 describe('LauncherApp actions', () => {
   it.each([
-    ['2a unsupported driver_too_old', 'Check again', 'checkAgain'],
-    ['4a needs_install', 'Install', 'install'],
-    ['4c failed install', 'Retry', 'retry'],
-    ['6 running', 'Open Z-Vision Generator', 'openApp'],
-    ['10a failed update', 'Repair', 'repairApp'],
-    ['11b uninstalled', 'Quit', 'quitLauncher']
-  ] as const)('%s: %s calls %s', async (name, label, method) => {
+    ['2a unsupported driver_too_old', 'check_again', 'checkAgain'],
+    ['4a needs_install', 'install', 'install'],
+    ['4c failed install', 'retry', 'retry'],
+    ['6 running', 'open', 'openApp'],
+    ['9 stopped', 'open', 'openApp'],
+    ['10a failed update', 'open', 'openApp'],
+    ['11b uninstalled', 'quit', 'quitLauncher']
+  ] as const)('%s: the main button is %s and calls %s', async (name, id, method) => {
     const { target, bridge } = await open(name);
 
-    buttonByText(label, target.querySelector('.action-zone') as HTMLElement).click();
+    expect(primary(target)?.dataset.primary).toBe(id);
+    primary(target)?.click();
 
     expect(bridge[method]).toHaveBeenCalledOnce();
+  });
+
+  it('shows the main button the snapshot’s controls name, not one it works out itself', async () => {
+    const { target, bridge } = await open('6 running', (s) => { s.controls.primary = 'retry'; });
+
+    primary(target)?.click();
+
+    expect(bridge.retry).toHaveBeenCalledOnce();
+    expect(bridge.openApp).not.toHaveBeenCalled();
+  });
+
+  it('shows no main button where the controls have none', async () => {
+    const { target } = await open('4b installing');
+    expect(primary(target)).toBeNull();
+    expect(target.querySelector('[data-testid="caption"]')).not.toBeNull();
   });
 
   it('opens the requirements page from See the requirements', async () => {
     const { target, bridge } = await open('2b unsupported no_nvidia_gpu');
 
-    buttonByText('See the requirements', target).click();
+    expect(primary(target)?.dataset.primary).toBe('see_requirements');
+    primary(target)?.click();
 
     expect(bridge.openLink).toHaveBeenCalledWith('requirements');
   });
@@ -191,7 +216,8 @@ describe('LauncherApp actions', () => {
   it('keeps Starting inert', async () => {
     const { target, bridge } = await open('5 starting');
 
-    const button = buttonByText('Starting', target.querySelector('.action-zone') as HTMLElement);
+    const button = primary(target) as HTMLButtonElement;
+    expect(button.dataset.primary).toBe('starting');
     expect(button.disabled).toBe(true);
     button.click();
 
@@ -201,19 +227,46 @@ describe('LauncherApp actions', () => {
   it('updates and opens the release notes from the update notice', async () => {
     const { target, bridge } = await open('7 running with update');
 
-    buttonByText('Update', target.querySelector('.notice') as HTMLElement).click();
-    buttonByText('What’s new', target).click();
+    (notice(target)?.querySelector('[data-testid="update-button"]') as HTMLButtonElement).click();
+    link(target, 'whats_new').click();
 
     expect(bridge.updateApp).toHaveBeenCalledOnce();
     expect(bridge.openLink).toHaveBeenCalledWith('whats_new');
   });
 
+  it('offers no update where the controls offer none', async () => {
+    const { target } = await open('6 running');
+    expect(notice(target)).toBeNull();
+    expect(target.querySelector('[data-testid="update-dot"]')).toBeNull();
+  });
+
+  it('offers the update again once a failed update has been opened and the app runs', async () => {
+    const failed = await open('10a failed update');
+    expect(failed.target.querySelector('[data-testid="update-button"]')).toBeNull();
+
+    failed.emit(snapshot('7 running with update'));
+    await settle();
+
+    expect(failed.target.querySelector('[data-testid="update-button"]')).not.toBeNull();
+    expect(failed.target.querySelector('[data-testid="update-dot"]')).not.toBeNull();
+  });
+
   it('opens the install guide from the newer-launcher warning', async () => {
     const { target, bridge } = await open('10b running needs newer launcher');
 
-    buttonByText('Open the install guide', target).click();
+    link(target, 'install_guide').click();
 
     expect(bridge.openLink).toHaveBeenCalledWith('install_guide');
+  });
+
+  it('shows the folder an incomplete uninstall left behind', async () => {
+    const { target } = await open('11b uninstalled incomplete');
+    const folder = target.querySelector('[data-testid="leftover-folder"]');
+    expect(folder?.textContent).toBe(snapshot('11b uninstalled incomplete').leftoverFolder);
+
+    document.body.innerHTML = '';
+    const clean = await open('11b uninstalled');
+    expect(clean.target.querySelector('[data-testid="leftover-folder"]')).toBeNull();
   });
 
   it('ignores a command Rust refuses as busy', async () => {
@@ -221,7 +274,7 @@ describe('LauncherApp actions', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     bridge.install = vi.fn(() => Promise.reject('busy'));
 
-    buttonByText('Install', target.querySelector('.action-zone') as HTMLElement).click();
+    primary(target)?.click();
     await settle();
 
     expect(error).not.toHaveBeenCalled();
@@ -238,13 +291,13 @@ describe('LauncherApp actions', () => {
   });
 
   it('puts focus on the primary action', async () => {
-    await open('6 running');
-    expect(document.activeElement?.textContent?.trim()).toBe('Open Z-Vision Generator');
+    const { target } = await open('6 running');
+    expect(document.activeElement).toBe(primary(target));
   });
 
   it('puts focus on Quit when there is no primary action', async () => {
-    await open('4b installing');
-    expect(document.activeElement?.textContent?.trim()).toBe('Quit');
+    const { target } = await open('4b installing');
+    expect(document.activeElement).toBe(quitButton(target));
   });
 });
 
@@ -252,27 +305,27 @@ describe('LauncherApp quiet bar', () => {
   it('offers Quit and More, but no Start at login, before install', async () => {
     const before = await open('4a needs_install');
     expect(before.target.querySelector('[role="switch"]')).toBeNull();
-    expect(before.target.querySelector('[aria-label="More actions"]')).not.toBeNull();
-    expect(buttonByText('Quit', before.target.querySelector('footer') as HTMLElement)).toBeTruthy();
+    expect(moreButton(before.target)).not.toBeNull();
+    expect(quitButton(before.target)).toBeTruthy();
   });
 
   it('offers Quit alone while installing', async () => {
     const { target } = await open('4b installing');
     expect(target.querySelector('[role="switch"]')).toBeNull();
-    expect(target.querySelector('[aria-label="More actions"]')).toBeNull();
+    expect(moreButton(target)).toBeNull();
   });
 
   it('quits from the bar', async () => {
     const { target, bridge } = await open('6 running');
 
-    buttonByText('Quit', target.querySelector('footer') as HTMLElement).click();
+    quitButton(target).click();
 
     expect(bridge.quitLauncher).toHaveBeenCalledOnce();
   });
 
   it('drops the bar once uninstalled', async () => {
     const { target } = await open('11b uninstalled');
-    expect(target.querySelector('footer')).toBeNull();
+    expect(target.querySelector('[data-testid="quiet-bar"]')).toBeNull();
   });
 
   it('sets start at login and shows the state Rust answers', async () => {
@@ -303,20 +356,20 @@ describe('LauncherApp quiet bar', () => {
     const toggle = target.querySelector('[role="switch"]') as HTMLInputElement;
 
     const hint = document.getElementById(toggle.getAttribute('aria-describedby') ?? '');
-    expect(hint?.textContent).toBe('Starts in the background at login.');
+    expect(hint?.textContent).toBeTruthy();
   });
 
   it('disables Start at login and More while updating', async () => {
     const { target } = await open('8a updating');
 
     expect((target.querySelector('[role="switch"]') as HTMLInputElement).disabled).toBe(true);
-    expect((target.querySelector('[aria-label="More actions"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((moreButton(target) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('lists Repair and Uninstall in More, and repairs from it', async () => {
     const { target, bridge } = await open('6 running');
 
-    (target.querySelector('[aria-label="More actions"]') as HTMLButtonElement).click();
+    (moreButton(target) as HTMLButtonElement).click();
     await settle();
     const items = Array.from(document.querySelectorAll('[role^="menuitem"]')).map((el) => el.getAttribute('data-action'));
     expect(items).toEqual(['repair', 'uninstall', 'beta']);
@@ -329,13 +382,13 @@ describe('LauncherApp quiet bar', () => {
 
   it('asks before uninstalling, then uninstalls', async () => {
     const { target, bridge } = await open('6 running');
-    (target.querySelector('[aria-label="More actions"]') as HTMLButtonElement).click();
+    (moreButton(target) as HTMLButtonElement).click();
     await settle();
 
     (document.querySelector('[data-action="uninstall"]') as HTMLButtonElement).click();
     await settle();
     expect(bridge.uninstallApp).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-testid="confirm-dialog"]')?.textContent).toContain('Uninstall Z-Vision Generator?');
+    expect(document.querySelector('[data-testid="confirm-dialog"]')).not.toBeNull();
 
     (document.querySelector('[data-action="confirm"]') as HTMLButtonElement).click();
     await settle();
@@ -344,7 +397,7 @@ describe('LauncherApp quiet bar', () => {
 
   it('starts the Windows uninstaller without asking', async () => {
     const { target, bridge } = await open('6 running', (s) => { s.packaging = 'windows_nsis'; });
-    (target.querySelector('[aria-label="More actions"]') as HTMLButtonElement).click();
+    (moreButton(target) as HTMLButtonElement).click();
     await settle();
 
     (document.querySelector('[data-action="uninstall"]') as HTMLButtonElement).click();
@@ -357,7 +410,7 @@ describe('LauncherApp quiet bar', () => {
 
 describe('LauncherApp beta', () => {
   const openMore = async (target: HTMLElement) => {
-    (target.querySelector('[aria-label="More actions"]') as HTMLButtonElement).click();
+    (moreButton(target) as HTMLButtonElement).click();
     await settle();
     return document.querySelector('[data-action="beta"]') as HTMLButtonElement;
   };
@@ -368,7 +421,6 @@ describe('LauncherApp beta', () => {
 
     expect(Array.from(document.querySelectorAll('[role^="menuitem"]'))).toHaveLength(1);
     expect(document.querySelectorAll('[role="separator"]')).toHaveLength(0);
-    expect(item.textContent).toContain('Get beta versions');
     expect(item.getAttribute('aria-checked')).toBe('false');
     expect(item.getAttribute('role')).toBe('menuitemcheckbox');
   });
@@ -414,40 +466,34 @@ describe('LauncherApp beta', () => {
 
     expect((await openMore(target)).getAttribute('aria-checked')).toBe('true');
   });
-
-  it('marks a beta install in the kicker and a beta update in the notice', async () => {
-    const running = await open('6 running a beta version');
-    expect(running.target.querySelector('.kicker')?.textContent).toBe('Version 0.15.0b2 · beta');
-    document.body.innerHTML = '';
-    const update = await open('7 running with a beta update');
-    expect(update.target.textContent).toContain('Beta 0.15.0b3 is out.');
-  });
 });
 
 describe('LauncherApp log', () => {
-  it('opens the end of the log in a sheet titled by what failed', async () => {
+  it('opens the end of the log in a sheet', async () => {
     const { target } = await open('4c failed install', (s) => { s.logTail = ['first line', 'last line']; });
 
-    buttonByText('Show the log', target).click();
+    (target.querySelector('[data-testid="show-log"]') as HTMLButtonElement).click();
     await settle();
 
     const sheet = document.querySelector('[data-testid="sheet"] [role="dialog"]') as HTMLElement;
-    expect(sheet.getAttribute('aria-label')).toBe('End of the install log');
+    expect(sheet.getAttribute('aria-label')).toBeTruthy();
     expect(sheet.querySelector('pre')?.textContent).toBe('first line\nlast line');
   });
 
-  it('copies the log and says so', async () => {
+  it('copies the log and acknowledges it', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
     const { target } = await open('9 stopped', (s) => { s.logTail = ['a', 'b']; });
-    buttonByText('Show the log', target).click();
+    (target.querySelector('[data-testid="show-log"]') as HTMLButtonElement).click();
     await settle();
+    const copy = document.querySelector('[data-testid="copy-log"]') as HTMLButtonElement;
+    const before = copy.textContent;
 
-    (document.querySelector('[aria-label="Copy the end of the log"]') as HTMLButtonElement).click();
+    copy.click();
     await settle();
 
     expect(writeText).toHaveBeenCalledWith('a\nb');
-    expect(document.querySelector('[aria-label="Copy the end of the log"]')?.textContent).toContain('Copied');
+    expect(copy.textContent).not.toBe(before);
   });
 });

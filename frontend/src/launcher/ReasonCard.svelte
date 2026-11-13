@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '$lib/components/atoms/Icon.svelte';
   import LauncherLink from './LauncherLink.svelte';
+  import type { LinkId } from './types';
 
   interface Props {
     /** What was checked, e.g. "NVIDIA driver". */
@@ -10,7 +11,7 @@
     /** What is needed, as a sentence. */
     needed: string;
     /** A docs link after the needed line. */
-    link?: { label: string; onopen: () => void };
+    link?: { id: LinkId; label: string; onopen: () => void };
   }
 
   let { name, found, needed, link }: Props = $props();
@@ -21,7 +22,7 @@
   <div>
     <span class="reason-name">{name}</span>
     {#if found}<span class="reason-found">{found}</span>{/if}
-    <span class="reason-need">{needed}{#if link}{' '}<LauncherLink label={link.label} onclick={link.onopen} />{/if}</span>
+    <span class="reason-need">{needed}{#if link}{' '}<LauncherLink id={link.id} label={link.label} onclick={link.onopen} />{/if}</span>
   </div>
 </div>
 

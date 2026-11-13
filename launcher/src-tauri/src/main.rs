@@ -15,6 +15,7 @@ mod download;
 mod links;
 mod machine;
 mod manifest;
+mod opener;
 mod paths;
 mod plan;
 mod process_tree;

@@ -13,17 +13,18 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": null,
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": false,
-      "menu": [],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": null,
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   },
   {
@@ -44,17 +45,18 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "check_again",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": false,
-      "menu": [],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "check_again",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   },
   {
@@ -75,17 +77,18 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "check_again",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": false,
-      "menu": [],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "check_again",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   },
   {
@@ -106,17 +109,18 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "check_again",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": false,
-      "menu": [],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "check_again",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   },
   {
@@ -137,17 +141,18 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "see_requirements",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": false,
-      "menu": [],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "see_requirements",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   },
   {
@@ -168,17 +173,18 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "see_requirements",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": false,
-      "menu": [],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "see_requirements",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   },
   {
@@ -195,17 +201,18 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": null,
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": false,
-      "menu": [],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": null,
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   },
   {
@@ -222,19 +229,20 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "install",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": false,
-      "menu": [
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "install",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -251,19 +259,20 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "install",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": false,
-      "menu": [
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "install",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -289,17 +298,54 @@
       },
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": null,
-      "update": false,
-      "log": false,
-      "bar": true,
+      "stoppedAt": null,
+      "controls": {
+        "primary": null,
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "4b installing with current tools",
+    "snapshot": {
+      "phase": "installing",
+      "installedVersion": null,
+      "updateVersion": null,
+      "needsNewerLauncher": null,
       "autostart": false,
-      "menu": [],
-      "locked": false
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": {
+        "steps": [
+          "install_app",
+          "finish"
+        ],
+        "index": 0,
+        "fraction": 0.41,
+        "line": "Downloading torch (2.1GiB)"
+      },
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "stoppedAt": null,
+      "controls": {
+        "primary": null,
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   },
   {
@@ -324,28 +370,26 @@
         "line": "Downloading torch (2.1GiB)"
       },
       "failedAction": "install",
-      "error": {
-        "code": "download_failed",
-        "detail": null
-      },
+      "error": "download_failed",
+      "leftoverFolder": null,
       "logTail": [
         "Resolved 212 packages in 1.2s",
         "error: Failed to download `torch`",
         "  Caused by: request timed out"
       ],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "retry",
-      "update": false,
-      "log": true,
-      "bar": true,
-      "autostart": false,
-      "menu": [
-        "uninstall",
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "retry",
+        "update": false,
+        "log": true,
+        "bar": true,
+        "autostart": false,
+        "menu": [
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -370,27 +414,25 @@
         "line": null
       },
       "failedAction": "install",
-      "error": {
-        "code": "uv_failed",
-        "detail": null
-      },
+      "error": "uv_failed",
+      "leftoverFolder": null,
       "logTail": [
         "Resolved 212 packages in 1.2s",
         "error: Failed to download `torch`",
         "  Caused by: request timed out"
       ],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "retry",
-      "update": false,
-      "log": true,
-      "bar": true,
-      "autostart": false,
-      "menu": [
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "retry",
+        "update": false,
+        "log": true,
+        "bar": true,
+        "autostart": false,
+        "menu": [
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -407,21 +449,22 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "starting",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": true
+      "stoppedAt": null,
+      "controls": {
+        "primary": "starting",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": true
+      }
     }
   },
   {
@@ -438,21 +481,22 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "open",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -469,21 +513,22 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "open",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -500,21 +545,22 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "open",
-      "update": true,
-      "log": false,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "open",
+        "update": true,
+        "log": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -531,21 +577,22 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "open",
-      "update": true,
-      "log": false,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "open",
+        "update": true,
+        "log": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -570,21 +617,22 @@
       },
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": null,
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": true
+      "stoppedAt": null,
+      "controls": {
+        "primary": null,
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": true
+      }
     }
   },
   {
@@ -609,21 +657,22 @@
       },
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": null,
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": true
+      "stoppedAt": null,
+      "controls": {
+        "primary": null,
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": true
+      }
     }
   },
   {
@@ -649,21 +698,22 @@
       },
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": null,
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": true
+      "stoppedAt": null,
+      "controls": {
+        "primary": null,
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": true
+      }
     }
   },
   {
@@ -690,21 +740,22 @@
       },
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": null,
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": true
+      "stoppedAt": null,
+      "controls": {
+        "primary": null,
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": true
+      }
     }
   },
   {
@@ -721,24 +772,25 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [
         "MemoryError",
         "Killed"
       ],
-      "stoppedAt": 1762950000000
-    },
-    "controls": {
-      "primary": "open",
-      "update": false,
-      "log": true,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": 1762950000000,
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "log": true,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -754,28 +806,26 @@
       "unsupported": null,
       "progress": null,
       "failedAction": "start",
-      "error": {
-        "code": "start_exited",
-        "detail": null
-      },
+      "error": "start_exited",
+      "leftoverFolder": null,
       "logTail": [
         "Traceback (most recent call last):",
         "ImportError: libcudnn.so.9"
       ],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "open",
-      "update": false,
-      "log": true,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "log": true,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -791,28 +841,27 @@
       "unsupported": null,
       "progress": null,
       "failedAction": "update",
-      "error": {
-        "code": "uv_failed",
-        "detail": null
-      },
+      "error": "uv_failed",
+      "leftoverFolder": null,
       "logTail": [
         "Resolved 212 packages in 1.2s",
         "error: Failed to download `torch`",
         "  Caused by: request timed out"
       ],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "repair",
-      "update": false,
-      "log": true,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "uninstall",
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "log": true,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -829,21 +878,22 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "open",
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "repair",
-        "uninstall",
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -869,24 +919,22 @@
         "line": null
       },
       "failedAction": "repair",
-      "error": {
-        "code": "low_disk",
-        "detail": "3100000000"
-      },
+      "error": "low_disk",
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "retry",
-      "update": false,
-      "log": true,
-      "bar": true,
-      "autostart": true,
-      "menu": [
-        "uninstall",
-        "beta"
-      ],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "retry",
+        "update": false,
+        "log": true,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
     }
   },
   {
@@ -903,17 +951,18 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": null,
-      "update": false,
-      "log": false,
-      "bar": true,
-      "autostart": false,
-      "menu": [],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": null,
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   },
   {
@@ -930,17 +979,18 @@
       "progress": null,
       "failedAction": null,
       "error": null,
+      "leftoverFolder": null,
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "quit",
-      "update": false,
-      "log": false,
-      "bar": false,
-      "autostart": false,
-      "menu": [],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "quit",
+        "update": false,
+        "log": false,
+        "bar": false,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   },
   {
@@ -956,21 +1006,19 @@
       "unsupported": null,
       "progress": null,
       "failedAction": null,
-      "error": {
-        "code": "uninstall_incomplete",
-        "detail": "/home/example/.local/share/zvision"
-      },
+      "error": "uninstall_incomplete",
+      "leftoverFolder": "/home/example/.local/share/zvision",
       "logTail": [],
-      "stoppedAt": null
-    },
-    "controls": {
-      "primary": "quit",
-      "update": false,
-      "log": false,
-      "bar": false,
-      "autostart": false,
-      "menu": [],
-      "locked": false
+      "stoppedAt": null,
+      "controls": {
+        "primary": "quit",
+        "update": false,
+        "log": false,
+        "bar": false,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
     }
   }
 ]

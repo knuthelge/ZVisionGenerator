@@ -140,7 +140,7 @@ pub fn is_newer(candidate: &str, base: &str) -> bool {
 }
 
 /// Whether two version strings name the same version (`1.0` and `1.0.0` do).
-fn same_version(a: &str, b: &str) -> bool {
+pub(crate) fn same_version(a: &str, b: &str) -> bool {
     match (parse(a), parse(b)) {
         (Some(a), Some(b)) => a == b,
         _ => a == b,

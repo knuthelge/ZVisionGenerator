@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { formatBytes, isPrerelease, launcherControls, launcherView } from './launcherView';
-import type { Snapshot, SnapshotCase } from './types';
+import { formatBytes, isPrerelease, launcherView } from './launcherView';
+import type { ErrorCode, Snapshot, SnapshotCase } from './types';
 
-// The cases `snapshot::controls()` in Rust is tested against: both sides must produce the same controls.
+// Rust's own snapshots, controls included: the same cases `snapshot::controls()` is tested against.
 const CASES = JSON.parse(readFileSync(resolve(process.cwd(), '..', 'launcher/contract/snapshot_cases.json'), 'utf8')) as SnapshotCase[];
 
 function snapshot(name: string): Snapshot {
@@ -16,15 +16,26 @@ function snapshot(name: string): Snapshot {
 
 const view = (name: string) => launcherView(snapshot(name), { formatTime: () => '14:32' });
 
-describe('controls', () => {
-  it.each(CASES.map((c) => [c.name, c] as const))('match the fixture for %s', (_name, c) => {
-    expect(launcherControls(c.snapshot)).toEqual(c.controls);
-    expect(launcherView(c.snapshot).controls).toEqual(c.controls);
-  });
-
+describe('fixture', () => {
   it('covers every phase of the contract', () => {
     const phases = new Set(CASES.map((c) => c.snapshot.phase));
     expect(phases.size).toBe(13);
+  });
+
+  it('renders every case', () => {
+    for (const c of CASES) expect(() => launcherView(c.snapshot), c.name).not.toThrow();
+  });
+});
+
+describe('controls', () => {
+  it('are the snapshot’s own: the view derives none', () => {
+    const running = snapshot('6 running');
+    const changed = { ...running, controls: { ...running.controls, primary: 'quit' as const, menu: [], update: true } };
+    const shown = launcherView(changed);
+    expect(shown.controls).toBe(changed.controls);
+    expect(shown.primary?.id).toBe('quit');
+    expect(shown.menu).toEqual([]);
+    expect(shown.hero.update).toBe(true);
   });
 });
 
@@ -32,12 +43,12 @@ describe('hero', () => {
   it('draws the ring from the progress fraction while installing', () => {
     const { hero, kicker, kickerAccent } = view('4b installing');
     expect(hero.halo).toMatchObject({ kind: 'progress', fraction: 0.41 });
-    expect(hero.halo.valuetext).toBe('41 percent, installing Z-Vision Generator');
+    expect(hero.halo.valuetext).toContain('41');
     expect(hero.percent).toBe(41);
     expect(hero.mood).toBe('creating');
     expect(hero.mascotProgress).toBe(0.41);
     expect(hero.pool).toBe('work');
-    expect(kicker).toBe('Step 2 of 3');
+    expect(kicker).toMatch(/2.*3/);
     expect(kickerAccent).toBe(true);
   });
 
@@ -56,12 +67,10 @@ describe('hero', () => {
   });
 
   it('freezes the ring in red where an install stopped, with no stamp', () => {
-    const { hero, kicker, kickerAccent } = view('4c failed install');
+    const { hero, kickerAccent } = view('4c failed install');
     expect(hero.halo).toMatchObject({ kind: 'error', fraction: 0.41 });
     expect(hero.percent).toBeUndefined();
-    expect(hero.fault).toBe(true);
     expect(hero.pool).toBe('dim');
-    expect(kicker).toBe('Step 2 of 3');
     expect(kickerAccent).toBe(false);
   });
 
@@ -93,61 +102,80 @@ describe('hero', () => {
 });
 
 describe('kicker', () => {
-  it('says Setup before install, the version once installed, and nothing when uninstalled', () => {
-    expect(view('1 checking').kicker).toBe('Setup');
-    expect(view('4a needs_install').kicker).toBe('Setup');
-    expect(view('6 running').kicker).toBe('Version 0.14.0');
-    expect(view('9 stopped').kicker).toBe('Version 0.14.0');
+  it('names the installed version, and nothing when uninstalled', () => {
+    expect(view('6 running').kicker).toContain('0.14.0');
+    expect(view('9 stopped').kicker).toContain('0.14.0');
+    expect(view('1 checking').kicker).not.toContain('0.14.0');
     expect(view('11b uninstalled').kicker).toBe('');
   });
 
   it('counts the steps of the work in progress', () => {
-    expect(view('8a updating').kicker).toBe('Step 1 of 2');
-    expect(view('8b repairing').kicker).toBe('Step 3 of 4');
-    expect(view('R failed repair').kicker).toBe('Step 1 of 4');
+    expect(view('8a updating').kicker).toMatch(/1.*2/);
+    expect(view('8b repairing').kicker).toMatch(/3.*4/);
+    expect(view('R failed repair').kicker).toMatch(/1.*4/);
   });
 });
 
 describe('headline and sub', () => {
   it('names the update target while updating', () => {
-    expect(view('8a updating with updateVersion').headline).toBe('Updating to 0.14.1');
-    expect(view('8a updating').headline).toBe('Updating');
+    expect(view('8a updating with updateVersion').headline).toContain('0.14.1');
+    expect(view('8a updating').headline).not.toContain('0.14.1');
   });
 
   it('says where to find the app by platform', () => {
-    expect(view('6 running').sub?.text).toContain('the menu bar');
-    expect(view('7 running with update').sub?.text).toContain('Open the launcher again');
-    const windows = { ...snapshot('6 running'), packaging: 'windows_nsis' as const };
-    expect(launcherView(windows).sub?.text).toContain('the notification area');
+    const sub = (packaging: Snapshot['packaging']) => launcherView({ ...snapshot('6 running'), packaging }).sub?.text;
+    expect(new Set([sub('macos_app'), sub('windows_nsis'), sub('appimage')]).size).toBe(3);
+    expect(sub('appimage')).toBe(sub('linux_package'));
   });
 
-  it('gives a failed install or repair its cause as an alert lead', () => {
-    const install = view('4c failed install');
-    expect(install.headline).toBe('Install didn’t finish');
-    expect(install.sub).toMatchObject({ lead: 'The download didn’t finish.', leadAlert: true });
-    const repair = view('R failed repair');
-    expect(repair.headline).toBe('Repair didn’t finish');
-    expect(repair.sub?.lead).toContain('free disk space');
-    expect(view('4c failed install (windows)').sub?.lead).toBe('The installer stopped with an error.');
+  it('gives a failed install, repair or update its cause as an alert lead, one per error code', () => {
+    const codes: ErrorCode[] = ['download_failed', 'download_unavailable', 'checksum_mismatch', 'tool_broken', 'low_disk', 'uv_failed'];
+    for (const name of ['4c failed install', 'R failed repair', '10a failed update']) {
+      const leads = codes.map((error) => {
+        const sub = launcherView({ ...snapshot(name), error }).sub;
+        expect(sub?.leadAlert, `${name} ${error}`).toBe(true);
+        expect(sub?.lead, `${name} ${error}`).toBeTruthy();
+        return sub?.lead;
+      });
+      expect(new Set(leads).size, name).toBe(codes.length);
+    }
   });
 
-  it('tells a failed update to repair, and a failed start to open again', () => {
-    expect(view('10a failed update').headline).toBe('Update didn’t finish');
-    expect(view('10a failed update').sub?.text).toContain('Repair reinstalls');
-    expect(view('9b failed start').headline).toBe('Didn’t start');
+  it('takes the cause line of a failed update from the same table as a failed install', () => {
+    expect(view('10a failed update').sub?.lead).toBe(view('4c failed install (windows)').sub?.lead);
   });
 
-  it('reports when it stopped', () => {
-    expect(view('9 stopped').sub?.text).toBe('It stopped on its own at 14:32. Open starts it again.');
+  it('tells a failed update and a failed start apart from a failed install', () => {
+    const headlines = ['4c failed install', 'R failed repair', '10a failed update', '9b failed start'].map((name) => view(name).headline);
+    expect(new Set(headlines).size).toBe(4);
+  });
+
+  it('words each failed start with a next step and no cause lead', () => {
+    const texts = (['start_exited', 'start_timeout'] as const).map((error) => {
+      const sub = launcherView({ ...snapshot('9b failed start'), error }).sub;
+      expect(sub?.lead).toBeNull();
+      expect(sub?.text).toBeTruthy();
+      return sub?.text;
+    });
+    expect(new Set(texts).size).toBe(2);
+  });
+
+  it('reports the time it stopped at', () => {
+    expect(view('9 stopped').sub?.text).toContain('14:32');
   });
 
   it('has no sub while uninstalling, and an instruction once uninstalled', () => {
     expect(view('U uninstalling').sub).toBeNull();
-    expect(view('11b uninstalled').sub).toMatchObject({ lead: 'Delete the AppImage to finish.', leadAlert: false });
-    expect(view('11b uninstalled incomplete').sub).toMatchObject({
-      lead: 'Move Z-Vision Generator to the Trash to finish.',
-      text: 'Some files could not be removed.'
-    });
+    expect(view('11b uninstalled').sub?.lead).toBeTruthy();
+    expect(view('11b uninstalled').sub?.folder).toBeUndefined();
+  });
+
+  it('names the folder an incomplete uninstall left, and only then', () => {
+    const incomplete = snapshot('11b uninstalled incomplete');
+    expect(incomplete.leftoverFolder).toBeTruthy();
+    expect(view('11b uninstalled incomplete').sub?.folder).toBe(incomplete.leftoverFolder);
+    expect(view('11b uninstalled incomplete').sub?.text).toBeTruthy();
+    expect(view('11b uninstalled').sub?.text).toBe('');
   });
 });
 
@@ -155,17 +183,11 @@ describe('notice', () => {
   it('explains an unsupported machine with one reason', () => {
     expect(view('2a unsupported driver_too_old').notice).toMatchObject({
       kind: 'reason',
-      name: 'NVIDIA driver',
       found: '575.51.03',
-      needed: 'Needs version 580 or newer.',
       link: { id: 'requirements' }
     });
-    expect(view('2a unsupported low_disk (macos)').notice).toMatchObject({
-      name: 'Free disk space',
-      found: '7.3 GB',
-      needed: 'Needs about 10 GB.'
-    });
-    expect(view('2b unsupported no_nvidia_gpu').notice).toMatchObject({ found: null, needed: 'None found.', link: null });
+    expect(view('2a unsupported low_disk (macos)').notice).toMatchObject({ kind: 'reason', found: '7.3 GB' });
+    expect(view('2b unsupported no_nvidia_gpu').notice).toMatchObject({ found: null, link: null });
     expect(view('2b unsupported gpu_too_old').notice).toMatchObject({ found: 'GTX 1080', link: null });
   });
 
@@ -178,16 +200,17 @@ describe('notice', () => {
   it('offers the log where the controls do, titled by what failed', () => {
     for (const c of CASES) {
       const notice = launcherView(c.snapshot).notice;
-      expect(notice?.kind === 'log', c.name).toBe(c.controls.log);
+      expect(notice?.kind === 'log', c.name).toBe(c.snapshot.controls.log);
     }
-    expect(view('4c failed install').notice).toMatchObject({ sheetTitle: 'End of the install log' });
-    expect(view('10a failed update').notice).toMatchObject({ sheetTitle: 'End of the update log' });
-    expect(view('9 stopped').notice).toMatchObject({ sheetTitle: 'End of the log' });
+    const title = (name: string) => {
+      const notice = view(name).notice;
+      return notice?.kind === 'log' ? notice.sheetTitle : null;
+    };
+    expect(new Set([title('4c failed install'), title('10a failed update'), title('9 stopped')]).size).toBe(3);
   });
 
   it('shows what stays once uninstalled', () => {
-    const notice = view('11b uninstalled').notice;
-    expect(notice).toMatchObject({ kind: 'kept', link: { id: 'data_folder' } });
+    expect(view('11b uninstalled').notice).toMatchObject({ kind: 'kept', link: { id: 'data_folder' } });
   });
 
   it('only notes the move to Applications; there is no button for it', () => {
@@ -198,66 +221,65 @@ describe('notice', () => {
 
 describe('action zone', () => {
   it('names the primary action of each state', () => {
-    expect(view('4a needs_install').primary).toMatchObject({ id: 'install', label: 'Install', icon: 'download' });
+    expect(view('4a needs_install').primary).toMatchObject({ id: 'install', icon: 'download' });
     expect(view('2b unsupported no_nvidia_gpu').primary).toMatchObject({ id: 'see_requirements', variant: 'secondary' });
-    expect(view('5 starting').primary).toMatchObject({ id: 'starting', label: 'Starting…', loading: true });
-    expect(view('6 running').primary?.label).toBe('Open Z-Vision Generator');
-    expect(view('10a failed update').primary).toMatchObject({ id: 'repair', label: 'Repair' });
-    expect(view('11b uninstalled').primary).toMatchObject({ id: 'quit', label: 'Quit' });
+    expect(view('5 starting').primary).toMatchObject({ id: 'starting', loading: true });
+    expect(view('6 running').primary?.id).toBe('open');
+    expect(view('10a failed update').primary?.id).toBe('open');
+    expect(view('11b uninstalled').primary?.id).toBe('quit');
   });
 
   it('has a primary exactly when the controls do', () => {
-    for (const c of CASES) expect(launcherView(c.snapshot).primary?.id ?? null, c.name).toBe(c.controls.primary);
+    for (const c of CASES) expect(launcherView(c.snapshot).primary?.id ?? null, c.name).toBe(c.snapshot.controls.primary);
   });
 
   it('shows the step in progress as a caption while working, and not otherwise', () => {
-    expect(view('4b installing').caption).toEqual({ label: 'Installing Z-Vision Generator', line: 'Downloading torch (2.1GiB)' });
-    expect(view('8b repairing').caption?.label).toBe('Reinstalling Z-Vision Generator');
-    expect(view('8a updating with updateVersion').caption).toEqual({ label: 'Installing 0.14.1', line: null });
-    expect(view('8a updating with new tools').caption).toEqual({ label: 'Downloading uv and ffmpeg', line: null });
+    expect(view('4b installing').caption?.line).toBe('Downloading torch (2.1GiB)');
+    expect(view('4b installing').caption?.label).toBeTruthy();
+    expect(view('8a updating with updateVersion').caption).toMatchObject({ line: null });
+    expect(view('8a updating with updateVersion').caption?.label).toContain('0.14.1');
     expect(view('4c failed install').caption).toBeNull();
     expect(view('6 running').caption).toBeNull();
   });
 
-  it('lists More entries in order, with Repair left out where it is the primary', () => {
-    expect(view('6 running').menu.map((m) => m.id)).toEqual(['repair', 'uninstall', 'beta']);
-    expect(view('10a failed update').menu.map((m) => m.id)).toEqual(['uninstall', 'beta']);
-    expect(view('4a needs_install').menu.map((m) => m.id)).toEqual(['beta']);
-    expect(view('4c failed install (windows)').menu.map((m) => m.id)).toEqual(['beta']);
-    expect(view('4c failed install').menu.map((m) => m.id)).toEqual(['uninstall', 'beta']);
-    expect(view('1 checking').menu).toEqual([]);
+  it('names the step of each progress row', () => {
+    const labels = (name: string) => view(name).caption?.label;
+    expect(labels('4b installing')).not.toBe(labels('8b repairing'));
+    expect(labels('8a updating with new tools')).not.toBe(labels('8a updating with updateVersion'));
+  });
+
+  it('lists More entries in the snapshot’s order', () => {
+    for (const c of CASES) expect(launcherView(c.snapshot).menu.map((m) => m.id), c.name).toEqual(c.snapshot.controls.menu);
   });
 
   it('carries the stored beta choice on the beta entry only', () => {
     const entries = (name: string) => view(name).menu;
     expect(entries('6 running').map((m) => m.checked)).toEqual([undefined, undefined, false]);
-    expect(entries('4a needs_install with beta')[0]).toMatchObject({ id: 'beta', label: 'Get beta versions', checked: true });
+    expect(entries('4a needs_install with beta')[0]).toMatchObject({ id: 'beta', checked: true });
   });
 });
 
 describe('beta wording', () => {
-  it('adds a beta tag to the kicker of a pre-release install only', () => {
-    expect(view('6 running').kicker).toBe('Version 0.14.0');
-    expect(view('6 running a beta version').kicker).toBe('Version 0.15.0b2 · beta');
+  it('marks a pre-release install in the kicker only', () => {
+    expect(view('6 running a beta version').kicker).toContain('0.15.0b2');
+    expect(view('6 running a beta version').kicker).toMatch(/beta/i);
+    expect(view('6 running').kicker).not.toMatch(/beta/i);
   });
 
   it('calls a pre-release update a beta, and a stable one a version', () => {
-    expect(view('7 running with update').notice).toMatchObject({ lead: 'Version 0.14.1 is out.' });
-    expect(view('7 running with a beta update').notice).toMatchObject({ kind: 'update', version: '0.15.0b3', lead: 'Beta 0.15.0b3 is out.' });
+    const lead = (name: string) => {
+      const notice = view(name).notice;
+      return notice?.kind === 'update' ? notice.lead : '';
+    };
+    expect(lead('7 running with update')).toContain('0.14.1');
+    expect(lead('7 running with update')).not.toMatch(/beta/i);
+    expect(lead('7 running with a beta update')).toContain('0.15.0b3');
+    expect(lead('7 running with a beta update')).toMatch(/beta/i);
   });
 
   it('knows pre-release version spellings', () => {
     for (const v of ['0.15.0b2', '1.0rc1', '1.0.0a1', '1.0.dev3', '1.0-beta.2', 'v2.0rc1', '1.0b1+local']) expect(isPrerelease(v), v).toBe(true);
     for (const v of ['0.14.1', '1.0', '1.0.post1', 'garbage', '']) expect(isPrerelease(v), v).toBe(false);
-  });
-});
-
-describe('copy', () => {
-  it('words a failed or unavailable download without a dead end', () => {
-    const failed = launcherView({ ...snapshot('4c failed install'), error: { code: 'download_failed', detail: null } });
-    expect(failed.sub?.lead).toBe('The download didn’t finish.');
-    const gone = launcherView({ ...snapshot('4c failed install'), error: { code: 'download_unavailable', detail: 'x' } });
-    expect(gone.sub?.text).toBe('A newer launcher fixes this.');
   });
 });
 

@@ -116,8 +116,13 @@ pub fn inherited_path() -> Option<OsString> {
 /// Build a command for `program` that runs without a shell and, on Windows, without a window, and that inherits
 /// the launcher's environment without the AppImage's additions. A caller's own `.env` calls come after this.
 pub fn hidden_command(program: &Path) -> Command {
+    hidden_command_in(program, &env::vars_os().collect())
+}
+
+/// [`hidden_command`] for a launcher whose environment is `env`.
+pub fn hidden_command_in(program: &Path, env: &HashMap<OsString, OsString>) -> Command {
     let mut command = no_window(Command::new(program));
-    for change in process_env_fixups() {
+    for change in child_env_fixups(env) {
         match change {
             EnvChange::Set(name, value) => command.env(name, value),
             EnvChange::Remove(name) => command.env_remove(name),

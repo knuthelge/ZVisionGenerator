@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager, Wry};
 
 use crate::app::{begin_quit, show_main_window};
 use crate::controller::Controller;
-use crate::snapshot::{Primary, controls};
+use crate::snapshot::Primary;
 
 const OPEN_ID: &str = "open";
 const SHOW_ID: &str = "show";
@@ -148,7 +148,7 @@ fn on_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
 /// Open the app in the browser when the window's main button would, else show the window.
 fn open(app: &AppHandle) {
     let controller = app.state::<Controller>();
-    if controls(&controller.snapshot()).primary == Some(Primary::Open) {
+    if controller.snapshot().controls.primary == Some(Primary::Open) {
         let _ = controller.open_app();
     } else {
         show_main_window(app);

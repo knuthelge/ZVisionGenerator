@@ -16,10 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::paths::Layout;
 use crate::process_tree;
-use crate::records::{
-    ServerRecord, StopOrDelete, delete_server_record, read_server_record, stale_action,
-    write_server_record,
-};
+use crate::records::{ServerRecord, delete_server_record, read_server_record, write_server_record};
 use crate::spawn::{hidden_command, inherited_path};
 
 /// The app's default port, and the first of the 100 it scans.
@@ -326,10 +323,7 @@ pub fn clear_stale_record(layout: &Layout, grace: Duration) -> io::Result<()> {
     let Some(record) = read_server_record(&layout.server_json) else {
         return delete_server_record(&layout.server_json);
     };
-    match stale_action(&record, process_tree::start_time_of(record.pid)) {
-        StopOrDelete::Stop => stop(layout, &record, grace),
-        StopOrDelete::Delete => delete_server_record(&layout.server_json),
-    }
+    stop(layout, &record, grace)
 }
 
 #[cfg(test)]

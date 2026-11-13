@@ -5,11 +5,11 @@
 //! arguments are the contract in `frontend/src/launcher/bridge.ts`.
 
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_opener::OpenerExt;
 
 use crate::app::begin_quit;
 use crate::controller::Controller;
 use crate::links;
+use crate::opener;
 use crate::snapshot::{LinkId, Snapshot};
 
 /// The error of a link that has nothing to open, such as release notes before an update is offered.
@@ -69,16 +69,10 @@ pub async fn set_beta(controller: State<'_, Controller>, enabled: bool) -> Resul
 }
 
 #[tauri::command]
-pub async fn open_link(
-    app: AppHandle,
-    controller: State<'_, Controller>,
-    link: LinkId,
-) -> Result<(), String> {
+pub async fn open_link(controller: State<'_, Controller>, link: LinkId) -> Result<(), String> {
     let url = links::url(link, controller.snapshot().update_version.as_deref())
         .ok_or_else(|| NO_LINK.to_owned())?;
-    app.opener()
-        .open_url(url, None::<&str>)
-        .map_err(|e| e.to_string())
+    opener::open_url(&url).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

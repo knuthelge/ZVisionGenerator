@@ -1,6 +1,6 @@
 // The Rust-to-window contract. Mirrors `launcher/src-tauri/src/snapshot.rs`; the fixture
-// `launcher/contract/snapshot_cases.json` is tested against both sides. Words live in the window; Rust sends codes
-// and raw values.
+// `launcher/contract/snapshot_cases.json` holds Rust's own snapshots, which the window's tests render. Words live in
+// the window; Rust sends codes and raw values.
 
 export type Phase =
   | 'checking'
@@ -55,11 +55,6 @@ export interface Progress {
   line: string | null;
 }
 
-export interface LauncherError {
-  code: ErrorCode;
-  detail: string | null;
-}
-
 export interface Snapshot {
   phase: Phase;
   installedVersion: string | null;
@@ -75,11 +70,15 @@ export interface Snapshot {
   unsupported: Unsupported | null;
   progress: Progress | null;
   failedAction: FailedAction | null;
-  error: LauncherError | null;
+  error: ErrorCode | null;
+  /** Root, which an incomplete uninstall could not delete; set only with error `uninstall_incomplete`. */
+  leftoverFolder: string | null;
   /** `failed` and `stopped` only; [] otherwise. */
   logTail: string[];
   /** Unix milliseconds; `stopped` only. */
   stoppedAt: number | null;
+  /** What the window shows and allows in this state; derived in Rust. */
+  controls: Controls;
 }
 
 export type Primary =
@@ -108,5 +107,4 @@ export interface Controls {
 export interface SnapshotCase {
   name: string;
   snapshot: Snapshot;
-  controls: Controls;
 }

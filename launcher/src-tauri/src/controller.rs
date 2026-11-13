@@ -9,7 +9,7 @@
 //! the controller has no Tauri dependency: the snapshot leaves through an injected callback, and "exit the app" is an
 //! injected callback too. [`SystemRunner`] is the real implementation.
 //!
-//! [`after_upgrade`] and [`on_child_exit`] are the pure decisions; the rest is plumbing around them.
+//! [`after_upgrade`] is the pure decision; the rest is plumbing around it.
 
 use std::io;
 use std::ops::Deref;
@@ -28,8 +28,8 @@ use crate::progress::{self, SAMPLE_INTERVAL, SNAPSHOT_INTERVAL, Throttle};
 use crate::records::{self, Prefs, ServerRecord};
 use crate::server::{self, DEFAULT_PORT, Readiness};
 use crate::snapshot::{
-    Controls, ErrorCode, FailedAction, LauncherError, MenuItem, Packaging, Phase, Primary,
-    Progress, Snapshot, Unsupported, controls,
+    Controls, ErrorCode, FailedAction, MenuItem, Packaging, Phase, Primary, Progress, Snapshot,
+    Unsupported, controls,
 };
 use crate::uninstall;
 use crate::uv::{self, Channel, TAIL_LINES, UvFailure};
@@ -59,8 +59,10 @@ pub trait Runner: Send + Sync + 'static {
     fn check_disk(&self, layout: &Layout) -> Result<(), Unsupported>;
     /// Whether the app (`tool-bin/ziv`) is installed.
     fn is_installed(&self, layout: &Layout) -> bool;
+    /// Whether uv, ffmpeg and ffprobe are all in place.
+    fn tools_present(&self, layout: &Layout) -> bool;
     /// Download and unpack uv and ffmpeg.
-    fn fetch_tools(&self, layout: &Layout, platform: Platform) -> Result<(), LauncherError>;
+    fn fetch_tools(&self, layout: &Layout, platform: Platform) -> Result<(), ErrorCode>;
     /// Run uv to completion. `on_start` gets its process id when it runs, `on_line` every output line.
     fn run_uv(
         &self,
@@ -175,10 +177,7 @@ pub enum Outcome {
 /// version was offered" is a failure to upgrade; a pre-release moving to another pre-release is a change.
 pub fn after_upgrade(before: Option<&str>, after: Option<&str>, offered: &str) -> Outcome {
     let unchanged = match (before, after) {
-        (Some(before), Some(after)) => match (version::parse(before), version::parse(after)) {
-            (Some(before), Some(after)) => before == after,
-            _ => before == after,
-        },
+        (Some(before), Some(after)) => version::same_version(before, after),
         _ => false,
     };
     match after {
@@ -189,15 +188,16 @@ pub fn after_upgrade(before: Option<&str>, after: Option<&str>, offered: &str) -
     }
 }
 
-/// The phase to show when the server process ended: none while a stop was requested (the flow that asked owns the
-/// phase), `stopped` otherwise. "Requested" is a flag set before stopping, never the exit code.
-pub fn on_child_exit(stop_requested: bool) -> Option<Phase> {
-    (!stop_requested).then_some(Phase::Stopped)
-}
-
-/// Whether the installed tools are the pinned ones of `platform`; an unsupported platform has none.
-fn tools_current(inner: &Inner, platform: Option<Platform>) -> bool {
+/// Whether the installed tools are the pinned ones of `platform` and are all in place; an unsupported platform has
+/// none. The one test an install and an update use to skip the download.
+fn tools_current(
+    inner: &Inner,
+    runner: &dyn Runner,
+    layout: &Layout,
+    platform: Option<Platform>,
+) -> bool {
     platform.is_some_and(|platform| inner.prefs.tools_current(&manifest::pins(platform)))
+        && runner.tools_present(layout)
 }
 
 /// The failed action that belongs to a long-running action.
@@ -237,20 +237,15 @@ enum Abort {
 /// A failed action: what failed, the error and the log tail the window shows.
 struct Failure {
     action: FailedAction,
-    error: LauncherError,
+    error: ErrorCode,
     tail: Vec<String>,
 }
 
 impl Failure {
-    fn new(
-        action: FailedAction,
-        code: ErrorCode,
-        detail: Option<String>,
-        tail: Vec<String>,
-    ) -> Self {
+    fn new(action: FailedAction, error: ErrorCode, tail: Vec<String>) -> Self {
         Self {
             action,
-            error: LauncherError { code, detail },
+            error,
             tail,
         }
     }
@@ -331,9 +326,13 @@ impl Controller {
             progress: None,
             failed_action: None,
             error: None,
+            leftover_folder: None,
             log_tail: Vec::new(),
             stopped_at: None,
+            controls: Controls::default(),
         };
+        let mut snapshot = snapshot;
+        snapshot.controls = controls(&snapshot);
         let throttle = Throttle::new(config.timing.snapshot_interval);
         Self(Arc::new(Shared {
             config,
@@ -367,8 +366,9 @@ impl Controller {
 
     // ----- plumbing -------------------------------------------------------------------------------------------
 
-    /// Send the current snapshot to the window.
-    fn publish(&self, inner: &Inner) {
+    /// Send the current snapshot to the window, with the controls of its state.
+    fn publish(&self, inner: &mut Inner) {
+        inner.snapshot.controls = controls(&inner.snapshot);
         (self.emit)(&inner.snapshot);
     }
 
@@ -376,7 +376,7 @@ impl Controller {
     fn update<R>(&self, change: impl FnOnce(&mut Inner) -> R) -> R {
         let mut inner = lock(&self.inner);
         let result = change(&mut inner);
-        self.publish(&inner);
+        self.publish(&mut inner);
         result
     }
 
@@ -388,7 +388,7 @@ impl Controller {
         };
         change(progress);
         if inner.throttle.ready(Instant::now()) {
-            self.publish(&inner);
+            self.publish(&mut inner);
         }
     }
 
@@ -404,7 +404,7 @@ impl Controller {
             return Err(BUSY.to_owned());
         }
         let result = act(&mut inner);
-        self.publish(&inner);
+        self.publish(&mut inner);
         Ok(result)
     }
 
@@ -465,12 +465,18 @@ impl Controller {
         self.start_update_timer();
     }
 
-    /// The first thing after launch: a macOS app on a disk image does nothing; an installed app starts; anything
-    /// else is checked for support.
+    /// The first thing after launch: a macOS app on a disk image does nothing; otherwise an enabled start-at-login
+    /// entry is rewritten with the current path, then an installed app starts and anything else is checked for
+    /// support.
     fn launch(&self, background: bool) {
         if self.runner.must_move_to_applications() {
             self.update(|inner| inner.snapshot.phase = Phase::MoveToApplications);
             return;
+        }
+        // Writing the entry again points it at this launcher's path: an AppImage that was moved or replaced, or a
+        // package that was reinstalled elsewhere, would otherwise leave a login entry that starts nothing.
+        if self.snapshot().autostart {
+            let _ = self.runner.set_autostart(true);
         }
         let layout = &self.config.layout;
         let _ = self
@@ -589,7 +595,12 @@ impl Controller {
         action: Action,
     ) -> Result<(), String> {
         self.gated(allowed, |inner| {
-            let current = tools_current(inner, self.config.platform);
+            let current = tools_current(
+                inner,
+                &*self.runner,
+                &self.config.layout,
+                self.config.platform,
+            );
             let snapshot = &mut inner.snapshot;
             snapshot.phase = running_phase(action);
             snapshot.progress = Some(Progress {
@@ -708,7 +719,12 @@ impl Controller {
             (
                 inner.snapshot.installed_version.clone(),
                 inner.snapshot.update_version.clone(),
-                tools_current(&inner, self.config.platform),
+                tools_current(
+                    &inner,
+                    &*self.runner,
+                    &self.config.layout,
+                    self.config.platform,
+                ),
             )
         };
         let ids = plan::step_ids(action, current);
@@ -748,14 +764,10 @@ impl Controller {
                 self.stop_server();
                 Ok(())
             }
-            Step::CheckDisk => self.runner.check_disk(layout).map_err(|reason| {
-                Abort::Fail(Failure::new(
-                    failed,
-                    ErrorCode::LowDisk,
-                    reason.found,
-                    Vec::new(),
-                ))
-            }),
+            Step::CheckDisk => self
+                .runner
+                .check_disk(layout)
+                .map_err(|_| Abort::Fail(Failure::new(failed, ErrorCode::LowDisk, Vec::new()))),
             Step::FetchTools => {
                 let platform = self.platform(failed)?;
                 self.runner
@@ -764,7 +776,7 @@ impl Controller {
                 self.record_tools(platform);
                 Ok(())
             }
-            Step::CacheClean => self.run_uv_step(failed, &owned(uv::cache_clean_args()), false),
+            Step::CacheClean => self.run_uv_step(failed, &uv::cache_clean_args(), false),
             Step::ToolInstall { reinstall } => {
                 let platform = self.platform(failed)?;
                 let (beta, installed) = {
@@ -780,7 +792,7 @@ impl Controller {
                 let beta = lock(&self.inner).prefs.beta;
                 self.run_uv_step(failed, &uv::upgrade_args(platform, beta), false)
             }
-            Step::CachePrune => self.run_uv_step(failed, &owned(uv::prune_args()), false),
+            Step::CachePrune => self.run_uv_step(failed, &uv::prune_args(), false),
             Step::ReadVersion => {
                 let after = self.runner.read_version(layout);
                 self.record_version(action, before, after, offered);
@@ -798,25 +810,16 @@ impl Controller {
     }
 
     fn platform(&self, action: FailedAction) -> Result<Platform, Abort> {
-        self.config.platform.ok_or_else(|| {
-            Abort::Fail(Failure::new(
-                action,
-                ErrorCode::ToolBroken,
-                Some("this computer is not supported".to_owned()),
-                Vec::new(),
-            ))
-        })
+        self.config
+            .platform
+            .ok_or_else(|| Abort::Fail(Failure::new(action, ErrorCode::ToolBroken, Vec::new())))
     }
 
-    fn fetch_failure(&self, action: FailedAction, error: LauncherError) -> Abort {
+    fn fetch_failure(&self, action: FailedAction, error: ErrorCode) -> Abort {
         if self.quitting() {
             Abort::Quit
         } else {
-            Abort::Fail(Failure {
-                action,
-                error,
-                tail: Vec::new(),
-            })
+            Abort::Fail(Failure::new(action, error, Vec::new()))
         }
     }
 
@@ -840,11 +843,7 @@ impl Controller {
         match result {
             Ok(()) => Ok(()),
             Err(_) if self.quitting() => Err(Abort::Quit),
-            Err(UvFailure { error, tail }) => Err(Abort::Fail(Failure {
-                action,
-                error,
-                tail,
-            })),
+            Err(UvFailure { error, tail }) => Err(Abort::Fail(Failure::new(action, error, tail))),
         }
     }
 
@@ -944,11 +943,8 @@ impl Controller {
             let flags = Arc::clone(&flags);
             Box::new(move || me.on_server_exit(&flags))
         };
-        let record = match self.runner.start_server(layout, port, on_exit) {
-            Ok(record) => record,
-            Err(error) => {
-                return Err(self.start_failure(ErrorCode::StartExited, Some(error.to_string())));
-            }
+        let Ok(record) = self.runner.start_server(layout, port, on_exit) else {
+            return Err(self.start_failure(ErrorCode::StartExited));
         };
         let registered = {
             let mut inner = lock(&self.inner);
@@ -981,7 +977,7 @@ impl Controller {
                         inner.prefs.last_port = Some(port);
                         self.save_prefs(&inner);
                         inner.snapshot.phase = Phase::Running;
-                        self.publish(&inner);
+                        self.publish(&mut inner);
                     }
                     running
                 };
@@ -1005,23 +1001,22 @@ impl Controller {
                 } else {
                     ErrorCode::StartExited
                 };
-                Err(self.start_failure(code, None))
+                Err(self.start_failure(code))
             }
         }
     }
 
     /// A failed start: the server is stopped (it may still be running after a timeout) and the log tail kept.
-    fn start_failure(&self, code: ErrorCode, detail: Option<String>) -> Abort {
+    fn start_failure(&self, code: ErrorCode) -> Abort {
         self.stop_server();
         let tail = self.runner.read_log_tail(&self.config.layout);
-        Abort::Fail(Failure::new(FailedAction::Start, code, detail, tail))
+        Abort::Fail(Failure::new(FailedAction::Start, code, tail))
     }
 
     /// The watcher's report that the server process ended. While running and not asked to stop, that is a crash:
     /// show `stopped` with the time and the log tail.
     fn on_server_exit(&self, flags: &Arc<ServerFlags>) {
         flags.exited.store(true, Ordering::SeqCst);
-        let requested = flags.stop_requested.load(Ordering::SeqCst);
         let mut inner = lock(&self.inner);
         let ours = inner
             .server
@@ -1031,9 +1026,6 @@ impl Controller {
             // Starting: the start flow sees the flag. Anything else: another flow owns the phase.
             return;
         }
-        let Some(phase) = on_child_exit(requested) else {
-            return;
-        };
         if let Some(server) = inner.server.take() {
             let _ = self
                 .runner
@@ -1041,12 +1033,12 @@ impl Controller {
         }
         let tail = self.runner.read_log_tail(&self.config.layout);
         let snapshot = &mut inner.snapshot;
-        snapshot.phase = phase;
+        snapshot.phase = Phase::Stopped;
         snapshot.stopped_at = Some(now_millis());
         snapshot.log_tail = tail;
         snapshot.failed_action = None;
         snapshot.error = None;
-        self.publish(&inner);
+        self.publish(&mut inner);
     }
 
     /// Uninstall on macOS and Linux: stop the server, remove start at login, delete Root.
@@ -1059,10 +1051,13 @@ impl Controller {
             snapshot.phase = Phase::Uninstalled;
             snapshot.autostart = false;
             snapshot.progress = None;
-            snapshot.error = leftover.map(|_| LauncherError {
-                code: ErrorCode::UninstallIncomplete,
-                detail: Some(self.config.layout.root.display().to_string()),
-            });
+            if leftover.is_some() {
+                snapshot.error = Some(ErrorCode::UninstallIncomplete);
+                snapshot.leftover_folder = Some(self.config.layout.root.display().to_string());
+            } else {
+                snapshot.error = None;
+                snapshot.leftover_folder = None;
+            }
         });
     }
 
@@ -1166,11 +1161,6 @@ impl Controller {
     }
 }
 
-/// uv's arguments as owned strings.
-fn owned(args: Vec<&'static str>) -> Vec<String> {
-    args.into_iter().map(str::to_owned).collect()
-}
-
 /// The address of the Web UI on `port`.
 fn browser_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/")
@@ -1214,7 +1204,13 @@ impl Runner for SystemRunner {
         layout.ziv().is_file()
     }
 
-    fn fetch_tools(&self, layout: &Layout, platform: Platform) -> Result<(), LauncherError> {
+    fn tools_present(&self, layout: &Layout) -> bool {
+        [layout.uv(), layout.ffmpeg(), layout.ffprobe()]
+            .iter()
+            .all(|tool| tool.is_file())
+    }
+
+    fn fetch_tools(&self, layout: &Layout, platform: Platform) -> Result<(), ErrorCode> {
         download::fetch_tools(layout, platform)
     }
 
@@ -1366,12 +1362,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_requested_stop_changes_no_phase_and_a_surprise_exit_is_stopped() {
-        assert_eq!(on_child_exit(true), None);
-        assert_eq!(on_child_exit(false), Some(Phase::Stopped));
-    }
-
     // ----- the fake runner ------------------------------------------------------------------------------------
 
     const LAUNCHER: &str = "0.1.0";
@@ -1394,7 +1384,7 @@ mod tests {
         disk: Result<(), Unsupported>,
         installed: bool,
         must_move: bool,
-        tools: VecDeque<Result<(), LauncherError>>,
+        tools: VecDeque<Result<(), ErrorCode>>,
         /// One result per uv call, in order; `None` once exhausted means success.
         uv: VecDeque<Result<(), UvFailure>>,
         /// Block the first uv call until `stop_tree` kills it.
@@ -1411,6 +1401,8 @@ mod tests {
         cache_bytes: u64,
         delete_fails: bool,
         autostart: bool,
+        /// Whether uv, ffmpeg and ffprobe are in place.
+        tools_present: bool,
     }
 
     /// A latch a test opens to let a blocked fake call go on.
@@ -1483,6 +1475,7 @@ mod tests {
                     cache_bytes: 0,
                     delete_fails: false,
                     autostart: false,
+                    tools_present: true,
                 }),
                 start_gate: Gate::new(),
                 ready_gate: Gate::new(),
@@ -1543,10 +1536,7 @@ mod tests {
 
     fn uv_failed() -> UvFailure {
         UvFailure {
-            error: LauncherError {
-                code: ErrorCode::UvFailed,
-                detail: None,
-            },
+            error: ErrorCode::UvFailed,
             tail: vec!["error: boom".to_owned()],
         }
     }
@@ -1570,7 +1560,11 @@ mod tests {
             self.script().installed
         }
 
-        fn fetch_tools(&self, _: &Layout, _: Platform) -> Result<(), LauncherError> {
+        fn tools_present(&self, _: &Layout) -> bool {
+            self.script().tools_present
+        }
+
+        fn fetch_tools(&self, _: &Layout, _: Platform) -> Result<(), ErrorCode> {
             self.note("fetch_tools");
             self.script().tools.pop_front().unwrap_or(Ok(()))
         }
@@ -1858,6 +1852,61 @@ mod tests {
     }
 
     #[test]
+    fn every_snapshot_carries_the_controls_of_its_state() {
+        let rig = rig();
+        assert_eq!(rig.snap().controls, controls(&rig.snap()));
+        rig.fake
+            .script()
+            .versions
+            .push_back(Some("0.14.0".to_owned()));
+        rig.controller.launch(false);
+        rig.controller.install().unwrap();
+        rig.idle();
+        let seen = lock(&rig.emitted).clone();
+        assert!(seen.len() > 3);
+        for snapshot in seen {
+            assert_eq!(
+                snapshot.controls,
+                controls(&snapshot),
+                "{:?}",
+                snapshot.phase
+            );
+        }
+        assert_eq!(rig.snap().controls.primary, Some(Primary::Open));
+    }
+
+    #[test]
+    fn an_enabled_start_at_login_entry_is_written_again_at_launch() {
+        let fake = Fake::new();
+        fake.script().autostart = true;
+        let rig = rig_with(Packaging::Appimage, Some(Platform::LinuxX64), fake);
+        rig.controller.launch(false);
+        assert_eq!(rig.fake.count("autostart true"), 1);
+        assert!(rig.snap().autostart);
+    }
+
+    #[test]
+    fn a_disabled_start_at_login_entry_is_left_alone() {
+        let rig = rig();
+        rig.controller.launch(false);
+        assert_eq!(rig.fake.count("autostart true"), 0);
+        assert_eq!(rig.fake.count("autostart false"), 0);
+    }
+
+    #[test]
+    fn start_at_login_is_not_rewritten_from_a_disk_image() {
+        let fake = Fake::new();
+        {
+            let mut script = fake.script();
+            script.autostart = true;
+            script.must_move = true;
+        }
+        let rig = rig_with(Packaging::MacosApp, Some(Platform::MacosArm64), fake);
+        rig.controller.launch(false);
+        assert_eq!(rig.fake.count("autostart true"), 0);
+    }
+
+    #[test]
     fn a_macos_app_on_a_disk_image_does_nothing() {
         let rig = rig();
         rig.fake.script().must_move = true;
@@ -1979,7 +2028,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_install_keeps_its_progress_and_retry_runs_it_again_to_the_end() {
+    fn a_failed_install_keeps_its_progress_and_retry_runs_it_again_without_the_download() {
         let rig = rig();
         {
             let mut script = rig.fake.script();
@@ -1992,14 +2041,14 @@ mod tests {
         let snap = rig.snap();
         assert_eq!(snap.phase, Phase::Failed);
         assert_eq!(snap.failed_action, Some(FailedAction::Install));
-        assert_eq!(snap.error.as_ref().unwrap().code, ErrorCode::UvFailed);
+        assert_eq!(snap.error, Some(ErrorCode::UvFailed));
         assert_eq!(snap.log_tail, ["error: boom"]);
         assert_eq!(
             snap.progress.as_ref().unwrap().index,
             1,
             "frozen in install_app"
         );
-        assert_eq!(controls(&snap).primary, Some(Primary::Retry));
+        assert_eq!(snap.controls.primary, Some(Primary::Retry));
 
         rig.controller.retry().unwrap();
         rig.idle();
@@ -2010,26 +2059,68 @@ mod tests {
         assert!(snap.log_tail.is_empty());
         assert_eq!(
             rig.fake.count("fetch_tools"),
-            2,
-            "the whole install runs again"
+            1,
+            "the tools of the first try are kept"
         );
+        assert!(
+            rig.emitted_steps(Phase::Installing)
+                .contains(&vec![StepId::InstallApp, StepId::Finish])
+        );
+    }
+
+    #[test]
+    fn an_install_with_current_tools_downloads_nothing() {
+        let rig = rig();
+        rig.fake
+            .script()
+            .versions
+            .push_back(Some("0.14.0".to_owned()));
+        rig.tools_installed();
+        rig.controller.launch(false);
+        rig.controller.install().unwrap();
+        rig.idle();
+        assert_eq!(rig.snap().phase, Phase::Running);
+        assert_eq!(rig.fake.count("fetch_tools"), 0);
+    }
+
+    #[test]
+    fn current_pins_with_a_missing_tool_file_download_the_tools_again() {
+        let rig = rig();
+        rig.fake.script().tools_present = false;
+        rig.tools_installed();
+        rig.controller.launch(false);
+        rig.controller.install().unwrap();
+        rig.idle();
+        assert_eq!(rig.fake.count("fetch_tools"), 1);
+        assert!(rig.emitted_steps(Phase::Installing).contains(&vec![
+            StepId::DownloadTools,
+            StepId::InstallApp,
+            StepId::Finish
+        ]));
+    }
+
+    #[test]
+    fn a_repair_downloads_the_tools_even_when_they_are_current() {
+        let rig = rig();
+        rig.tools_installed();
+        rig.running("0.14.0", None);
+        rig.controller.repair_app().unwrap();
+        rig.idle();
+        assert_eq!(rig.fake.count("fetch_tools"), 1);
     }
 
     #[test]
     fn a_failed_download_names_its_error_and_leaves_the_ring_empty() {
         let rig = rig();
-        rig.fake.script().tools.push_back(Err(LauncherError {
-            code: ErrorCode::ChecksumMismatch,
-            detail: None,
-        }));
+        rig.fake
+            .script()
+            .tools
+            .push_back(Err(ErrorCode::ChecksumMismatch));
         rig.controller.launch(false);
         rig.controller.install().unwrap();
         rig.idle();
         let snap = rig.snap();
-        assert_eq!(
-            snap.error.as_ref().unwrap().code,
-            ErrorCode::ChecksumMismatch
-        );
+        assert_eq!(snap.error, Some(ErrorCode::ChecksumMismatch));
         assert_eq!(snap.progress.as_ref().unwrap().fraction, None);
         assert_eq!(rig.fake.count("start_server"), 0);
     }
@@ -2106,16 +2197,16 @@ mod tests {
     #[test]
     fn a_failed_tool_download_during_an_update_fails_the_update_and_records_nothing() {
         let rig = rig();
-        rig.fake.script().tools.push_back(Err(LauncherError {
-            code: ErrorCode::DownloadFailed,
-            detail: None,
-        }));
+        rig.fake
+            .script()
+            .tools
+            .push_back(Err(ErrorCode::DownloadFailed));
         rig.running("0.14.0", Some("0.14.1"));
         rig.controller.update_app().unwrap();
         rig.idle();
         let snap = rig.snap();
         assert_eq!(snap.failed_action, Some(FailedAction::Update));
-        assert_eq!(snap.error.unwrap().code, ErrorCode::DownloadFailed);
+        assert_eq!(snap.error, Some(ErrorCode::DownloadFailed));
         assert!(rig.fake.uv_commands().is_empty());
         assert!(rig.prefs().tool_pins.is_empty());
     }
@@ -2182,7 +2273,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_upgrade_offers_repair_and_a_failed_restart_is_a_failed_start() {
+    fn a_failed_upgrade_offers_open_and_keeps_the_offer_and_a_failed_restart_is_a_failed_start() {
         let rig = rig();
         rig.fake.script().uv.push_back(Err(uv_failed()));
         rig.running("0.14.0", Some("0.14.1"));
@@ -2191,7 +2282,19 @@ mod tests {
         let snap = rig.snap();
         assert_eq!(snap.failed_action, Some(FailedAction::Update));
         assert_eq!(snap.progress, None);
-        assert_eq!(controls(&snap).primary, Some(Primary::Repair));
+        assert_eq!(snap.update_version.as_deref(), Some("0.14.1"));
+        assert_eq!(snap.controls.primary, Some(Primary::Open));
+        assert_eq!(
+            snap.controls.menu,
+            [MenuItem::Repair, MenuItem::Uninstall, MenuItem::Beta]
+        );
+
+        rig.controller.open_app().unwrap();
+        rig.idle();
+        let snap = rig.snap();
+        assert_eq!(snap.phase, Phase::Running);
+        assert_eq!(snap.update_version.as_deref(), Some("0.14.1"));
+        assert!(snap.controls.update, "the update is offered again");
 
         let rig = rig_with(
             Packaging::LinuxPackage,
@@ -2208,7 +2311,7 @@ mod tests {
         rig.idle();
         let snap = rig.snap();
         assert_eq!(snap.failed_action, Some(FailedAction::Start));
-        assert_eq!(snap.error.as_ref().unwrap().code, ErrorCode::StartExited);
+        assert_eq!(snap.error, Some(ErrorCode::StartExited));
         assert_eq!(snap.log_tail, ["server log line"]);
     }
 
@@ -2251,9 +2354,7 @@ mod tests {
         rig.idle();
         let snap = rig.snap();
         assert_eq!(snap.failed_action, Some(FailedAction::Repair));
-        let error = snap.error.unwrap();
-        assert_eq!(error.code, ErrorCode::LowDisk);
-        assert_eq!(error.detail.as_deref(), Some("3100000000"));
+        assert_eq!(snap.error, Some(ErrorCode::LowDisk));
         assert_eq!(rig.fake.count("fetch_tools"), 0);
     }
 
@@ -2363,7 +2464,7 @@ mod tests {
         rig.controller.launch(false);
         rig.controller.install().unwrap();
         rig.idle();
-        assert_eq!(rig.snap().error.unwrap().code, ErrorCode::ToolBroken);
+        assert_eq!(rig.snap().error, Some(ErrorCode::ToolBroken));
     }
 
     // ----- the server -----------------------------------------------------------------------------------------
@@ -2424,7 +2525,7 @@ mod tests {
         let snap = rig.snap();
         assert_eq!(snap.phase, Phase::Failed);
         assert_eq!(snap.failed_action, Some(FailedAction::Start));
-        assert_eq!(snap.error.unwrap().code, ErrorCode::StartExited);
+        assert_eq!(snap.error, Some(ErrorCode::StartExited));
         assert_eq!(snap.log_tail, ["server log line"]);
         assert_eq!(snap.stopped_at, None);
     }
@@ -2439,7 +2540,7 @@ mod tests {
         }
         rig.controller.launch(true);
         let snap = rig.snap();
-        assert_eq!(snap.error.unwrap().code, ErrorCode::StartTimeout);
+        assert_eq!(snap.error, Some(ErrorCode::StartTimeout));
         assert_eq!(rig.fake.count("stop_server 8081"), 1);
         // Open tries again.
         rig.fake.script().serve = Serve::Ready;
@@ -2961,10 +3062,9 @@ mod tests {
         rig.idle();
         let snap = rig.snap();
         assert_eq!(snap.phase, Phase::Uninstalled);
-        let error = snap.error.unwrap();
-        assert_eq!(error.code, ErrorCode::UninstallIncomplete);
+        assert_eq!(snap.error, Some(ErrorCode::UninstallIncomplete));
         assert_eq!(
-            error.detail,
+            snap.leftover_folder,
             Some(rig.controller.config.layout.root.display().to_string())
         );
     }

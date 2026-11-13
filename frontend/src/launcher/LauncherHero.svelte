@@ -10,28 +10,21 @@
     halo: HaloView;
     /** Shows the stamp on the ring: the percentage done. */
     percent?: number;
-    /** Something is wrong or off: the brand light dims. */
-    fault?: boolean;
     /** An update is offered: the amber dot. */
     update?: boolean;
-    /** The brand light's strength when it is not the one the ring implies. */
-    pool?: PoolStrength;
+    /** The brand light's strength. */
+    pool: PoolStrength;
   }
 
-  let { mood, mascotProgress, halo, percent, fault = false, update = false, pool }: Props = $props();
+  let { mood, mascotProgress, halo, percent, update = false, pool }: Props = $props();
 
   const STRENGTHS: PoolStrength[] = ['live', 'work', 'rest', 'dim'];
-
-  const strength = $derived<PoolStrength>(
-    pool ??
-      (halo.kind === 'live' ? 'live' : halo.kind === 'progress' || halo.kind === 'busy' ? 'work' : halo.kind === 'error' || fault ? 'dim' : 'rest')
-  );
 </script>
 
 <div class="hero">
   <!-- One layer per strength, so a change cross-fades instead of jumping. -->
   {#each STRENGTHS as level (level)}
-    <div class="pool pool-{level}" class:on={strength === level} aria-hidden="true"></div>
+    <div class="pool pool-{level}" class:on={pool === level} aria-hidden="true"></div>
   {/each}
   <ProgressHalo kind={halo.kind} fraction={halo.fraction} label={halo.label} valuetext={halo.valuetext} />
   <div class="mascot">

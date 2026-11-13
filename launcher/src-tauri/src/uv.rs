@@ -15,7 +15,7 @@ use crate::manifest::{
     PACKAGE, PYTHON, Platform, UV_HTTP_TIMEOUT_SECS, WINDOWS_TORCH_BACKEND_ARGS,
 };
 use crate::paths::Layout;
-use crate::snapshot::{ErrorCode, LauncherError};
+use crate::snapshot::ErrorCode;
 use crate::spawn::hidden_command;
 use crate::version::is_prerelease;
 
@@ -136,30 +136,24 @@ pub fn install_args(platform: Platform, reinstall: bool, channel: Channel<'_>) -
     )
 }
 
-/// `uv tool install --upgrade --reinstall-package z-vision-generator z-vision-generator --python 3.14`: `uv tool
-/// upgrade` cannot take `--torch-backend`, so on Windows it would bring back a PyTorch without CUDA; installing
-/// with `--upgrade` over the existing tool takes the same arguments as the install. `--reinstall-package` implies
-/// `--refresh-package`, so uv looks past its cached index (PyPI lets it keep one for ten minutes) and finds a
-/// release published just before, and it reinstalls only the small app package, never its dependencies. The
-/// requirement on the command line replaces the receipt's, so a pinned repair does not hold the update back.
-/// `beta` adds `--prerelease allow`.
+/// `uv tool install --upgrade z-vision-generator --python 3.14`: `uv tool upgrade` cannot take `--torch-backend`, so
+/// on Windows it would bring back a PyTorch without CUDA; installing with `--upgrade` over the existing tool takes
+/// the same arguments as the install. `--upgrade` implies `--refresh`, so uv looks past its cached index (PyPI lets
+/// it keep one for ten minutes) and finds a release published just before. The requirement on the command line
+/// replaces the receipt's, so a pinned repair does not hold the update back. `beta` adds `--prerelease allow`.
 pub fn upgrade_args(platform: Platform, beta: bool) -> Vec<String> {
     let channel = if beta { Channel::Beta } else { Channel::Stable };
-    tool_install_args(
-        platform,
-        &["--upgrade", "--reinstall-package", PACKAGE],
-        channel,
-    )
+    tool_install_args(platform, &["--upgrade"], channel)
 }
 
 /// `uv cache clean`.
-pub fn cache_clean_args() -> Vec<&'static str> {
-    vec!["cache", "clean"]
+pub fn cache_clean_args() -> Vec<String> {
+    ["cache", "clean"].map(str::to_owned).to_vec()
 }
 
 /// `uv cache prune --ci`: drops what a CI cache would not keep, the downloaded wheels that are already installed.
-pub fn prune_args() -> Vec<&'static str> {
-    vec!["cache", "prune", "--ci"]
+pub fn prune_args() -> Vec<String> {
+    ["cache", "prune", "--ci"].map(str::to_owned).to_vec()
 }
 
 /// The error code for a failed uv call, read from the last lines of its output: a full disk is `low_disk`, a
@@ -179,7 +173,7 @@ pub fn classify_uv_failure(tail: &[String]) -> ErrorCode {
 /// A failed uv call: the error for the window and the last lines of uv's output for the log tail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UvFailure {
-    pub error: LauncherError,
+    pub error: ErrorCode,
     pub tail: Vec<String>,
 }
 
@@ -288,11 +282,8 @@ pub fn run<S: AsRef<OsStr>>(
     on_start: impl FnOnce(u32),
     on_line: impl FnMut(&str),
 ) -> Result<(), UvFailure> {
-    let launch_failed = |error: io::Error| UvFailure {
-        error: LauncherError {
-            code: ErrorCode::ToolBroken,
-            detail: Some(error.to_string()),
-        },
+    let launch_failed = |_: io::Error| UvFailure {
+        error: ErrorCode::ToolBroken,
         tail: Vec::new(),
     };
     let mut child = spawn(layout, args).map_err(launch_failed)?;
@@ -302,10 +293,7 @@ pub fn run<S: AsRef<OsStr>>(
         return Ok(());
     }
     Err(UvFailure {
-        error: LauncherError {
-            code: classify_uv_failure(&tail),
-            detail: None,
-        },
+        error: classify_uv_failure(&tail),
         tail,
     })
 }
@@ -429,15 +417,13 @@ mod tests {
     }
 
     #[test]
-    fn upgrade_installs_over_the_tool_reinstalling_only_the_package() {
+    fn upgrade_installs_over_the_tool_with_upgrade() {
         assert_eq!(
             upgrade_args(Platform::LinuxX64, false),
             [
                 "tool",
                 "install",
                 "--upgrade",
-                "--reinstall-package",
-                "z-vision-generator",
                 "z-vision-generator",
                 "--python",
                 "3.14"
@@ -448,8 +434,8 @@ mod tests {
             upgrade_args(Platform::LinuxX64, false)
         );
         let windows = upgrade_args(Platform::WindowsX64, false);
-        assert_eq!(windows[..8], upgrade_args(Platform::LinuxX64, false)[..]);
-        assert_eq!(windows[8..], TORCH_BACKEND);
+        assert_eq!(windows[..6], upgrade_args(Platform::LinuxX64, false)[..]);
+        assert_eq!(windows[6..], TORCH_BACKEND);
     }
 
     #[test]
@@ -463,17 +449,16 @@ mod tests {
     }
 
     #[test]
-    fn only_upgrade_reinstalls_the_package() {
+    fn no_command_reinstalls_a_single_package() {
         for platform in PLATFORMS {
-            assert!(!has(
-                &install_args(platform, false, STABLE),
-                "--reinstall-package"
-            ));
-            assert!(!has(
-                &install_args(platform, true, STABLE),
-                "--reinstall-package"
-            ));
-            assert!(has(&upgrade_args(platform, false), "--reinstall-package"));
+            for args in [
+                install_args(platform, false, STABLE),
+                install_args(platform, true, STABLE),
+                upgrade_args(platform, false),
+                upgrade_args(platform, true),
+            ] {
+                assert!(!has(&args, "--reinstall-package"), "{args:?}");
+            }
         }
     }
 
@@ -538,8 +523,8 @@ mod tests {
         );
         assert_eq!(install[7..], TORCH_BACKEND);
         let upgrade = upgrade_args(Platform::WindowsX64, true);
-        assert_eq!(upgrade[8..10], ["--prerelease", "allow"]);
-        assert_eq!(upgrade[10..], TORCH_BACKEND);
+        assert_eq!(upgrade[6..8], ["--prerelease", "allow"]);
+        assert_eq!(upgrade[8..], TORCH_BACKEND);
     }
 
     #[test]
@@ -723,7 +708,7 @@ mod tests {
                 "echo resolving; echo 'error: No space left on device (os error 28)' >&2; exit 2",
             );
             let failure = run(&layout, &["tool", "install"], |_| {}, |_| {}).unwrap_err();
-            assert_eq!(failure.error.code, ErrorCode::LowDisk);
+            assert_eq!(failure.error, ErrorCode::LowDisk);
             assert_eq!(failure.tail.len(), 2);
             assert!(failure.tail.iter().any(|line| line.contains("os error 28")));
         }
@@ -733,7 +718,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let layout = layout_with_uv(dir.path(), "echo 'error: no solution' >&2; exit 1");
             let failure = run(&layout, &["tool", "install"], |_| {}, |_| {}).unwrap_err();
-            assert_eq!(failure.error.code, ErrorCode::UvFailed);
+            assert_eq!(failure.error, ErrorCode::UvFailed);
         }
 
         #[test]
@@ -753,7 +738,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let layout = Layout::new(dir.path().to_path_buf());
             let failure = run(&layout, &["x"], |_| panic!("no process"), |_| {}).unwrap_err();
-            assert_eq!(failure.error.code, ErrorCode::ToolBroken);
+            assert_eq!(failure.error, ErrorCode::ToolBroken);
             assert!(failure.tail.is_empty());
         }
     }

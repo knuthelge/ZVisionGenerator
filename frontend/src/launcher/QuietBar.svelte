@@ -52,7 +52,7 @@
   }
 </script>
 
-<footer class="bar">
+<footer class="bar" data-testid="quiet-bar">
   {#if autostart !== null}
     <span class="login" bind:this={loginEl} onfocusin={() => relay('focus')} onfocusout={() => relay('blur')}>
       <Tooltip text={HINT} focusable={false} placement="top">
@@ -69,6 +69,7 @@
         icon
         disabled={busy}
         aria-label="More actions"
+        data-testid="more-button"
         aria-haspopup="menu"
         aria-expanded={moreOpen}
         onclick={() => (moreOpen = !moreOpen)}

@@ -1,8 +1,9 @@
 //! The Rust-to-window contract: the `Snapshot` the window renders, the `Controls` derived from it, and the ids they use.
 //!
 //! The wire format mirrors `frontend/src/launcher/types.ts`: fields are camelCase, enum values snake_case, and absent
-//! values are `null`. Words live in the window; Rust sends codes and raw values. Both sides derive the controls of a
-//! state from the snapshot and are tested against `launcher/contract/snapshot_cases.json`.
+//! values are `null`. Words live in the window; Rust sends codes and raw values. The controls of a state are derived
+//! here, once, and travel inside the snapshot; the window only reads them. [`controls`] is tested against
+//! `launcher/contract/snapshot_cases.json`, which the window's tests render too.
 
 use serde::{Deserialize, Serialize};
 
@@ -110,14 +111,6 @@ pub struct Progress {
     pub line: Option<String>,
 }
 
-/// A failure's code and an optional raw detail (free bytes, a path).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LauncherError {
-    pub code: ErrorCode,
-    pub detail: Option<String>,
-}
-
 /// Everything the window needs to draw one screen. Emitted whole on every state change.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -136,11 +129,15 @@ pub struct Snapshot {
     pub unsupported: Option<Unsupported>,
     pub progress: Option<Progress>,
     pub failed_action: Option<FailedAction>,
-    pub error: Option<LauncherError>,
+    pub error: Option<ErrorCode>,
+    /// Root, which an incomplete uninstall could not delete; set only with error `uninstall_incomplete`.
+    pub leftover_folder: Option<String>,
     /// Phases `failed` and `stopped` only.
     pub log_tail: Vec<String>,
     /// Unix milliseconds; phase `stopped` only.
     pub stopped_at: Option<i64>,
+    /// What the window shows and allows in this state; see [`controls`].
+    pub controls: Controls,
 }
 
 /// The main button of a screen.
@@ -169,7 +166,7 @@ pub enum MenuItem {
 }
 
 /// Which controls a screen shows. A command is allowed only when its control is available here.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Controls {
     pub primary: Option<Primary>,
@@ -256,11 +253,7 @@ pub fn controls(snapshot: &Snapshot) -> Controls {
                     c.primary = Some(Primary::Retry);
                     show_installed(&mut c, &WITHOUT_REPAIR);
                 }
-                Some(FailedAction::Update) => {
-                    c.primary = Some(Primary::Repair);
-                    show_installed(&mut c, &WITHOUT_REPAIR);
-                }
-                Some(FailedAction::Start) | None => {
+                Some(FailedAction::Start | FailedAction::Update) | None => {
                     c.primary = Some(Primary::Open);
                     show_installed(&mut c, &ALL);
                 }
@@ -286,7 +279,6 @@ mod tests {
     struct Case {
         name: String,
         snapshot: Snapshot,
-        controls: Controls,
     }
 
     fn cases() -> Vec<Case> {
@@ -307,6 +299,7 @@ mod tests {
             "4a needs_install",
             "4a needs_install with beta",
             "4b installing",
+            "4b installing with current tools",
             "4c failed install",
             "4c failed install (windows)",
             "5 starting",
@@ -346,12 +339,6 @@ mod tests {
                 "snapshot of {:?}",
                 case.name
             );
-            assert_eq!(
-                serde_json::to_value(&case.controls).unwrap(),
-                raw["controls"],
-                "controls of {:?}",
-                case.name
-            );
         }
     }
 
@@ -360,7 +347,7 @@ mod tests {
         for case in cases() {
             assert_eq!(
                 controls(&case.snapshot),
-                case.controls,
+                case.snapshot.controls,
                 "controls of {:?}",
                 case.name
             );

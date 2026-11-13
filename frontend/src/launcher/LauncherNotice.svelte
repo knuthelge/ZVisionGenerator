@@ -17,13 +17,13 @@
 </script>
 
 <!-- The notice slot above the action: a reason, a note, an alert, the log button or what stays. -->
-<div class="notice" data-kind={notice.kind}>
+<div class="notice" data-kind={notice.kind} data-testid="notice">
   {#if notice.kind === 'reason'}
     <ReasonCard
       name={notice.name}
       found={notice.found}
       needed={notice.needed}
-      link={notice.link ? { label: notice.link.label, onopen: () => onlink(notice.link!.id) } : undefined}
+      link={notice.link ? { id: notice.link.id, label: notice.link.label, onopen: () => onlink(notice.link!.id) } : undefined}
     />
   {:else if notice.kind === 'note'}
     <p class="note">
@@ -33,22 +33,22 @@
   {:else if notice.kind === 'update'}
     <div class="ui-alert ui-alert-info alert">
       <Icon name="up" size={14} />
-      <div class="alert-text"><b>{notice.lead}</b> {notice.text} <LauncherLink label={notice.link.label} onclick={() => onlink(notice.link.id)} /></div>
-      <Button onclick={onupdate}>{notice.button}</Button>
+      <div class="alert-text"><b>{notice.lead}</b> {notice.text} <LauncherLink id={notice.link.id} label={notice.link.label} onclick={() => onlink(notice.link.id)} /></div>
+      <Button data-testid="update-button" onclick={onupdate}>{notice.button}</Button>
     </div>
   {:else if notice.kind === 'newer'}
     <div class="ui-alert ui-alert-warning alert">
       <Icon name="alert" size={14} />
-      <div class="alert-text"><b>{notice.lead}</b> {notice.text} <LauncherLink label={notice.link.label} onclick={() => onlink(notice.link.id)} /></div>
+      <div class="alert-text"><b>{notice.lead}</b> {notice.text} <LauncherLink id={notice.link.id} label={notice.link.label} onclick={() => onlink(notice.link.id)} /></div>
     </div>
   {:else if notice.kind === 'log'}
-    <Button variant="quiet" size="sm" aria-haspopup="dialog" onclick={onlog}><Icon name="file" size={14} />{notice.label}</Button>
+    <Button variant="quiet" size="sm" aria-haspopup="dialog" data-testid="show-log" onclick={onlog}><Icon name="file" size={14} />{notice.label}</Button>
   {:else}
     <div class="kept">
       {#each notice.entries as entry (entry.path)}
         <code>{entry.path}</code><span>{entry.what}</span>
       {/each}
-      <p>{notice.help} <LauncherLink label={notice.link.label} onclick={() => onlink(notice.link.id)} /></p>
+      <p>{notice.help} <LauncherLink id={notice.link.id} label={notice.link.label} onclick={() => onlink(notice.link.id)} /></p>
     </div>
   {/if}
 </div>

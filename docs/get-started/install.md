@@ -76,7 +76,7 @@ Tick **Start at login** in the launcher window. The app then starts in the backg
 
 ### Update the app { #launcher-update }
 
-When a new version is out, the window offers **Update**. The app stops, updates and starts again. Your data and models stay. If the update doesn't finish, choose **Repair**.
+When a new version is out, the window offers **Update**. The app stops, updates and starts again. Your data and models stay. If the update doesn't finish, **Open** starts the app again and the update stays on offer. To reinstall, choose **Repair** in **More**.
 
 To try pre-release versions, open **More** and tick **Get beta versions**; it is there before you install too. The window then offers betas as updates (**Beta 0.15.0b1 is out.**) and marks an installed beta next to its version. Unticking it downloads nothing and never goes back to an older version: a beta stays installed, **Repair** reinstalls that same beta, and **Update** offers the next stable version once one newer than your beta is out.
 

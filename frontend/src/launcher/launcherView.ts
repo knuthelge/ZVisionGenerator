@@ -1,6 +1,6 @@
 // Pure view model of the launcher window: one snapshot in, everything the window shows out. The words live here (Rust
-// sends codes and raw values); `LauncherApp` only lays the result out. `launcherControls` mirrors
-// `snapshot::controls()` in Rust, and both are tested against the same fixture.
+// sends codes and raw values); `LauncherApp` only lays the result out. The controls come with the snapshot: Rust
+// derives them (`snapshot::controls()`), the window never does.
 import type { IconName } from '$lib/components/atoms/Icon.svelte';
 import type { MascotMood } from '$lib/components/atoms/Mascot.svelte';
 import type {
@@ -36,8 +36,6 @@ export interface HeroView {
   halo: HaloView;
   /** Shown as the stamp on the ring. */
   percent?: number;
-  /** The brand light dims: something is wrong or off. */
-  fault: boolean;
   /** The amber dot: an update is offered. */
   update: boolean;
   /** Strength of the brand light behind the ring. */
@@ -50,6 +48,8 @@ export interface SubView {
   /** The lead is a failure's cause, announced at once. */
   leadAlert: boolean;
   text: string;
+  /** A folder the text sends the user to, shown apart from it. */
+  folder?: string;
 }
 
 export interface PrimaryView {
@@ -110,74 +110,6 @@ export interface ViewOptions {
   formatTime?: (ms: number) => string;
 }
 
-const MENU_ALL: Controls['menu'] = ['repair', 'uninstall', 'beta'];
-const MENU_WITHOUT_REPAIR: Controls['menu'] = ['uninstall', 'beta'];
-
-/** Derive which controls the snapshot's state offers (the Phase x control table of the design). */
-export function launcherControls(s: Snapshot): Controls {
-  const c: Controls = { primary: null, update: false, log: false, bar: true, autostart: false, menu: [], locked: false };
-  const installed = (menu: Controls['menu']): void => {
-    c.autostart = true;
-    c.menu = [...menu];
-  };
-  switch (s.phase) {
-    case 'unsupported':
-      if (s.unsupported) c.primary = isFixable(s.unsupported) ? 'check_again' : 'see_requirements';
-      break;
-    case 'needs_install':
-      c.primary = 'install';
-      c.menu = ['beta'];
-      break;
-    case 'starting':
-      c.primary = 'starting';
-      c.locked = true;
-      installed(MENU_ALL);
-      break;
-    case 'running':
-      c.primary = 'open';
-      c.update = s.updateVersion !== null;
-      installed(MENU_ALL);
-      break;
-    case 'updating':
-    case 'repairing':
-      c.locked = true;
-      installed(MENU_ALL);
-      break;
-    case 'stopped':
-      c.primary = 'open';
-      c.log = true;
-      installed(MENU_ALL);
-      break;
-    case 'failed':
-      c.log = true;
-      if (s.failedAction === 'install') {
-        c.primary = 'retry';
-        // A failed install leaves a partial install behind; Windows' own uninstaller cleans it.
-        c.menu = s.packaging === 'windows_nsis' ? ['beta'] : [...MENU_WITHOUT_REPAIR];
-      } else if (s.failedAction === 'repair') {
-        c.primary = 'retry';
-        installed(MENU_WITHOUT_REPAIR);
-      } else if (s.failedAction === 'update') {
-        c.primary = 'repair';
-        installed(MENU_WITHOUT_REPAIR);
-      } else {
-        c.primary = 'open';
-        installed(MENU_ALL);
-      }
-      break;
-    case 'uninstalled':
-      c.primary = 'quit';
-      c.bar = false;
-      break;
-    case 'checking':
-    case 'move_to_applications':
-    case 'installing':
-    case 'uninstalling':
-      break;
-  }
-  return c;
-}
-
 function isFixable(u: Unsupported): boolean {
   return u.code === 'driver_too_old' || u.code === 'low_disk';
 }
@@ -225,8 +157,11 @@ function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1);
 }
 
-function leftoverText(s: Snapshot): string {
-  return s.error?.code === 'uninstall_incomplete' ? 'Some files could not be removed.' : '';
+/** What an uninstall that could not delete everything tells the user to do; empty when it deleted everything. */
+function leftoverSub(s: Snapshot): Pick<SubView, 'text' | 'folder'> {
+  return s.error === 'uninstall_incomplete' && s.leftoverFolder !== null
+    ? { text: 'Some files could not be removed. Delete this folder yourself:', folder: s.leftoverFolder }
+    : { text: '' };
 }
 
 /** How to bring the window back after closing it: Linux desktops may show no tray icon. */
@@ -244,8 +179,11 @@ const finishLead: Record<Packaging, string> = {
   linux_package: `Remove the ${NAME} package to finish.`
 };
 
+/** The codes an install, repair or update can fail with. */
+type ActionErrorCode = Exclude<ErrorCode, 'start_exited' | 'start_timeout' | 'uninstall_incomplete'>;
+
 /** The cause of a failed install or repair, and what to do next. */
-const causes: Record<ErrorCode, { lead: string; text: string }> = {
+const causes: Record<ActionErrorCode, { lead: string; text: string }> = {
   download_failed: {
     lead: 'The download didn’t finish.',
     text: 'Check the internet connection, then retry. What’s already downloaded is kept.'
@@ -269,14 +207,21 @@ const causes: Record<ErrorCode, { lead: string; text: string }> = {
   uv_failed: {
     lead: 'The installer stopped with an error.',
     text: 'Show the log for details, then retry. What’s already downloaded is kept.'
-  },
-  start_exited: { lead: 'It stopped while starting.', text: '' },
-  start_timeout: { lead: 'It didn’t answer in time.', text: '' },
-  uninstall_incomplete: { lead: '', text: '' }
+  }
 };
 
+/** What a failed start says, and what to do next. */
+const startTexts: Record<'start_exited' | 'start_timeout', string> = {
+  start_exited: 'It stopped while starting. Open tries again, and Repair, in the ⋯ menu, fixes a broken install.',
+  start_timeout: 'It didn’t answer in time. Open tries again, and Repair, in the ⋯ menu, fixes a broken install.'
+};
+
+/** What to do after a failed update: the app was stopped for it, and the offer is still there once it runs. */
+const UPDATE_NEXT = 'Open starts it again, and the update stays on offer.';
+
 function causeOf(s: Snapshot): { lead: string; text: string } {
-  return causes[s.error?.code ?? 'uv_failed'];
+  const code = s.error;
+  return code !== null && code in causes ? causes[code as ActionErrorCode] : causes.uv_failed;
 }
 
 /** Whether a version string is a development, alpha, beta or release-candidate version (`0.15.0b2`, `1.0rc1`). */
@@ -359,7 +304,6 @@ function heroOf(s: Snapshot, controls: Controls): HeroView {
     ...(s.phase === 'installing' || s.phase === 'repairing' ? (fraction !== null ? { mascotProgress: fraction } : {}) : {}),
     halo,
     ...(percent !== undefined ? { percent } : {}),
-    fault,
     update: controls.update,
     pool: poolOf(s, fault)
   };
@@ -445,12 +389,13 @@ function failedView(s: Snapshot): { headline: string; sub: SubView } {
     case 'update':
       return {
         headline: 'Update didn’t finish',
-        sub: { lead: null, leadAlert: false, text: 'Repair reinstalls the newest version. Your outputs, settings and models stay.' }
+        sub: { lead: cause.lead, leadAlert: true, text: UPDATE_NEXT }
       };
     default:
-      return s.error?.code === 'start_exited'
-        ? { headline: 'Didn’t start', sub: { lead: null, leadAlert: false, text: 'It stopped while starting. Open tries again.' } }
-        : { headline: 'Didn’t start', sub: { lead: null, leadAlert: false, text: 'It didn’t answer in time. Open tries again.' } };
+      return {
+        headline: 'Didn’t start',
+        sub: { lead: null, leadAlert: false, text: startTexts[s.error === 'start_timeout' ? 'start_timeout' : 'start_exited'] }
+      };
   }
 }
 
@@ -507,7 +452,7 @@ function defaultFormatTime(ms: number): string {
 /** Everything the window shows for `s`. */
 export function launcherView(s: Snapshot, options: ViewOptions = {}): LauncherView {
   const formatTime = options.formatTime ?? defaultFormatTime;
-  const controls = launcherControls(s);
+  const { controls } = s;
   const plain = (text: string): SubView => ({ lead: null, leadAlert: false, text });
   let headline = NAME;
   let sub: SubView | null = null;
@@ -596,11 +541,7 @@ export function launcherView(s: Snapshot, options: ViewOptions = {}): LauncherVi
       break;
     case 'uninstalled':
       headline = 'Uninstalled';
-      sub = {
-        lead: finishLead[s.packaging],
-        leadAlert: false,
-        text: leftoverText(s)
-      };
+      sub = { lead: finishLead[s.packaging], leadAlert: false, ...leftoverSub(s) };
       notice = {
         kind: 'kept',
         entries: [

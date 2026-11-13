@@ -1,7 +1,7 @@
 //! The launcher's two small files in Root: the running server's record and the saved preferences.
 //!
-//! Both are JSON with camelCase keys. The shapes and the stale-record decision are pure; reading, writing and
-//! deleting are thin edge functions. A missing or unreadable file reads as absent, never as an error the user sees.
+//! Both are JSON with camelCase keys. The shapes are pure; reading, writing and deleting are thin edge functions. A
+//! missing or unreadable file reads as absent, never as an error the user sees.
 
 use std::fs;
 use std::io;
@@ -10,7 +10,6 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::process_tree::same_process;
 use crate::version::Skip;
 
 /// `server.json`: the server the launcher started.
@@ -62,23 +61,6 @@ impl Prefs {
     pub fn set_skip(&mut self, version: &str, launcher: &str) {
         self.skip_version = Some(version.to_owned());
         self.skipped_by = Some(launcher.to_owned());
-    }
-}
-
-/// What to do with a leftover `server.json` at launch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StopOrDelete {
-    /// The recorded process is still the server: stop its tree, then delete the file.
-    Stop,
-    /// The process is gone or is another program that reused the PID: only delete the file.
-    Delete,
-}
-
-/// Decide about a leftover record, given the start time of the process now holding its PID (`None` when none does).
-pub fn stale_action(record: &ServerRecord, live_start: Option<u64>) -> StopOrDelete {
-    match live_start {
-        Some(start) if same_process(start, record.start_time) => StopOrDelete::Stop,
-        _ => StopOrDelete::Delete,
     }
 }
 
@@ -138,39 +120,6 @@ mod tests {
         start_time: 1_000,
         port: 8081,
     };
-
-    #[test]
-    fn a_live_process_with_the_recorded_start_time_is_stopped() {
-        assert_eq!(stale_action(&RECORD, Some(1_000)), StopOrDelete::Stop);
-    }
-
-    #[test]
-    fn start_times_within_five_seconds_are_the_same_process() {
-        assert_eq!(stale_action(&RECORD, Some(1_005)), StopOrDelete::Stop);
-        assert_eq!(stale_action(&RECORD, Some(995)), StopOrDelete::Stop);
-    }
-
-    #[test]
-    fn a_different_start_time_means_the_pid_was_reused() {
-        assert_eq!(stale_action(&RECORD, Some(1_006)), StopOrDelete::Delete);
-        assert_eq!(stale_action(&RECORD, Some(994)), StopOrDelete::Delete);
-        assert_eq!(stale_action(&RECORD, Some(50_000)), StopOrDelete::Delete);
-    }
-
-    #[test]
-    fn a_dead_process_only_has_its_record_deleted() {
-        assert_eq!(stale_action(&RECORD, None), StopOrDelete::Delete);
-    }
-
-    #[test]
-    fn a_start_time_near_zero_does_not_underflow() {
-        let record = ServerRecord {
-            start_time: 2,
-            ..RECORD
-        };
-        assert_eq!(stale_action(&record, Some(0)), StopOrDelete::Stop);
-        assert_eq!(stale_action(&record, Some(u64::MAX)), StopOrDelete::Delete);
-    }
 
     #[test]
     fn the_server_record_has_the_documented_keys() {

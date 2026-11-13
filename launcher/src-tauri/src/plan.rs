@@ -36,11 +36,17 @@ pub enum Step {
     StartServer { open_browser: bool },
 }
 
-/// The steps of `action` in order, each with the progress row it belongs to. An update downloads the tools only
-/// when `tools_current` is false (the installed tools are not the pinned ones); the other actions ignore it.
+/// The steps of `action` in order, each with the progress row it belongs to. An install or an update downloads the
+/// tools only when `tools_current` is false (the installed tools are not the pinned ones); a repair always does.
 pub fn steps(action: Action, tools_current: bool) -> Vec<(Step, StepId)> {
     use Step::*;
     match action {
+        Action::Install if tools_current => vec![
+            (ToolInstall { reinstall: false }, StepId::InstallApp),
+            (CachePrune, StepId::Finish),
+            (ReadVersion, StepId::Finish),
+            (StartServer { open_browser: true }, StepId::Finish),
+        ],
         Action::Install => vec![
             (FetchTools, StepId::DownloadTools),
             (ToolInstall { reinstall: false }, StepId::InstallApp),
@@ -108,8 +114,8 @@ mod tests {
             .collect()
     }
 
-    fn update_steps_with_stale_tools() -> Vec<Step> {
-        steps(Action::Update, false)
+    fn steps_with_stale_tools(action: Action) -> Vec<Step> {
+        steps(action, false)
             .into_iter()
             .map(|(step, _)| step)
             .collect()
@@ -125,7 +131,7 @@ mod tests {
     #[test]
     fn install_downloads_installs_prunes_reads_then_starts_with_the_browser() {
         assert_eq!(
-            only_steps(Action::Install),
+            steps_with_stale_tools(Action::Install),
             [
                 Step::FetchTools,
                 Step::ToolInstall { reinstall: false },
@@ -213,8 +219,12 @@ mod tests {
     #[test]
     fn progress_rows_per_action() {
         assert_eq!(
-            step_ids(Action::Install, true),
+            step_ids(Action::Install, false),
             [StepId::DownloadTools, StepId::InstallApp, StepId::Finish]
+        );
+        assert_eq!(
+            step_ids(Action::Install, true),
+            [StepId::InstallApp, StepId::Finish]
         );
         assert_eq!(
             step_ids(Action::Update, true),
@@ -257,7 +267,7 @@ mod tests {
     #[test]
     fn an_update_with_stale_tools_stops_the_server_then_downloads_before_upgrading() {
         assert_eq!(
-            update_steps_with_stale_tools(),
+            steps_with_stale_tools(Action::Update),
             [
                 Step::StopServer,
                 Step::FetchTools,
@@ -276,9 +286,20 @@ mod tests {
     }
 
     #[test]
-    fn install_and_repair_download_whatever_the_recorded_tools_are() {
-        for action in [Action::Install, Action::Repair] {
-            assert_eq!(steps(action, true), steps(action, false), "{action:?}");
-        }
+    fn an_install_with_current_tools_downloads_nothing() {
+        assert_eq!(
+            only_steps(Action::Install),
+            [
+                Step::ToolInstall { reinstall: false },
+                Step::CachePrune,
+                Step::ReadVersion,
+                Step::StartServer { open_browser: true },
+            ]
+        );
+    }
+
+    #[test]
+    fn repair_downloads_whatever_the_recorded_tools_are() {
+        assert_eq!(steps(Action::Repair, true), steps(Action::Repair, false));
     }
 }

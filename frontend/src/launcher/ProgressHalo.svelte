@@ -29,6 +29,7 @@
 
 <svg
   class="halo"
+  data-testid="halo"
   data-kind={kind}
   viewBox="0 0 176 176"
   width="176"
@@ -47,6 +48,7 @@
   <g class="halo-spin">
     <circle
       class="halo-arc"
+      data-testid="halo-arc"
       cx="88"
       cy="88"
       r={RADIUS}

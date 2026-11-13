@@ -211,7 +211,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="shell" bind:this={shell}>
+<div class="shell" bind:this={shell} data-testid="launcher" data-phase={visible ? phase : undefined}>
   {#if view && snapshot && visible}
     <header class="masthead">
       <Wordmark height={18} />
@@ -223,13 +223,12 @@
       mascotProgress={view.hero.mascotProgress}
       halo={view.hero.halo}
       percent={view.hero.percent}
-      fault={view.hero.fault}
       update={view.hero.update}
       pool={view.hero.pool}
     />
 
     <div class="text" role="status">
-      <p class="ui-area-label kicker" class:accent={view.kickerAccent}>{view.kicker}</p>
+      <p class="ui-area-label kicker" class:accent={view.kickerAccent} data-testid="kicker">{view.kicker}</p>
       {#key view.headline}
         <div class="swap" in:fly={{ y: 6, duration: motion(220) }} out:fade={{ duration: motion(120) }}>
           <h1 class="headline">{view.headline}</h1>
@@ -237,6 +236,7 @@
             <p class="sub">
               {#if view.sub.lead}<strong role={view.sub.leadAlert ? 'alert' : undefined}>{view.sub.lead}</strong>{/if}
               {view.sub.text}
+              {#if view.sub.folder}<code class="path folder" data-testid="leftover-folder">{view.sub.folder}</code>{/if}
             </p>
           {/if}
         </div>
@@ -259,7 +259,8 @@
               <div class="ui-action-bar">
                 <Button
                   main
-                  data-primary
+                  data-primary={view.primary.id}
+                  data-testid="primary"
                   variant={view.primary.variant}
                   loading={view.primary.loading}
                   onclick={() => primaryClick(view.primary!)}
@@ -268,7 +269,7 @@
                 </Button>
               </div>
             {:else if view.caption}
-              <div class="caption">
+              <div class="caption" data-testid="caption">
                 <span class="caption-label">{view.caption.label}</span>
                 {#if view.caption.line}<span class="caption-line">{view.caption.line}</span>{/if}
               </div>
@@ -291,7 +292,7 @@
     {#if view.notice?.kind === 'log'}
       <Sheet bind:open={logOpen} title={view.notice.sheetTitle}>
         {#snippet headActions()}
-          <Button variant="quiet" aria-label="Copy the end of the log" onclick={copyLog}><Icon name="copy" size={14} />{copied ? 'Copied' : 'Copy'}</Button>
+          <Button variant="quiet" aria-label="Copy the end of the log" data-testid="copy-log" onclick={copyLog}><Icon name="copy" size={14} />{copied ? 'Copied' : 'Copy'}</Button>
           <span class="sr-only" role="status">{copied ? 'Copied' : ''}</span>
         {/snippet}
         <div class="log-body">
@@ -306,7 +307,7 @@
         {UNINSTALL_DIALOG.staysBefore} <code class="path">{UNINSTALL_DIALOG.paths[0]}</code> {UNINSTALL_DIALOG.staysAnd}
         <code class="path">{UNINSTALL_DIALOG.paths[1]}</code>.
       </p>
-      <p><LauncherLink label={UNINSTALL_DIALOG.link.label} onclick={() => openLink(UNINSTALL_DIALOG.link.id)} /></p>
+      <p><LauncherLink id={UNINSTALL_DIALOG.link.id} label={UNINSTALL_DIALOG.link.label} onclick={() => openLink(UNINSTALL_DIALOG.link.id)} /></p>
     </ConfirmDialog>
   {/if}
 </div>
@@ -334,6 +335,7 @@
   .headline { margin: 4px 0 0; font-family: var(--font-heading); font-size: var(--text-display); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-wrap: balance; color: var(--color-text-primary); }
   .sub { margin: 6px 0 0; max-width: 340px; font-size: var(--text-content); line-height: 1.5; text-wrap: pretty; color: var(--color-text-secondary); }
   .sub strong { display: block; font-weight: 600; color: var(--color-text-primary); }
+  .sub .folder { display: block; margin-top: 4px; font-size: var(--text-meta); overflow-wrap: anywhere; user-select: all; }
 
   .action-zone { flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0 32px 16px; }
   .slot { display: grid; width: 100%; min-height: var(--spacing-bar); }
