@@ -1,6 +1,6 @@
 # A desktop launcher
 
-**Status:** Proposed (2026-11-12). The concept and the main technical choices are agreed. A spike on all three platforms comes before the build. The first round is unsigned, for testing. No changes to the app: the launcher uses only `ziv ui`'s public flags.
+**Status:** In progress (2026-11-13). Round 1 (unsigned, for testing) is built and verified end to end on Linux. It awaits the macOS and Windows checks below and has no `launcher-v*` release yet. No changes to the app: the launcher uses only `ziv ui`'s public flags.
 
 ## Why
 
@@ -8,7 +8,7 @@ Today the app can only be installed and started from a terminal: install uv, run
 
 ## What the user sees and does
 
-- **Install:** downloads the launcher for their platform from the link in the install guide (a `.dmg` on macOS, an installer `.exe` on Windows, an AppImage, `.deb` or `.rpm` on Linux, whichever the spike picks) and opens it. A small window checks the machine, then sets up the app with a progress bar. On macOS, if the launcher is running from the mounted `.dmg` or a quarantined download location, it first asks the user to move it to Applications, because start at login and later starts need a fixed location. It says up front that the first install downloads several GB. When it's done, the Web UI opens in the browser, and the existing first-run dialog offers an image model as today.
+- **Install:** downloads the launcher for their platform from the link in the install guide (a `.dmg` on macOS, an installer `.exe` on Windows, an AppImage, `.deb` or `.rpm` on Linux) and opens it. A small window checks the machine, then sets up the app with a progress bar. On macOS, if the launcher is running from the mounted `.dmg` or a quarantined download location, it first asks the user to move it to Applications, because start at login and later starts need a fixed location. It says up front that the first install downloads several GB. When it's done, the Web UI opens in the browser, and the existing first-run dialog offers an image model as today.
 - **Start:** opens the launcher. The app starts and the Web UI opens in the browser. Opening the launcher again while the app is running brings its window forward.
 - **Use:** works in the Web UI as today.
 - **Stop:** chooses Quit in the launcher window or the tray menu. Every other way the launcher exits (Cmd+Q, Quit from the Dock, logging out or shutting down) stops the app the same way.
@@ -26,7 +26,7 @@ One small fixed-size window holds everything. It shows the app's state (checking
 - **Open Z-Vision Generator**: opens the Web UI in the browser, starting the app first if it has stopped, for example after a crash.
 - **Update**: only when a new version is out.
 - **Start at login**: a checkbox, off by default.
-- **Repair** and **Uninstall**.
+- **Repair** and **Uninstall**, in the ⋯ menu with **Get beta versions**. The menu is locked while the app is starting.
 - **Quit**: stops the app and closes the launcher.
 
 Closing the window only hides it; the app keeps running. It opens on first install and when the launcher is started by hand (on macOS also from the Dock icon), not when it's started at login.
@@ -71,7 +71,7 @@ Start at login uses the Tauri autostart plugin: a LaunchAgent on macOS, the `Run
 
 ### Updates
 
-**The app.** The launcher checks the PyPI JSON API for `z-vision-generator` at start and once a day, and offers Update when a newer stable release is out. Update stops the server, runs `uv tool upgrade` (on Windows with the Windows arguments) and starts the server again. If the upgrade or the restart fails, the window says so and offers Repair.
+**The app.** The launcher checks the PyPI JSON API for `z-vision-generator` at start and once a day, and offers Update when a newer stable release is out. A "Get beta versions" item in the ⋯ menu, off by default, also offers pre-releases; it never downgrades. Update stops the server, runs `uv tool upgrade` with `--reinstall-package z-vision-generator` (on Windows with the Windows arguments) and starts the server again. If the upgrade or the restart fails, the window says so and offers Repair.
 
 A future app release may need something this launcher doesn't provide, such as a newer Python. Then `uv tool upgrade` succeeds without installing it. So after upgrading, the launcher checks that the installed version actually changed; if it didn't, it shows "This update needs a newer launcher" with a link to the install guide and stops offering that version.
 
@@ -83,7 +83,7 @@ The launcher downloads no models. The first-run dialog already picks an image mo
 
 ### Releases
 
-The launcher has its own release workflow, started by `launcher-v*` tags, separate from the app's `v*` release. It builds the launcher for macOS (arm64), Windows and Linux (an AppImage, or a `.deb` and an `.rpm`; see the spike) and publishes them as a GitHub release that isn't marked as the latest, so app releases stay on top. A separate workflow means an app release doesn't rebuild the launcher, and a failed launcher build can't leave a half-finished app release behind after the PyPI publish. The existing workflow's prerelease rule (any tag containing `a`, `b` or `rc`) must not be copied: it matches every `launcher-` tag.
+The launcher has its own release workflow, started by `launcher-v*` tags, separate from the app's `v*` release. It builds the launcher for macOS (arm64), Windows and Linux (an AppImage, a `.deb` and an `.rpm`) and publishes them as a GitHub release that isn't marked as the latest, so app releases stay on top. A separate workflow means an app release doesn't rebuild the launcher, and a failed launcher build can't leave a half-finished app release behind after the PyPI publish. The existing workflow's prerelease rule (any tag containing `a`, `b` or `rc`) must not be copied: it matches every `launcher-` tag.
 
 Because a launcher release is never "latest", the install guide links to the exact `launcher-v…` release, and that link is updated as part of each launcher release. Asset file names stay the same from release to release.
 
@@ -99,20 +99,14 @@ The install guide gets a launcher section next to the terminal install. The trou
 
 The install page in the docs shows these steps with screenshots. Signing later costs $99 a year for Apple (with notarization) and about $10 a month for Azure Artifact Signing on Windows; whether an individual in the EU qualifies for the Azure service is unconfirmed.
 
-## Spike before the build
+## Checks
 
-On macOS, Windows and Linux:
+Linux was verified end to end. What remains is the macOS and Windows pass, plus a few Linux distros:
 
-- That CUDA torch survives an update on Windows.
-- How to show install progress: uv has no machine-readable progress and hides its bars when it isn't writing to a terminal. Options are its per-package lines or the folder size against the measured total. Also a good `UV_HTTP_TIMEOUT` for slow connections.
-- A GPL ffmpeg and ffprobe source for each platform, macOS arm64 in particular.
-- The install size on Windows and macOS, and the first-install time on a normal connection.
-- Gatekeeper on macOS 15 and 26 with a downloaded `.dmg`: `codesign -dv` reports an ad-hoc signature, Open Anyway works, the move-to-Applications prompt appears when run from the `.dmg`, and the uv, Python and ffmpeg the launcher downloads itself aren't quarantined.
-- The launcher folder's size after one real update that changes torch, to confirm `uv cache prune --ci` keeps it flat.
-- A Windows account whose username has spaces or non-ASCII characters, and the macOS folder path with its space (`Application Support`).
-- Uninstalling on Windows while the app is running: the folder is fully removed.
-- The tray on Ubuntu 24.04, KDE and Fedora GNOME.
-- The Linux format: an AppImage if it starts on a fresh Ubuntu 24.04 (which doesn't ship `libfuse2`) and on Fedora, including Fedora GNOME without the AppIndicator library; otherwise a `.deb` plus an `.rpm`, which Tauri builds from the same config, checked by double-clicking the `.deb` in Ubuntu's App Center.
+- **macOS 15 and 26 (Apple silicon):** first open from the `.dmg` shows the move-to-Applications message; Gatekeeper blocks the first open and Open Anyway works (`codesign -dv` reports an ad-hoc signature); the uv, Python and ffmpeg the launcher downloads aren't quarantined; install, start, Quit, start at login (LaunchAgent), the menu-bar icon, Update, Repair and Uninstall work.
+- **Windows 11 (RTX 20-series or newer):** SmartScreen allows the setup `.exe` (per-user, no admin); no console window appears; CUDA torch survives an Update; a username with spaces or non-ASCII characters works; start at login (Run value) and the tray icon work; Quit, a shutdown with the app running and Uninstall (from the window and from Settings, Apps) leave nothing running or behind.
+- **Measured size:** the install size and first-install time on both, to replace the Windows and macOS `EXPECTED_CACHE_BYTES` placeholders in `launcher/src-tauri/src/manifest.rs` (Linux is measured), and the folder size staying flat after an Update that changes torch.
+- **Linux distros:** the AppImage on a fresh Ubuntu 24.04 (no `libfuse2`) and on Fedora, the tray on KDE and on Fedora GNOME without AppIndicator, and the `.deb` from Ubuntu's App Center.
 
 ## Alternatives
 
