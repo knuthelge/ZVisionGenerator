@@ -8,12 +8,8 @@
 //! Everything that touches the machine goes through the [`Runner`] trait, so tests drive whole flows with a fake and
 //! the controller has no Tauri dependency: the snapshot leaves through an injected callback, and "exit the app" is an
 //! injected callback too. [`SystemRunner`] is the real implementation.
-//!
-//! [`after_upgrade`] is the pure decision; the rest is plumbing around it.
 
 use std::io;
-use std::ops::Deref;
-use std::process::ExitStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -23,7 +19,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::manifest::{self, Platform};
 use crate::opener;
 use crate::paths::{Layout, default_root};
-use crate::plan::{self, Action, Step};
+use crate::plan::{Action, Plan, Step};
 use crate::process_tree::{self, Member, STOP_GRACE};
 use crate::progress::{self, SAMPLE_INTERVAL, SNAPSHOT_INTERVAL, Throttle};
 use crate::records::{self, Prefs, ServerRecord};
@@ -34,14 +30,14 @@ use crate::snapshot::{
 };
 use crate::uninstall;
 use crate::uv::{self, Channel, TAIL_LINES, UvFailure};
-use crate::version::{self, Offer};
+use crate::version;
 use crate::{download, machine};
 
 /// The error string of a command whose control is not available.
 pub const BUSY: &str = "busy";
 
 /// How often the launcher asks PyPI for a newer version of the app.
-pub const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Receives every snapshot the window should see. It runs inside the controller's lock, so it must not call back
 /// into the controller (Tauri's `emit` does not).
@@ -64,14 +60,15 @@ pub trait Runner: Send + Sync + 'static {
     fn tools_present(&self, layout: &Layout) -> bool;
     /// Download and unpack uv and ffmpeg.
     fn fetch_tools(&self, layout: &Layout, platform: Platform) -> Result<(), ErrorCode>;
-    /// Run uv to completion. `on_start` gets its process id when it runs, `on_line` every output line.
+    /// Run uv to completion and return the last lines of its output. `on_start` gets its process id when it runs,
+    /// `on_line` every output line.
     fn run_uv(
         &self,
         layout: &Layout,
         args: &[String],
         on_start: &mut dyn FnMut(u32),
         on_line: &mut dyn FnMut(&str),
-    ) -> Result<(), UvFailure>;
+    ) -> Result<Vec<String>, UvFailure>;
     /// The size of uv's cache in bytes.
     fn cache_size(&self, layout: &Layout) -> u64;
     /// The installed app's version.
@@ -83,7 +80,7 @@ pub trait Runner: Send + Sync + 'static {
     /// Stop a process and everything it started.
     fn stop_tree(&self, pid: u32, start_time: u64, grace: Duration);
     /// Deal with a `server.json` an earlier run left behind.
-    fn clear_stale_record(&self, layout: &Layout, grace: Duration) -> io::Result<()>;
+    fn clear_stale_record(&self, layout: &Layout, grace: Duration);
     /// The port the server should start on.
     fn choose_port(&self, last: Option<u16>) -> u16;
     /// Start the server and write `server.json`; `on_exit` is called once, when the process ends.
@@ -96,12 +93,7 @@ pub trait Runner: Send + Sync + 'static {
     /// Wait for the server to answer; `stopped` says it is gone or a stop was asked for.
     fn wait_for_server(&self, port: u16, stopped: &mut dyn FnMut() -> bool) -> Readiness;
     /// Stop the server's tree and delete `server.json`.
-    fn stop_server(
-        &self,
-        layout: &Layout,
-        record: &ServerRecord,
-        grace: Duration,
-    ) -> io::Result<()>;
+    fn stop_server(&self, layout: &Layout, record: &ServerRecord, grace: Duration);
     /// The last lines of the server's log.
     fn read_log_tail(&self, layout: &Layout) -> Vec<String>;
     /// Open `url` in the default browser.
@@ -147,8 +139,6 @@ pub struct Config {
     /// `None` on a target the launcher has no pins for: installing then fails with `tool_broken`.
     pub platform: Option<Platform>,
     pub packaging: Packaging,
-    /// The launcher's own version; a stored skip applies only to the launcher that stored it.
-    pub launcher_version: String,
     pub timing: Timing,
 }
 
@@ -159,33 +149,8 @@ impl Config {
             layout: Layout::new(default_root()?),
             platform: Platform::current(),
             packaging: uninstall::current_packaging(),
-            launcher_version: env!("CARGO_PKG_VERSION").to_owned(),
             timing: Timing::default(),
         })
-    }
-}
-
-/// How an upgrade ended.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Outcome {
-    /// The installed version changed (or cannot be told): carry on.
-    Upgraded,
-    /// The version did not move although `offered` is newer: the release needs a newer launcher.
-    NeedsNewerLauncher(String),
-}
-
-/// Judge an upgrade from the version before and the one actually installed after. Only "no change although a newer
-/// version was offered" is a failure to upgrade; a pre-release moving to another pre-release is a change.
-pub fn after_upgrade(before: Option<&str>, after: Option<&str>, offered: &str) -> Outcome {
-    let unchanged = match (before, after) {
-        (Some(before), Some(after)) => version::same_version(before, after),
-        _ => false,
-    };
-    match after {
-        Some(after) if unchanged && version::is_newer(offered, after) => {
-            Outcome::NeedsNewerLauncher(offered.to_owned())
-        }
-        _ => Outcome::Upgraded,
     }
 }
 
@@ -219,7 +184,7 @@ fn running_phase(action: Action) -> Phase {
     }
 }
 
-/// Seconds-since-epoch helper for `stoppedAt`.
+/// The current time in Unix milliseconds, for `stoppedAt`.
 fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -242,14 +207,15 @@ struct Failure {
     tail: Vec<String>,
 }
 
-impl Failure {
-    fn new(action: FailedAction, error: ErrorCode, tail: Vec<String>) -> Self {
-        Self {
-            action,
-            error,
-            tail,
-        }
-    }
+/// What one run of an action knows across its steps.
+struct Run {
+    action: Action,
+    /// The installed version when the action began.
+    before: Option<String>,
+    /// The version the update offered when the action began.
+    offered: Option<String>,
+    /// The end of uv's output from the last upgrade.
+    upgrade_tail: Vec<String>,
 }
 
 type Flow = Result<(), Abort>;
@@ -282,15 +248,17 @@ struct Inner {
     throttle: Throttle,
 }
 
-pub struct Shared {
+struct Shared {
     config: Config,
     runner: Arc<dyn Runner>,
     emit: Emit,
     exit: Exit,
     inner: Mutex<Inner>,
     idle: Condvar,
-    /// Held while shutting down; `true` once done, so the work happens exactly once.
-    shutdown_done: Mutex<bool>,
+    /// Held while shutting down, so the work happens exactly once and a second caller waits for it.
+    shutdown_lock: Mutex<()>,
+    /// Set when the shutdown work is done; the app exits only after that.
+    stopped: AtomicBool,
     /// A flow's end tells the update timer to check; dropping the sender ends the timer.
     update_signal: Mutex<Option<Sender<()>>>,
 }
@@ -303,14 +271,6 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[derive(Clone)]
 pub struct Controller(Arc<Shared>);
 
-impl Deref for Controller {
-    type Target = Shared;
-
-    fn deref(&self) -> &Shared {
-        &self.0
-    }
-}
-
 impl Controller {
     /// Build a controller in phase `checking`, reading `launcher.json` and the start-at-login state.
     pub fn new(config: Config, runner: Arc<dyn Runner>, emit: Emit, exit: Exit) -> Self {
@@ -319,7 +279,6 @@ impl Controller {
             phase: Phase::Checking,
             installed_version: None,
             update_version: None,
-            needs_newer_launcher: None,
             autostart: runner.autostart_enabled(),
             beta: prefs.beta,
             packaging: config.packaging,
@@ -350,19 +309,20 @@ impl Controller {
                 throttle,
             }),
             idle: Condvar::new(),
-            shutdown_done: Mutex::new(false),
+            shutdown_lock: Mutex::new(()),
+            stopped: AtomicBool::new(false),
             update_signal: Mutex::new(None),
         }))
     }
 
     /// The current snapshot (the window's `get_snapshot`).
     pub fn snapshot(&self) -> Snapshot {
-        lock(&self.inner).snapshot.clone()
+        lock(&self.0.inner).snapshot.clone()
     }
 
     /// Whether the app is installed, for deciding whether a start-at-login launch shows the window.
     pub fn is_installed(&self) -> bool {
-        self.runner.is_installed(&self.config.layout)
+        self.0.runner.is_installed(&self.0.config.layout)
     }
 
     // ----- plumbing -------------------------------------------------------------------------------------------
@@ -370,12 +330,12 @@ impl Controller {
     /// Send the current snapshot to the window, with the controls of its state.
     fn publish(&self, inner: &mut Inner) {
         inner.snapshot.controls = controls(&inner.snapshot);
-        (self.emit)(&inner.snapshot);
+        (self.0.emit)(&inner.snapshot);
     }
 
     /// Change the state under the lock and send the result.
     fn update<R>(&self, change: impl FnOnce(&mut Inner) -> R) -> R {
-        let mut inner = lock(&self.inner);
+        let mut inner = lock(&self.0.inner);
         let result = change(&mut inner);
         self.publish(&mut inner);
         result
@@ -383,7 +343,7 @@ impl Controller {
 
     /// Change progress details and send the result at most four times a second.
     fn update_progress(&self, change: impl FnOnce(&mut Progress)) {
-        let mut inner = lock(&self.inner);
+        let mut inner = lock(&self.0.inner);
         let Some(progress) = inner.snapshot.progress.as_mut() else {
             return;
         };
@@ -400,7 +360,7 @@ impl Controller {
         allowed: impl FnOnce(&Controls) -> bool,
         act: impl FnOnce(&mut Inner) -> R,
     ) -> Result<R, String> {
-        let mut inner = lock(&self.inner);
+        let mut inner = lock(&self.0.inner);
         if inner.quitting || !allowed(&controls(&inner.snapshot)) {
             return Err(BUSY.to_owned());
         }
@@ -417,19 +377,19 @@ impl Controller {
         ) {
             return;
         }
-        let _ = records::write_prefs(&self.config.layout.launcher_json, &inner.prefs);
+        let _ = records::write_prefs(&self.0.config.layout.launcher_json, &inner.prefs);
     }
 
     /// Run `work` on a worker thread; [`Controller::wait_idle`] and the worker count follow it.
     fn spawn_worker(&self, work: impl FnOnce(&Controller) + Send + 'static) {
-        lock(&self.inner).workers += 1;
+        lock(&self.0.inner).workers += 1;
         let me = self.clone();
         thread::Builder::new()
             .name("launcher-worker".to_owned())
             .spawn(move || {
                 work(&me);
-                lock(&me.inner).workers -= 1;
-                me.idle.notify_all();
+                lock(&me.0.inner).workers -= 1;
+                me.0.idle.notify_all();
             })
             .expect("the system can start a thread");
     }
@@ -438,12 +398,13 @@ impl Controller {
     #[cfg(test)]
     fn wait_idle(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
-        let mut inner = lock(&self.inner);
+        let mut inner = lock(&self.0.inner);
         while inner.workers > 0 {
             let Some(left) = deadline.checked_duration_since(Instant::now()) else {
                 return false;
             };
             inner = self
+                .0
                 .idle
                 .wait_timeout(inner, left)
                 .unwrap_or_else(PoisonError::into_inner)
@@ -453,7 +414,7 @@ impl Controller {
     }
 
     fn quitting(&self) -> bool {
-        lock(&self.inner).quitting
+        lock(&self.0.inner).quitting
     }
 
     // ----- launch ---------------------------------------------------------------------------------------------
@@ -470,24 +431,24 @@ impl Controller {
     /// entry is rewritten with the current path, then an installed app starts and anything else is checked for
     /// support.
     fn launch(&self, background: bool) {
-        if self.runner.must_move_to_applications() {
+        if self.0.runner.must_move_to_applications() {
             self.update(|inner| inner.snapshot.phase = Phase::MoveToApplications);
             return;
         }
         // Writing the entry again points it at this launcher's path: an AppImage that was moved or replaced, or a
         // package that was reinstalled elsewhere, would otherwise leave a login entry that starts nothing.
         if self.snapshot().autostart {
-            let _ = self.runner.set_autostart(true);
+            let _ = self.0.runner.set_autostart(true);
         }
-        let layout = &self.config.layout;
-        let _ = self
+        let layout = &self.0.config.layout;
+        self.0
             .runner
-            .clear_stale_record(layout, self.config.timing.stop_grace);
-        if !self.runner.is_installed(layout) {
+            .clear_stale_record(layout, self.0.config.timing.stop_grace);
+        if !self.0.runner.is_installed(layout) {
             self.check_machine();
             return;
         }
-        let installed = self.runner.read_version(layout);
+        let installed = self.0.runner.read_version(layout);
         self.update(|inner| {
             inner.snapshot.installed_version = installed;
             inner.snapshot.phase = Phase::Starting;
@@ -498,7 +459,7 @@ impl Controller {
 
     /// Run the machine check and show its verdict.
     fn check_machine(&self) {
-        let verdict = self.runner.check_machine(&self.config.layout);
+        let verdict = self.0.runner.check_machine(&self.0.config.layout);
         if self.quitting() {
             return;
         }
@@ -520,7 +481,7 @@ impl Controller {
         if let Err(Abort::Fail(failure)) = result {
             self.fail(failure);
         }
-        if let Some(signal) = lock(&self.update_signal).as_ref() {
+        if let Some(signal) = lock(&self.0.update_signal).as_ref() {
             let _ = signal.send(());
         }
     }
@@ -566,7 +527,7 @@ impl Controller {
 
     /// `retry`: run the failed install or repair again.
     pub fn retry(&self) -> Result<(), String> {
-        let action = match lock(&self.inner).snapshot.failed_action {
+        let action = match lock(&self.0.inner).snapshot.failed_action {
             Some(FailedAction::Repair) => Action::Repair,
             _ => Action::Install,
         };
@@ -592,17 +553,19 @@ impl Controller {
         allowed: impl FnOnce(&Controls) -> bool,
         action: Action,
     ) -> Result<(), String> {
-        self.gated(allowed, |inner| {
+        // The plan is built once: its rows go into the snapshot and its steps to the worker.
+        let steps = self.gated(allowed, |inner| {
             let current = tools_current(
                 inner,
-                &*self.runner,
-                &self.config.layout,
-                self.config.platform,
+                &*self.0.runner,
+                &self.0.config.layout,
+                self.0.config.platform,
             );
+            let Plan { rows, steps } = Plan::new(action, current);
             let snapshot = &mut inner.snapshot;
             snapshot.phase = running_phase(action);
             snapshot.progress = Some(Progress {
-                steps: plan::step_ids(action, current),
+                steps: rows,
                 index: 0,
                 fraction: None,
                 line: None,
@@ -611,9 +574,10 @@ impl Controller {
             snapshot.error = None;
             snapshot.log_tail = Vec::new();
             snapshot.unsupported = None;
+            steps
         })?;
         self.spawn_worker(move |me| {
-            let result = me.run_action(action);
+            let result = me.run_action(action, &steps);
             me.end_flow(result);
         });
         Ok(())
@@ -637,7 +601,7 @@ impl Controller {
             },
         )?;
         match running_on {
-            Some(port) => self.runner.open_url(&browser_url(port)),
+            Some(port) => self.0.runner.open_url(&browser_url(port)),
             None => self.spawn_worker(|me| {
                 let result = me.start_server(true);
                 me.end_flow(result);
@@ -674,8 +638,11 @@ impl Controller {
             },
         )?;
         if windows {
-            self.runner.start_uninstaller().map_err(|e| e.to_string())?;
-            (self.exit)();
+            self.0
+                .runner
+                .start_uninstaller()
+                .map_err(|e| e.to_string())?;
+            (self.0.exit)();
         } else {
             self.spawn_worker(|me| me.run_uninstall());
         }
@@ -685,7 +652,7 @@ impl Controller {
     /// `set_autostart`: turn start at login on or off; returns the new state.
     pub fn set_autostart(&self, enabled: bool) -> Result<bool, String> {
         self.gated(|c| c.autostart && !c.locked, |_| ())?;
-        let state = self.runner.set_autostart(enabled)?;
+        let state = self.0.runner.set_autostart(enabled)?;
         self.update(|inner| inner.snapshot.autostart = state);
         Ok(state)
     }
@@ -710,29 +677,27 @@ impl Controller {
 
     // ----- the flows ------------------------------------------------------------------------------------------
 
-    /// Run the steps of `action` in order.
-    fn run_action(&self, action: Action) -> Flow {
-        let (before, offered, current) = {
-            let inner = lock(&self.inner);
+    /// Run the steps of `action` in order, each in its row of the progress list.
+    fn run_action(&self, action: Action, steps: &[(Step, usize)]) -> Flow {
+        let (before, offered) = {
+            let inner = lock(&self.0.inner);
             (
                 inner.snapshot.installed_version.clone(),
                 inner.snapshot.update_version.clone(),
-                tools_current(
-                    &inner,
-                    &*self.runner,
-                    &self.config.layout,
-                    self.config.platform,
-                ),
             )
         };
-        let ids = plan::step_ids(action, current);
-        for (step, id) in plan::steps(action, current) {
+        let mut run = Run {
+            action,
+            before,
+            offered,
+            upgrade_tail: Vec::new(),
+        };
+        for &(step, row) in steps {
             if self.quitting() {
                 return Err(Abort::Quit);
             }
-            let row = ids.iter().position(|candidate| *candidate == id);
-            self.enter_step(row.unwrap_or(0));
-            self.run_step(action, step, before.as_deref(), offered.as_deref())?;
+            self.enter_step(row);
+            self.run_step(&mut run, step)?;
         }
         Ok(())
     }
@@ -748,37 +713,37 @@ impl Controller {
         });
     }
 
-    fn run_step(
-        &self,
-        action: Action,
-        step: Step,
-        before: Option<&str>,
-        offered: Option<&str>,
-    ) -> Flow {
-        let failed = failed_action(action);
-        let layout = &self.config.layout;
+    fn run_step(&self, run: &mut Run, step: Step) -> Flow {
+        let failed = failed_action(run.action);
+        let layout = &self.0.config.layout;
         match step {
             Step::StopServer => {
                 self.stop_server();
                 Ok(())
             }
-            Step::CheckDisk => self
-                .runner
-                .check_disk(layout)
-                .map_err(|_| Abort::Fail(Failure::new(failed, ErrorCode::LowDisk, Vec::new()))),
+            Step::CheckDisk => self.0.runner.check_disk(layout).map_err(|_| {
+                Abort::Fail(Failure {
+                    action: failed,
+                    error: ErrorCode::LowDisk,
+                    tail: Vec::new(),
+                })
+            }),
             Step::FetchTools => {
                 let platform = self.platform(failed)?;
-                self.runner
+                self.0
+                    .runner
                     .fetch_tools(layout, platform)
                     .map_err(|error| self.fetch_failure(failed, error))?;
                 self.record_tools(platform);
                 Ok(())
             }
-            Step::CacheClean => self.run_uv_step(failed, &uv::cache_clean_args(), false),
+            Step::CacheClean => self
+                .run_uv_step(failed, &uv::cache_clean_args(), false)
+                .map(drop),
             Step::ToolInstall { reinstall } => {
                 let platform = self.platform(failed)?;
                 let (beta, installed) = {
-                    let inner = lock(&self.inner);
+                    let inner = lock(&self.0.inner);
                     (inner.prefs.beta, inner.snapshot.installed_version.clone())
                 };
                 let channel = if reinstall {
@@ -787,18 +752,19 @@ impl Controller {
                     Channel::for_install(beta)
                 };
                 let args = uv::install_args(platform, reinstall, channel);
-                self.run_uv_step(failed, &args, true)
+                self.run_uv_step(failed, &args, true).map(drop)
             }
             Step::ToolUpgrade => {
                 let platform = self.platform(failed)?;
-                let beta = lock(&self.inner).prefs.beta;
-                self.run_uv_step(failed, &uv::upgrade_args(platform, beta), false)
-            }
-            Step::CachePrune => self.run_uv_step(failed, &uv::prune_args(), false),
-            Step::ReadVersion => {
-                let after = self.runner.read_version(layout);
-                self.record_version(action, before, after, offered);
+                let beta = lock(&self.0.inner).prefs.beta;
+                run.upgrade_tail =
+                    self.run_uv_step(failed, &uv::upgrade_args(platform, beta), false)?;
                 Ok(())
+            }
+            Step::CachePrune => self.run_uv_step(failed, &uv::prune_args(), false).map(drop),
+            Step::ReadVersion => {
+                let after = self.0.runner.read_version(layout);
+                self.record_version(run, after)
             }
             Step::StartServer { open_browser } => self.start_server(open_browser),
         }
@@ -806,120 +772,134 @@ impl Controller {
 
     /// Remember that the pinned tools of `platform` are installed.
     fn record_tools(&self, platform: Platform) {
-        let mut inner = lock(&self.inner);
+        let mut inner = lock(&self.0.inner);
         inner.prefs.set_tool_pins(&manifest::pins(platform));
         self.save_prefs(&inner);
     }
 
     fn platform(&self, action: FailedAction) -> Result<Platform, Abort> {
-        self.config
-            .platform
-            .ok_or_else(|| Abort::Fail(Failure::new(action, ErrorCode::ToolBroken, Vec::new())))
+        self.0.config.platform.ok_or_else(|| {
+            Abort::Fail(Failure {
+                action,
+                error: ErrorCode::ToolBroken,
+                tail: Vec::new(),
+            })
+        })
     }
 
     fn fetch_failure(&self, action: FailedAction, error: ErrorCode) -> Abort {
         if self.quitting() {
             Abort::Quit
         } else {
-            Abort::Fail(Failure::new(action, error, Vec::new()))
+            Abort::Fail(Failure {
+                action,
+                error,
+                tail: Vec::new(),
+            })
         }
     }
 
-    /// Run one uv command. With `track_fraction`, the share of the expected cache size fills the ring meanwhile.
-    fn run_uv_step(&self, action: FailedAction, args: &[String], track_fraction: bool) -> Flow {
-        let layout = &self.config.layout;
+    /// Run one uv command and return the end of its output. With `track_fraction`, the share of the expected cache
+    /// size fills the ring meanwhile.
+    fn run_uv_step(
+        &self,
+        action: FailedAction,
+        args: &[String],
+        track_fraction: bool,
+    ) -> Result<Vec<String>, Abort> {
+        let layout = &self.0.config.layout;
         let result = thread::scope(|scope| {
             let (stop, stopped) = mpsc::channel::<()>();
             if track_fraction {
                 scope.spawn(move || self.sample_fraction(stopped));
             }
             let result =
-                self.runner
+                self.0
+                    .runner
                     .run_uv(layout, args, &mut |pid| self.uv_started(pid), &mut |line| {
                         self.update_progress(|progress| progress.line = Some(line.to_owned()));
                     });
             drop(stop);
             result
         });
-        lock(&self.inner).uv = None;
+        lock(&self.0.inner).uv = None;
         match result {
-            Ok(()) => Ok(()),
+            Ok(tail) => Ok(tail),
             Err(_) if self.quitting() => Err(Abort::Quit),
-            Err(UvFailure { error, tail }) => Err(Abort::Fail(Failure::new(action, error, tail))),
+            Err(UvFailure { error, tail }) => Err(Abort::Fail(Failure {
+                action,
+                error,
+                tail,
+            })),
         }
     }
 
     /// Remember uv's process so Quit can stop it; stop it at once when Quit already came.
     fn uv_started(&self, pid: u32) {
-        let Some(start_time) = self.runner.start_time_of(pid) else {
+        let Some(start_time) = self.0.runner.start_time_of(pid) else {
             return;
         };
         let quit = {
-            let mut inner = lock(&self.inner);
+            let mut inner = lock(&self.0.inner);
             inner.uv = Some(Member { pid, start_time });
             inner.quitting
         };
         if quit {
-            self.runner
-                .stop_tree(pid, start_time, self.config.timing.stop_grace);
+            self.0
+                .runner
+                .stop_tree(pid, start_time, self.0.config.timing.stop_grace);
         }
     }
 
     /// Measure the cache now and then every sample interval until `stopped` disconnects.
     fn sample_fraction(&self, stopped: mpsc::Receiver<()>) {
-        let Some(platform) = self.config.platform else {
+        let Some(platform) = self.0.config.platform else {
             return;
         };
         let expected = manifest::expected_cache_bytes(platform);
         loop {
-            let size = self.runner.cache_size(&self.config.layout);
+            let size = self.0.runner.cache_size(&self.0.config.layout);
             let fraction = progress::fraction(size, expected);
             self.update_progress(|progress| progress.fraction = Some(fraction));
-            match stopped.recv_timeout(self.config.timing.sample_interval) {
+            match stopped.recv_timeout(self.0.config.timing.sample_interval) {
                 Err(RecvTimeoutError::Timeout) => {}
                 _ => return,
             }
         }
     }
 
-    /// Store the version read after an action. After an update it is compared with the one before: a version that
-    /// did not move although a newer one was offered is remembered as needing a newer launcher.
-    fn record_version(
-        &self,
-        action: Action,
-        before: Option<&str>,
-        after: Option<String>,
-        offered: Option<&str>,
-    ) {
-        let outcome = match (action, offered) {
-            (Action::Update, Some(offered)) => after_upgrade(before, after.as_deref(), offered),
-            _ => Outcome::Upgraded,
-        };
-        self.update(|inner| match outcome {
-            Outcome::Upgraded => {
-                inner.snapshot.installed_version = after;
-                inner.snapshot.update_version = None;
-            }
-            Outcome::NeedsNewerLauncher(version) => {
-                inner
-                    .prefs
-                    .set_skip(&version, &self.config.launcher_version);
-                self.save_prefs(inner);
-                inner.snapshot.update_version = None;
-                inner.snapshot.needs_newer_launcher = Some(version);
-            }
+    /// Store the version read after an action. An update after which the version is unchanged although a newer one
+    /// was offered did not update: it fails like any failed update, with the end of uv's output as its log.
+    fn record_version(&self, run: &mut Run, after: Option<String>) -> Flow {
+        let unchanged = run.action == Action::Update
+            && matches!(
+                (&run.before, &after, &run.offered),
+                (Some(before), Some(after), Some(offered))
+                    if before == after && version::is_newer(offered, after)
+            );
+        if unchanged {
+            return Err(Abort::Fail(Failure {
+                action: FailedAction::Update,
+                error: ErrorCode::UvFailed,
+                tail: std::mem::take(&mut run.upgrade_tail),
+            }));
+        }
+        self.update(|inner| {
+            inner.snapshot.installed_version = after;
+            inner.snapshot.update_version = None;
         });
+        Ok(())
     }
 
     /// Stop the server the launcher started, if any: flag first, then the tree, then `server.json`. Idempotent.
     fn stop_server(&self) {
-        let server = lock(&self.inner).server.take();
+        let server = lock(&self.0.inner).server.take();
         if let Some(server) = server {
             server.flags.stop_requested.store(true, Ordering::SeqCst);
-            let _ = self.runner.stop_server(
-                &self.config.layout,
+            self.0.runner.stop_server(
+                &self.0.config.layout,
                 &server.record,
-                self.config.timing.stop_grace,
+                self.0.config.timing.stop_grace,
             );
         }
     }
@@ -928,7 +908,7 @@ impl Controller {
     /// asked. A start that ends or times out is a failed `start`. Nothing else can change the phase while it runs
     /// (the controls are locked), but a quit can: it stops the server and the start ends quietly.
     fn start_server(&self, open_browser: bool) -> Flow {
-        let layout = &self.config.layout;
+        let layout = &self.0.config.layout;
         self.stop_server();
         self.update(|inner| {
             inner.snapshot.phase = Phase::Starting;
@@ -937,19 +917,19 @@ impl Controller {
         if self.quitting() {
             return Err(Abort::Quit);
         }
-        let last_port = lock(&self.inner).prefs.last_port;
-        let port = self.runner.choose_port(last_port);
+        let last_port = lock(&self.0.inner).prefs.last_port;
+        let port = self.0.runner.choose_port(last_port);
         let flags = Arc::new(ServerFlags::default());
         let on_exit: Box<dyn FnOnce() + Send> = {
             let me = self.clone();
             let flags = Arc::clone(&flags);
             Box::new(move || me.on_server_exit(&flags))
         };
-        let Ok(record) = self.runner.start_server(layout, port, on_exit) else {
+        let Ok(record) = self.0.runner.start_server(layout, port, on_exit) else {
             return Err(self.start_failure(ErrorCode::StartExited));
         };
         let registered = {
-            let mut inner = lock(&self.inner);
+            let mut inner = lock(&self.0.inner);
             let registered = !inner.quitting;
             if registered {
                 inner.server = Some(ServerState {
@@ -962,18 +942,18 @@ impl Controller {
         if !registered {
             // Quit while the process was starting: shutdown has not seen it, so it is stopped here.
             flags.stop_requested.store(true, Ordering::SeqCst);
-            let _ = self
+            self.0
                 .runner
-                .stop_server(layout, &record, self.config.timing.stop_grace);
+                .stop_server(layout, &record, self.0.config.timing.stop_grace);
             return Err(Abort::Quit);
         }
-        let readiness = self.runner.wait_for_server(port, &mut || {
+        let readiness = self.0.runner.wait_for_server(port, &mut || {
             flags.exited.load(Ordering::SeqCst) || flags.stop_requested.load(Ordering::SeqCst)
         });
         match readiness {
             Readiness::Ready if !flags.exited.load(Ordering::SeqCst) => {
                 let running = {
-                    let mut inner = lock(&self.inner);
+                    let mut inner = lock(&self.0.inner);
                     let running = !inner.quitting;
                     if running {
                         inner.prefs.last_port = Some(port);
@@ -988,7 +968,7 @@ impl Controller {
                     return Err(Abort::Quit);
                 }
                 if open_browser {
-                    self.runner.open_url(&browser_url(port));
+                    self.0.runner.open_url(&browser_url(port));
                 }
                 Ok(())
             }
@@ -1011,15 +991,19 @@ impl Controller {
     /// A failed start: the server is stopped (it may still be running after a timeout) and the log tail kept.
     fn start_failure(&self, code: ErrorCode) -> Abort {
         self.stop_server();
-        let tail = self.runner.read_log_tail(&self.config.layout);
-        Abort::Fail(Failure::new(FailedAction::Start, code, tail))
+        let tail = self.0.runner.read_log_tail(&self.0.config.layout);
+        Abort::Fail(Failure {
+            action: FailedAction::Start,
+            error: code,
+            tail,
+        })
     }
 
     /// The watcher's report that the server process ended. While running and not asked to stop, that is a crash:
     /// show `stopped` with the time and the log tail.
     fn on_server_exit(&self, flags: &Arc<ServerFlags>) {
         flags.exited.store(true, Ordering::SeqCst);
-        let mut inner = lock(&self.inner);
+        let mut inner = lock(&self.0.inner);
         let ours = inner
             .server
             .as_ref()
@@ -1029,11 +1013,11 @@ impl Controller {
             return;
         }
         if let Some(server) = inner.server.take() {
-            let _ = self
+            self.0
                 .runner
-                .stop_server(&self.config.layout, &server.record, Duration::ZERO);
+                .stop_server(&self.0.config.layout, &server.record, Duration::ZERO);
         }
-        let tail = self.runner.read_log_tail(&self.config.layout);
+        let tail = self.0.runner.read_log_tail(&self.0.config.layout);
         let snapshot = &mut inner.snapshot;
         snapshot.phase = Phase::Stopped;
         snapshot.stopped_at = Some(now_millis());
@@ -1046,8 +1030,8 @@ impl Controller {
     /// Uninstall on macOS and Linux: stop the server, remove start at login, delete Root.
     fn run_uninstall(&self) {
         self.stop_server();
-        let _ = self.runner.set_autostart(false);
-        let leftover = self.runner.delete_root(&self.config.layout).err();
+        let _ = self.0.runner.set_autostart(false);
+        let leftover = self.0.runner.delete_root(&self.0.config.layout).err();
         self.update(|inner| {
             let snapshot = &mut inner.snapshot;
             snapshot.phase = Phase::Uninstalled;
@@ -1055,7 +1039,7 @@ impl Controller {
             snapshot.progress = None;
             if leftover.is_some() {
                 snapshot.error = Some(ErrorCode::UninstallIncomplete);
-                snapshot.leftover_folder = Some(self.config.layout.root.display().to_string());
+                snapshot.leftover_folder = Some(self.0.config.layout.root.display().to_string());
             } else {
                 snapshot.error = None;
                 snapshot.leftover_folder = None;
@@ -1065,17 +1049,17 @@ impl Controller {
 
     // ----- updates --------------------------------------------------------------------------------------------
 
-    /// Ask PyPI for the latest version and set `updateVersion` or `needsNewerLauncher` from it. A failed request,
+    /// Ask PyPI for the latest version and set `updateVersion` from it. A failed request,
     /// an app that is not installed, a changed setting or a busy phase change nothing.
-    pub fn check_for_update(&self) {
+    fn check_for_update(&self) {
         let (installed, beta) = {
-            let inner = lock(&self.inner);
+            let inner = lock(&self.0.inner);
             (inner.snapshot.installed_version.clone(), inner.prefs.beta)
         };
         let Some(installed) = installed else {
             return;
         };
-        let Some(latest) = self.runner.fetch_latest(beta) else {
+        let Some(latest) = self.0.runner.fetch_latest(beta) else {
             return;
         };
         self.update(|inner| {
@@ -1088,19 +1072,8 @@ impl Controller {
             if inner.quitting || !calm || !unchanged {
                 return;
             }
-            let offer = version::offer(
-                &installed,
-                &latest,
-                inner.prefs.skip(),
-                &self.config.launcher_version,
-            );
-            let (update, needs_newer) = match offer {
-                Offer::None => (None, None),
-                Offer::Update(version) => (Some(version), None),
-                Offer::NeedsNewer(version) => (None, Some(version)),
-            };
-            inner.snapshot.update_version = update;
-            inner.snapshot.needs_newer_launcher = needs_newer;
+            inner.snapshot.update_version =
+                version::is_newer(&latest, &installed).then_some(latest);
         });
     }
 
@@ -1109,9 +1082,9 @@ impl Controller {
     /// each check waits for; dropping the sender ends the thread.
     fn start_update_timer(&self) {
         let (signal, signalled) = mpsc::channel::<()>();
-        *lock(&self.update_signal) = Some(signal);
+        *lock(&self.0.update_signal) = Some(signal);
         let me = self.clone();
-        let interval = self.config.timing.update_interval;
+        let interval = self.0.config.timing.update_interval;
         thread::Builder::new()
             .name("launcher-updates".to_owned())
             .spawn(move || {
@@ -1135,31 +1108,39 @@ impl Controller {
 
     /// Stop everything the launcher started: the running uv tree and the server. Runs its work exactly once however
     /// often and from wherever it is called; a second caller waits for the first to finish. Flows in progress end
-    /// quietly and start nothing. Call it from every exit path, after hiding the window.
-    pub fn shutdown(&self) {
-        let mut done = lock(&self.shutdown_done);
-        if *done {
-            return;
+    /// quietly and start nothing. Call it from every exit path, after hiding the window. Returns whether this call
+    /// did the work.
+    pub fn shutdown(&self) -> bool {
+        let _turn = lock(&self.0.shutdown_lock);
+        if self.is_stopped() {
+            return false;
         }
-        *done = true;
-        *lock(&self.update_signal) = None;
+        *lock(&self.0.update_signal) = None;
         let (uv, server) = {
-            let mut inner = lock(&self.inner);
+            let mut inner = lock(&self.0.inner);
             inner.quitting = true;
             (inner.uv.take(), inner.server.take())
         };
         if let Some(uv) = uv {
-            self.runner
-                .stop_tree(uv.pid, uv.start_time, self.config.timing.stop_grace);
+            self.0
+                .runner
+                .stop_tree(uv.pid, uv.start_time, self.0.config.timing.stop_grace);
         }
         if let Some(server) = server {
             server.flags.stop_requested.store(true, Ordering::SeqCst);
-            let _ = self.runner.stop_server(
-                &self.config.layout,
+            self.0.runner.stop_server(
+                &self.0.config.layout,
                 &server.record,
-                self.config.timing.stop_grace,
+                self.0.config.timing.stop_grace,
             );
         }
+        self.0.stopped.store(true, Ordering::SeqCst);
+        true
+    }
+
+    /// Whether [`Controller::shutdown`] has finished, so the app may exit.
+    pub fn is_stopped(&self) -> bool {
+        self.0.stopped.load(Ordering::SeqCst)
     }
 }
 
@@ -1220,7 +1201,7 @@ impl Runner for SystemRunner {
         args: &[String],
         on_start: &mut dyn FnMut(u32),
         on_line: &mut dyn FnMut(&str),
-    ) -> Result<(), UvFailure> {
+    ) -> Result<Vec<String>, UvFailure> {
         uv::run(layout, args, on_start, on_line)
     }
 
@@ -1244,8 +1225,8 @@ impl Runner for SystemRunner {
         process_tree::stop_tree(pid, start_time, grace);
     }
 
-    fn clear_stale_record(&self, layout: &Layout, grace: Duration) -> io::Result<()> {
-        server::clear_stale_record(layout, grace)
+    fn clear_stale_record(&self, layout: &Layout, grace: Duration) {
+        server::clear_stale_record(layout, grace);
     }
 
     fn choose_port(&self, last: Option<u16>) -> u16 {
@@ -1259,7 +1240,7 @@ impl Runner for SystemRunner {
         on_exit: Box<dyn FnOnce() + Send>,
     ) -> io::Result<ServerRecord> {
         let (child, record) = server::start(layout, port)?;
-        let _ = server::watch(child, move |_: io::Result<ExitStatus>| on_exit());
+        server::watch(child, on_exit);
         Ok(record)
     }
 
@@ -1267,13 +1248,8 @@ impl Runner for SystemRunner {
         server::wait_for_server(port, stopped)
     }
 
-    fn stop_server(
-        &self,
-        layout: &Layout,
-        record: &ServerRecord,
-        grace: Duration,
-    ) -> io::Result<()> {
-        server::stop(layout, record, grace)
+    fn stop_server(&self, layout: &Layout, record: &ServerRecord, grace: Duration) {
+        server::stop(layout, record, grace);
     }
 
     fn read_log_tail(&self, layout: &Layout) -> Vec<String> {
@@ -1311,60 +1287,7 @@ mod tests {
     use super::*;
     use crate::snapshot::StepId;
 
-    // ----- pure decisions -------------------------------------------------------------------------------------
-
-    #[test]
-    fn a_changed_version_is_an_upgrade() {
-        assert_eq!(
-            after_upgrade(Some("0.14.0"), Some("0.14.1"), "0.14.1"),
-            Outcome::Upgraded
-        );
-    }
-
-    #[test]
-    fn an_unchanged_version_with_a_newer_one_offered_needs_a_newer_launcher() {
-        assert_eq!(
-            after_upgrade(Some("0.14.0"), Some("0.14.0"), "0.14.1"),
-            Outcome::NeedsNewerLauncher("0.14.1".to_owned())
-        );
-        // Spelled differently, still the same version.
-        assert_eq!(
-            after_upgrade(Some("1.0"), Some("1.0.0"), "1.1"),
-            Outcome::NeedsNewerLauncher("1.1".to_owned())
-        );
-    }
-
-    #[test]
-    fn a_pre_release_moving_to_another_pre_release_is_not_a_failure() {
-        assert_eq!(
-            after_upgrade(Some("0.15.0b3"), Some("0.15.0b2"), "0.15.0"),
-            Outcome::Upgraded
-        );
-    }
-
-    #[test]
-    fn an_unreadable_version_after_the_upgrade_does_not_claim_a_skip() {
-        assert_eq!(
-            after_upgrade(Some("0.14.0"), None, "0.14.1"),
-            Outcome::Upgraded
-        );
-        assert_eq!(
-            after_upgrade(None, Some("0.14.0"), "0.14.1"),
-            Outcome::Upgraded
-        );
-    }
-
-    #[test]
-    fn an_unchanged_version_that_is_not_older_than_the_offer_is_no_skip() {
-        assert_eq!(
-            after_upgrade(Some("0.14.1"), Some("0.14.1"), "0.14.1"),
-            Outcome::Upgraded
-        );
-    }
-
     // ----- the fake runner ------------------------------------------------------------------------------------
-
-    const LAUNCHER: &str = "0.1.0";
 
     /// How the fake's server becomes ready.
     #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1575,7 +1498,7 @@ mod tests {
             args: &[String],
             on_start: &mut dyn FnMut(u32),
             on_line: &mut dyn FnMut(&str),
-        ) -> Result<(), UvFailure> {
+        ) -> Result<Vec<String>, UvFailure> {
             lock(&self.uv_args).push(args.to_vec());
             self.note(&format!("uv {}", args.join(" ")));
             on_start(4242);
@@ -1594,7 +1517,7 @@ mod tests {
                 }
                 return Err(uv_failed());
             }
-            result
+            result.map(|()| vec!["Resolved 3 packages".to_owned()])
         }
 
         fn cache_size(&self, _: &Layout) -> u64 {
@@ -1624,9 +1547,8 @@ mod tests {
             self.cv.notify_all();
         }
 
-        fn clear_stale_record(&self, _: &Layout, _: Duration) -> io::Result<()> {
+        fn clear_stale_record(&self, _: &Layout, _: Duration) {
             self.note("clear_stale_record");
-            Ok(())
         }
 
         fn choose_port(&self, last: Option<u16>) -> u16 {
@@ -1679,17 +1601,11 @@ mod tests {
             Readiness::Stopped
         }
 
-        fn stop_server(
-            &self,
-            layout: &Layout,
-            record: &ServerRecord,
-            _: Duration,
-        ) -> io::Result<()> {
+        fn stop_server(&self, layout: &Layout, record: &ServerRecord, _: Duration) {
             self.note(&format!("stop_server {}", record.port));
             let _ = fs::remove_file(&layout.server_json);
             // The process would end now, and its watcher would report that.
             self.crash_server();
-            Ok(())
         }
 
         fn read_log_tail(&self, _: &Layout) -> Vec<String> {
@@ -1742,7 +1658,6 @@ mod tests {
             layout: Layout::new(dir.path().join("zvision")),
             platform,
             packaging,
-            launcher_version: LAUNCHER.to_owned(),
             timing: Timing {
                 sample_interval: Duration::from_millis(5),
                 snapshot_interval: Duration::ZERO,
@@ -1800,7 +1715,7 @@ mod tests {
         }
 
         fn prefs(&self) -> Prefs {
-            records::read_prefs(&self.controller.config.layout.launcher_json)
+            records::read_prefs(&self.controller.0.config.layout.launcher_json)
         }
 
         /// Record the pinned tools of the rig's platform as installed.
@@ -2140,7 +2055,6 @@ mod tests {
         assert_eq!(snap.phase, Phase::Running);
         assert_eq!(snap.installed_version.as_deref(), Some("0.14.1"));
         assert_eq!(snap.update_version, None);
-        assert_eq!(snap.needs_newer_launcher, None);
         assert!(rig.fake.calls().iter().all(|c| !c.starts_with("open ")));
     }
 
@@ -2237,7 +2151,7 @@ mod tests {
     }
 
     #[test]
-    fn an_update_that_changes_nothing_stores_the_skip_and_restarts_the_server() {
+    fn an_update_that_changes_nothing_is_a_failed_update_with_uvs_log() {
         let rig = rig();
         rig.fake
             .script()
@@ -2252,23 +2166,59 @@ mod tests {
         rig.controller.update_app().unwrap();
         rig.idle();
         let snap = rig.snap();
-        assert_eq!(snap.phase, Phase::Running);
+        assert_eq!(snap.phase, Phase::Failed);
+        assert_eq!(snap.failed_action, Some(FailedAction::Update));
+        assert_eq!(snap.error, Some(ErrorCode::UvFailed));
+        assert_eq!(snap.log_tail, ["Resolved 3 packages"]);
+        assert_eq!(snap.progress, None);
         assert_eq!(snap.installed_version.as_deref(), Some("0.14.0"));
-        assert_eq!(snap.update_version, None);
-        assert_eq!(snap.needs_newer_launcher.as_deref(), Some("0.14.1"));
-        let prefs = rig.prefs();
-        assert_eq!(prefs.skip_version.as_deref(), Some("0.14.1"));
-        assert_eq!(prefs.skipped_by.as_deref(), Some(LAUNCHER));
+        assert_eq!(snap.update_version.as_deref(), Some("0.14.1"));
+        assert_eq!(snap.controls.primary, Some(Primary::Open));
+        assert_eq!(
+            snap.controls.menu,
+            [MenuItem::Repair, MenuItem::Uninstall, MenuItem::Beta]
+        );
+        assert!(!snap.controls.locked);
         assert_eq!(
             rig.fake.count("stop_server 8081"),
             1,
             "stopped before upgrading"
         );
-        assert_eq!(rig.fake.count("start_server"), 2, "and started again");
-        // The stored skip makes the next check say the same.
+        assert_eq!(
+            rig.fake.count("start_server"),
+            1,
+            "and not started again: Open does that"
+        );
+        // Nothing was remembered about it: the next check offers the update as before.
         rig.fake.script().latest = Some("0.14.1".to_owned());
         rig.controller.check_for_update();
-        assert_eq!(rig.snap().needs_newer_launcher.as_deref(), Some("0.14.1"));
+        assert_eq!(rig.snap().update_version.as_deref(), Some("0.14.1"));
+    }
+
+    #[test]
+    fn an_update_whose_version_cannot_be_read_afterwards_is_not_a_failure() {
+        let rig = rig();
+        rig.fake.script().versions.push_back(None);
+        rig.running("0.14.0", Some("0.14.1"));
+        rig.controller.update_app().unwrap();
+        rig.idle();
+        let snap = rig.snap();
+        assert_eq!(snap.phase, Phase::Running);
+        assert_eq!(snap.installed_version, None);
+        assert_eq!(snap.update_version, None);
+    }
+
+    #[test]
+    fn an_unchanged_version_that_was_not_older_than_the_offer_is_not_a_failure() {
+        let rig = rig();
+        rig.fake
+            .script()
+            .versions
+            .push_back(Some("0.14.1".to_owned()));
+        rig.running("0.14.1", Some("0.14.1"));
+        rig.controller.update_app().unwrap();
+        rig.idle();
+        assert_eq!(rig.snap().phase, Phase::Running);
         assert_eq!(rig.snap().update_version, None);
     }
 
@@ -2580,8 +2530,13 @@ mod tests {
         let rig = rig();
         rig.fake.script().installed = true;
         rig.controller.launch(true);
-        rig.controller.shutdown();
-        rig.controller.shutdown();
+        assert!(!rig.controller.is_stopped());
+        assert!(rig.controller.shutdown(), "the first call does the work");
+        assert!(rig.controller.is_stopped());
+        assert!(
+            !rig.controller.shutdown(),
+            "a second call has nothing to do"
+        );
         assert_eq!(rig.fake.count("stop_server 8081"), 1);
         assert_eq!(
             rig.snap().phase,
@@ -2638,13 +2593,13 @@ mod tests {
             let worker = thread::spawn(move || me.launch(false));
             match hold {
                 Hold::Process => wait_until(|| self.fake.count("start_server") == 1),
-                Hold::Readiness => wait_until(|| lock(&self.controller.inner).server.is_some()),
+                Hold::Readiness => wait_until(|| lock(&self.controller.0.inner).server.is_some()),
             }
             worker
         }
 
         fn server_json_exists(&self) -> bool {
-            self.controller.config.layout.server_json.exists()
+            self.controller.0.config.layout.server_json.exists()
         }
 
         fn opened_the_browser(&self) -> bool {
@@ -2676,7 +2631,7 @@ mod tests {
         assert!(!rig.opened_the_browser());
         assert_eq!(rig.prefs().last_port, None);
         assert_eq!(rig.fake.count("stop_server 8081"), 1);
-        assert!(lock(&rig.controller.inner).server.is_none());
+        assert!(lock(&rig.controller.0.inner).server.is_none());
         assert!(!rig.server_json_exists());
     }
 
@@ -2734,7 +2689,7 @@ mod tests {
         assert_eq!(snap.error, None);
         assert!(!rig.saw(Phase::Failed));
         assert_eq!(rig.fake.count("start_server"), 5);
-        assert!(lock(&rig.controller.inner).server.is_some());
+        assert!(lock(&rig.controller.0.inner).server.is_some());
         // Every start but the last was stopped exactly once, by its own flow.
         assert_eq!(rig.fake.count("stop_server 8081"), 4);
     }
@@ -2949,18 +2904,6 @@ mod tests {
     }
 
     #[test]
-    fn a_skip_stored_by_another_launcher_version_is_ignored() {
-        let rig = rig();
-        rig.running("0.14.0", None);
-        rig.controller
-            .update(|inner| inner.prefs.set_skip("0.14.1", "0.0.9"));
-        rig.fake.script().latest = Some("0.14.1".to_owned());
-        rig.controller.check_for_update();
-        assert_eq!(rig.snap().update_version.as_deref(), Some("0.14.1"));
-        assert_eq!(rig.snap().needs_newer_launcher, None);
-    }
-
-    #[test]
     fn nothing_is_offered_while_an_action_runs_or_when_nothing_is_installed() {
         let rig = rig();
         rig.fake.script().latest = Some("9.9.9".to_owned());
@@ -3034,7 +2977,7 @@ mod tests {
         let rig = rig();
         rig.fake.script().installed = true;
         rig.controller.launch(true);
-        std::fs::remove_file(&rig.controller.config.layout.launcher_json).unwrap();
+        std::fs::remove_file(&rig.controller.0.config.layout.launcher_json).unwrap();
         rig.controller.uninstall_app().unwrap();
         rig.idle();
         assert!(rig.saw(Phase::Uninstalling));
@@ -3046,7 +2989,7 @@ mod tests {
         assert!(at("stop_server 8081") < at("autostart false"));
         assert!(at("autostart false") < at("delete_root"));
         assert!(
-            !rig.controller.config.layout.launcher_json.exists(),
+            !rig.controller.0.config.layout.launcher_json.exists(),
             "an uninstall writes nothing into Root"
         );
     }
@@ -3063,7 +3006,7 @@ mod tests {
         assert_eq!(snap.error, Some(ErrorCode::UninstallIncomplete));
         assert_eq!(
             snap.leftover_folder,
-            Some(rig.controller.config.layout.root.display().to_string())
+            Some(rig.controller.0.config.layout.root.display().to_string())
         );
     }
 

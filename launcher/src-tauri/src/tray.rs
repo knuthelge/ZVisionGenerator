@@ -24,7 +24,7 @@ const COLOR_ICON: &[u8] = include_bytes!("../icons/tray/color.png");
 
 /// The words of the tray menu and tooltip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Labels {
+struct Labels {
     pub open: &'static str,
     /// The second item: it shows the window, and says so when an update is waiting there.
     pub show: &'static str,
@@ -33,7 +33,7 @@ pub struct Labels {
 }
 
 /// The labels for the operating system `os` (a `std::env::consts::OS` value); macOS writes menu items in title case.
-pub fn tray_labels(os: &str, update_available: bool) -> Labels {
+fn tray_labels(os: &str, update_available: bool) -> Labels {
     let mac = os == "macos";
     Labels {
         open: "Open Z-Vision Generator",

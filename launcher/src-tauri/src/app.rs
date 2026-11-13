@@ -6,7 +6,6 @@
 //! [`begin_quit`], which hides the window, stops everything the launcher started once through
 //! `Controller::shutdown`, and only then exits the app.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread;
 
@@ -20,37 +19,13 @@ use crate::snapshot::Snapshot;
 use crate::tray::{self, Tray};
 
 /// The label of the one window, as in `tauri.conf.json`.
-pub const MAIN_WINDOW: &str = "main";
+const MAIN_WINDOW: &str = "main";
 
 /// The event that carries every snapshot to the window.
 const SNAPSHOT_EVENT: &str = "launcher:snapshot";
 
 /// The argument the start-at-login entry passes, and the single-instance plugin looks for.
 const AUTOSTART_ARG: &str = "--autostart";
-
-/// Where a quit has got to; the first caller of [`QuitGate::begin`] runs it.
-#[derive(Default)]
-struct QuitGate {
-    started: AtomicBool,
-    done: AtomicBool,
-}
-
-impl QuitGate {
-    /// Claim the quit: true for the first caller only.
-    fn begin(&self) -> bool {
-        !self.started.swap(true, Ordering::SeqCst)
-    }
-
-    /// Record that everything is stopped and the app may exit.
-    fn finish(&self) {
-        self.done.store(true, Ordering::SeqCst);
-    }
-
-    /// Whether everything is stopped, so an exit may go ahead.
-    fn is_done(&self) -> bool {
-        self.done.load(Ordering::SeqCst)
-    }
-}
 
 /// Build and run the app; returns when it exits. `autostart` is a start-at-login launch.
 pub fn run(autostart: bool) {
@@ -105,7 +80,6 @@ pub fn run(autostart: bool) {
             let handle = app.handle().clone();
             let controller = build_controller(&handle)?;
             app.manage(controller.clone());
-            app.manage(QuitGate::default());
             watch_signals(&handle);
             controller.start(autostart);
             Ok(())
@@ -117,8 +91,8 @@ pub fn run(autostart: bool) {
         // Cmd+Q, the Dock's Quit and logout land here with no code; our own exit comes back here once done.
         RunEvent::ExitRequested { api, .. } => {
             let stopped = app
-                .try_state::<QuitGate>()
-                .is_none_or(|gate| gate.is_done());
+                .try_state::<Controller>()
+                .is_none_or(|controller| controller.is_stopped());
             if !stopped {
                 api.prevent_exit();
                 begin_quit(app);
@@ -216,21 +190,19 @@ fn fit_and_show(app: &AppHandle) {
 }
 
 /// Quit: hide the window, stop everything the launcher started, then exit. Safe to call from any thread and any
-/// number of times; the work runs once, on its own thread so the caller (often the main thread) never waits for it.
+/// number of times; the work runs on its own thread so the caller (often the main thread) never waits for it, and
+/// `Controller::shutdown` lets only the first call do it and exit.
 pub fn begin_quit(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.hide();
-    }
-    if !app.state::<QuitGate>().begin() {
-        return;
     }
     let app = app.clone();
     thread::Builder::new()
         .name("launcher-quit".to_owned())
         .spawn(move || {
-            app.state::<Controller>().shutdown();
-            app.state::<QuitGate>().finish();
-            app.exit(0);
+            if app.state::<Controller>().shutdown() {
+                app.exit(0);
+            }
         })
         .expect("the system can start a thread");
 }
@@ -265,24 +237,6 @@ fn watch_signals(_app: &AppHandle) {}
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn only_the_first_quit_runs() {
-        let gate = QuitGate::default();
-        assert!(gate.begin());
-        assert!(!gate.begin());
-        assert!(!gate.begin());
-    }
-
-    #[test]
-    fn an_exit_waits_until_everything_is_stopped() {
-        let gate = QuitGate::default();
-        assert!(!gate.is_done());
-        gate.begin();
-        assert!(!gate.is_done());
-        gate.finish();
-        assert!(gate.is_done());
-    }
 
     #[test]
     fn a_window_that_fits_keeps_its_height() {

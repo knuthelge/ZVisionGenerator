@@ -1,9 +1,9 @@
-//! Versions: parsing and comparing them, the PyPI check, and whether to offer an update.
+//! Versions: parsing and comparing them, the PyPI check, and whether a published version is newer.
 //!
-//! Versions follow the part of PEP 440 the app uses: numeric release segments, optionally followed by a development,
-//! alpha, beta, release-candidate or post-release marker. A pre-release sorts below its release.
+//! Only the versions the app publishes are understood: `X.Y.Z`, optionally followed by an alpha, beta or
+//! release-candidate marker (`a1`, `b2`, `rc3`) and a `.postN` or `.devN` marker, as in `0.15.0b2.dev1`. Anything
+//! else does not parse. A pre-release sorts below its release.
 
-use std::cmp::Ordering;
 use std::time::Duration;
 
 use crate::download;
@@ -13,153 +13,75 @@ const PYPI_URL: &str = "https://pypi.org/pypi/z-vision-generator/json";
 /// How long the PyPI request may take in total.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Where a version sits relative to its release; the derived order is dev < alpha < beta < rc < final < post.
+/// A parsed version. The derived order is the PEP 440 order: the release first, then the pre-release marker, the
+/// post-release marker and the development marker, each in the form of a sort key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Stage {
-    Dev(u64),
-    Alpha(u64),
-    Beta(u64),
-    Rc(u64),
-    Final,
-    Post(u64),
+struct Version {
+    release: [u64; 3],
+    /// 0 for a development build of a release with no other marker (below every pre-release), 1 to 3 for alpha, beta
+    /// and release candidate, 4 for none.
+    phase: u8,
+    /// The number after the pre-release marker.
+    pre: u64,
+    /// The number after `.post`, plus one; 0 without one.
+    post: u64,
+    /// The number after `.dev`; the largest value without one, so a development build sorts below its release.
+    dev: u64,
 }
 
-/// A parsed version: release segments and a stage.
-#[derive(Debug, Clone)]
-pub struct Version {
-    release: Vec<u64>,
-    stage: Stage,
+/// Take the digits at the start of `text` as a number and return the rest.
+fn number(text: &str) -> Option<(u64, &str)> {
+    let end = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
+    let (digits, rest) = text.split_at(end);
+    Some((digits.parse().ok()?, rest))
 }
 
-impl PartialEq for Version {
-    /// Equal in order, so `1.0` equals `1.0.0`.
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == Ordering::Equal
-    }
-}
-
-impl Eq for Version {}
-
-impl Ord for Version {
-    /// Compare release segments numerically with missing ones as zero (`1.0` equals `1.0.0`), then stages.
-    fn cmp(&self, other: &Self) -> Ordering {
-        let len = self.release.len().max(other.release.len());
-        for index in 0..len {
-            let ours = self.release.get(index).copied().unwrap_or(0);
-            let theirs = other.release.get(index).copied().unwrap_or(0);
-            match ours.cmp(&theirs) {
-                Ordering::Equal => {}
-                unequal => return unequal,
-            }
+/// Parse `X.Y.Z[(a|b|rc)N][.postN][.devN]`; `None` for any other spelling.
+fn parse(text: &str) -> Option<Version> {
+    let (major, rest) = number(text)?;
+    let (minor, rest) = number(rest.strip_prefix('.')?)?;
+    let (patch, mut rest) = number(rest.strip_prefix('.')?)?;
+    let mut phase = 4;
+    let mut pre = 0;
+    for (marker, value) in [("a", 1), ("b", 2), ("rc", 3)] {
+        if let Some(after) = rest.strip_prefix(marker) {
+            let (n, after) = number(after)?;
+            (phase, pre, rest) = (value, n, after);
+            break;
         }
-        self.stage.cmp(&other.stage)
     }
-}
-
-impl PartialOrd for Version {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+    let mut post = 0;
+    if let Some(after) = rest.strip_prefix(".post") {
+        let (n, after) = number(after)?;
+        (post, rest) = (n.checked_add(1)?, after);
     }
-}
-
-/// The stage marker at the start of `text` (`rc1`, `.post2`, `-beta`, `.dev3`), with the rest unparsed.
-fn parse_stage(text: &str) -> Option<Stage> {
-    let text = text.trim_start_matches(['.', '-', '_']);
-    if text.is_empty() {
-        return Some(Stage::Final);
+    let mut dev = None;
+    if let Some(after) = rest.strip_prefix(".dev") {
+        let (n, after) = number(after)?;
+        (dev, rest) = (Some(n), after);
     }
-    let split = text
-        .find(|c: char| !c.is_ascii_alphabetic())
-        .unwrap_or(text.len());
-    let (word, rest) = text.split_at(split);
-    let rest = rest.trim_start_matches(['.', '-', '_']);
-    let number = if rest.is_empty() {
-        0
-    } else {
-        rest.parse().ok()?
-    };
-    match word {
-        "dev" => Some(Stage::Dev(number)),
-        "a" | "alpha" => Some(Stage::Alpha(number)),
-        "b" | "beta" => Some(Stage::Beta(number)),
-        "rc" | "c" | "pre" | "preview" => Some(Stage::Rc(number)),
-        "post" | "rev" | "r" => Some(Stage::Post(number)),
-        _ => None,
+    if !rest.is_empty() {
+        return None;
     }
-}
-
-/// Parse a version string such as `0.14.1`, `1.0.0rc1` or `v2.0`; `None` when it is not a version.
-pub fn parse(text: &str) -> Option<Version> {
-    let text = text.trim().to_ascii_lowercase();
-    let text = text.strip_prefix('v').unwrap_or(&text);
-    let text = text.split('+').next().unwrap_or(text);
-    let split = text
-        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .unwrap_or(text.len());
-    let (numbers, rest) = text.split_at(split);
-    // A dot before the marker (`1.0.dev1`) belongs to the marker, not to the release.
-    let numbers = numbers.strip_suffix('.').unwrap_or(numbers);
-    let release: Vec<u64> = numbers
-        .split('.')
-        .map(|segment| segment.parse().ok())
-        .collect::<Option<_>>()?;
-    let rest = if numbers.len() < split {
-        &text[numbers.len()..]
-    } else {
-        rest
-    };
+    if phase == 4 && post == 0 && dev.is_some() {
+        phase = 0;
+    }
     Some(Version {
-        release,
-        stage: parse_stage(rest)?,
+        release: [major, minor, patch],
+        phase,
+        pre,
+        post,
+        dev: dev.unwrap_or(u64::MAX),
     })
 }
 
 /// Whether `candidate` is a newer version than `base`; `false` when either does not parse.
-pub fn is_newer(candidate: &str, base: &str) -> bool {
+pub(crate) fn is_newer(candidate: &str, base: &str) -> bool {
     match (parse(candidate), parse(base)) {
         (Some(candidate), Some(base)) => candidate > base,
         _ => false,
-    }
-}
-
-/// Whether two version strings name the same version (`1.0` and `1.0.0` do).
-pub(crate) fn same_version(a: &str, b: &str) -> bool {
-    match (parse(a), parse(b)) {
-        (Some(a), Some(b)) => a == b,
-        _ => a == b,
-    }
-}
-
-/// An app version the launcher could not upgrade to, and the launcher version that found out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Skip<'a> {
-    pub version: &'a str,
-    pub skipped_by: &'a str,
-}
-
-/// What the launcher tells the user about the latest published version.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Offer {
-    /// Nothing to say.
-    None,
-    /// A newer version can be installed.
-    Update(String),
-    /// A newer version exists that needs a newer launcher.
-    NeedsNewer(String),
-}
-
-/// Decide what to offer. A stored skip applies only to the launcher version that stored it; when the latest version
-/// is that skipped one, and still newer than what is installed, the user needs a newer launcher instead.
-pub fn offer(installed: &str, latest: &str, skip: Option<Skip<'_>>, launcher: &str) -> Offer {
-    if !is_newer(latest, installed) {
-        return Offer::None;
-    }
-    let skipped =
-        skip.is_some_and(|skip| skip.skipped_by == launcher && same_version(skip.version, latest));
-    if skipped {
-        Offer::NeedsNewer(latest.to_owned())
-    } else {
-        Offer::Update(latest.to_owned())
     }
 }
 
@@ -182,7 +104,7 @@ fn newest_unyanked(releases: &serde_json::Map<String, serde_json::Value>) -> Opt
 /// The latest version in PyPI's JSON. Without `beta` it is `info.version`, PyPI's own latest stable release; with
 /// `beta` it is the newest parseable release that has a file that is not yanked, pre-releases included. `None` when
 /// the body has no usable version.
-pub fn latest_from_pypi_json(body: &str, beta: bool) -> Option<String> {
+fn latest_from_pypi_json(body: &str, beta: bool) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(body).ok()?;
     if beta {
         return newest_unyanked(json.get("releases")?.as_object()?);
@@ -208,30 +130,44 @@ pub fn fetch_latest(beta: bool) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn skip<'a>(version: &'a str, by: &'a str) -> Option<Skip<'a>> {
-        Some(Skip {
-            version,
-            skipped_by: by,
-        })
-    }
-
     #[test]
     fn parses_release_segments_and_stages() {
         assert_eq!(parse("0.14.1").unwrap().release, [0, 14, 1]);
-        assert_eq!(parse("1.0.0rc1").unwrap().stage, Stage::Rc(1));
-        assert_eq!(parse("1.0.0").unwrap().stage, Stage::Final);
-        assert_eq!(parse("1.0a2").unwrap().stage, Stage::Alpha(2));
-        assert_eq!(parse("1.0.0b").unwrap().stage, Stage::Beta(0));
-        assert_eq!(parse("1.0.dev3").unwrap().stage, Stage::Dev(3));
-        assert_eq!(parse("1.0.post1").unwrap().stage, Stage::Post(1));
-        assert_eq!(parse("1.0-rc.2").unwrap().stage, Stage::Rc(2));
-        assert_eq!(parse(" v2.1 ").unwrap().release, [2, 1]);
-        assert_eq!(parse("1.0+local.1"), parse("1.0"));
+        assert_eq!(parse("1.0.0rc1").unwrap().phase, 3);
+        assert_eq!(parse("1.0.0b2").unwrap().phase, 2);
+        assert_eq!(parse("1.0.0a2").unwrap().phase, 1);
+        assert_eq!(parse("1.0.0").unwrap().phase, 4);
+        assert_eq!(parse("1.0.0.dev3").unwrap().phase, 0);
+        assert!(parse("1.0.0.post1").is_some());
+        assert!(parse("1.0.0b2.dev1").is_some());
+        assert!(parse("1.0.0.post1.dev1").is_some());
     }
 
     #[test]
-    fn rejects_what_is_not_a_version() {
-        for text in ["", "abc", "1..2", ".1", "1.x", "1.0.unknown", "1.0rcx"] {
+    fn rejects_what_the_app_does_not_publish() {
+        for text in [
+            "",
+            "abc",
+            "1..2",
+            ".1",
+            "1.x",
+            "1.0",
+            "1",
+            "1.0.0.0",
+            "v1.0.0",
+            "1.0.0b",
+            "1.0.0rcx",
+            "1.0.0-rc1",
+            "1.0.0+local",
+            "1.0.0beta1",
+            "1.0.0RC1",
+            "1.0.0.dev",
+            "1.0.0.post",
+            " 1.0.0",
+            "1.0.0 ",
+            "1.0.0.unknown",
+            "1.0.0b2a1",
+        ] {
             assert_eq!(parse(text), None, "{text:?}");
         }
     }
@@ -239,17 +175,14 @@ mod tests {
     #[test]
     fn compares_numerically_per_segment() {
         assert!(is_newer("0.14.1", "0.14.0"));
-        assert!(is_newer("0.10", "0.9"));
         assert!(is_newer("0.10.0", "0.9.9"));
         assert!(is_newer("1.0.0", "0.99.99"));
         assert!(!is_newer("0.14.0", "0.14.1"));
-        assert!(!is_newer("0.9", "0.10"));
     }
 
     #[test]
     fn equal_versions_are_not_newer() {
-        assert!(!is_newer("1.0", "1.0.0"));
-        assert!(!is_newer("1.0.0", "1.0"));
+        assert!(!is_newer("1.0.0", "1.0.0"));
         assert!(!is_newer("0.14.0", "0.14.0"));
     }
 
@@ -262,6 +195,9 @@ mod tests {
         assert!(is_newer("1.0.0rc1", "1.0.0b3"));
         assert!(is_newer("1.0.0b1", "1.0.0a9"));
         assert!(is_newer("1.0.0a1", "1.0.0.dev5"));
+        assert!(is_newer("1.0.0a1", "1.0.0a1.dev5"));
+        assert!(is_newer("1.0.0", "1.0.0rc1.post1"));
+        assert!(is_newer("1.0.0rc1.post1", "1.0.0rc1"));
     }
 
     #[test]
@@ -272,65 +208,8 @@ mod tests {
 
     #[test]
     fn unparsable_versions_are_never_newer() {
-        assert!(!is_newer("abc", "1.0"));
-        assert!(!is_newer("1.0", "abc"));
-    }
-
-    #[test]
-    fn a_newer_latest_is_an_update() {
-        assert_eq!(
-            offer("0.14.0", "0.14.1", None, "0.1.0"),
-            Offer::Update("0.14.1".into())
-        );
-    }
-
-    #[test]
-    fn the_same_or_an_older_latest_offers_nothing() {
-        assert_eq!(offer("0.14.1", "0.14.1", None, "0.1.0"), Offer::None);
-        assert_eq!(offer("0.14.1", "0.14.0", None, "0.1.0"), Offer::None);
-        assert_eq!(offer("1.0.0", "1.0.0rc1", None, "0.1.0"), Offer::None);
-        assert_eq!(offer("0.14.0", "garbage", None, "0.1.0"), Offer::None);
-        assert_eq!(offer("garbage", "0.14.0", None, "0.1.0"), Offer::None);
-    }
-
-    #[test]
-    fn a_skip_by_this_launcher_turns_the_update_into_needs_newer() {
-        assert_eq!(
-            offer("0.14.0", "0.15.0", skip("0.15.0", "0.1.0"), "0.1.0"),
-            Offer::NeedsNewer("0.15.0".into())
-        );
-    }
-
-    #[test]
-    fn a_skip_by_another_launcher_version_does_not_apply() {
-        assert_eq!(
-            offer("0.14.0", "0.15.0", skip("0.15.0", "0.1.0"), "0.2.0"),
-            Offer::Update("0.15.0".into())
-        );
-    }
-
-    #[test]
-    fn a_version_newer_than_the_skipped_one_is_offered() {
-        assert_eq!(
-            offer("0.14.0", "0.15.1", skip("0.15.0", "0.1.0"), "0.1.0"),
-            Offer::Update("0.15.1".into())
-        );
-    }
-
-    #[test]
-    fn a_skipped_version_that_is_already_installed_offers_nothing() {
-        assert_eq!(
-            offer("0.15.0", "0.15.0", skip("0.15.0", "0.1.0"), "0.1.0"),
-            Offer::None
-        );
-    }
-
-    #[test]
-    fn the_skip_matches_the_latest_by_version_not_spelling() {
-        assert_eq!(
-            offer("0.14.0", "0.15", skip("0.15.0", "0.1.0"), "0.1.0"),
-            Offer::NeedsNewer("0.15".into())
-        );
+        assert!(!is_newer("abc", "1.0.0"));
+        assert!(!is_newer("1.0.0", "abc"));
     }
 
     #[test]
@@ -430,17 +309,11 @@ mod tests {
     }
 
     #[test]
-    fn a_beta_is_offered_only_when_newer_than_what_is_installed() {
-        assert_eq!(
-            offer("0.14.1", "0.15.0b1", None, "0.1.0"),
-            Offer::Update("0.15.0b1".into())
-        );
-        assert_eq!(offer("0.15.0b2", "0.15.0b1", None, "0.1.0"), Offer::None);
-        assert_eq!(offer("0.15.0b1", "0.14.1", None, "0.1.0"), Offer::None);
-        assert_eq!(
-            offer("0.15.0b1", "0.15.0", None, "0.1.0"),
-            Offer::Update("0.15.0".into())
-        );
+    fn a_beta_is_newer_only_when_above_what_is_installed() {
+        assert!(is_newer("0.15.0b1", "0.14.1"));
+        assert!(!is_newer("0.15.0b1", "0.15.0b2"));
+        assert!(!is_newer("0.14.1", "0.15.0b1"));
+        assert!(is_newer("0.15.0", "0.15.0b1"));
     }
 
     /// A body shaped like PyPI's: file objects with their usual fields, a stable `info.version`, betas on top and a

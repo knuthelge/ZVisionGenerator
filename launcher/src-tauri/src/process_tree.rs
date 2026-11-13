@@ -52,13 +52,13 @@ impl From<&Entry> for Member {
 }
 
 /// Whether two start times belong to the same process.
-pub fn same_process(a: u64, b: u64) -> bool {
+fn same_process(a: u64, b: u64) -> bool {
     a.abs_diff(b) <= START_TIME_TOLERANCE_SECS
 }
 
 /// Every process below `root` by parent links, nearest first; `root` itself is not included. A process that
 /// points back up the tree (a reused PID) is visited once.
-pub fn descendants(entries: &[Entry], root: u32) -> Vec<Member> {
+fn descendants(entries: &[Entry], root: u32) -> Vec<Member> {
     let mut seen = HashSet::from([root]);
     let mut found: Vec<Member> = Vec::new();
     let mut frontier = vec![root];
@@ -185,38 +185,38 @@ fn wait_gone(system: &mut System, members: &[Member], limit: Duration) -> Vec<Me
 }
 
 /// Stop every member of a snapshot. On Unix the first member (the server) gets SIGTERM and `grace` to take the
-/// others down with it; survivors are then killed. On Windows every member is terminated at once. Returns the
-/// members that could not be stopped (all of them when the system gives no process table); empty when the tree is
-/// gone.
-pub fn stop_members(members: &[Member], grace: Duration) -> Vec<Member> {
+/// others down with it; survivors are then killed. On Windows every member is terminated at once. Waits until the
+/// members are gone, or a short while after the kill.
+pub fn stop_members(members: &[Member], grace: Duration) {
     let Some(root) = members.first() else {
-        return Vec::new();
+        return;
     };
     let Some(mut system) = open_table() else {
-        return members.to_vec();
+        return;
     };
     if cfg!(unix) {
         for process in refresh_alive(&mut system, std::slice::from_ref(root)) {
             process.kill_with(Signal::Term);
         }
         if wait_gone(&mut system, members, grace).is_empty() {
-            return Vec::new();
+            return;
         }
     }
     for process in refresh_alive(&mut system, members) {
         process.kill();
     }
-    wait_gone(&mut system, members, KILL_WAIT)
+    wait_gone(&mut system, members, KILL_WAIT);
 }
 
 /// Snapshot the tree below `root` (root included) and stop all of it; see [`stop_members`]. Nothing is stopped
 /// unless `root` is alive with `root_start_time` (as [`same_process`] reads it), so a PID the system reused for
 /// another program is left alone; nothing running at `root` is nothing to stop.
-pub fn stop_tree(root: u32, root_start_time: u64, grace: Duration) -> Vec<Member> {
+pub fn stop_tree(root: u32, root_start_time: u64, grace: Duration) {
     let tree = snapshot_tree(root);
-    match tree.first() {
-        Some(top) if same_process(top.start_time, root_start_time) => stop_members(&tree, grace),
-        _ => Vec::new(),
+    if let Some(top) = tree.first()
+        && same_process(top.start_time, root_start_time)
+    {
+        stop_members(&tree, grace);
     }
 }
 
@@ -293,8 +293,8 @@ mod tests {
     fn an_unused_pid_has_no_start_time_and_no_tree() {
         assert_eq!(start_time_of(u32::MAX - 1), None);
         assert!(snapshot_tree(u32::MAX - 1).is_empty());
-        assert!(stop_tree(u32::MAX - 1, 0, Duration::ZERO).is_empty());
-        assert!(stop_members(&[], Duration::ZERO).is_empty());
+        stop_tree(u32::MAX - 1, 0, Duration::ZERO);
+        stop_members(&[], Duration::ZERO);
     }
 
     #[test]
@@ -343,9 +343,8 @@ mod tests {
             let mut child = sh("sleep 300 & sleep 301 & wait");
             let tree = tree_of(child.id(), 3);
             assert_eq!(tree[0].pid, child.id());
-            let survivors = stop_members(&tree, Duration::from_millis(200));
+            stop_members(&tree, Duration::from_millis(200));
             child.wait().unwrap();
-            assert!(survivors.is_empty(), "{survivors:?}");
             assert!(alive_members(&tree).is_empty());
         }
 
@@ -353,9 +352,8 @@ mod tests {
         fn a_nested_tree_is_stopped_entirely() {
             let mut child = sh("sh -c 'sleep 302 & wait' & wait");
             let tree = tree_of(child.id(), 3);
-            let survivors = stop_tree(child.id(), tree[0].start_time, Duration::from_millis(200));
+            stop_tree(child.id(), tree[0].start_time, Duration::from_millis(200));
             child.wait().unwrap();
-            assert!(survivors.is_empty(), "{survivors:?}");
             assert!(alive_members(&tree).is_empty());
         }
 
@@ -364,8 +362,7 @@ mod tests {
             let mut child = sh("sleep 305 & wait");
             let tree = tree_of(child.id(), 2);
             let wrong = tree[0].start_time + 1_000;
-            let survivors = stop_tree(child.id(), wrong, Duration::from_millis(100));
-            assert!(survivors.is_empty());
+            stop_tree(child.id(), wrong, Duration::from_millis(100));
             assert!(child.try_wait().unwrap().is_none(), "the root was stopped");
             assert_eq!(
                 alive_members(&tree).len(),
@@ -381,9 +378,9 @@ mod tests {
             let mut child = sh("exec sleep 303");
             let tree = tree_of(child.id(), 1);
             let started = Instant::now();
-            let survivors = stop_members(&tree, Duration::from_secs(30));
+            stop_members(&tree, Duration::from_secs(30));
             child.wait().unwrap();
-            assert!(survivors.is_empty());
+            assert!(alive_members(&tree).is_empty());
             assert!(started.elapsed() < Duration::from_secs(10));
         }
 
@@ -392,9 +389,8 @@ mod tests {
             let mut child = sh("trap '' TERM; while :; do sleep 1; done");
             let tree = tree_of(child.id(), 1);
             thread::sleep(Duration::from_millis(200));
-            let survivors = stop_members(&tree, Duration::from_millis(300));
+            stop_members(&tree, Duration::from_millis(300));
             child.wait().unwrap();
-            assert!(survivors.is_empty(), "{survivors:?}");
             assert!(alive_members(&tree).is_empty());
         }
 
@@ -407,7 +403,7 @@ mod tests {
                 start_time: real.start_time + 1_000,
             };
             assert!(alive_members(&[reused]).is_empty());
-            assert!(stop_members(&[reused], Duration::from_millis(100)).is_empty());
+            stop_members(&[reused], Duration::from_millis(100));
             assert!(
                 child.try_wait().unwrap().is_none(),
                 "the process was stopped"

@@ -32,21 +32,17 @@ const DISK_FULL_OS_ERRORS: [i32; 2] = [28, 112];
 
 /// Which end of a streaming copy failed.
 #[derive(Debug)]
-pub enum CopyError {
+enum CopyError {
     /// The source failed: the network.
     Read,
     /// The destination failed: the disk.
     Write(io::Error),
 }
 
-/// Copy `reader` to `writer` and return the lowercase hex SHA-256 and the byte count of what was copied.
-pub fn hash_copy(
-    reader: &mut impl Read,
-    writer: &mut impl Write,
-) -> Result<(String, u64), CopyError> {
+/// Copy `reader` to `writer` and return the lowercase hex SHA-256 of what was copied.
+fn hash_copy(reader: &mut impl Read, writer: &mut impl Write) -> Result<String, CopyError> {
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; CHUNK];
-    let mut total = 0u64;
     loop {
         let read = match reader.read(&mut buffer) {
             Ok(0) => break,
@@ -58,9 +54,8 @@ pub fn hash_copy(
         writer
             .write_all(&buffer[..read])
             .map_err(CopyError::Write)?;
-        total += read as u64;
     }
-    Ok((hex(&hasher.finalize()), total))
+    Ok(hex(&hasher.finalize()))
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -68,7 +63,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// Check a computed hash against the pinned one; a difference is [`ErrorCode::ChecksumMismatch`].
-pub fn verify(actual: &str, expected: &str) -> Result<(), ErrorCode> {
+fn verify(actual: &str, expected: &str) -> Result<(), ErrorCode> {
     if actual == expected {
         Ok(())
     } else {
@@ -78,7 +73,7 @@ pub fn verify(actual: &str, expected: &str) -> Result<(), ErrorCode> {
 
 /// The code for an HTTP error status: a file that is gone (404, 410) is `download_unavailable`, the rest is
 /// `download_failed`.
-pub fn classify_http(status: u16) -> ErrorCode {
+fn classify_http(status: u16) -> ErrorCode {
     match status {
         404 | 410 => ErrorCode::DownloadUnavailable,
         _ => ErrorCode::DownloadFailed,
@@ -86,7 +81,7 @@ pub fn classify_http(status: u16) -> ErrorCode {
 }
 
 /// The code for an I/O error while saving a file: a full disk is `low_disk`, anything else `download_failed`.
-pub fn classify_io(error: &io::Error) -> ErrorCode {
+fn classify_io(error: &io::Error) -> ErrorCode {
     let disk_full = error.kind() == io::ErrorKind::StorageFull
         || error
             .raw_os_error()
@@ -100,7 +95,7 @@ pub fn classify_io(error: &io::Error) -> ErrorCode {
 
 /// The code for a failed request: a status maps by [`classify_http`], an I/O error by [`classify_io`], and
 /// timeouts, DNS failures and the rest are `download_failed`.
-pub fn classify_request(error: &ureq::Error) -> ErrorCode {
+fn classify_request(error: &ureq::Error) -> ErrorCode {
     match error {
         ureq::Error::StatusCode(status) => classify_http(*status),
         ureq::Error::Io(error) => classify_io(error),
@@ -109,7 +104,7 @@ pub fn classify_request(error: &ureq::Error) -> ErrorCode {
 }
 
 /// The code for a failed copy: the disk is `low_disk` when full, the network is `download_failed`.
-pub fn classify_copy(error: &CopyError) -> ErrorCode {
+fn classify_copy(error: &CopyError) -> ErrorCode {
     match error {
         CopyError::Read => ErrorCode::DownloadFailed,
         CopyError::Write(error) => classify_io(error),
@@ -128,7 +123,7 @@ fn store_verified(
     let result = (|| {
         let file = File::create(part).map_err(|error| classify_io(&error))?;
         let mut writer = BufWriter::new(file);
-        let (actual, _) = hash_copy(reader, &mut writer).map_err(|error| classify_copy(&error))?;
+        let actual = hash_copy(reader, &mut writer).map_err(|error| classify_copy(&error))?;
         writer.flush().map_err(|error| classify_io(&error))?;
         drop(writer);
         verify(&actual, expected)?;
@@ -176,7 +171,7 @@ pub fn fetch(download: &Download, dir: &Path) -> Result<PathBuf, ErrorCode> {
 ///
 /// The errors of [`fetch`]; an archive that cannot be unpacked is `tool_broken`, or `low_disk` when the disk is
 /// full.
-pub fn install_download(download: &Download, layout: &Layout) -> Result<(), ErrorCode> {
+fn install_download(download: &Download, layout: &Layout) -> Result<(), ErrorCode> {
     let archive_path = fetch(download, &layout.downloads)?;
     let unpacked = archive::extract(
         &archive_path,
@@ -192,7 +187,7 @@ pub fn install_download(download: &Download, layout: &Layout) -> Result<(), Erro
 }
 
 /// The argument that makes `tool` print its version and exit: uv takes `--version`, FFmpeg's tools `-version`.
-pub fn version_arg(tool: &str) -> &'static str {
+fn version_arg(tool: &str) -> &'static str {
     if tool.starts_with("uv") {
         "--version"
     } else {
@@ -205,7 +200,7 @@ pub fn version_arg(tool: &str) -> &'static str {
 /// # Errors
 ///
 /// `tool_broken` for the first one that does not start or does not succeed.
-pub fn check_tools(layout: &Layout) -> Result<(), ErrorCode> {
+fn check_tools(layout: &Layout) -> Result<(), ErrorCode> {
     for path in [layout.uv(), layout.ffmpeg(), layout.ffprobe()] {
         let name = path
             .file_stem()
@@ -273,35 +268,32 @@ mod tests {
     }
 
     #[test]
-    fn hash_copy_returns_the_lowercase_sha256_and_the_length() {
+    fn hash_copy_returns_the_lowercase_sha256_and_copies_the_bytes() {
         let mut out = Vec::new();
-        let (hash, bytes) = hash_copy(&mut Cursor::new(b"hello"), &mut out).unwrap();
+        let hash = hash_copy(&mut Cursor::new(b"hello"), &mut out).unwrap();
         assert_eq!(hash, HELLO_SHA256);
-        assert_eq!(bytes, 5);
         assert_eq!(out, b"hello");
     }
 
     #[test]
     fn hash_copy_of_nothing_is_the_empty_hash() {
         let mut out = Vec::new();
-        let (hash, bytes) = hash_copy(&mut Cursor::new(b""), &mut out).unwrap();
+        let hash = hash_copy(&mut Cursor::new(b""), &mut out).unwrap();
         assert_eq!(
             hash,
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
-        assert_eq!(bytes, 0);
     }
 
     #[test]
     fn hash_copy_spans_several_chunks() {
         let data = vec![7u8; CHUNK * 3 + 11];
         let mut out = Vec::new();
-        let (hash, bytes) = hash_copy(&mut Cursor::new(&data), &mut out).unwrap();
-        assert_eq!(bytes, data.len() as u64);
+        let hash = hash_copy(&mut Cursor::new(&data), &mut out).unwrap();
         assert_eq!(out, data);
         let mut again = Vec::new();
         assert_eq!(
-            hash_copy(&mut Cursor::new(&data), &mut again).unwrap().0,
+            hash_copy(&mut Cursor::new(&data), &mut again).unwrap(),
             hash
         );
     }

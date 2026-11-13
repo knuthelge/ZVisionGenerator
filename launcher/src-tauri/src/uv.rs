@@ -43,7 +43,7 @@ const NETWORK_PHRASES: [&str; 8] = [
 
 /// The environment every uv call adds: uv's folders inside Root, managed Python only, no uv configuration read,
 /// and a five-minute network timeout.
-pub fn uv_env(layout: &Layout) -> Vec<(&'static str, OsString)> {
+fn uv_env(layout: &Layout) -> Vec<(&'static str, OsString)> {
     vec![
         ("UV_TOOL_DIR", layout.tools.clone().into_os_string()),
         ("UV_TOOL_BIN_DIR", layout.tool_bin.clone().into_os_string()),
@@ -164,7 +164,7 @@ pub fn prune_args() -> Vec<String> {
 /// The error code for a failed uv call, read from the last lines of its output: a full disk is `low_disk`, a
 /// network problem `download_failed`, anything else `uv_failed`. The disk check comes first because uv words a
 /// full disk during a download as a failed download.
-pub fn classify_uv_failure(tail: &[String]) -> ErrorCode {
+fn classify_uv_failure(tail: &[String]) -> ErrorCode {
     let text = tail.join("\n").to_lowercase();
     if DISK_FULL_PHRASES.iter().any(|phrase| text.contains(phrase)) {
         ErrorCode::LowDisk
@@ -240,10 +240,7 @@ fn forward_lines(stream: impl Read, sender: mpsc::Sender<String>) {
 /// # Errors
 ///
 /// Fails when waiting for uv fails.
-pub fn pump(
-    child: &mut Child,
-    mut on_line: impl FnMut(&str),
-) -> io::Result<(ExitStatus, Vec<String>)> {
+fn pump(child: &mut Child, mut on_line: impl FnMut(&str)) -> io::Result<(ExitStatus, Vec<String>)> {
     let (sender, receiver) = mpsc::channel();
     let mut readers = Vec::new();
     if let Some(stdout) = child.stdout.take() {
@@ -266,8 +263,8 @@ pub fn pump(
     Ok((child.wait()?, tail.into_vec()))
 }
 
-/// Run uv with `args` to completion. `on_start` gets uv's process id as soon as it runs (so Quit can stop its tree)
-/// and `on_line` every output line.
+/// Run uv with `args` to completion and return the last [`TAIL_LINES`] lines of its output. `on_start` gets uv's
+/// process id as soon as it runs (so Quit can stop its tree) and `on_line` every output line.
 ///
 /// # Errors
 ///
@@ -278,7 +275,7 @@ pub fn run<S: AsRef<OsStr>>(
     args: &[S],
     on_start: impl FnOnce(u32),
     on_line: impl FnMut(&str),
-) -> Result<(), UvFailure> {
+) -> Result<Vec<String>, UvFailure> {
     let launch_failed = |_: io::Error| UvFailure {
         error: ErrorCode::ToolBroken,
         tail: Vec::new(),
@@ -287,7 +284,7 @@ pub fn run<S: AsRef<OsStr>>(
     on_start(child.id());
     let (status, tail) = pump(&mut child, on_line).map_err(launch_failed)?;
     if status.success() {
-        return Ok(());
+        return Ok(tail);
     }
     Err(UvFailure {
         error: classify_uv_failure(&tail),
@@ -663,7 +660,7 @@ mod tests {
             let layout = layout_with_uv(dir.path(), "echo out; echo err >&2");
             let mut seen = Vec::new();
             let mut pid = None;
-            run(
+            let mut tail = run(
                 &layout,
                 &["tool", "install"],
                 |id| pid = Some(id),
@@ -671,7 +668,9 @@ mod tests {
             )
             .unwrap();
             seen.sort();
+            tail.sort();
             assert_eq!(seen, ["err", "out"]);
+            assert_eq!(tail, seen);
             assert!(pid.is_some_and(|id| id > 0));
         }
 

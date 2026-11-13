@@ -10,8 +10,6 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::version::Skip;
-
 /// `server.json`: the server the launcher started.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,10 +26,6 @@ pub struct ServerRecord {
 pub struct Prefs {
     /// The port the server last became ready on; the Web UI keeps its drafts per port.
     pub last_port: Option<u16>,
-    /// An app version the installed launcher could not upgrade to.
-    pub skip_version: Option<String>,
-    /// The launcher version that found `skip_version` unreachable.
-    pub skipped_by: Option<String>,
     /// Whether the user opted into pre-release versions of the app.
     pub beta: bool,
     /// The SHA-256 pins of the uv and ffmpeg downloads installed in `bin/`; empty until a download succeeds.
@@ -39,14 +33,6 @@ pub struct Prefs {
 }
 
 impl Prefs {
-    /// The stored skip, when both halves are present.
-    pub fn skip(&self) -> Option<Skip<'_>> {
-        Some(Skip {
-            version: self.skip_version.as_deref()?,
-            skipped_by: self.skipped_by.as_deref()?,
-        })
-    }
-
     /// Whether the installed tools are the ones `pins` names.
     pub fn tools_current(&self, pins: &[&str]) -> bool {
         self.tool_pins.iter().eq(pins)
@@ -55,12 +41,6 @@ impl Prefs {
     /// Remember that the tools named by `pins` are installed.
     pub fn set_tool_pins(&mut self, pins: &[&str]) {
         self.tool_pins = pins.iter().map(|pin| (*pin).to_owned()).collect();
-    }
-
-    /// Remember that `launcher` could not upgrade the app to `version`.
-    pub fn set_skip(&mut self, version: &str, launcher: &str) {
-        self.skip_version = Some(version.to_owned());
-        self.skipped_by = Some(launcher.to_owned());
     }
 }
 
@@ -156,17 +136,14 @@ mod tests {
     fn prefs_round_trip_through_a_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("root").join("launcher.json");
-        let mut prefs = Prefs {
+        let prefs = Prefs {
             last_port: Some(8083),
             ..Prefs::default()
         };
-        prefs.set_skip("0.15.0", "0.1.0");
         write_prefs(&path, &prefs).unwrap();
         assert_eq!(read_prefs(&path), prefs);
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("\"lastPort\": 8083"), "{text}");
-        assert!(text.contains("\"skipVersion\": \"0.15.0\""), "{text}");
-        assert!(text.contains("\"skippedBy\": \"0.1.0\""), "{text}");
     }
 
     #[test]
@@ -198,16 +175,13 @@ mod tests {
         fs::write(&path, r#"{"lastPort": 8090, "extra": true}"#).unwrap();
         let prefs = read_prefs(&path);
         assert_eq!(prefs.last_port, Some(8090));
-        assert_eq!(prefs.skip(), None);
+        assert!(!prefs.beta);
     }
 
     #[test]
     fn default_prefs_write_null_for_absent_values() {
         let text = serde_json::to_string(&Prefs::default()).unwrap();
-        assert_eq!(
-            text,
-            r#"{"lastPort":null,"skipVersion":null,"skippedBy":null,"beta":false,"toolPins":[]}"#
-        );
+        assert_eq!(text, r#"{"lastPort":null,"beta":false,"toolPins":[]}"#);
     }
 
     #[test]
@@ -228,24 +202,6 @@ mod tests {
                 .contains("\"beta\": true")
         );
         assert_eq!(read_prefs(&path), prefs);
-    }
-
-    #[test]
-    fn a_skip_needs_both_halves() {
-        let half = Prefs {
-            skip_version: Some("0.15.0".into()),
-            ..Prefs::default()
-        };
-        assert_eq!(half.skip(), None);
-        let mut full = Prefs::default();
-        full.set_skip("0.15.0", "0.1.0");
-        assert_eq!(
-            full.skip(),
-            Some(Skip {
-                version: "0.15.0",
-                skipped_by: "0.1.0"
-            })
-        );
     }
 
     #[test]

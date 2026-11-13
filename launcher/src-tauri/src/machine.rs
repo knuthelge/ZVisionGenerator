@@ -9,18 +9,18 @@ use crate::snapshot::{Unsupported, UnsupportedCode};
 use crate::spawn::hidden_command;
 
 /// Lowest NVIDIA driver major version the app's CUDA build runs on.
-pub const MIN_DRIVER_MAJOR: u32 = 580;
+const MIN_DRIVER_MAJOR: u32 = 580;
 /// Lowest GPU compute capability (major, minor) the app's CUDA build runs on.
-pub const MIN_COMPUTE_CAP: (u32, u32) = (7, 5);
+const MIN_COMPUTE_CAP: (u32, u32) = (7, 5);
 /// Free space Root's volume needs: 10 GB (10 x 10^9 bytes).
-pub const MIN_FREE_BYTES: u64 = 10_000_000_000;
+const MIN_FREE_BYTES: u64 = 10_000_000_000;
 
 /// The `needed` value shown for GPU reasons.
 const NEEDED_COMPUTE_CAP: &str = "7.5";
 
 /// One GPU line of `nvidia-smi` output.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Gpu {
+struct Gpu {
     pub name: String,
     /// The driver's version string, for example `580.95.05`.
     pub driver: String,
@@ -30,13 +30,13 @@ pub struct Gpu {
 
 /// A mounted volume and the bytes free on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Mount {
+struct Mount {
     pub mount_point: PathBuf,
     pub free: u64,
 }
 
 /// The major part of a driver version: `580` for `580.95.05`.
-pub fn driver_major(driver: &str) -> Option<u32> {
+fn driver_major(driver: &str) -> Option<u32> {
     driver.trim().split('.').next()?.parse().ok()
 }
 
@@ -64,12 +64,12 @@ fn parse_gpu_line(line: &str) -> Option<Gpu> {
 }
 
 /// Parse the output of the GPU query; lines that are not a GPU (errors, blanks, a missing field) are skipped.
-pub fn parse_nvidia_smi(stdout: &str) -> Vec<Gpu> {
+fn parse_nvidia_smi(stdout: &str) -> Vec<Gpu> {
     stdout.lines().filter_map(parse_gpu_line).collect()
 }
 
 /// Decide whether the GPUs pass: driver major >= 580 and any compute capability >= 7.5, one reason, first match wins.
-pub fn evaluate_gpus(gpus: &[Gpu]) -> Result<(), Unsupported> {
+fn evaluate_gpus(gpus: &[Gpu]) -> Result<(), Unsupported> {
     let Some(first) = gpus.first() else {
         return Err(no_nvidia_gpu());
     };
@@ -94,7 +94,7 @@ pub fn evaluate_gpus(gpus: &[Gpu]) -> Result<(), Unsupported> {
 
 /// The reason when the GPU query gave no GPU: a second, driver-only query tells an old driver (which rejects the
 /// `compute_cap` field) from no NVIDIA GPU at all.
-pub fn evaluate_without_gpus(driver_only_stdout: Option<&str>) -> Unsupported {
+fn evaluate_without_gpus(driver_only_stdout: Option<&str>) -> Unsupported {
     let driver = driver_only_stdout
         .and_then(|text| text.lines().map(str::trim).find(|line| !line.is_empty()))
         .filter(|driver| driver_major(driver).is_some_and(|major| major < MIN_DRIVER_MAJOR));
@@ -121,7 +121,7 @@ fn driver_too_old(driver: &str) -> Unsupported {
 }
 
 /// The volume holding `path`: the mount whose mount point is the longest prefix of it.
-pub fn volume_for<'a>(mounts: &'a [Mount], path: &Path) -> Option<&'a Mount> {
+fn volume_for<'a>(mounts: &'a [Mount], path: &Path) -> Option<&'a Mount> {
     mounts
         .iter()
         .filter(|mount| path.starts_with(&mount.mount_point))
@@ -129,7 +129,7 @@ pub fn volume_for<'a>(mounts: &'a [Mount], path: &Path) -> Option<&'a Mount> {
 }
 
 /// Pass when `free` bytes reach `need`; otherwise the `low_disk` reason with the free bytes as a decimal string.
-pub fn check_space(free: u64, need: u64) -> Result<(), Unsupported> {
+fn check_space(free: u64, need: u64) -> Result<(), Unsupported> {
     if free >= need {
         return Ok(());
     }
@@ -141,13 +141,13 @@ pub fn check_space(free: u64, need: u64) -> Result<(), Unsupported> {
 }
 
 /// Whether the macOS app runs from a disk image or a translocated copy, where it must not install or start anything.
-pub fn needs_move_to_applications(exe: &Path) -> bool {
+fn needs_move_to_applications(exe: &Path) -> bool {
     let path = exe.to_string_lossy();
     path.starts_with("/Volumes/") || path.contains("/AppTranslocation/")
 }
 
 /// The ways to run `nvidia-smi` in order: by name from `PATH`, then the driver's usual install location.
-pub fn nvidia_smi_candidates(os: &str, system_root: Option<&str>) -> Vec<PathBuf> {
+fn nvidia_smi_candidates(os: &str, system_root: Option<&str>) -> Vec<PathBuf> {
     match os {
         "windows" => {
             let mut list = vec![PathBuf::from("nvidia-smi.exe")];
@@ -188,7 +188,7 @@ fn run_nvidia_smi(candidates: &[PathBuf], fields: &str) -> Option<String> {
 }
 
 /// Check the NVIDIA driver and GPU (Windows and Linux); macOS has nothing to check.
-pub fn check_gpu() -> Result<(), Unsupported> {
+fn check_gpu() -> Result<(), Unsupported> {
     let system_root = std::env::var("SystemRoot").ok();
     let candidates = nvidia_smi_candidates(std::env::consts::OS, system_root.as_deref());
     if candidates.is_empty() {
@@ -205,7 +205,7 @@ pub fn check_gpu() -> Result<(), Unsupported> {
 }
 
 /// Bytes free on the volume holding `root`, or `None` when the disks cannot be listed or none holds it.
-pub fn free_bytes(root: &Path) -> Option<u64> {
+fn free_bytes(root: &Path) -> Option<u64> {
     let disks = sysinfo::Disks::new_with_refreshed_list().ok()?;
     let mounts: Vec<Mount> = disks
         .iter()

@@ -57,7 +57,6 @@ pub enum ErrorCode {
 #[serde(rename_all = "snake_case")]
 pub enum LinkId {
     Requirements,
-    InstallGuide,
     DataFolder,
     WhatsNew,
 }
@@ -119,8 +118,6 @@ pub struct Snapshot {
     pub installed_version: Option<String>,
     /// Set while an update is offered; kept through `updating` as the target.
     pub update_version: Option<String>,
-    /// Never set together with `update_version`.
-    pub needs_newer_launcher: Option<String>,
     pub autostart: bool,
     /// Whether the user opted into pre-release versions of the app.
     pub beta: bool,
@@ -313,7 +310,6 @@ mod tests {
             "9 stopped",
             "9b failed start",
             "10a failed update",
-            "10b running needs newer launcher",
             "R failed repair",
             "U uninstalling",
             "11b uninstalled",

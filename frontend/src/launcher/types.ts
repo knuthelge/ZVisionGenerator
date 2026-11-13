@@ -30,7 +30,7 @@ export type ErrorCode =
   | 'start_timeout'
   | 'uninstall_incomplete';
 
-export type LinkId = 'requirements' | 'install_guide' | 'data_folder' | 'whats_new';
+export type LinkId = 'requirements' | 'data_folder' | 'whats_new';
 
 export type Packaging = 'macos_app' | 'windows_nsis' | 'appimage' | 'linux_package';
 
@@ -58,10 +58,8 @@ export interface Progress {
 export interface Snapshot {
   phase: Phase;
   installedVersion: string | null;
-  /** Set while an update is offered, kept through `updating` as the target; cleared on success or needs-newer. */
+  /** Set while an update is offered, kept through `updating` as the target; cleared when the update succeeds. */
   updateVersion: string | null;
-  /** Never set together with `updateVersion`. */
-  needsNewerLauncher: string | null;
   autostart: boolean;
   /** The user opted into pre-release versions of the app. */
   beta: boolean;

@@ -1,7 +1,7 @@
-//! The ordered steps of each action (install, update, repair) and the step ids the window shows for them.
+//! The plan of each action (install, update, repair): its ordered steps and the progress rows the window shows.
 //!
 //! A [`Step`] is one thing the controller does; a [`StepId`] is the row of the progress list it belongs to. Several
-//! steps share a row, and steps before the first or after the last visible work sit with the nearest row.
+//! steps share a row, and stopping the server sits with the row of the step after it.
 
 use crate::snapshot::StepId;
 
@@ -36,89 +36,111 @@ pub enum Step {
     StartServer { open_browser: bool },
 }
 
-/// The steps of `action` in order, each with the progress row it belongs to. An install or an update downloads the
-/// tools only when `tools_current` is false (the installed tools are not the pinned ones); a repair always does.
-pub fn steps(action: Action, tools_current: bool) -> Vec<(Step, StepId)> {
-    use Step::*;
-    match action {
-        Action::Install if tools_current => vec![
-            (ToolInstall { reinstall: false }, StepId::InstallApp),
-            (CachePrune, StepId::Finish),
-            (ReadVersion, StepId::Finish),
-            (StartServer { open_browser: true }, StepId::Finish),
-        ],
-        Action::Install => vec![
-            (FetchTools, StepId::DownloadTools),
-            (ToolInstall { reinstall: false }, StepId::InstallApp),
-            (CachePrune, StepId::Finish),
-            (ReadVersion, StepId::Finish),
-            (StartServer { open_browser: true }, StepId::Finish),
-        ],
-        Action::Update if tools_current => vec![
-            (StopServer, StepId::UpdateApp),
-            (ToolUpgrade, StepId::UpdateApp),
-            (ReadVersion, StepId::Finish),
-            (CachePrune, StepId::Finish),
-            (
-                StartServer {
-                    open_browser: false,
-                },
-                StepId::Finish,
-            ),
-        ],
-        Action::Update => vec![
-            (StopServer, StepId::DownloadTools),
-            (FetchTools, StepId::DownloadTools),
-            (ToolUpgrade, StepId::UpdateApp),
-            (ReadVersion, StepId::Finish),
-            (CachePrune, StepId::Finish),
-            (
-                StartServer {
-                    open_browser: false,
-                },
-                StepId::Finish,
-            ),
-        ],
-        Action::Repair => vec![
-            (StopServer, StepId::DownloadTools),
-            (CheckDisk, StepId::DownloadTools),
-            (FetchTools, StepId::DownloadTools),
-            (CacheClean, StepId::CleanCache),
-            (ToolInstall { reinstall: true }, StepId::InstallApp),
-            (CachePrune, StepId::Finish),
-            (ReadVersion, StepId::Finish),
-            (StartServer { open_browser: true }, StepId::Finish),
-        ],
+impl Step {
+    /// The progress row the step belongs to; `None` for a step that sits with the row of the step after it.
+    fn row(self) -> Option<StepId> {
+        match self {
+            Step::StopServer => None,
+            Step::CheckDisk | Step::FetchTools => Some(StepId::DownloadTools),
+            Step::CacheClean => Some(StepId::CleanCache),
+            Step::ToolInstall { .. } => Some(StepId::InstallApp),
+            Step::ToolUpgrade => Some(StepId::UpdateApp),
+            Step::CachePrune | Step::ReadVersion | Step::StartServer { .. } => Some(StepId::Finish),
+        }
     }
 }
 
-/// The progress rows of `action`, in order, without repeats.
-pub fn step_ids(action: Action, tools_current: bool) -> Vec<StepId> {
-    let mut ids: Vec<StepId> = Vec::new();
-    for (_, id) in steps(action, tools_current) {
-        if ids.last() != Some(&id) {
+/// What an action does, built once when it begins: the rows of its progress list and its steps in order, each with
+/// the index of its row, so the rows shown and the steps run always agree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Plan {
+    /// The progress rows, in order, without repeats.
+    pub rows: Vec<StepId>,
+    /// The steps in order, each with the index into `rows` of the row it belongs to.
+    pub steps: Vec<(Step, usize)>,
+}
+
+impl Plan {
+    /// The plan of `action`. An install or an update downloads the tools only when `tools_current` is false (the
+    /// installed tools are not the pinned ones); a repair always does.
+    pub fn new(action: Action, tools_current: bool) -> Self {
+        let listed: &[Step] = match action {
+            Action::Install => &[
+                Step::FetchTools,
+                Step::ToolInstall { reinstall: false },
+                Step::CachePrune,
+                Step::ReadVersion,
+                Step::StartServer { open_browser: true },
+            ],
+            Action::Update => &[
+                Step::StopServer,
+                Step::FetchTools,
+                Step::ToolUpgrade,
+                Step::ReadVersion,
+                Step::CachePrune,
+                Step::StartServer {
+                    open_browser: false,
+                },
+            ],
+            Action::Repair => &[
+                Step::StopServer,
+                Step::CheckDisk,
+                Step::FetchTools,
+                Step::CacheClean,
+                Step::ToolInstall { reinstall: true },
+                Step::CachePrune,
+                Step::ReadVersion,
+                Step::StartServer { open_browser: true },
+            ],
+        };
+        let fetch = action == Action::Repair || !tools_current;
+        let kept: Vec<Step> = listed
+            .iter()
+            .copied()
+            .filter(|step| fetch || *step != Step::FetchTools)
+            .collect();
+        // A step with no row of its own takes the row of the step after it.
+        let mut ids: Vec<StepId> = Vec::with_capacity(kept.len());
+        for step in kept.iter().rev() {
+            let id = step
+                .row()
+                .or_else(|| ids.last().copied())
+                .unwrap_or(StepId::Finish);
             ids.push(id);
         }
+        ids.reverse();
+        let mut rows: Vec<StepId> = Vec::new();
+        let mut steps = Vec::with_capacity(kept.len());
+        for (step, id) in kept.into_iter().zip(ids) {
+            if rows.last() != Some(&id) {
+                rows.push(id);
+            }
+            steps.push((step, rows.len() - 1));
+        }
+        Self { rows, steps }
     }
-    ids
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn only_steps(action: Action) -> Vec<Step> {
-        steps(action, true)
+    const ACTIONS: [Action; 3] = [Action::Install, Action::Update, Action::Repair];
+
+    fn steps_of(action: Action, tools_current: bool) -> Vec<Step> {
+        Plan::new(action, tools_current)
+            .steps
             .into_iter()
             .map(|(step, _)| step)
             .collect()
     }
 
+    fn only_steps(action: Action) -> Vec<Step> {
+        steps_of(action, true)
+    }
+
     fn steps_with_stale_tools(action: Action) -> Vec<Step> {
-        steps(action, false)
-            .into_iter()
-            .map(|(step, _)| step)
-            .collect()
+        steps_of(action, false)
     }
 
     fn position(action: Action, wanted: Step) -> usize {
@@ -219,19 +241,19 @@ mod tests {
     #[test]
     fn progress_rows_per_action() {
         assert_eq!(
-            step_ids(Action::Install, false),
+            Plan::new(Action::Install, false).rows,
             [StepId::DownloadTools, StepId::InstallApp, StepId::Finish]
         );
         assert_eq!(
-            step_ids(Action::Install, true),
+            Plan::new(Action::Install, true).rows,
             [StepId::InstallApp, StepId::Finish]
         );
         assert_eq!(
-            step_ids(Action::Update, true),
+            Plan::new(Action::Update, true).rows,
             [StepId::UpdateApp, StepId::Finish]
         );
         assert_eq!(
-            step_ids(Action::Repair, true),
+            Plan::new(Action::Repair, true).rows,
             [
                 StepId::DownloadTools,
                 StepId::CleanCache,
@@ -242,21 +264,37 @@ mod tests {
     }
 
     #[test]
-    fn rows_never_go_backwards() {
-        for action in [Action::Install, Action::Update, Action::Repair] {
+    fn the_row_index_starts_at_zero_and_advances_by_at_most_one() {
+        for action in ACTIONS {
             for tools_current in [true, false] {
-                let ids = step_ids(action, tools_current);
-                let mut seen = Vec::new();
-                for (_, id) in steps(action, tools_current) {
-                    let row = ids.iter().position(|candidate| *candidate == id).unwrap();
-                    seen.push(row);
-                }
+                let plan = Plan::new(action, tools_current);
+                let indexes: Vec<usize> = plan.steps.iter().map(|(_, row)| *row).collect();
+                assert_eq!(indexes.first(), Some(&0), "{action:?} {tools_current}");
                 assert!(
-                    seen.windows(2).all(|pair| pair[0] <= pair[1]),
+                    indexes
+                        .windows(2)
+                        .all(|pair| pair[1] - pair[0] <= 1 && pair[0] <= pair[1]),
                     "{action:?} {tools_current}"
                 );
+                assert_eq!(indexes.last(), Some(&(plan.rows.len() - 1)));
             }
         }
+    }
+
+    #[test]
+    fn stopping_the_server_sits_with_the_first_row_that_remains() {
+        let row_of_stop = |action, tools_current| {
+            let plan = Plan::new(action, tools_current);
+            let (_, row) = plan
+                .steps
+                .iter()
+                .find(|(step, _)| *step == Step::StopServer)
+                .unwrap();
+            plan.rows[*row]
+        };
+        assert_eq!(row_of_stop(Action::Update, true), StepId::UpdateApp);
+        assert_eq!(row_of_stop(Action::Update, false), StepId::DownloadTools);
+        assert_eq!(row_of_stop(Action::Repair, true), StepId::DownloadTools);
     }
 
     #[test]
@@ -280,7 +318,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            step_ids(Action::Update, false),
+            Plan::new(Action::Update, false).rows,
             [StepId::DownloadTools, StepId::UpdateApp, StepId::Finish]
         );
     }
@@ -300,6 +338,9 @@ mod tests {
 
     #[test]
     fn repair_downloads_whatever_the_recorded_tools_are() {
-        assert_eq!(steps(Action::Repair, true), steps(Action::Repair, false));
+        assert_eq!(
+            Plan::new(Action::Repair, true),
+            Plan::new(Action::Repair, false)
+        );
     }
 }

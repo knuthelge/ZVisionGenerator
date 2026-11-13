@@ -44,7 +44,7 @@ pub fn current_packaging() -> Packaging {
 
 /// A running process as far as the cleanup cares: its id and the executable it runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Proc {
+struct Proc {
     pub pid: u32,
     pub exe: Option<PathBuf>,
 }
@@ -59,7 +59,7 @@ fn same_path(a: &Path, b: &Path, ignore_case: bool) -> bool {
 }
 
 /// The ids of the processes that run the executable `exe`, not counting `own_pid`.
-pub fn other_launcher_pids(procs: &[Proc], exe: &Path, own_pid: u32) -> Vec<u32> {
+fn other_launcher_pids(procs: &[Proc], exe: &Path, own_pid: u32) -> Vec<u32> {
     procs
         .iter()
         .filter(|process| process.pid != own_pid)
@@ -182,40 +182,27 @@ fn kill_other_launchers() {
     stop_members(&members, Duration::ZERO);
 }
 
-/// The cleanup of `layout`: `kill_others` first, then the recorded server (only when its pid is alive with the
-/// recorded start time), then Root unless `keep_data`. Every failure is ignored: the uninstaller must never be
-/// blocked by it.
-fn cleanup(
-    layout: &Layout,
-    kill_others: impl FnOnce(),
-    keep_data: bool,
-    grace: Duration,
-    budget: Duration,
-) {
-    kill_others();
-    let _ = clear_stale_record(layout, grace);
+/// The cleanup of `layout`: the recorded server (only when its pid is alive with the recorded start time), then Root
+/// unless `keep_data`. Every failure is ignored: the uninstaller must never be blocked by it.
+fn cleanup(layout: &Layout, keep_data: bool) {
+    clear_stale_record(layout, STOP_GRACE);
     if !keep_data {
-        let _ = delete_root(&layout.root, budget);
+        let _ = delete_root(&layout.root, DELETE_RETRY);
     }
 }
 
 /// Run the headless cleanup (`--uninstall-cleanup`): stop the other launcher processes and the launcher's server,
 /// delete Root unless `keep_data` (`--keep-data`, an upgrade), and return so the process exits 0. Starts no window
-/// and no single-instance check.
+/// and no single-instance check. The other launchers go first: a running window would hold files in Root.
 pub fn headless(keep_data: bool) {
     if let Some(root) = default_root() {
-        cleanup(
-            &Layout::new(root),
-            kill_other_launchers,
-            keep_data,
-            STOP_GRACE,
-            DELETE_RETRY,
-        );
+        kill_other_launchers();
+        cleanup(&Layout::new(root), keep_data);
     }
 }
 
 /// The uninstaller the Windows installer placed next to the launcher: `uninstall.exe` in the folder of `exe`.
-pub fn uninstaller_path(exe: &Path) -> Option<PathBuf> {
+fn uninstaller_path(exe: &Path) -> Option<PathBuf> {
     exe.parent().map(|dir| dir.join("uninstall.exe"))
 }
 
@@ -541,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_kills_others_first_then_deletes_root_even_with_a_stale_record() {
+    fn cleanup_stops_nothing_and_deletes_root_even_with_a_stale_record() {
         let dir = tempfile::tempdir().unwrap();
         let layout = Layout::new(dir.path().join(root_name()));
         fs::create_dir_all(&layout.tools).unwrap();
@@ -551,18 +538,7 @@ mod tests {
             r#"{"pid":4294967,"startTime":1,"port":8080}"#,
         )
         .unwrap();
-        let order = Cell::new(0);
-        cleanup(
-            &layout,
-            || {
-                assert!(layout.root.exists(), "others are killed before Root goes");
-                order.set(1);
-            },
-            false,
-            Duration::ZERO,
-            Duration::ZERO,
-        );
-        assert_eq!(order.get(), 1);
+        cleanup(&layout, false);
         assert!(!layout.root.exists());
     }
 
@@ -576,15 +552,7 @@ mod tests {
             r#"{"pid":4294967,"startTime":1,"port":8080}"#,
         )
         .unwrap();
-        let killed = Cell::new(false);
-        cleanup(
-            &layout,
-            || killed.set(true),
-            true,
-            Duration::ZERO,
-            Duration::ZERO,
-        );
-        assert!(killed.get());
+        cleanup(&layout, true);
         assert!(!layout.server_json.exists(), "the stale record is cleared");
         assert!(layout.tools.exists(), "Root stays");
     }
@@ -593,7 +561,7 @@ mod tests {
     fn cleanup_never_fails_when_there_is_nothing_to_clean() {
         let dir = tempfile::tempdir().unwrap();
         let layout = Layout::new(dir.path().join(root_name()));
-        cleanup(&layout, || {}, false, Duration::ZERO, Duration::ZERO);
+        cleanup(&layout, false);
         assert!(!layout.root.exists());
     }
 }

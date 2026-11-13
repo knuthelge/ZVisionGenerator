@@ -13,7 +13,7 @@ use crate::manifest::ArchiveKind;
 
 /// The wanted name that `entry_path` is a file of, matching the last path segment (`/` or `\` separated) exactly
 /// apart from ASCII case; `None` for a folder entry (a trailing separator) or a file nobody wanted.
-pub fn member_target<'a>(entry_path: &str, wanted: &[&'a str]) -> Option<&'a str> {
+fn member_target<'a>(entry_path: &str, wanted: &[&'a str]) -> Option<&'a str> {
     let name = entry_path.rsplit(['/', '\\']).next()?;
     if name.is_empty() {
         return None;
@@ -29,7 +29,7 @@ pub fn member_target<'a>(entry_path: &str, wanted: &[&'a str]) -> Option<&'a str
 /// # Errors
 ///
 /// Returns the first wanted name no entry provides.
-pub fn pick_members(names: &[String], wanted: &[&str]) -> Result<Vec<usize>, String> {
+fn pick_members(names: &[String], wanted: &[&str]) -> Result<Vec<usize>, String> {
     wanted
         .iter()
         .map(|want| {

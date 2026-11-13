@@ -11,7 +11,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, ExitStatus, Stdio};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::paths::Layout;
@@ -29,13 +29,13 @@ const PORT_SCAN: u16 = 100;
 const CONNECT_PROBE: Duration = Duration::from_millis(500);
 
 /// How often readiness is polled.
-pub const READY_POLL: Duration = Duration::from_millis(500);
+const READY_POLL: Duration = Duration::from_millis(500);
 
 /// How long one readiness request may take.
-pub const READY_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+const READY_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long a starting server may take to answer before the start fails.
-pub const READY_TIMEOUT: Duration = Duration::from_secs(600);
+const READY_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// How long `ziv --version` may take.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(60);
@@ -44,7 +44,7 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(60);
 const LOG_TAIL_BYTES: u64 = 64 * 1024;
 
 /// The ports to try, in order: the one the server last ran on, then 8080 through 8179, each once.
-pub fn port_candidates(last: Option<u16>) -> Vec<u16> {
+fn port_candidates(last: Option<u16>) -> Vec<u16> {
     let scan = DEFAULT_PORT..DEFAULT_PORT + PORT_SCAN;
     last.into_iter()
         .chain(scan.filter(|port| Some(*port) != last))
@@ -52,7 +52,7 @@ pub fn port_candidates(last: Option<u16>) -> Vec<u16> {
 }
 
 /// The first candidate `is_free` accepts, or [`DEFAULT_PORT`] when none is (the app then reports the problem).
-pub fn pick_port(candidates: &[u16], mut is_free: impl FnMut(u16) -> bool) -> u16 {
+fn pick_port(candidates: &[u16], mut is_free: impl FnMut(u16) -> bool) -> u16 {
     candidates
         .iter()
         .copied()
@@ -61,7 +61,7 @@ pub fn pick_port(candidates: &[u16], mut is_free: impl FnMut(u16) -> bool) -> u1
 }
 
 /// `ui --no-browser --port <port>`; no `--host`, so the app binds to this machine only.
-pub fn server_args(port: u16) -> Vec<OsString> {
+fn server_args(port: u16) -> Vec<OsString> {
     ["ui", "--no-browser", "--port"]
         .into_iter()
         .map(OsString::from)
@@ -75,7 +75,7 @@ pub fn server_args(port: u16) -> Vec<OsString> {
 /// # Errors
 ///
 /// Fails when a folder on the path holds the path separator and cannot be joined.
-pub fn server_env(
+fn server_env(
     layout: &Layout,
     path: Option<&OsStr>,
 ) -> Result<Vec<(&'static str, OsString)>, env::JoinPathsError> {
@@ -89,13 +89,13 @@ pub fn server_env(
 }
 
 /// The version in `ziv --version`'s output: the text after `ziv ` on the first line.
-pub fn parse_version(output: &str) -> Option<String> {
+fn parse_version(output: &str) -> Option<String> {
     let version = output.lines().next()?.trim().strip_prefix("ziv ")?.trim();
     (!version.is_empty()).then(|| version.to_owned())
 }
 
 /// The last `count` non-empty lines of `text`. Lines end at `\n` or `\r` (progress bars redraw with `\r`).
-pub fn tail_lines(text: &str, count: usize) -> Vec<String> {
+fn tail_lines(text: &str, count: usize) -> Vec<String> {
     let lines: Vec<&str> = output_lines(text).collect();
     lines[lines.len().saturating_sub(count)..]
         .iter()
@@ -121,7 +121,7 @@ fn answers(port: u16) -> bool {
 
 /// Whether the app can take `port`: it binds, and on Unix nothing answers on it either (macOS lets a loopback bind
 /// succeed over a wildcard listener such as Docker's).
-pub fn port_is_free(port: u16) -> bool {
+fn port_is_free(port: u16) -> bool {
     can_bind(port) && (cfg!(windows) || !answers(port))
 }
 
@@ -195,16 +195,16 @@ pub fn start(layout: &Layout, port: u16) -> io::Result<(Child, ServerRecord)> {
     Ok((child, record))
 }
 
-/// Wait for `child` on its own thread and pass how it ended to `on_exit`. The thread also reaps the child.
-pub fn watch(
-    mut child: Child,
-    on_exit: impl FnOnce(io::Result<ExitStatus>) + Send + 'static,
-) -> JoinHandle<()> {
-    thread::spawn(move || on_exit(child.wait()))
+/// Wait for `child` on its own thread and call `on_exit` once it has ended. The thread also reaps the child.
+pub fn watch(mut child: Child, on_exit: impl FnOnce() + Send + 'static) {
+    thread::spawn(move || {
+        let _ = child.wait();
+        on_exit();
+    });
 }
 
 /// Whether `127.0.0.1:port` answers an HTTP request for `/` within `timeout`; any status counts.
-pub fn http_responds_within(port: u16, timeout: Duration) -> bool {
+fn http_responds_within(port: u16, timeout: Duration) -> bool {
     use std::io::Write;
     let attempt = || -> io::Result<bool> {
         let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
@@ -223,7 +223,7 @@ pub fn http_responds_within(port: u16, timeout: Duration) -> bool {
 }
 
 /// [`http_responds_within`] with the readiness request timeout.
-pub fn http_responds(port: u16) -> bool {
+fn http_responds(port: u16) -> bool {
     http_responds_within(port, READY_REQUEST_TIMEOUT)
 }
 
@@ -238,7 +238,7 @@ pub enum Readiness {
 
 /// Poll every `poll` until `responds` is true, `stopped` is true or `timeout` passes. `stopped` is checked first, so
 /// a dead server is never mistaken for one that answers.
-pub fn wait_until_ready(
+fn wait_until_ready(
     mut responds: impl FnMut() -> bool,
     mut stopped: impl FnMut() -> bool,
     poll: Duration,
@@ -299,27 +299,21 @@ pub fn read_version(layout: &Layout) -> Option<String> {
 
 /// Stop the server `record` names and everything it started (see [`process_tree::stop_tree`], `grace` is how long
 /// the server gets to exit by itself on Unix), then delete `server.json`. Only a process alive with the recorded
-/// start time is stopped; a PID another program reused is left alone. Safe when nothing runs.
-///
-/// # Errors
-///
-/// Fails when `server.json` exists and cannot be deleted.
-pub fn stop(layout: &Layout, record: &ServerRecord, grace: Duration) -> io::Result<()> {
+/// start time is stopped; a PID another program reused is left alone. Safe when nothing runs. A `server.json` that
+/// cannot be deleted stays; the next start overwrites it.
+pub fn stop(layout: &Layout, record: &ServerRecord, grace: Duration) {
     process_tree::stop_tree(record.pid, record.start_time, grace);
-    delete_server_record(&layout.server_json)
+    let _ = delete_server_record(&layout.server_json);
 }
 
 /// Deal with a `server.json` left by an earlier run: stop its tree only when that pid is alive with the recorded
 /// start time, otherwise just delete the file. Without a record (or with an unreadable one) nothing runs.
-///
-/// # Errors
-///
-/// Fails when `server.json` cannot be deleted.
-pub fn clear_stale_record(layout: &Layout, grace: Duration) -> io::Result<()> {
+pub fn clear_stale_record(layout: &Layout, grace: Duration) {
     let Some(record) = read_server_record(&layout.server_json) else {
-        return delete_server_record(&layout.server_json);
+        let _ = delete_server_record(&layout.server_json);
+        return;
     };
-    stop(layout, &record, grace)
+    stop(layout, &record, grace);
 }
 
 #[cfg(test)]
@@ -590,18 +584,18 @@ mod tests {
     fn a_stale_record_for_nothing_is_just_deleted() {
         let dir = tempfile::tempdir().unwrap();
         let layout = layout_in(dir.path());
-        clear_stale_record(&layout, Duration::ZERO).unwrap();
+        clear_stale_record(&layout, Duration::ZERO);
         let record = ServerRecord {
             pid: u32::MAX - 1,
             start_time: 1,
             port: 8080,
         };
         write_server_record(&layout.server_json, &record).unwrap();
-        clear_stale_record(&layout, Duration::ZERO).unwrap();
+        clear_stale_record(&layout, Duration::ZERO);
         assert!(!layout.server_json.exists());
         fs::create_dir_all(&layout.root).unwrap();
         fs::write(&layout.server_json, "{ not json").unwrap();
-        clear_stale_record(&layout, Duration::ZERO).unwrap();
+        clear_stale_record(&layout, Duration::ZERO);
         assert!(!layout.server_json.exists());
     }
 
@@ -677,8 +671,8 @@ mod tests {
                 .unwrap();
             assert_eq!(Path::new(first_path), layout.bin);
 
-            let exited = std::sync::mpsc::channel();
-            let watcher = watch(child, move |status| exited.0.send(status.unwrap()).unwrap());
+            let (exited, ended) = std::sync::mpsc::channel();
+            watch(child, move || exited.send(()).unwrap());
             let members = process_tree::snapshot_tree(record.pid);
             for _ in 0..200 {
                 if process_tree::snapshot_tree(record.pid).len() >= 3 {
@@ -691,12 +685,12 @@ mod tests {
             } else {
                 process_tree::snapshot_tree(record.pid)
             };
-            stop(&layout, &record, Duration::from_millis(200)).unwrap();
-            watcher.join().unwrap();
+            stop(&layout, &record, Duration::from_millis(200));
+            ended.recv_timeout(Duration::from_secs(10)).unwrap();
             assert!(process_tree::alive_members(&members).is_empty());
             assert!(!layout.server_json.exists());
             // Stopping again, with nothing running, is fine.
-            stop(&layout, &record, Duration::ZERO).unwrap();
+            stop(&layout, &record, Duration::ZERO);
         }
 
         #[test]
@@ -711,21 +705,16 @@ mod tests {
             let log = wait_for_log(&layout, "to stderr");
             let root = fs::canonicalize(&layout.root).unwrap();
             assert!(log.contains(&format!("cwd: {}", root.display())), "{log}");
-            stop(&layout, &record, Duration::ZERO).unwrap();
+            stop(&layout, &record, Duration::ZERO);
             assert!(!layout.server_json.exists());
         }
 
         #[test]
-        fn a_watched_child_reports_how_it_ended() {
+        fn a_watched_child_reports_that_it_ended() {
             let child = Command::new("sh").args(["-c", "exit 3"]).spawn().unwrap();
             let (sender, receiver) = std::sync::mpsc::channel();
-            let handle = watch(child, move |status| sender.send(status).unwrap());
-            let status = receiver
-                .recv_timeout(Duration::from_secs(10))
-                .unwrap()
-                .unwrap();
-            handle.join().unwrap();
-            assert_eq!(status.code(), Some(3));
+            watch(child, move || sender.send(()).unwrap());
+            receiver.recv_timeout(Duration::from_secs(10)).unwrap();
         }
 
         #[test]
@@ -740,7 +729,7 @@ mod tests {
                 port: 8127,
             };
             write_server_record(&layout.server_json, &record).unwrap();
-            stop(&layout, &record, Duration::from_millis(100)).unwrap();
+            stop(&layout, &record, Duration::from_millis(100));
             assert!(!layout.server_json.exists());
             assert!(
                 child.try_wait().unwrap().is_none(),
@@ -772,7 +761,7 @@ mod tests {
                 port: 8124,
             };
             write_server_record(&layout.server_json, &record).unwrap();
-            clear_stale_record(&layout, Duration::from_millis(200)).unwrap();
+            clear_stale_record(&layout, Duration::from_millis(200));
             child.wait().unwrap();
             assert!(process_tree::alive_members(&tree).is_empty());
             assert!(!layout.server_json.exists());
@@ -790,7 +779,7 @@ mod tests {
                 port: 8125,
             };
             write_server_record(&layout.server_json, &record).unwrap();
-            clear_stale_record(&layout, Duration::from_millis(100)).unwrap();
+            clear_stale_record(&layout, Duration::from_millis(100));
             assert!(!layout.server_json.exists());
             assert!(
                 child.try_wait().unwrap().is_none(),

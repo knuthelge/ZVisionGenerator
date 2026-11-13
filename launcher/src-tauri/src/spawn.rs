@@ -50,7 +50,7 @@ const APPIMAGE_LISTS: [&str; 9] = [
 
 /// One change to a child's environment: set a variable, or remove it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EnvChange {
+enum EnvChange {
     Set(OsString, OsString),
     Remove(OsString),
 }
@@ -60,7 +60,7 @@ pub enum EnvChange {
 ///
 /// The AppImage's variables are removed, and `$APPDIR` entries (and empty ones) are dropped from the folder lists;
 /// a list left empty is removed.
-pub fn child_env_fixups(env: &HashMap<OsString, OsString>) -> Vec<EnvChange> {
+fn child_env_fixups(env: &HashMap<OsString, OsString>) -> Vec<EnvChange> {
     let get = |name: &str| env.get(OsStr::new(name)).filter(|value| !value.is_empty());
     let appdir = get("APPDIR").map(PathBuf::from);
     if appdir.is_none() && get("APPIMAGE").is_none() {
@@ -116,13 +116,8 @@ pub fn inherited_path() -> Option<OsString> {
 /// Build a command for `program` that runs without a shell and, on Windows, without a window, and that inherits
 /// the launcher's environment without the AppImage's additions. A caller's own `.env` calls come after this.
 pub fn hidden_command(program: &Path) -> Command {
-    hidden_command_in(program, &env::vars_os().collect())
-}
-
-/// [`hidden_command`] for a launcher whose environment is `env`.
-pub fn hidden_command_in(program: &Path, env: &HashMap<OsString, OsString>) -> Command {
     let mut command = no_window(Command::new(program));
-    for change in child_env_fixups(env) {
+    for change in process_env_fixups() {
         match change {
             EnvChange::Set(name, value) => command.env(name, value),
             EnvChange::Remove(name) => command.env_remove(name),

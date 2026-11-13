@@ -251,14 +251,6 @@ describe('LauncherApp actions', () => {
     expect(failed.target.querySelector('[data-testid="update-dot"]')).not.toBeNull();
   });
 
-  it('opens the install guide from the newer-launcher warning', async () => {
-    const { target, bridge } = await open('10b running needs newer launcher');
-
-    link(target, 'install_guide').click();
-
-    expect(bridge.openLink).toHaveBeenCalledWith('install_guide');
-  });
-
   it('shows the folder an incomplete uninstall left behind', async () => {
     const { target } = await open('11b uninstalled incomplete');
     const folder = target.querySelector('[data-testid="leftover-folder"]');

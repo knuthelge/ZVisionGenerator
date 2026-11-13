@@ -6,7 +6,7 @@ A message that names a file, a setting or a model, or that says "use X instead",
 
 ## Where to look { #where-to-look }
 
-- [Installing and starting](#installing-and-starting): `ziv ui` won't start, no NVIDIA GPU found, a package or ffmpeg missing, the browser opens on another port, another device can't connect, and the launcher's own messages: this computer isn't supported, the install failed, an update needs a newer launcher.
+- [Installing and starting](#installing-and-starting): `ziv ui` won't start, no NVIDIA GPU found, a package or ffmpeg missing, the browser opens on another port, another device can't connect, and the launcher's own messages: this computer isn't supported and the install failed.
 - [Downloads](#downloads): a model won't download, Hugging Face refuses or can't be reached, the download is slow or stops, files missing from the cache.
 - [Stuck or slow](#stuck-or-slow): the first job seems stuck, Generate is greyed out, a job failed.
 - [Memory and slowdowns](#memory-and-slowdowns): the computer is slow, crawls, freezes or beachballs, out of memory, the terminal closes while a model loads, a model is refused for lack of memory.
@@ -98,10 +98,6 @@ The window says **Install didn't finish** and gives the cause in its first line.
 - **The installer stopped with an error:** open **Show the log**, then **Retry**. If it keeps failing, [report it](#report-a-problem).
 
 **Show the log** opens the end of the install log. Copy it into a [bug report](#report-a-problem) if **Retry** fails again.
-
-### The launcher says an update needs a newer launcher { #launcher-needs-newer }
-
-The window says **Version … needs a newer launcher**. The new version of the app needs something this launcher can't install, such as a newer Python. The app, your settings and your models stay as they are and keep working. Download the newest launcher from [Install](../get-started/install.md#get-the-launcher) and open it. It finds the installed app and offers the update again.
 
 ### Installed with pip
 

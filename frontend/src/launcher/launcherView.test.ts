@@ -14,7 +14,7 @@ function snapshot(name: string): Snapshot {
   return found.snapshot;
 }
 
-const view = (name: string) => launcherView(snapshot(name), { formatTime: () => '14:32' });
+const view = (name: string) => launcherView(snapshot(name));
 
 describe('fixture', () => {
   it('covers every phase of the contract', () => {
@@ -81,7 +81,6 @@ describe('hero', () => {
   it('closes the ring and lights up while running; an update adds the dot', () => {
     expect(view('6 running').hero).toMatchObject({ mood: 'idle', halo: { kind: 'live' }, pool: 'live', update: false });
     expect(view('7 running with update').hero.update).toBe(true);
-    expect(view('10b running needs newer launcher').hero.update).toBe(false);
   });
 
   it('opens the ring back to its track when it stopped or did not start', () => {
@@ -160,8 +159,9 @@ describe('headline and sub', () => {
     expect(new Set(texts).size).toBe(2);
   });
 
-  it('reports the time it stopped at', () => {
-    expect(view('9 stopped').sub?.text).toContain('14:32');
+  it('reports the time it stopped at, in whatever form the locale gives it', () => {
+    expect(view('9 stopped').sub?.text).toMatch(/^It stopped on its own at \S.*\. Open starts it again\.$/);
+    expect(launcherView({ ...snapshot('9 stopped'), stoppedAt: null }).sub?.text).toBe('It stopped on its own. Open starts it again.');
   });
 
   it('has no sub while uninstalling, and an instruction once uninstalled', () => {
@@ -191,9 +191,8 @@ describe('notice', () => {
     expect(view('2b unsupported gpu_too_old').notice).toMatchObject({ found: 'GTX 1080', link: null });
   });
 
-  it('offers the update and the newer-launcher warning as alerts', () => {
+  it('offers the update as an alert', () => {
     expect(view('7 running with update').notice).toMatchObject({ kind: 'update', version: '0.14.1', link: { id: 'whats_new' } });
-    expect(view('10b running needs newer launcher').notice).toMatchObject({ kind: 'newer', link: { id: 'install_guide' } });
     expect(view('6 running').notice).toBeNull();
   });
 
@@ -272,8 +271,8 @@ describe('beta wording', () => {
   });
 
   it('knows pre-release version spellings', () => {
-    for (const v of ['0.15.0b2', '1.0rc1', '1.0.0a1', '1.0.dev3', '1.0-beta.2', 'v2.0rc1', '1.0b1+local']) expect(isPrerelease(v), v).toBe(true);
-    for (const v of ['0.14.1', '1.0', '1.0.post1', 'garbage', '']) expect(isPrerelease(v), v).toBe(false);
+    for (const v of ['0.15.0b2', '1.0.0rc1', '1.0.0a1', '1.0.0.dev3', '1.0.0b2.dev1']) expect(isPrerelease(v), v).toBe(true);
+    for (const v of ['0.14.1', '1.0.0.post1', '1.0', 'v1.0.0', '1.0.0-beta.2', 'garbage', '']) expect(isPrerelease(v), v).toBe(false);
   });
 });
 

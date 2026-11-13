@@ -73,7 +73,7 @@ Start at login uses the Tauri autostart plugin: a LaunchAgent on macOS, the `Run
 
 **The app.** The launcher checks the PyPI JSON API for `z-vision-generator` at start and once a day, and offers Update when a newer stable release is out. A "Get beta versions" item in the ⋯ menu, off by default, also offers pre-releases; it never downgrades. Update stops the server, runs `uv tool install --upgrade z-vision-generator --python 3.14` (on Windows with `--torch-backend cu132`) and starts the server again. If the upgrade or the restart fails, the window says so and offers Open, which starts the app again; the update stays on offer, and Repair is in the ⋯ menu.
 
-A future app release may need something this launcher doesn't provide, such as a newer Python. Then the update succeeds without installing it. So after upgrading, the launcher checks that the installed version actually changed; if it didn't, it shows "This update needs a newer launcher" with a link to the install guide and stops offering that version.
+A future app release may need something this launcher doesn't provide, such as a newer Python. Then the update succeeds without installing it. So after upgrading, the launcher checks that the installed version actually changed; if it didn't although a newer one was offered, the update counts as failed, like any other failed update: the window shows the end of uv's output, Open starts the app again and the update stays on offer.
 
 **The launcher.** It doesn't check for newer launchers in the first round: it should rarely change, and testers are told when it does. The Tauri updater can come with signing.
 
@@ -89,7 +89,7 @@ Because a launcher release is never "latest", the install guide links to the exa
 
 The launcher pins the uv and ffmpeg versions it downloads. Which app version it installs comes from PyPI, so a new app release doesn't need a new launcher.
 
-The install guide gets a launcher section next to the terminal install. The troubleshooting page gets entries for the launcher's own messages (unsupported machine, failed install, "This update needs a newer launcher") and says to use Repair where the app's messages suggest `uv tool install --reinstall`.
+The install guide gets a launcher section next to the terminal install. The troubleshooting page gets entries for the launcher's own messages (unsupported machine, failed install) and says to use Repair where the app's messages suggest `uv tool install --reinstall`.
 
 ## Unsigned first round
 

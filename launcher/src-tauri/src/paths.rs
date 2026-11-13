@@ -3,31 +3,21 @@
 //! Root holds everything the launcher installs: tools, Python, the app, caches and its own records. It writes nothing
 //! outside Root except the start-at-login entry, and never edits `PATH`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Name of Root's folder under the user's local data folder: lowercase on Linux, `ZVision` elsewhere.
 pub fn root_folder_name(os: &str) -> &'static str {
     if os == "linux" { "zvision" } else { "ZVision" }
 }
 
-/// Join a program's base name with the platform's executable suffix (`.exe` on Windows, nothing elsewhere).
-pub fn exe_name(name: &str, suffix: &str) -> String {
-    format!("{name}{suffix}")
-}
-
-/// File name of the executable `name` on this platform.
+/// File name of the executable `name` on this platform (`.exe` on Windows, nothing elsewhere).
 pub fn exe(name: &str) -> String {
-    exe_name(name, std::env::consts::EXE_SUFFIX)
-}
-
-/// Root under `data_local_dir` for the operating system `os` (a `std::env::consts::OS` value).
-pub fn root_under(data_local_dir: &Path, os: &str) -> PathBuf {
-    data_local_dir.join(root_folder_name(os))
+    format!("{name}{}", std::env::consts::EXE_SUFFIX)
 }
 
 /// Root on this machine, or `None` when the system has no local data folder.
 pub fn default_root() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|dir| root_under(&dir, std::env::consts::OS))
+    dirs::data_local_dir().map(|dir| dir.join(root_folder_name(std::env::consts::OS)))
 }
 
 /// Every path the launcher uses, derived from one Root.
@@ -91,6 +81,7 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn root_folder_is_lowercase_on_linux_only() {
@@ -100,16 +91,17 @@ mod tests {
     }
 
     #[test]
-    fn root_sits_under_the_local_data_folder() {
-        let data = Path::new("data");
-        assert_eq!(root_under(data, "linux"), data.join("zvision"));
-        assert_eq!(root_under(data, "windows"), data.join("ZVision"));
+    fn root_sits_under_the_local_data_folder_in_the_folder_of_this_os() {
+        let root = default_root().expect("the test machine has a local data folder");
+        assert_eq!(
+            root.file_name().unwrap(),
+            root_folder_name(std::env::consts::OS)
+        );
+        assert_eq!(root.parent(), dirs::data_local_dir().as_deref());
     }
 
     #[test]
     fn exe_names_take_the_platform_suffix() {
-        assert_eq!(exe_name("uv", ".exe"), "uv.exe");
-        assert_eq!(exe_name("uv", ""), "uv");
         assert_eq!(exe("ziv"), format!("ziv{}", std::env::consts::EXE_SUFFIX));
     }
 

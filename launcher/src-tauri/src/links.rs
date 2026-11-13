@@ -16,9 +16,6 @@ const RELEASES: &str = "https://github.com/knuthelge/ZVisionGenerator/releases/t
 pub fn url(link: LinkId, update_version: Option<&str>) -> Option<String> {
     match link {
         LinkId::Requirements => Some(format!("{DOCS}get-started/install/#check-your-machine")),
-        LinkId::InstallGuide => Some(format!(
-            "{DOCS}get-started/install/#install-with-the-launcher"
-        )),
         LinkId::DataFolder => Some(format!("{DOCS}reference/data-folder/")),
         LinkId::WhatsNew => update_version.map(|version| format!("{RELEASES}v{version}")),
     }
@@ -29,11 +26,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    const DOCS_LINKS: [LinkId; 3] = [
-        LinkId::Requirements,
-        LinkId::InstallGuide,
-        LinkId::DataFolder,
-    ];
+    const DOCS_LINKS: [LinkId; 2] = [LinkId::Requirements, LinkId::DataFolder];
 
     fn repo_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -73,12 +66,6 @@ mod tests {
             url(LinkId::Requirements, None).as_deref(),
             Some(
                 "https://knuthelge.github.io/ZVisionGenerator/get-started/install/#check-your-machine"
-            )
-        );
-        assert_eq!(
-            url(LinkId::InstallGuide, None).as_deref(),
-            Some(
-                "https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install-with-the-launcher"
             )
         );
         assert_eq!(

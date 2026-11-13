@@ -36,11 +36,6 @@
       <div class="alert-text"><b>{notice.lead}</b> {notice.text} <LauncherLink id={notice.link.id} label={notice.link.label} onclick={() => onlink(notice.link.id)} /></div>
       <Button data-testid="update-button" onclick={onupdate}>{notice.button}</Button>
     </div>
-  {:else if notice.kind === 'newer'}
-    <div class="ui-alert ui-alert-warning alert">
-      <Icon name="alert" size={14} />
-      <div class="alert-text"><b>{notice.lead}</b> {notice.text} <LauncherLink id={notice.link.id} label={notice.link.label} onclick={() => onlink(notice.link.id)} /></div>
-    </div>
   {:else if notice.kind === 'log'}
     <Button variant="quiet" size="sm" aria-haspopup="dialog" data-testid="show-log" onclick={onlog}><Icon name="file" size={14} />{notice.label}</Button>
   {:else}

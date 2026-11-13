@@ -70,7 +70,6 @@ export type NoticeView =
   | { kind: 'reason'; name: string; found: string | null; needed: string; link: LinkView | null }
   | { kind: 'note'; icon: IconName; lead: string | null; text: string }
   | { kind: 'update'; version: string; lead: string; text: string; link: LinkView; button: string }
-  | { kind: 'newer'; lead: string; text: string; link: LinkView }
   | { kind: 'log'; label: string; sheetTitle: string }
   | { kind: 'kept'; entries: { path: string; what: string }[]; help: string; link: LinkView };
 
@@ -101,11 +100,6 @@ export interface LauncherView {
   primary: PrimaryView | null;
   /** Entries of the More menu, in order; empty when More is hidden. */
   menu: MenuItemView[];
-}
-
-export interface ViewOptions {
-  /** Formats `stoppedAt` (Unix ms) as a clock time; the browser's locale by default. */
-  formatTime?: (ms: number) => string;
 }
 
 const NAME = 'Z-Vision Generator';
@@ -218,9 +212,13 @@ function causeOf(s: Snapshot): { lead: string; text: string } {
   return code !== null && code in causes ? causes[code as ActionErrorCode] : causes.uv_failed;
 }
 
-/** Whether a version string is a development, alpha, beta or release-candidate version (`0.15.0b2`, `1.0rc1`). */
+/**
+ * Whether a version the app publishes is an alpha, beta, release-candidate or development version (`0.15.0b2`,
+ * `1.0.0rc1`, `1.0.0.dev3`). The app publishes `X.Y.Z`, optionally with `aN`, `bN` or `rcN`, then `.postN` and `.devN`.
+ */
 export function isPrerelease(version: string): boolean {
-  return /^v?\d+(\.\d+)*[._-]?(dev|a|alpha|b|beta|rc|c|pre|preview)[._-]?\d*(\+.*)?$/i.test(version.trim());
+  const match = /^\d+\.\d+\.\d+((?:a|b|rc)\d+)?(?:\.post\d+)?(\.dev\d+)?$/.exec(version);
+  return match !== null && (match[1] !== undefined || match[2] !== undefined);
 }
 
 function stepKicker(p: Progress): string {
@@ -439,13 +437,13 @@ export const UNINSTALL_DIALOG = {
   link: { id: 'data_folder', label: 'Where your data lives' } satisfies LinkView
 } as const;
 
-function defaultFormatTime(ms: number): string {
+/** `stoppedAt` (Unix ms) as a clock time in the browser's locale. */
+function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 /** Everything the window shows for `s`. */
-export function launcherView(s: Snapshot, options: ViewOptions = {}): LauncherView {
-  const formatTime = options.formatTime ?? defaultFormatTime;
+export function launcherView(s: Snapshot): LauncherView {
   const { controls } = s;
   const plain = (text: string): SubView => ({ lead: null, leadAlert: false, text });
   let headline = NAME;
@@ -499,13 +497,6 @@ export function launcherView(s: Snapshot, options: ViewOptions = {}): LauncherVi
           text: 'It restarts to update.',
           link: { id: 'whats_new', label: 'What’s new' },
           button: 'Update'
-        };
-      } else if (s.needsNewerLauncher) {
-        notice = {
-          kind: 'newer',
-          lead: `Version ${s.needsNewerLauncher} needs a newer launcher.`,
-          text: 'Your app, settings and models stay.',
-          link: { id: 'install_guide', label: 'Open the install guide' }
         };
       }
       break;
