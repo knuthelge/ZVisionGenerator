@@ -36,8 +36,9 @@ pub enum Step {
     StartServer { open_browser: bool },
 }
 
-/// The steps of `action` in order, each with the progress row it belongs to.
-pub fn steps(action: Action) -> Vec<(Step, StepId)> {
+/// The steps of `action` in order, each with the progress row it belongs to. An update downloads the tools only
+/// when `tools_current` is false (the installed tools are not the pinned ones); the other actions ignore it.
+pub fn steps(action: Action, tools_current: bool) -> Vec<(Step, StepId)> {
     use Step::*;
     match action {
         Action::Install => vec![
@@ -47,8 +48,21 @@ pub fn steps(action: Action) -> Vec<(Step, StepId)> {
             (ReadVersion, StepId::Finish),
             (StartServer { open_browser: true }, StepId::Finish),
         ],
-        Action::Update => vec![
+        Action::Update if tools_current => vec![
             (StopServer, StepId::UpdateApp),
+            (ToolUpgrade, StepId::UpdateApp),
+            (ReadVersion, StepId::Finish),
+            (CachePrune, StepId::Finish),
+            (
+                StartServer {
+                    open_browser: false,
+                },
+                StepId::Finish,
+            ),
+        ],
+        Action::Update => vec![
+            (StopServer, StepId::DownloadTools),
+            (FetchTools, StepId::DownloadTools),
             (ToolUpgrade, StepId::UpdateApp),
             (ReadVersion, StepId::Finish),
             (CachePrune, StepId::Finish),
@@ -73,9 +87,9 @@ pub fn steps(action: Action) -> Vec<(Step, StepId)> {
 }
 
 /// The progress rows of `action`, in order, without repeats.
-pub fn step_ids(action: Action) -> Vec<StepId> {
+pub fn step_ids(action: Action, tools_current: bool) -> Vec<StepId> {
     let mut ids: Vec<StepId> = Vec::new();
-    for (_, id) in steps(action) {
+    for (_, id) in steps(action, tools_current) {
         if ids.last() != Some(&id) {
             ids.push(id);
         }
@@ -88,7 +102,17 @@ mod tests {
     use super::*;
 
     fn only_steps(action: Action) -> Vec<Step> {
-        steps(action).into_iter().map(|(step, _)| step).collect()
+        steps(action, true)
+            .into_iter()
+            .map(|(step, _)| step)
+            .collect()
+    }
+
+    fn update_steps_with_stale_tools() -> Vec<Step> {
+        steps(Action::Update, false)
+            .into_iter()
+            .map(|(step, _)| step)
+            .collect()
     }
 
     fn position(action: Action, wanted: Step) -> usize {
@@ -189,15 +213,15 @@ mod tests {
     #[test]
     fn progress_rows_per_action() {
         assert_eq!(
-            step_ids(Action::Install),
+            step_ids(Action::Install, true),
             [StepId::DownloadTools, StepId::InstallApp, StepId::Finish]
         );
         assert_eq!(
-            step_ids(Action::Update),
+            step_ids(Action::Update, true),
             [StepId::UpdateApp, StepId::Finish]
         );
         assert_eq!(
-            step_ids(Action::Repair),
+            step_ids(Action::Repair, true),
             [
                 StepId::DownloadTools,
                 StepId::CleanCache,
@@ -210,13 +234,51 @@ mod tests {
     #[test]
     fn rows_never_go_backwards() {
         for action in [Action::Install, Action::Update, Action::Repair] {
-            let ids = step_ids(action);
-            let mut seen = Vec::new();
-            for (_, id) in steps(action) {
-                let row = ids.iter().position(|candidate| *candidate == id).unwrap();
-                seen.push(row);
+            for tools_current in [true, false] {
+                let ids = step_ids(action, tools_current);
+                let mut seen = Vec::new();
+                for (_, id) in steps(action, tools_current) {
+                    let row = ids.iter().position(|candidate| *candidate == id).unwrap();
+                    seen.push(row);
+                }
+                assert!(
+                    seen.windows(2).all(|pair| pair[0] <= pair[1]),
+                    "{action:?} {tools_current}"
+                );
             }
-            assert!(seen.windows(2).all(|pair| pair[0] <= pair[1]), "{action:?}");
+        }
+    }
+
+    #[test]
+    fn an_update_with_current_tools_downloads_nothing() {
+        assert!(!only_steps(Action::Update).contains(&Step::FetchTools));
+    }
+
+    #[test]
+    fn an_update_with_stale_tools_stops_the_server_then_downloads_before_upgrading() {
+        assert_eq!(
+            update_steps_with_stale_tools(),
+            [
+                Step::StopServer,
+                Step::FetchTools,
+                Step::ToolUpgrade,
+                Step::ReadVersion,
+                Step::CachePrune,
+                Step::StartServer {
+                    open_browser: false
+                },
+            ]
+        );
+        assert_eq!(
+            step_ids(Action::Update, false),
+            [StepId::DownloadTools, StepId::UpdateApp, StepId::Finish]
+        );
+    }
+
+    #[test]
+    fn install_and_repair_download_whatever_the_recorded_tools_are() {
+        for action in [Action::Install, Action::Repair] {
+            assert_eq!(steps(action, true), steps(action, false), "{action:?}");
         }
     }
 }

@@ -148,8 +148,10 @@ fn store_verified(
     result
 }
 
-fn agent() -> ureq::Agent {
+/// The one HTTP agent for every launcher request: https only, with connect and read timeouts.
+pub fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
+        .https_only(true)
         .timeout_connect(Some(CONNECT_TIMEOUT))
         .timeout_per_read(Some(READ_TIMEOUT))
         .build()
@@ -414,6 +416,12 @@ mod tests {
             classify_request(&ureq::Error::ConnectionFailed),
             ErrorCode::DownloadFailed
         );
+    }
+
+    #[test]
+    fn the_download_agent_refuses_plain_http_without_connecting() {
+        let error = agent().get("http://127.0.0.1:1/file").call().unwrap_err();
+        assert!(matches!(error, ureq::Error::RequireHttpsOnly(_)), "{error}");
     }
 
     #[test]

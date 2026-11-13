@@ -35,6 +35,8 @@ pub struct Prefs {
     pub skipped_by: Option<String>,
     /// Whether the user opted into pre-release versions of the app.
     pub beta: bool,
+    /// The SHA-256 pins of the uv and ffmpeg downloads installed in `bin/`; empty until a download succeeds.
+    pub tool_pins: Vec<String>,
 }
 
 impl Prefs {
@@ -44,6 +46,16 @@ impl Prefs {
             version: self.skip_version.as_deref()?,
             skipped_by: self.skipped_by.as_deref()?,
         })
+    }
+
+    /// Whether the installed tools are the ones `pins` names.
+    pub fn tools_current(&self, pins: &[&str]) -> bool {
+        self.tool_pins.iter().eq(pins)
+    }
+
+    /// Remember that the tools named by `pins` are installed.
+    pub fn set_tool_pins(&mut self, pins: &[&str]) {
+        self.tool_pins = pins.iter().map(|pin| (*pin).to_owned()).collect();
     }
 
     /// Remember that `launcher` could not upgrade the app to `version`.
@@ -245,7 +257,7 @@ mod tests {
         let text = serde_json::to_string(&Prefs::default()).unwrap();
         assert_eq!(
             text,
-            r#"{"lastPort":null,"skipVersion":null,"skippedBy":null,"beta":false}"#
+            r#"{"lastPort":null,"skipVersion":null,"skippedBy":null,"beta":false,"toolPins":[]}"#
         );
     }
 
@@ -285,5 +297,40 @@ mod tests {
                 skipped_by: "0.1.0"
             })
         );
+    }
+
+    #[test]
+    fn tools_are_current_only_when_the_recorded_pins_match_exactly() {
+        let mut prefs = Prefs::default();
+        assert!(!prefs.tools_current(&["a", "b"]), "no record means stale");
+        prefs.set_tool_pins(&["a", "b"]);
+        assert!(prefs.tools_current(&["a", "b"]));
+        assert!(!prefs.tools_current(&["a", "c"]));
+        assert!(!prefs.tools_current(&["a"]));
+        assert!(!prefs.tools_current(&["a", "b", "c"]));
+    }
+
+    #[test]
+    fn the_tool_pins_round_trip_through_the_prefs_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        let mut prefs = Prefs::default();
+        prefs.set_tool_pins(&["a", "b"]);
+        write_prefs(&path, &prefs).unwrap();
+        let read = read_prefs(&path);
+        assert!(read.tools_current(&["a", "b"]));
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("\"toolPins\": [")
+        );
+    }
+
+    #[test]
+    fn prefs_without_tool_pins_read_as_stale_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        fs::write(&path, r#"{"lastPort": 8090}"#).unwrap();
+        assert!(!read_prefs(&path).tools_current(&["a"]));
     }
 }

@@ -46,7 +46,9 @@ The Rust modules named here and below are in `launcher/src-tauri/src/`. Where a 
 
 ## Pins
 
-The pins are in `manifest.rs`: uv and the ffmpeg builds, each by URL and SHA-256, plus the package name, the Python version and the size estimates the progress ring uses. To move a pin, download the new file into a scratch folder, compare its SHA-256 with the one upstream publishes, put both into the manifest and run `make launcher-test` and the ignored live test. ffmpeg must be a GPL build with libx264, because the app encodes H.264 and AAC. Windows and Linux use a dated BtbN release; macOS uses Martin Riedl's versioned folder, whose `.sha256` files sit beside each zip.
+The pins are in `manifest.rs`: uv and the ffmpeg builds, each by URL and SHA-256, plus the package name, the Python version and the size estimates the progress ring uses. To move a pin, download the new file into a scratch folder, compare its SHA-256 with the one upstream publishes, put both into the manifest and run `make launcher-test` and the ignored live test. ffmpeg must be a GPL build with libx264, because the app encodes H.264 and AAC. Windows and Linux use a dated release of [BtbN's FFmpeg-Builds](https://github.com/FFmpeg-Builds/FFmpeg-Builds); macOS uses Martin Riedl's versioned folder, whose `.sha256` files sit beside each zip.
+
+Downloads are made over https only, redirects included. Install and Repair download the tools and then record their SHA-256 pins as `toolPins` in the launcher's preferences (`Prefs` in `records.rs`). An update downloads them again only when that record differs from the current manifest or is missing, so moving a pin reaches existing installs with the launcher's next update; `plan.rs` decides it and the controller tests cover it.
 
 An upstream release can disappear. The launcher then reports that the download is no longer available and points to a newer launcher, so a launcher release re-pins. Pin ffmpeg to a dated release tag, never to `latest`.
 

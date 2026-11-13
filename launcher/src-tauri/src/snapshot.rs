@@ -316,6 +316,7 @@ mod tests {
             "7 running with a beta update",
             "8a updating",
             "8a updating with updateVersion",
+            "8a updating with new tools",
             "8b repairing",
             "9 stopped",
             "9b failed start",

@@ -6,6 +6,8 @@
 use std::cmp::Ordering;
 use std::time::Duration;
 
+use crate::download;
+
 /// Where the latest published version of the app is listed.
 const PYPI_URL: &str = "https://pypi.org/pypi/z-vision-generator/json";
 /// How long the PyPI request may take in total.
@@ -213,7 +215,8 @@ pub fn latest_from_pypi_json(body: &str, beta: bool) -> Option<String> {
 
 /// Ask PyPI for the latest version (see [`latest_from_pypi_json`]); `None` on any failure.
 pub fn fetch_latest(beta: bool) -> Option<String> {
-    let mut response = ureq::get(PYPI_URL)
+    let mut response = download::agent()
+        .get(PYPI_URL)
         .config()
         .timeout_global(Some(FETCH_TIMEOUT))
         .build()

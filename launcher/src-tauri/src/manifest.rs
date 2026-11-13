@@ -118,10 +118,10 @@ const UV_LINUX: Download = Download {
     members: &["uv-x86_64-unknown-linux-gnu/uv"],
 };
 
-/// BtbN FFmpeg-Builds, FFmpeg release branch 9.0 (n9.0.2), GPL build with libx264: one archive holds both tools.
+/// BtbN's FFmpeg-Builds, FFmpeg release branch 9.0 (n9.0.2), GPL build with libx264: one archive holds both tools.
 const FFMPEG_WINDOWS: Download = Download {
     file: "ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-9.0.zip",
-    url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-9.0.zip",
+    url: "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-9.0.zip",
     sha256: "693f3e224bc184b40524a62ca47526cfebaf2504414021b92fe75f677ad868b9",
     archive: ArchiveKind::Zip,
     members: &[
@@ -132,7 +132,7 @@ const FFMPEG_WINDOWS: Download = Download {
 
 const FFMPEG_LINUX: Download = Download {
     file: "ffmpeg-n9.0.2-39-g7adfbe40dc-linux64-gpl-9.0.tar.xz",
-    url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-linux64-gpl-9.0.tar.xz",
+    url: "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-linux64-gpl-9.0.tar.xz",
     sha256: "73e29a56974ae5a651133a04584c7483b21afe941e17dc91d79814a758b608d3",
     archive: ArchiveKind::TarXz,
     members: &[
@@ -166,6 +166,11 @@ pub fn downloads(platform: Platform) -> Vec<&'static Download> {
         Platform::WindowsX64 => vec![&UV_WINDOWS, &FFMPEG_WINDOWS],
         Platform::LinuxX64 => vec![&UV_LINUX, &FFMPEG_LINUX],
     }
+}
+
+/// The SHA-256 of every download of `platform`, in [`downloads`] order: what identifies the pinned tools.
+pub fn pins(platform: Platform) -> Vec<&'static str> {
+    downloads(platform).iter().map(|d| d.sha256).collect()
 }
 
 #[cfg(test)]
@@ -249,6 +254,14 @@ mod tests {
     }
 
     #[test]
+    fn pins_are_the_download_hashes_in_order() {
+        for platform in PLATFORMS {
+            let hashes: Vec<_> = downloads(platform).iter().map(|d| d.sha256).collect();
+            assert_eq!(pins(platform), hashes, "{platform:?}");
+        }
+    }
+
+    #[test]
     fn uv_is_pinned_to_the_release_tag() {
         for platform in PLATFORMS {
             let uv = downloads(platform)[0];
@@ -266,7 +279,7 @@ mod tests {
             let ffmpeg = downloads(platform)[1];
             assert!(
                 ffmpeg.url.starts_with(
-                    "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/"
+                    "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/"
                 ),
                 "{platform:?}"
             );

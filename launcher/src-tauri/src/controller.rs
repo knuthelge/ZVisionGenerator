@@ -195,6 +195,11 @@ pub fn on_child_exit(stop_requested: bool) -> Option<Phase> {
     (!stop_requested).then_some(Phase::Stopped)
 }
 
+/// Whether the installed tools are the pinned ones of `platform`; an unsupported platform has none.
+fn tools_current(inner: &Inner, platform: Option<Platform>) -> bool {
+    platform.is_some_and(|platform| inner.prefs.tools_current(&manifest::pins(platform)))
+}
+
 /// The failed action that belongs to a long-running action.
 fn failed_action(action: Action) -> FailedAction {
     match action {
@@ -584,10 +589,11 @@ impl Controller {
         action: Action,
     ) -> Result<(), String> {
         self.gated(allowed, |inner| {
+            let current = tools_current(inner, self.config.platform);
             let snapshot = &mut inner.snapshot;
             snapshot.phase = running_phase(action);
             snapshot.progress = Some(Progress {
-                steps: plan::step_ids(action),
+                steps: plan::step_ids(action, current),
                 index: 0,
                 fraction: None,
                 line: None,
@@ -697,15 +703,16 @@ impl Controller {
 
     /// Run the steps of `action` in order.
     fn run_action(&self, action: Action) -> Flow {
-        let (before, offered) = {
+        let (before, offered, current) = {
             let inner = lock(&self.inner);
             (
                 inner.snapshot.installed_version.clone(),
                 inner.snapshot.update_version.clone(),
+                tools_current(&inner, self.config.platform),
             )
         };
-        let ids = plan::step_ids(action);
-        for (step, id) in plan::steps(action) {
+        let ids = plan::step_ids(action, current);
+        for (step, id) in plan::steps(action, current) {
             if self.quitting() {
                 return Err(Abort::Quit);
             }
@@ -753,7 +760,9 @@ impl Controller {
                 let platform = self.platform(failed)?;
                 self.runner
                     .fetch_tools(layout, platform)
-                    .map_err(|error| self.fetch_failure(failed, error))
+                    .map_err(|error| self.fetch_failure(failed, error))?;
+                self.record_tools(platform);
+                Ok(())
             }
             Step::CacheClean => self.run_uv_step(failed, &owned(uv::cache_clean_args()), false),
             Step::ToolInstall { reinstall } => {
@@ -779,6 +788,13 @@ impl Controller {
             }
             Step::StartServer { open_browser } => self.start_server(open_browser),
         }
+    }
+
+    /// Remember that the pinned tools of `platform` are installed.
+    fn record_tools(&self, platform: Platform) {
+        let mut inner = lock(&self.inner);
+        inner.prefs.set_tool_pins(&manifest::pins(platform));
+        self.save_prefs(&inner);
     }
 
     fn platform(&self, action: FailedAction) -> Result<Platform, Abort> {
@@ -1780,8 +1796,26 @@ mod tests {
             lock(&self.emitted).iter().any(|s| s.phase == phase)
         }
 
+        /// The progress rows of every snapshot sent while in `phase`.
+        fn emitted_steps(&self, phase: Phase) -> Vec<Vec<StepId>> {
+            lock(&self.emitted)
+                .iter()
+                .filter(|s| s.phase == phase)
+                .filter_map(|s| s.progress.as_ref().map(|p| p.steps.clone()))
+                .collect()
+        }
+
         fn prefs(&self) -> Prefs {
             records::read_prefs(&self.controller.config.layout.launcher_json)
+        }
+
+        /// Record the pinned tools of the rig's platform as installed.
+        fn tools_installed(&self) {
+            self.controller.update(|inner| {
+                inner
+                    .prefs
+                    .set_tool_pins(&manifest::pins(Platform::LinuxX64));
+            });
         }
 
         /// Put the controller into an installed, running state without running a flow.
@@ -2017,6 +2051,98 @@ mod tests {
         assert_eq!(snap.update_version, None);
         assert_eq!(snap.needs_newer_launcher, None);
         assert!(rig.fake.calls().iter().all(|c| !c.starts_with("open ")));
+    }
+
+    #[test]
+    fn an_update_with_stale_pins_fetches_the_tools_and_records_them() {
+        let rig = rig();
+        rig.fake
+            .script()
+            .versions
+            .push_back(Some("0.14.1".to_owned()));
+        rig.running("0.14.0", Some("0.14.1"));
+        rig.controller.update_app().unwrap();
+        rig.idle();
+        let calls = rig.fake.calls();
+        let at = |needle: &str| {
+            calls
+                .iter()
+                .position(|c| c.starts_with(needle))
+                .unwrap_or_else(|| panic!("{needle} missing from {calls:?}"))
+        };
+        assert_eq!(rig.fake.count("fetch_tools"), 1);
+        assert!(at("fetch_tools") < at("uv tool upgrade"));
+        assert_eq!(rig.snap().phase, Phase::Running);
+        assert!(
+            rig.prefs()
+                .tools_current(&manifest::pins(Platform::LinuxX64))
+        );
+        assert!(rig.emitted_steps(Phase::Updating).contains(&vec![
+            StepId::DownloadTools,
+            StepId::UpdateApp,
+            StepId::Finish
+        ]));
+    }
+
+    #[test]
+    fn an_update_with_current_pins_leaves_the_tools_alone() {
+        let rig = rig();
+        rig.fake
+            .script()
+            .versions
+            .push_back(Some("0.14.1".to_owned()));
+        rig.tools_installed();
+        rig.running("0.14.0", Some("0.14.1"));
+        rig.controller.update_app().unwrap();
+        rig.idle();
+        assert_eq!(rig.fake.count("fetch_tools"), 0);
+        assert_eq!(rig.snap().phase, Phase::Running);
+        assert!(
+            rig.emitted_steps(Phase::Updating)
+                .contains(&vec![StepId::UpdateApp, StepId::Finish])
+        );
+    }
+
+    #[test]
+    fn a_failed_tool_download_during_an_update_fails_the_update_and_records_nothing() {
+        let rig = rig();
+        rig.fake.script().tools.push_back(Err(LauncherError {
+            code: ErrorCode::DownloadFailed,
+            detail: None,
+        }));
+        rig.running("0.14.0", Some("0.14.1"));
+        rig.controller.update_app().unwrap();
+        rig.idle();
+        let snap = rig.snap();
+        assert_eq!(snap.failed_action, Some(FailedAction::Update));
+        assert_eq!(snap.error.unwrap().code, ErrorCode::DownloadFailed);
+        assert_eq!(rig.fake.count("uv tool upgrade"), 0);
+        assert!(rig.prefs().tool_pins.is_empty());
+    }
+
+    #[test]
+    fn install_and_repair_record_the_pins_they_fetched() {
+        let rig = rig();
+        rig.controller.launch(false);
+        rig.controller.install().unwrap();
+        rig.idle();
+        assert!(
+            rig.prefs()
+                .tools_current(&manifest::pins(Platform::LinuxX64))
+        );
+
+        let rig = rig_with(
+            Packaging::LinuxPackage,
+            Some(Platform::LinuxX64),
+            Fake::new(),
+        );
+        rig.running("0.14.0", None);
+        rig.controller.repair_app().unwrap();
+        rig.idle();
+        assert!(
+            rig.prefs()
+                .tools_current(&manifest::pins(Platform::LinuxX64))
+        );
     }
 
     #[test]

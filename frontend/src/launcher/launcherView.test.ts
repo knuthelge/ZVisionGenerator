@@ -214,6 +214,7 @@ describe('action zone', () => {
     expect(view('4b installing').caption).toEqual({ label: 'Installing Z-Vision Generator', line: 'Downloading torch (2.1GiB)' });
     expect(view('8b repairing').caption?.label).toBe('Reinstalling Z-Vision Generator');
     expect(view('8a updating with updateVersion').caption).toEqual({ label: 'Installing 0.14.1', line: null });
+    expect(view('8a updating with new tools').caption).toEqual({ label: 'Downloading uv and ffmpeg', line: null });
     expect(view('4c failed install').caption).toBeNull();
     expect(view('6 running').caption).toBeNull();
   });

@@ -627,6 +627,46 @@
     }
   },
   {
+    "name": "8a updating with new tools",
+    "snapshot": {
+      "phase": "updating",
+      "installedVersion": "0.14.0",
+      "updateVersion": "0.14.1",
+      "needsNewerLauncher": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": {
+        "steps": [
+          "download_tools",
+          "update_app",
+          "finish"
+        ],
+        "index": 0,
+        "fraction": null,
+        "line": null
+      },
+      "failedAction": null,
+      "error": null,
+      "logTail": [],
+      "stoppedAt": null
+    },
+    "controls": {
+      "primary": null,
+      "update": false,
+      "log": false,
+      "bar": true,
+      "autostart": true,
+      "menu": [
+        "repair",
+        "uninstall",
+        "beta"
+      ],
+      "locked": true
+    }
+  },
+  {
     "name": "8b repairing",
     "snapshot": {
       "phase": "repairing",
