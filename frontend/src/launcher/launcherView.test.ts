@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { formatBytes, isPrerelease, launcherView } from './launcherView';
+import { isPrerelease, launcherView } from './launcherView';
 import type { ErrorCode, Snapshot, SnapshotCase } from './types';
 
 // Rust's own snapshots, controls included: the same cases `snapshot::controls()` is tested against.
@@ -107,6 +107,15 @@ describe('headline and sub', () => {
     const sub = (packaging: Snapshot['packaging']) => launcherView({ ...snapshot('6 running'), packaging }).sub?.text;
     expect(new Set([sub('macos_app'), sub('windows_nsis'), sub('appimage')]).size).toBe(3);
     expect(sub('appimage')).toBe(sub('linux_package'));
+  });
+
+  it('announces the download size by platform', () => {
+    const lead = (packaging: Snapshot['packaging']) => {
+      const notice = launcherView({ ...snapshot('4a needs_install'), packaging }).notice;
+      return notice?.kind === 'note' ? notice.lead : null;
+    };
+    expect(new Set([lead('macos_app'), lead('windows_nsis'), lead('appimage')]).size).toBe(3);
+    expect(lead('appimage')).toBe(lead('linux_package'));
   });
 
   it('gives a failed install, repair or update its cause as an alert lead, one per error code', () => {
@@ -227,13 +236,5 @@ describe('beta wording', () => {
   it('knows pre-release version spellings', () => {
     for (const v of ['0.15.0b2', '1.0.0rc1', '1.0.0a1']) expect(isPrerelease(v), v).toBe(true);
     for (const v of ['0.14.1', '1.0.0.post1', '1.0.0.dev3', '1.0.0b2.dev1', '1.0', 'v1.0.0', '1.0.0-beta.2', 'garbage', '']) expect(isPrerelease(v), v).toBe(false);
-  });
-});
-
-describe('formatBytes', () => {
-  it('uses decimal units and drops a trailing .0', () => {
-    expect(formatBytes(4_200_000_000)).toBe('4.2 GB');
-    expect(formatBytes(10_000_000_000)).toBe('10 GB');
-    expect(formatBytes(850_000_000)).toBe('850 MB');
   });
 });

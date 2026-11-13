@@ -3,6 +3,7 @@
 // derives them (`snapshot::controls()`), the window never does.
 import type { IconName } from '$lib/components/atoms/Icon.svelte';
 import type { MascotMood } from '$lib/components/atoms/Mascot.svelte';
+import { sizeLabel } from '$lib/state/downloadProgress';
 import type {
   Controls,
   ErrorCode,
@@ -103,16 +104,6 @@ export interface LauncherView {
 
 const NAME = 'Z-Vision Generator';
 
-/** "4.2 GB", "850 MB": decimal units, as disks are sold. */
-export function formatBytes(bytes: number): string {
-  if (bytes >= 1e9) return `${trimZero((bytes / 1e9).toFixed(1))} GB`;
-  return `${Math.max(0, Math.round(bytes / 1e6))} MB`;
-}
-
-function trimZero(text: string): string {
-  return text.endsWith('.0') ? text.slice(0, -2) : text;
-}
-
 function bytesOf(value: string | null): number | null {
   if (value === null) return null;
   const n = Number(value);
@@ -164,6 +155,14 @@ const finishLead: Record<Packaging, string> = {
   windows_nsis: `${NAME} is removed.`,
   appimage: 'Delete the AppImage to finish.',
   linux_package: `Remove the ${NAME} package to finish.`
+};
+
+/** The download size an install announces, by platform. */
+const downloadLead: Record<Packaging, string> = {
+  macos_app: 'About 400 MB to download.',
+  windows_nsis: 'About 2.5 GB to download.',
+  appimage: 'About 3.5 GB to download.',
+  linux_package: 'About 3.5 GB to download.'
 };
 
 /** The codes an install, repair or update can fail with. */
@@ -323,8 +322,8 @@ function unsupportedView(u: Unsupported, controls: Controls): {
       notice = {
         kind: 'reason',
         name: 'Free disk space',
-        found: found === null ? null : formatBytes(found),
-        needed: needed === null ? 'Needs more free space.' : `Needs about ${formatBytes(needed)}.`,
+        found: found === null ? null : sizeLabel(found),
+        needed: needed === null ? 'Needs more free space.' : `Needs about ${sizeLabel(needed)}.`,
         link
       };
       break;
@@ -472,7 +471,7 @@ export function launcherView(s: Snapshot): LauncherView {
       notice = {
         kind: 'note',
         icon: 'download',
-        lead: 'About 4 GB to download.',
+        lead: downloadLead[s.packaging],
         text: 'It can take half an hour on a slow connection. Models come later, in your browser.'
       };
       break;

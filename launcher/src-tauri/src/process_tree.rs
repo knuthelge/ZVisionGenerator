@@ -57,21 +57,23 @@ fn same_process(a: u64, b: u64) -> bool {
 }
 
 /// Every process below `root` by parent links, nearest first; `root` itself is not included. A process that
-/// points back up the tree (a reused PID) is visited once.
-fn descendants(entries: &[Entry], root: u32) -> Vec<Member> {
-    let mut seen = HashSet::from([root]);
+/// points back up the tree (a reused PID) is visited once, and one that started before its parent is skipped (a
+/// stale parent ID that a dead process left behind, which Windows keeps).
+fn descendants(entries: &[Entry], root: &Entry) -> Vec<Member> {
+    let mut seen = HashSet::from([root.pid]);
     let mut found: Vec<Member> = Vec::new();
-    let mut frontier = vec![root];
+    let mut frontier = vec![(root.pid, root.start_time)];
     while !frontier.is_empty() {
         let mut next = Vec::new();
         for entry in entries {
-            if entry
-                .parent
-                .is_some_and(|parent| frontier.contains(&parent))
-                && seen.insert(entry.pid)
-            {
+            let child_of_frontier = entry.parent.is_some_and(|parent| {
+                frontier.iter().any(|&(pid, started)| {
+                    pid == parent && entry.start_time + START_TIME_TOLERANCE_SECS >= started
+                })
+            });
+            if child_of_frontier && seen.insert(entry.pid) {
                 found.push(Member::from(entry));
-                next.push(entry.pid);
+                next.push((entry.pid, entry.start_time));
             }
         }
         frontier = next;
@@ -109,7 +111,7 @@ pub fn snapshot_tree(root: u32) -> Vec<Member> {
         return Vec::new();
     };
     let mut members = vec![Member::from(top)];
-    members.extend(descendants(&entries, root));
+    members.extend(descendants(&entries, top));
     members
 }
 
@@ -224,6 +226,7 @@ pub fn stop_tree(root: u32, root_start_time: u64, grace: Duration) {
 mod tests {
     use super::*;
 
+    /// An entry that started at `pid * 10` seconds: a child has a higher PID than its parent, so it is younger.
     fn entry(pid: u32, parent: Option<u32>) -> Entry {
         Entry {
             pid,
@@ -246,17 +249,47 @@ mod tests {
             entry(13, Some(10)),
             entry(20, Some(1)),
         ];
-        assert_eq!(pids(&descendants(&table, 10)), [11, 13, 12]);
-        assert_eq!(pids(&descendants(&table, 1)), [10, 20, 11, 13, 12]);
-        assert_eq!(descendants(&table, 12), [], "a leaf has no descendants");
+        assert_eq!(pids(&descendants(&table, &entry(10, None))), [11, 13, 12]);
         assert_eq!(
-            descendants(&[entry(10, None), entry(11, Some(10))], 10),
+            pids(&descendants(&table, &entry(1, None))),
+            [10, 20, 11, 13, 12]
+        );
+        assert_eq!(
+            descendants(&table, &entry(12, None)),
+            [],
+            "a leaf has no descendants"
+        );
+        assert_eq!(
+            descendants(&[entry(10, None), entry(11, Some(10))], &entry(10, None)),
             [Member {
                 pid: 11,
                 start_time: 110
             }]
         );
-        assert!(descendants(&[entry(30, Some(2)), entry(31, Some(30))], 10).is_empty());
+        assert!(
+            descendants(&[entry(30, Some(2)), entry(31, Some(30))], &entry(10, None)).is_empty()
+        );
+    }
+
+    #[test]
+    fn descendants_ignore_a_process_older_than_the_root_it_names_as_parent() {
+        let root = entry(10, None);
+        let tolerated = Entry {
+            start_time: root.start_time - START_TIME_TOLERANCE_SECS,
+            ..entry(11, Some(10))
+        };
+        let stale = Entry {
+            start_time: root.start_time - START_TIME_TOLERANCE_SECS - 1,
+            ..entry(12, Some(10))
+        };
+        let table = [
+            root,
+            tolerated,
+            stale,
+            entry(13, Some(12)),
+            entry(14, Some(11)),
+        ];
+        assert_eq!(pids(&descendants(&table, &root)), [11, 14]);
     }
 
     #[test]
@@ -267,7 +300,7 @@ mod tests {
             entry(12, Some(11)),
             entry(13, Some(13)),
         ];
-        assert_eq!(pids(&descendants(&table, 10)), [11, 12]);
+        assert_eq!(pids(&descendants(&table, &entry(10, None))), [11, 12]);
     }
 
     #[test]

@@ -65,10 +65,13 @@ pub const UV_HTTP_TIMEOUT_SECS: u64 = 300;
 /// Expected size of uv's cache at the end of an install on Linux, in bytes. Measured: the cache peaks at about
 /// 6.6 GB just before `uv cache prune`.
 const EXPECTED_CACHE_BYTES_LINUX: u64 = 6_600_000_000;
-/// Expected size of uv's cache at the end of an install on Windows, in bytes. Placeholder until it is measured.
-const EXPECTED_CACHE_BYTES_WINDOWS: u64 = 7_000_000_000;
-/// Expected size of uv's cache at the end of an install on macOS, in bytes. Placeholder until it is measured.
-const EXPECTED_CACHE_BYTES_MACOS: u64 = 7_000_000_000;
+/// Expected size of uv's cache at the end of an install on Windows, in bytes. Estimated from the resolved wheel
+/// sizes (about 2.4 GB to download); the cache holds about twice the download once unpacked, as on Linux (6.6 GB
+/// from a 3.4 GB download).
+const EXPECTED_CACHE_BYTES_WINDOWS: u64 = 4_800_000_000;
+/// Expected size of uv's cache at the end of an install on macOS, in bytes. Estimated like the Windows figure,
+/// from about 0.4 GB to download.
+const EXPECTED_CACHE_BYTES_MACOS: u64 = 800_000_000;
 
 /// Expected size of uv's cache at the end of an install on `platform`, in bytes; the install progress ring fills
 /// toward it.
