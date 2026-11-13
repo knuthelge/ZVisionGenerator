@@ -16,7 +16,7 @@ The package version comes from the tag (`hatch-vcs`), so the tag must be a valid
 
 Pre-release tags are published as GitHub pre-releases, and uv installs them only when asked: `uv tool install --prerelease allow z-vision-generator`, or an exact pin such as `uv tool install z-vision-generator==0.13.0b1`.
 
-Final release tags also run the Deploy Docs workflow, which publishes the docs site from the tagged commit. Pre-release tags leave the published docs unchanged; run the Deploy Docs workflow by hand to publish between releases.
+Final release tags also run the Deploy Docs workflow, which publishes the docs site from the tagged commit. Pre-release tags leave the published docs unchanged; run the Deploy Docs workflow by hand to publish between releases. A manual run publishes `main`, so the docs of every feature not yet released go live with it.
 
 ## Checklist
 
@@ -26,8 +26,9 @@ Do these in order, on the commit you will tag.
 2. **Check the curated LoRA list.** Run `make check-curated`. It asks the Hub for every entry at its pinned commit, with no token, and compares each file's size and `lfs.sha256` with the list. It exits with an error and names each entry whose file is missing, changed or unreachable; fix or drop those entries first. The same run rewrites each entry's `downloads` with the repository's current Hugging Face download count in `curated_loras.json`, so commit the file afterwards (`--no-write` checks without writing). It needs the network, so it is not part of `make check`. See [The curated LoRA list](curated-loras.md).
 3. **Check that the wheel resolves.** `scripts/check_wheel_resolves.sh` builds the wheel and resolves it from an empty directory with `uv pip compile --no-config` for three fixed targets, from any host: Linux (`x86_64-unknown-linux-gnu`, PyPI only), Windows (`x86_64-pc-windows-msvc`, with the CUDA index and `--index-strategy unsafe-best-match` of the [install page](../get-started/install.md)) and macOS (`aarch64-apple-darwin` with `MACOSX_DEPLOYMENT_TARGET=14.0`, because uv assumes macOS 13 for that target while `mlx` ships only macOS 14 and newer wheels). A user installs the wheel with `uv tool install z-vision-generator`, where nothing of the repository's `uv.lock` or `[tool.uv]` settings applies; the script fails when a dependency has no solution next to ours, or when `gradio`, `qwen-tts-hf` or `faster-qwen3-tts` comes back. CI runs it on every pull request, on its macOS runner, and the Release workflow runs it on an Ubuntu runner before it publishes; the script resolves all three targets from either host.
 4. **Write the release commit.** Move the `[Unreleased]` entries of `CHANGELOG.md` under a `## [<version>] - <date>` heading, in a commit named `chore(release): v<version>` whose body lists the release highlights.
-5. **Tag and push.** Create the tag on that commit and push the commit and the tag. The Release workflow takes it from there.
-6. **Check the result.** The workflow's run is green, the version is on PyPI, the GitHub Release exists, and for a final release the docs site shows the new version.
+5. **Check the install guide's launcher links.** If [Install](../get-started/install.md) links a `launcher-v*` release, that release must exist before you tag, because the docs deploy on every final app tag and would otherwise publish dead download links.
+6. **Tag and push.** Create the tag on that commit and push the commit and the tag. The Release workflow takes it from there.
+7. **Check the result.** The workflow's run is green, the version is on PyPI, the GitHub Release exists, and for a final release the docs site shows the new version.
 
 ## Launcher releases { #launcher-releases }
 

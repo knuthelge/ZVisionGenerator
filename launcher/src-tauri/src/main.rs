@@ -1,6 +1,7 @@
 //! Entry point: picks the mode from the command line and starts it.
 //!
-//! `--uninstall-cleanup` runs the headless cleanup without starting Tauri; anything else starts the app, with
+//! `--uninstall-cleanup` runs the headless cleanup without starting Tauri (`--keep-data` with it stops everything
+//! but leaves the data folder, for an upgrade); anything else starts the app, with
 //! `--autostart` marking a start-at-login launch. Every module of the crate is declared here.
 
 // A release build on Windows is a GUI program: no console window.
@@ -34,22 +35,29 @@ use std::ffi::OsString;
 enum Mode {
     /// Run the app; `autostart` is set when the system started it at login.
     Gui { autostart: bool },
-    /// Clean up for the Windows uninstaller, without a window.
-    UninstallCleanup,
+    /// Clean up for the Windows uninstaller, without a window; `keep_data` leaves the data folder in place.
+    UninstallCleanup { keep_data: bool },
 }
 
 /// Read the mode from the arguments after the program name.
 fn cli_mode(args: impl IntoIterator<Item = OsString>) -> Mode {
     let mut autostart = false;
+    let mut cleanup = false;
+    let mut keep_data = false;
     for arg in args {
         if arg == "--uninstall-cleanup" {
-            return Mode::UninstallCleanup;
-        }
-        if arg == "--autostart" {
+            cleanup = true;
+        } else if arg == "--keep-data" {
+            keep_data = true;
+        } else if arg == "--autostart" {
             autostart = true;
         }
     }
-    Mode::Gui { autostart }
+    if cleanup {
+        Mode::UninstallCleanup { keep_data }
+    } else {
+        Mode::Gui { autostart }
+    }
 }
 
 /// Ask WebKitGTK not to use its DMABUF renderer, which paints a blank window on NVIDIA; a value already set wins.
@@ -67,7 +75,7 @@ fn main() {
     #[cfg(target_os = "linux")]
     disable_dmabuf_renderer();
     match cli_mode(std::env::args_os().skip(1)) {
-        Mode::UninstallCleanup => uninstall::headless(),
+        Mode::UninstallCleanup { keep_data } => uninstall::headless(keep_data),
         Mode::Gui { autostart } => app::run(autostart),
     }
 }
@@ -92,11 +100,26 @@ mod tests {
 
     #[test]
     fn uninstall_cleanup_wins_over_everything() {
-        assert_eq!(mode(&["--uninstall-cleanup"]), Mode::UninstallCleanup);
+        assert_eq!(
+            mode(&["--uninstall-cleanup"]),
+            Mode::UninstallCleanup { keep_data: false }
+        );
         assert_eq!(
             mode(&["--autostart", "--uninstall-cleanup"]),
-            Mode::UninstallCleanup
+            Mode::UninstallCleanup { keep_data: false }
         );
+    }
+
+    #[test]
+    fn keep_data_is_read_with_the_cleanup_in_any_order() {
+        let keep = Mode::UninstallCleanup { keep_data: true };
+        assert_eq!(mode(&["--uninstall-cleanup", "--keep-data"]), keep);
+        assert_eq!(mode(&["--keep-data", "--uninstall-cleanup"]), keep);
+    }
+
+    #[test]
+    fn keep_data_alone_is_a_normal_launch() {
+        assert_eq!(mode(&["--keep-data"]), Mode::Gui { autostart: false });
     }
 
     #[test]

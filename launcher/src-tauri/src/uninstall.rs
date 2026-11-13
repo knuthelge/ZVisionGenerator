@@ -3,6 +3,7 @@
 //! On macOS and Linux the controller runs the uninstall in the window and uses [`delete_root`]. On Windows the
 //! NSIS uninstaller runs `--uninstall-cleanup` before it removes the launcher's own files, and [`headless`] stops
 //! whatever holds files in Root, deletes Root and exits 0 no matter what: leftovers are only reported in the window.
+//! An upgrade runs the same uninstaller in place, and then the hook adds `--keep-data` so that Root survives.
 //!
 //! [`packaging`] and [`other_launcher_pids`] are pure; deleting and killing are thin edge functions.
 
@@ -212,20 +213,31 @@ fn kill_other_launchers() {
 }
 
 /// The cleanup of `layout`: `kill_others` first, then the recorded server (only when its pid is alive with the
-/// recorded start time), then Root. Every failure is ignored: the uninstaller must never be blocked by it.
-fn cleanup(layout: &Layout, kill_others: impl FnOnce(), grace: Duration, budget: Duration) {
+/// recorded start time), then Root unless `keep_data`. Every failure is ignored: the uninstaller must never be
+/// blocked by it.
+fn cleanup(
+    layout: &Layout,
+    kill_others: impl FnOnce(),
+    keep_data: bool,
+    grace: Duration,
+    budget: Duration,
+) {
     kill_others();
     let _ = clear_stale_record(layout, grace);
-    let _ = delete_root(&layout.root, budget);
+    if !keep_data {
+        let _ = delete_root(&layout.root, budget);
+    }
 }
 
 /// Run the headless cleanup (`--uninstall-cleanup`): stop the other launcher processes and the launcher's server,
-/// delete Root, and return so the process exits 0. Starts no window and no single-instance check.
-pub fn headless() {
+/// delete Root unless `keep_data` (`--keep-data`, an upgrade), and return so the process exits 0. Starts no window
+/// and no single-instance check.
+pub fn headless(keep_data: bool) {
     if let Some(root) = default_root() {
         cleanup(
             &Layout::new(root),
             kill_other_launchers,
+            keep_data,
             STOP_GRACE,
             DELETE_RETRY,
         );
@@ -576,6 +588,7 @@ mod tests {
                 assert!(layout.root.exists(), "others are killed before Root goes");
                 order.set(1);
             },
+            false,
             Duration::ZERO,
             Duration::ZERO,
         );
@@ -584,10 +597,33 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_that_keeps_data_stops_the_server_but_leaves_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path().join(root_name()));
+        fs::create_dir_all(&layout.tools).unwrap();
+        fs::write(
+            &layout.server_json,
+            r#"{"pid":4294967,"startTime":1,"port":8080}"#,
+        )
+        .unwrap();
+        let killed = Cell::new(false);
+        cleanup(
+            &layout,
+            || killed.set(true),
+            true,
+            Duration::ZERO,
+            Duration::ZERO,
+        );
+        assert!(killed.get());
+        assert!(!layout.server_json.exists(), "the stale record is cleared");
+        assert!(layout.tools.exists(), "Root stays");
+    }
+
+    #[test]
     fn cleanup_never_fails_when_there_is_nothing_to_clean() {
         let dir = tempfile::tempdir().unwrap();
         let layout = Layout::new(dir.path().join(root_name()));
-        cleanup(&layout, || {}, Duration::ZERO, Duration::ZERO);
+        cleanup(&layout, || {}, false, Duration::ZERO, Duration::ZERO);
         assert!(!layout.root.exists());
     }
 }
