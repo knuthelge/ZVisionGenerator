@@ -4,6 +4,8 @@ The Web UI runs on the computer that generates, and you can use it from any brow
 
 ## Open it from another device { #open-it-from-another-device }
 
+This needs a terminal install. The app the [launcher](../get-started/install.md#install-with-the-launcher) starts answers only on this computer, and the launcher has no setting to share it; see [Prefer a terminal?](../get-started/install.md#prefer-a-terminal).
+
 Start the Web UI so other devices can reach it:
 
 ```bash

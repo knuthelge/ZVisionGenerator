@@ -76,6 +76,8 @@ pub enum Packaging {
 #[serde(rename_all = "snake_case")]
 pub enum UnsupportedCode {
     NoNvidiaGpu,
+    /// `nvidia-smi` is installed but fails: a driver that needs a restart or a reinstall.
+    DriverNotWorking,
     DriverTooOld,
     GpuTooOld,
     LowDisk,
@@ -204,7 +206,9 @@ pub fn controls(snapshot: &Snapshot) -> Controls {
         Phase::Checking | Phase::MoveToApplications | Phase::Installing | Phase::Uninstalling => {}
         Phase::Unsupported => {
             c.primary = snapshot.unsupported.as_ref().map(|u| match u.code {
-                UnsupportedCode::DriverTooOld | UnsupportedCode::LowDisk => Primary::CheckAgain,
+                UnsupportedCode::DriverNotWorking
+                | UnsupportedCode::DriverTooOld
+                | UnsupportedCode::LowDisk => Primary::CheckAgain,
                 UnsupportedCode::NoNvidiaGpu | UnsupportedCode::GpuTooOld => {
                     Primary::SeeRequirements
                 }
@@ -245,11 +249,8 @@ pub fn controls(snapshot: &Snapshot) -> Controls {
                         WITHOUT_REPAIR.to_vec()
                     };
                 }
-                Some(FailedAction::Repair) => {
-                    c.primary = Some(Primary::Retry);
-                    show_installed(&mut c, &WITHOUT_REPAIR);
-                }
-                Some(FailedAction::Start | FailedAction::Update) | None => {
+                // Repair, update and start leave an app the user can still open.
+                Some(FailedAction::Repair | FailedAction::Start | FailedAction::Update) | None => {
                     c.primary = Some(Primary::Open);
                     show_installed(&mut c, &ALL);
                 }
@@ -287,6 +288,7 @@ mod tests {
         for expected in [
             "1 checking",
             "2a unsupported driver_too_old",
+            "2a unsupported driver_not_working",
             "2a unsupported low_disk",
             "2a unsupported low_disk (macos)",
             "2b unsupported no_nvidia_gpu",

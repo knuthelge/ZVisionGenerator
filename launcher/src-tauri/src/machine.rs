@@ -92,15 +92,19 @@ fn evaluate_gpus(gpus: &[Gpu]) -> Result<(), Unsupported> {
     Ok(())
 }
 
-/// The reason when the GPU query gave no GPU: a second, driver-only query tells an old driver (which rejects the
-/// `compute_cap` field) from no NVIDIA GPU at all.
-fn evaluate_without_gpus(driver_only_stdout: Option<&str>) -> Unsupported {
+/// The reason when the GPU query gave no GPU. Without `nvidia-smi` there is no NVIDIA driver at all. With it, a
+/// second, driver-only query tells an old driver (which rejects the `compute_cap` field) from a driver that does not
+/// work, for example one a restart or Secure Boot has not let in yet.
+fn evaluate_without_gpus(smi_found: bool, driver_only_stdout: Option<&str>) -> Unsupported {
+    if !smi_found {
+        return no_nvidia_gpu();
+    }
     let driver = driver_only_stdout
         .and_then(|text| text.lines().map(str::trim).find(|line| !line.is_empty()))
         .filter(|driver| driver_major(driver).is_some_and(|major| major < MIN_DRIVER_MAJOR));
     match driver {
         Some(driver) => driver_too_old(driver),
-        None => no_nvidia_gpu(),
+        None => driver_not_working(),
     }
 }
 
@@ -109,6 +113,14 @@ fn no_nvidia_gpu() -> Unsupported {
         code: UnsupportedCode::NoNvidiaGpu,
         found: None,
         needed: NEEDED_COMPUTE_CAP.to_owned(),
+    }
+}
+
+fn driver_not_working() -> Unsupported {
+    Unsupported {
+        code: UnsupportedCode::DriverNotWorking,
+        found: None,
+        needed: MIN_DRIVER_MAJOR.to_string(),
     }
 }
 
@@ -173,18 +185,29 @@ fn query_args(fields: &str) -> [String; 2] {
     ]
 }
 
-/// Run the first `nvidia-smi` that starts; its stdout when it exits successfully, else `None`.
-fn run_nvidia_smi(candidates: &[PathBuf], fields: &str) -> Option<String> {
+/// What running `nvidia-smi` came to.
+enum SmiRun {
+    /// No candidate program could be started.
+    NotFound,
+    /// A program started but exited with an error.
+    Failed,
+    /// It exited successfully with this stdout.
+    Output(String),
+}
+
+/// Run the first `nvidia-smi` that starts.
+fn run_nvidia_smi(candidates: &[PathBuf], fields: &str) -> SmiRun {
     for program in candidates {
         let Ok(output) = hidden_command(program).args(query_args(fields)).output() else {
             continue;
         };
-        return output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).into_owned());
+        return if output.status.success() {
+            SmiRun::Output(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            SmiRun::Failed
+        };
     }
-    None
+    SmiRun::NotFound
 }
 
 /// Check the NVIDIA driver and GPU (Windows and Linux); macOS has nothing to check.
@@ -194,14 +217,21 @@ fn check_gpu() -> Result<(), Unsupported> {
     if candidates.is_empty() {
         return Ok(());
     }
-    let gpus = run_nvidia_smi(&candidates, "name,driver_version,compute_cap")
-        .map(|stdout| parse_nvidia_smi(&stdout))
-        .unwrap_or_default();
-    if !gpus.is_empty() {
-        return evaluate_gpus(&gpus);
+    let first = run_nvidia_smi(&candidates, "name,driver_version,compute_cap");
+    if let SmiRun::Output(stdout) = &first {
+        let gpus = parse_nvidia_smi(stdout);
+        if !gpus.is_empty() {
+            return evaluate_gpus(&gpus);
+        }
     }
-    let driver_only = run_nvidia_smi(&candidates, "driver_version");
-    Err(evaluate_without_gpus(driver_only.as_deref()))
+    if matches!(first, SmiRun::NotFound) {
+        return Err(evaluate_without_gpus(false, None));
+    }
+    let driver_only = match run_nvidia_smi(&candidates, "driver_version") {
+        SmiRun::Output(stdout) => Some(stdout),
+        SmiRun::NotFound | SmiRun::Failed => None,
+    };
+    Err(evaluate_without_gpus(true, driver_only.as_deref()))
 }
 
 /// Bytes free on the volume holding `root`, or `None` when the disks cannot be listed or none holds it.
@@ -248,7 +278,7 @@ mod tests {
     fn check(stdout: &str) -> Result<(), Unsupported> {
         let gpus = parse_nvidia_smi(stdout);
         if gpus.is_empty() {
-            return Err(evaluate_without_gpus(None));
+            return Err(evaluate_without_gpus(true, None));
         }
         evaluate_gpus(&gpus)
     }
@@ -381,21 +411,27 @@ mod tests {
 
     #[test]
     fn a_driver_that_rejects_compute_cap_is_too_old() {
-        let reason = evaluate_without_gpus(Some("470.239.06\r\n"));
+        let reason = evaluate_without_gpus(true, Some("470.239.06\r\n"));
         assert_eq!(reason.code, UnsupportedCode::DriverTooOld);
         assert_eq!(reason.found.as_deref(), Some("470.239.06"));
         assert_eq!(reason.needed, "580");
     }
 
     #[test]
-    fn without_a_driver_answer_there_is_no_nvidia_gpu() {
+    fn a_nvidia_smi_that_fails_is_a_driver_that_does_not_work() {
         for text in [None, Some(""), Some("not a version"), Some("580.95.05")] {
-            assert_eq!(
-                evaluate_without_gpus(text).code,
-                UnsupportedCode::NoNvidiaGpu,
-                "{text:?}"
-            );
+            let reason = evaluate_without_gpus(true, text);
+            assert_eq!(reason.code, UnsupportedCode::DriverNotWorking, "{text:?}");
+            assert_eq!(reason.found, None);
+            assert_eq!(reason.needed, "580");
         }
+    }
+
+    #[test]
+    fn without_nvidia_smi_there_is_no_nvidia_gpu() {
+        let reason = evaluate_without_gpus(false, None);
+        assert_eq!(reason.code, UnsupportedCode::NoNvidiaGpu);
+        assert_eq!(reason.needed, "7.5");
     }
 
     #[test]

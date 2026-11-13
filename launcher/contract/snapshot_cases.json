@@ -58,6 +58,37 @@
     }
   },
   {
+    "name": "2a unsupported driver_not_working",
+    "snapshot": {
+      "phase": "unsupported",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": {
+        "code": "driver_not_working",
+        "found": null,
+        "needed": "580"
+      },
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "stoppedAt": null,
+      "controls": {
+        "primary": "check_again",
+        "update": false,
+        "log": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
     "name": "2a unsupported low_disk",
     "snapshot": {
       "phase": "unsupported",
@@ -849,29 +880,20 @@
       "beta": false,
       "packaging": "appimage",
       "unsupported": null,
-      "progress": {
-        "steps": [
-          "download_tools",
-          "clean_cache",
-          "install_app",
-          "finish"
-        ],
-        "index": 0,
-        "fraction": null,
-        "line": null
-      },
+      "progress": null,
       "failedAction": "repair",
       "error": "low_disk",
       "leftoverFolder": null,
       "logTail": [],
       "stoppedAt": null,
       "controls": {
-        "primary": "retry",
+        "primary": "open",
         "update": false,
         "log": true,
         "bar": true,
         "autostart": true,
         "menu": [
+          "repair",
           "uninstall",
           "beta"
         ],

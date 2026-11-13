@@ -174,11 +174,13 @@ describe('LauncherApp snapshots', () => {
 describe('LauncherApp actions', () => {
   it.each([
     ['2a unsupported driver_too_old', 'check_again', 'checkAgain'],
+    ['2a unsupported driver_not_working', 'check_again', 'checkAgain'],
     ['4a needs_install', 'install', 'install'],
     ['4c failed install', 'retry', 'retry'],
     ['6 running', 'open', 'openApp'],
     ['9 stopped', 'open', 'openApp'],
     ['10a failed update', 'open', 'openApp'],
+    ['R failed repair', 'open', 'openApp'],
     ['11b uninstalled', 'quit', 'quitLauncher']
   ] as const)('%s: the main button is %s and calls %s', async (name, id, method) => {
     const { target, bridge } = await open(name);

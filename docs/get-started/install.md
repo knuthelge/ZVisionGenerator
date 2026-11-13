@@ -84,7 +84,7 @@ The launcher doesn't update itself; download a newer one from [Get the launcher]
 
 ### Repair the launcher's install { #launcher-repair }
 
-If the app doesn't start, or reports a missing or outdated package or a missing ffmpeg, open **More** in the launcher window and choose **Repair**. The app stops, the launcher downloads its tools again and reinstalls the same version of the app. Your data folder and downloaded models stay as they are.
+If the app doesn't start, or reports a missing or outdated package or a missing ffmpeg, open **More** in the launcher window and choose **Repair**. The app stops, the launcher downloads its tools again and reinstalls the same version of the app. Your data folder and downloaded models stay as they are. If the repair doesn't finish, **Open** starts the app again, and **Repair** stays in **More**.
 
 ### Uninstall the launcher's install { #launcher-uninstall }
 
@@ -104,7 +104,11 @@ Open **More** and choose **Uninstall…**. It stops the app and removes the app,
 
 ### Prefer a terminal?
 
-Steps 2 to 6 install the same app from a terminal instead of the launcher. Use them if you want the `ziv` commands on your path, or if you prefer commands. Skip them if you used the launcher.
+Steps 2 to 6 install the same app from a terminal instead of the launcher. Use them if you want any of these, or if you prefer commands. Skip them if you used the launcher.
+
+- The `ziv` commands on your path.
+- The [data folder](../reference/data-folder.md#use-another-folder) or the Hugging Face cache on another drive on macOS or Linux.
+- Phone, tablet and other-computer access: the launcher's app answers only on this computer. See [Phones, tablets and other computers](../web-ui/devices.md).
 
 ## 2. Open a terminal { #open-a-terminal }
 

@@ -486,7 +486,7 @@ impl Controller {
         }
     }
 
-    /// Show a failure; install and repair keep their progress frozen where it stopped.
+    /// Show a failure; an install keeps its progress frozen where it stopped.
     fn fail(&self, failure: Failure) {
         self.update(|inner| {
             if inner.quitting {
@@ -499,7 +499,7 @@ impl Controller {
             snapshot.log_tail = failure.tail;
             snapshot.unsupported = None;
             snapshot.stopped_at = None;
-            if !matches!(failure.action, FailedAction::Install | FailedAction::Repair) {
+            if failure.action != FailedAction::Install {
                 snapshot.progress = None;
             }
         });
@@ -525,13 +525,9 @@ impl Controller {
         self.begin_action(|c| c.primary == Some(Primary::Install), Action::Install)
     }
 
-    /// `retry`: run the failed install or repair again.
+    /// `retry`: run the failed install again.
     pub fn retry(&self) -> Result<(), String> {
-        let action = match lock(&self.0.inner).snapshot.failed_action {
-            Some(FailedAction::Repair) => Action::Repair,
-            _ => Action::Install,
-        };
-        self.begin_action(|c| c.primary == Some(Primary::Retry), action)
+        self.begin_action(|c| c.primary == Some(Primary::Retry), Action::Install)
     }
 
     /// `update_app`: update the app to the offered version.
@@ -2309,16 +2305,20 @@ mod tests {
     }
 
     #[test]
-    fn retry_after_a_failed_repair_repairs_again() {
+    fn a_failed_repair_offers_open_and_repair_and_drops_its_progress() {
         let rig = rig();
         rig.fake.script().uv.extend([Ok(()), Err(uv_failed())]);
         rig.running("0.14.0", None);
         rig.controller.repair_app().unwrap();
         rig.idle();
-        assert_eq!(rig.snap().failed_action, Some(FailedAction::Repair));
-        rig.controller.retry().unwrap();
+        let snap = rig.snap();
+        assert_eq!(snap.failed_action, Some(FailedAction::Repair));
+        assert_eq!(snap.progress, None);
+        assert_eq!(snap.controls.primary, Some(Primary::Open));
+        assert!(snap.controls.menu.contains(&MenuItem::Repair));
+        assert_eq!(rig.controller.retry(), Err(BUSY.to_owned()));
+        rig.controller.open_app().unwrap();
         rig.idle();
-        assert_eq!(rig.fake.count("check_disk"), 2);
         assert_eq!(rig.snap().phase, Phase::Running);
     }
 

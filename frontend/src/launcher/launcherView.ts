@@ -127,7 +127,7 @@ function stepName(step: StepId, s: Snapshot): string {
     case 'clean_cache':
       return 'Clearing the download cache';
     case 'install_app':
-      return s.phase === 'repairing' || s.failedAction === 'repair' ? `Reinstalling ${NAME}` : `Installing ${NAME}`;
+      return s.phase === 'repairing' ? `Reinstalling ${NAME}` : `Installing ${NAME}`;
     case 'update_app':
       return s.updateVersion ? `Installing ${s.updateVersion}` : 'Installing the update';
     case 'finish':
@@ -170,7 +170,7 @@ const finishLead: Record<Packaging, string> = {
 /** The codes an install, repair or update can fail with. */
 type ActionErrorCode = Exclude<ErrorCode, 'start_exited' | 'start_timeout' | 'uninstall_incomplete'>;
 
-/** The cause of a failed install or repair, and what to do next. */
+/** The cause of a failed install, repair or update, and what to do next after an install. */
 const causes: Record<ActionErrorCode, { lead: string; text: string }> = {
   download_failed: {
     lead: 'The download didn’t finish.',
@@ -206,6 +206,9 @@ const startTexts: Record<'start_exited' | 'start_timeout', string> = {
 
 /** What to do after a failed update: the app was stopped for it, and the offer is still there once it runs. */
 const UPDATE_NEXT = 'Open starts it again, and the update stays on offer.';
+
+/** What to do after a failed repair: the app was stopped for it, and Repair is still in the menu. */
+const REPAIR_NEXT = 'Open starts it again. Repair is in the ⋯ menu.';
 
 function causeOf(s: Snapshot): { lead: string; text: string } {
   const code = s.error;
@@ -273,7 +276,7 @@ function haloOf(s: Snapshot): { halo: HaloView; percent?: number } {
     return { halo: { kind: 'busy', label } };
   }
   if (s.phase === 'running') return { halo: { kind: 'live', label } };
-  if (s.phase === 'failed' && (s.failedAction === 'install' || s.failedAction === 'repair')) {
+  if (s.phase === 'failed' && s.failedAction === 'install') {
     return { halo: { kind: 'error', label, ...(fraction !== null ? { fraction } : {}) } };
   }
   return { halo: { kind: 'rest', label } };
@@ -331,6 +334,15 @@ function unsupportedView(u: Unsupported, controls: Controls): {
       };
       break;
     }
+    case 'driver_not_working':
+      notice = {
+        kind: 'reason',
+        name: 'NVIDIA driver',
+        found: null,
+        needed: 'Isn’t working. Restart the computer, or reinstall the driver.',
+        link: null
+      };
+      break;
     case 'no_nvidia_gpu':
       notice = { kind: 'reason', name: 'NVIDIA graphics card', found: null, needed: 'None found.', link: null };
       break;
@@ -374,10 +386,14 @@ function failedView(s: Snapshot): { headline: string; sub: SubView } {
   const cause = causeOf(s);
   switch (s.failedAction) {
     case 'install':
+      return {
+        headline: 'Install didn’t finish',
+        sub: { lead: cause.lead, leadAlert: true, text: cause.text }
+      };
     case 'repair':
       return {
-        headline: s.failedAction === 'install' ? 'Install didn’t finish' : 'Repair didn’t finish',
-        sub: { lead: cause.lead, leadAlert: true, text: cause.text }
+        headline: 'Repair didn’t finish',
+        sub: { lead: cause.lead, leadAlert: true, text: REPAIR_NEXT }
       };
     case 'update':
       return {

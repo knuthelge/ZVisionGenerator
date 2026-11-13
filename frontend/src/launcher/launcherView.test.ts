@@ -111,7 +111,8 @@ describe('kicker', () => {
   it('counts the steps of the work in progress', () => {
     expect(view('8a updating').kicker).toMatch(/1.*2/);
     expect(view('8b repairing').kicker).toMatch(/3.*4/);
-    expect(view('R failed repair').kicker).toMatch(/1.*4/);
+    expect(view('4c failed install').kicker).toMatch(/2.*3/);
+    expect(view('R failed repair').kicker).toBe('Version 0.14.0');
   });
 });
 
@@ -147,6 +148,16 @@ describe('headline and sub', () => {
   it('tells a failed update and a failed start apart from a failed install', () => {
     const headlines = ['4c failed install', 'R failed repair', '10a failed update', '9b failed start'].map((name) => view(name).headline);
     expect(new Set(headlines).size).toBe(4);
+  });
+
+  it('words a failed repair like a failed update: Open starts the app again, and Repair is in the menu', () => {
+    const repair = view('R failed repair');
+    expect(repair.sub?.text).toBe('Open starts it again. Repair is in the ⋯ menu.');
+    expect(repair.sub?.text).not.toBe(view('10a failed update').sub?.text);
+    expect(repair.hero.halo.kind).toBe('rest');
+    expect(repair.primary?.id).toBe('open');
+    expect(repair.menu.map((item) => item.id)).toContain('repair');
+    expect(view('4c failed install').hero.halo.kind).toBe('error');
   });
 
   it('words each failed start with a next step and no cause lead', () => {
@@ -188,7 +199,20 @@ describe('notice', () => {
     });
     expect(view('2a unsupported low_disk (macos)').notice).toMatchObject({ kind: 'reason', found: '7.3 GB' });
     expect(view('2b unsupported no_nvidia_gpu').notice).toMatchObject({ found: null, link: null });
+    expect(view('2a unsupported driver_not_working').notice).toMatchObject({
+      kind: 'reason',
+      name: 'NVIDIA driver',
+      found: null,
+      needed: 'Isn’t working. Restart the computer, or reinstall the driver.',
+      link: null
+    });
     expect(view('2b unsupported gpu_too_old').notice).toMatchObject({ found: 'GTX 1080', link: null });
+  });
+
+  it('puts a driver that does not work under Can’t install yet, and a missing GPU under Can’t run', () => {
+    expect(view('2a unsupported driver_not_working').headline).toBe('Can’t install yet');
+    expect(view('2a unsupported driver_not_working').primary?.id).toBe('check_again');
+    expect(view('2b unsupported no_nvidia_gpu').headline).toBe('Can’t run on this computer');
   });
 
   it('offers the update as an alert', () => {

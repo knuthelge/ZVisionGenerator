@@ -58,7 +58,19 @@ Set `ZIV_DATA_DIR` to keep the data folder somewhere else, for example on a fast
 
 Set it for every command you run, so they all use the same folder.
 
-The launcher doesn't see `ZIV_DATA_DIR` or `HF_HOME` set in a shell profile: it starts from the Finder, the Start menu or at login, not from a shell. An app started by the launcher uses `~/.ziv` and the default Hugging Face cache. To keep the data elsewhere, start the app from a terminal with the variables set, as above.
+If you installed with the launcher, the app it starts inherits the launcher's own environment, so the variables have to be set where the launcher can see them.
+
+=== "macOS"
+
+    A shell profile doesn't reach the launcher, which starts from the Finder or at login, not from a shell. To move these folders, install from a terminal instead; see [Prefer a terminal?](../get-started/install.md#prefer-a-terminal).
+
+=== "Windows"
+
+    Press the Start key, type `environment variables` and choose **Edit environment variables for your account**. Add `ZIV_DATA_DIR` or `HF_HOME` as user variables, then quit the launcher and open it again. The app it starts uses them.
+
+=== "Linux"
+
+    A shell profile doesn't reach the launcher, which starts from the applications menu or at login, not from a shell. To move these folders, install from a terminal instead; see [Prefer a terminal?](../get-started/install.md#prefer-a-terminal).
 
 ## Output files
 

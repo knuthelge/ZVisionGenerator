@@ -6,7 +6,7 @@ A message that names a file, a setting or a model, or that says "use X instead",
 
 ## Where to look { #where-to-look }
 
-- [Installing and starting](#installing-and-starting): `ziv ui` won't start, no NVIDIA GPU found, a package or ffmpeg missing, the browser opens on another port, another device can't connect, and the launcher's own messages: this computer isn't supported and the install failed.
+- [Installing and starting](#installing-and-starting): `ziv ui` won't start, no NVIDIA GPU found, a package or ffmpeg missing, the browser opens on another port, another device can't connect, and the launcher's own messages: this computer isn't supported, the install failed and the app didn't start.
 - [Downloads](#downloads): a model won't download, Hugging Face refuses or can't be reached, the download is slow or stops, files missing from the cache.
 - [Stuck or slow](#stuck-or-slow): the first job seems stuck, Generate is greyed out, a job failed.
 - [Memory and slowdowns](#memory-and-slowdowns): the computer is slow, crawls, freezes or beachballs, out of memory, the terminal closes while a model loads, a model is refused for lack of memory.
@@ -83,6 +83,7 @@ The app answers only on this computer unless you ask it to share. Start it with 
 The launcher checked your machine before downloading anything and found something the app can't run on. The window names it, what it found and what is needed:
 
 - **NVIDIA driver:** Windows and Linux need driver 580 or newer. Install a newer driver, then choose **Check again**.
+- **NVIDIA driver isn't working:** the driver is installed but doesn't answer. This happens after a driver update before a restart, or on Linux when Secure Boot hasn't accepted the driver's key. Restart the computer, or reinstall the driver, then choose **Check again**. `nvidia-smi` in a terminal shows the same failure.
 - **Free disk space:** the launcher needs about 10 GB free on the drive it installs to. Free some space, then choose **Check again**.
 - **NVIDIA graphics card:** Windows and Linux need an RTX 20-series or newer. With no NVIDIA card, or an older one, the app can't run, and nothing was downloaded. **See the requirements** opens [Install](../get-started/install.md#check-your-machine).
 
@@ -98,6 +99,10 @@ The window says **Install didn't finish** and gives the cause in its first line.
 - **The installer stopped with an error:** open **Show the log**, then **Retry**. If it keeps failing, [report it](#report-a-problem).
 
 **Show the log** opens the end of the install log. Copy it into a [bug report](#report-a-problem) if **Retry** fails again.
+
+### The launcher says Didn't start { #launcher-didnt-start }
+
+The window says **Didn't start** when the app stopped while starting or didn't answer in time. **Open Z-Vision Generator** tries again. If it fails again, open **Show the log** for the reason, then choose **Repair** in **More**: it reinstalls the app and keeps your data folder and models. If it still fails, [report it](#report-a-problem) with the log.
 
 ### Installed with pip
 

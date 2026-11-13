@@ -1,10 +1,11 @@
 //! The Tauri app: builder, plugins, the window and run events, and Unix signals.
 //!
 //! Rust shows the window, never the page's script, once the page has loaded, so there is no white flash. Closing it
-//! hides it; the launcher keeps running until something asks it to quit. Every way out (the tray's and window's Quit,
-//! Cmd+Q, the Dock, logout, SIGTERM, SIGINT, SIGHUP, and the controller after a Windows uninstall) goes through
-//! [`begin_quit`], which hides the window, stops everything the launcher started once through
-//! `Controller::shutdown`, and only then exits the app.
+//! hides it; the launcher keeps running until something asks it to quit. The tray's and window's Quit, the signals
+//! (SIGTERM, SIGINT, SIGHUP) and the controller after a Windows uninstall go through [`begin_quit`], which hides the
+//! window, stops everything the launcher started once through `Controller::shutdown`, and only then exits the app.
+//! On macOS, Cmd+Q, the Dock's Quit and logout reach `RunEvent::Exit` without `ExitRequested`; the window is hidden
+//! there and the server is stopped on the main thread.
 
 use std::sync::{Arc, OnceLock};
 use std::thread;
@@ -88,7 +89,8 @@ pub fn run(autostart: bool) {
         .expect("error while building the launcher");
 
     app.run(|app, event| match event {
-        // Cmd+Q, the Dock's Quit and logout land here with no code; our own exit comes back here once done.
+        // An exit request while something is still running is held back and goes through `begin_quit`; macOS's
+        // Cmd+Q, Dock Quit and logout never send one.
         RunEvent::ExitRequested { api, .. } => {
             let stopped = app
                 .try_state::<Controller>()
@@ -98,8 +100,12 @@ pub fn run(autostart: bool) {
                 begin_quit(app);
             }
         }
-        // A last resort for an exit that was not prevented; a no-op once everything is stopped.
+        // An exit that was not prevented, such as Cmd+Q, the Dock's Quit and logout on macOS; a no-op once everything
+        // is stopped. The stop runs on the main thread, so the window is hidden first rather than left frozen.
         RunEvent::Exit => {
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+                let _ = window.hide();
+            }
             if let Some(controller) = app.try_state::<Controller>() {
                 controller.shutdown();
             }

@@ -34,7 +34,7 @@ export type LinkId = 'requirements' | 'data_folder' | 'whats_new';
 
 export type Packaging = 'macos_app' | 'windows_nsis' | 'appimage' | 'linux_package';
 
-export type UnsupportedCode = 'no_nvidia_gpu' | 'driver_too_old' | 'gpu_too_old' | 'low_disk';
+export type UnsupportedCode = 'no_nvidia_gpu' | 'driver_not_working' | 'driver_too_old' | 'gpu_too_old' | 'low_disk';
 
 export type FailedAction = 'install' | 'repair' | 'update' | 'start';
 
