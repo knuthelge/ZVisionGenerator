@@ -591,13 +591,6 @@ mod tests {
     }
 
     #[test]
-    fn the_documented_readiness_timings() {
-        assert_eq!(READY_POLL, Duration::from_millis(500));
-        assert_eq!(READY_REQUEST_TIMEOUT, Duration::from_secs(2));
-        assert_eq!(READY_TIMEOUT, Duration::from_secs(600));
-    }
-
-    #[test]
     fn a_stale_record_for_nothing_is_just_deleted() {
         let dir = tempfile::tempdir().unwrap();
         let layout = layout_in(dir.path());

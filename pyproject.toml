@@ -122,7 +122,11 @@ ziv-model = "zvisiongenerator.converters.convert_checkpoint:main"
 
 [tool.hatch.version]
 source = "vcs"
-raw-options = { version_scheme = "no-guess-dev" }
+
+[tool.hatch.version.raw-options]
+version_scheme = "no-guess-dev"
+# Read only v* tags, so a launcher-v* tag never becomes the app version.
+scm.git.describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--abbrev=40", "--match", "v[0-9]*"]
 
 [tool.hatch.build.hooks.vcs]
 version-file = "zvisiongenerator/_version.py"

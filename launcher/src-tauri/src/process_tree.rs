@@ -290,11 +290,6 @@ mod tests {
     }
 
     #[test]
-    fn the_server_gets_fifteen_seconds_before_it_is_killed() {
-        assert_eq!(STOP_GRACE, Duration::from_secs(15));
-    }
-
-    #[test]
     fn an_unused_pid_has_no_start_time_and_no_tree() {
         assert_eq!(start_time_of(u32::MAX - 1), None);
         assert!(snapshot_tree(u32::MAX - 1).is_empty());

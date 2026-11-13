@@ -124,7 +124,6 @@
     retry: () => bridge.retry(),
     starting: async () => {},
     open: () => bridge.openApp(),
-    repair: () => bridge.repairApp(),
     quit: () => bridge.quitLauncher()
   };
 

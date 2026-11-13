@@ -17,7 +17,6 @@ use crate::manifest::{
 use crate::paths::Layout;
 use crate::snapshot::ErrorCode;
 use crate::spawn::hidden_command;
-use crate::version::is_prerelease;
 
 /// How many of uv's last output lines a failure keeps as the log tail.
 pub const TAIL_LINES: usize = 40;
@@ -81,19 +80,21 @@ pub enum Channel<'a> {
     Stable,
     /// Pre-releases too (`--prerelease allow`), for a user who opted into betas.
     Beta,
-    /// Exactly this installed version (`z-vision-generator==<version>`), pre-release or not.
+    /// Exactly this installed version (`z-vision-generator==<version>`). uv accepts an explicit pre-release pin
+    /// without `--prerelease`.
     Pinned(&'a str),
 }
 
 impl<'a> Channel<'a> {
-    /// The channel for reinstalling the app: with betas on, the newest including pre-releases; with betas off and a
-    /// pre-release installed, that exact version, so a repair never downgrades; otherwise stable releases.
-    pub fn for_repair(beta: bool, installed: Option<&'a str>) -> Self {
-        match installed {
-            _ if beta => Channel::Beta,
-            Some(version) if is_prerelease(version) => Channel::Pinned(version),
-            _ => Channel::Stable,
-        }
+    /// The channel for installing: the newest release, including pre-releases when `beta` is on.
+    pub fn for_install(beta: bool) -> Self {
+        if beta { Channel::Beta } else { Channel::Stable }
+    }
+
+    /// The channel for repairing: exactly the installed version, so a repair never changes it; without a known
+    /// version, the newest stable release.
+    pub fn for_repair(installed: Option<&'a str>) -> Self {
+        installed.map_or(Channel::Stable, Channel::Pinned)
     }
 
     /// The package requirement uv installs.
@@ -104,14 +105,14 @@ impl<'a> Channel<'a> {
         }
     }
 
-    /// Whether uv is told to accept pre-releases. A pinned pre-release needs it to be accepted at all.
+    /// Whether uv is told to accept pre-releases for every package.
     fn allows_prerelease(self) -> bool {
-        self != Channel::Stable
+        self == Channel::Beta
     }
 }
 
-/// `uv tool install <mode flags> <requirement> --python 3.14`, with `--prerelease allow` for any [`Channel`] but
-/// stable and `--torch-backend cu132` on Windows.
+/// `uv tool install <mode flags> <requirement> --python 3.14`, with `--prerelease allow` for the beta [`Channel`]
+/// and `--torch-backend cu132` on Windows.
 fn tool_install_args(platform: Platform, mode: &[&str], channel: Channel<'_>) -> Vec<String> {
     let mut args = vec!["tool".to_owned(), "install".to_owned()];
     args.extend(mode.iter().map(|arg| (*arg).to_owned()));
@@ -126,8 +127,8 @@ fn tool_install_args(platform: Platform, mode: &[&str], channel: Channel<'_>) ->
     with_torch_backend(args, platform)
 }
 
-/// `uv tool install z-vision-generator --python 3.14`, with `--reinstall` when repairing. A [`Channel`] other than
-/// stable adds `--prerelease allow`; a pinned one installs `z-vision-generator==<version>`.
+/// `uv tool install z-vision-generator --python 3.14`, with `--reinstall` when repairing. The beta [`Channel`] adds
+/// `--prerelease allow`; a pinned one installs `z-vision-generator==<version>`.
 pub fn install_args(platform: Platform, reinstall: bool, channel: Channel<'_>) -> Vec<String> {
     tool_install_args(
         platform,
@@ -142,8 +143,7 @@ pub fn install_args(platform: Platform, reinstall: bool, channel: Channel<'_>) -
 /// it keep one for ten minutes) and finds a release published just before. The requirement on the command line
 /// replaces the receipt's, so a pinned repair does not hold the update back. `beta` adds `--prerelease allow`.
 pub fn upgrade_args(platform: Platform, beta: bool) -> Vec<String> {
-    let channel = if beta { Channel::Beta } else { Channel::Stable };
-    tool_install_args(platform, &["--upgrade"], channel)
+    tool_install_args(platform, &["--upgrade"], Channel::for_install(beta))
 }
 
 /// `uv cache clean`.
@@ -528,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pinned_repair_reinstalls_exactly_the_installed_version_and_allows_pre_releases() {
+    fn a_pinned_repair_reinstalls_exactly_the_installed_version_without_prerelease_allow() {
         assert_eq!(
             install_args(Platform::LinuxX64, true, Channel::Pinned("0.15.0b2")),
             [
@@ -537,31 +537,31 @@ mod tests {
                 "--reinstall",
                 "z-vision-generator==0.15.0b2",
                 "--python",
-                "3.14",
-                "--prerelease",
-                "allow"
+                "3.14"
             ]
         );
         let windows = install_args(Platform::WindowsX64, true, Channel::Pinned("0.15.0b2"));
         assert_eq!(windows[3], "z-vision-generator==0.15.0b2");
-        assert_eq!(windows[8..], TORCH_BACKEND);
+        assert_eq!(windows[6..], TORCH_BACKEND);
     }
 
     #[test]
-    fn repair_with_beta_off_pins_a_pre_release_and_leaves_stable_versions_alone() {
+    fn repair_pins_the_installed_version_whatever_it_is_and_else_takes_stable() {
         assert_eq!(
-            Channel::for_repair(false, Some("0.15.0rc1")),
+            Channel::for_repair(Some("0.15.0rc1")),
             Channel::Pinned("0.15.0rc1")
         );
-        assert_eq!(Channel::for_repair(false, Some("0.14.1")), Channel::Stable);
-        assert_eq!(Channel::for_repair(false, None), Channel::Stable);
+        assert_eq!(
+            Channel::for_repair(Some("0.14.1")),
+            Channel::Pinned("0.14.1")
+        );
+        assert_eq!(Channel::for_repair(None), Channel::Stable);
     }
 
     #[test]
-    fn repair_with_beta_on_takes_the_beta_channel_whatever_is_installed() {
-        assert_eq!(Channel::for_repair(true, Some("0.15.0rc1")), Channel::Beta);
-        assert_eq!(Channel::for_repair(true, Some("0.14.1")), Channel::Beta);
-        assert_eq!(Channel::for_repair(true, None), Channel::Beta);
+    fn install_takes_the_beta_channel_only_with_beta_on() {
+        assert_eq!(Channel::for_install(true), Channel::Beta);
+        assert_eq!(Channel::for_install(false), Channel::Stable);
     }
 
     #[test]

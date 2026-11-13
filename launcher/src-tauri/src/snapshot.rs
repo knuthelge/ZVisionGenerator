@@ -151,7 +151,6 @@ pub enum Primary {
     /// A loading button that does nothing.
     Starting,
     Open,
-    Repair,
     Quit,
 }
 

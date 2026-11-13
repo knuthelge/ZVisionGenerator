@@ -467,7 +467,6 @@ mod tests {
 
     #[test]
     fn the_disk_threshold_is_ten_decimal_gigabytes() {
-        assert_eq!(MIN_FREE_BYTES, 10_000_000_000);
         assert_eq!(check_space(10_000_000_000, MIN_FREE_BYTES), Ok(()));
         assert_eq!(check_space(u64::MAX, MIN_FREE_BYTES), Ok(()));
         let low = check_space(9_999_999_999, MIN_FREE_BYTES).unwrap_err();

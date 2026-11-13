@@ -16,7 +16,6 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 
 use crate::commands;
 use crate::controller::{Config, Controller, Emit, Exit, SystemHooks, SystemRunner};
-use crate::opener;
 use crate::snapshot::Snapshot;
 use crate::tray::{self, Tray};
 
@@ -163,13 +162,10 @@ fn build_controller(handle: &AppHandle) -> Result<Controller, Box<dyn std::error
     Ok(controller)
 }
 
-/// What the controller needs from the plugins: the browser and the start-at-login entry.
+/// What the controller needs from the plugins: the start-at-login entry.
 fn system_hooks(handle: &AppHandle) -> SystemHooks {
     let (enabled, set) = (handle.clone(), handle.clone());
     SystemHooks {
-        open_url: Box::new(|url| {
-            let _ = opener::open_url(url);
-        }),
         autostart_enabled: Box::new(move || enabled.autolaunch().is_enabled().unwrap_or(false)),
         set_autostart: Box::new(move |on| {
             let launch = set.autolaunch();

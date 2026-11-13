@@ -84,7 +84,7 @@ The launcher doesn't update itself. If a new version of the app needs a newer la
 
 ### Repair the launcher's install { #launcher-repair }
 
-If the app doesn't start, or reports a missing or outdated package or a missing ffmpeg, open **More** in the launcher window and choose **Repair**. The app stops, the launcher downloads its tools again and reinstalls the app. Your data folder and downloaded models stay as they are.
+If the app doesn't start, or reports a missing or outdated package or a missing ffmpeg, open **More** in the launcher window and choose **Repair**. The app stops, the launcher downloads its tools again and reinstalls the same version of the app. Your data folder and downloaded models stay as they are.
 
 ### Uninstall the launcher's install { #launcher-uninstall }
 

@@ -406,7 +406,6 @@ const PRIMARIES: Record<Primary, Omit<PrimaryView, 'id'>> = {
   retry: { label: 'Retry', icon: 'reset', variant: 'primary', loading: false },
   starting: { label: 'Starting…', icon: null, variant: 'primary', loading: true },
   open: { label: `Open ${NAME}`, icon: null, variant: 'primary', loading: false },
-  repair: { label: 'Repair', icon: 'reset', variant: 'primary', loading: false },
   quit: { label: 'Quit', icon: null, variant: 'primary', loading: false }
 };
 

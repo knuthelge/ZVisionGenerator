@@ -88,7 +88,6 @@ export type Primary =
   | 'retry'
   | 'starting'
   | 'open'
-  | 'repair'
   | 'quit';
 
 export interface Controls {

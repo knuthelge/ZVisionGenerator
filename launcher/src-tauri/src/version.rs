@@ -24,28 +24,11 @@ enum Stage {
     Post(u64),
 }
 
-impl Stage {
-    /// Whether the stage sorts below its release: development, alpha, beta and release-candidate versions.
-    fn is_prerelease(self) -> bool {
-        matches!(
-            self,
-            Stage::Dev(_) | Stage::Alpha(_) | Stage::Beta(_) | Stage::Rc(_)
-        )
-    }
-}
-
 /// A parsed version: release segments and a stage.
 #[derive(Debug, Clone)]
 pub struct Version {
     release: Vec<u64>,
     stage: Stage,
-}
-
-impl Version {
-    /// Whether this is a development, alpha, beta or release-candidate version.
-    pub fn is_prerelease(&self) -> bool {
-        self.stage.is_prerelease()
-    }
 }
 
 impl PartialEq for Version {
@@ -178,11 +161,6 @@ pub fn offer(installed: &str, latest: &str, skip: Option<Skip<'_>>, launcher: &s
     } else {
         Offer::Update(latest.to_owned())
     }
-}
-
-/// Whether the version string `text` names a pre-release; `false` when it does not parse.
-pub fn is_prerelease(text: &str) -> bool {
-    parse(text).is_some_and(|version| version.is_prerelease())
 }
 
 /// The newest version in PyPI's `releases` that has at least one file that is not yanked.
@@ -448,17 +426,6 @@ mod tests {
             r#"{"releases": []}"#,
         ] {
             assert_eq!(latest_from_pypi_json(body, true), None, "{body:?}");
-        }
-    }
-
-    #[test]
-    fn dev_alpha_beta_and_rc_are_pre_releases_final_and_post_are_not() {
-        for text in ["1.0.dev1", "1.0a1", "1.0b2", "1.0rc1", "0.15.0b3"] {
-            assert!(is_prerelease(text), "{text}");
-            assert!(parse(text).unwrap().is_prerelease(), "{text}");
-        }
-        for text in ["1.0", "0.14.1", "1.0.post1", "garbage", ""] {
-            assert!(!is_prerelease(text), "{text}");
         }
     }
 

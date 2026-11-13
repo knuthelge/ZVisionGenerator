@@ -181,7 +181,7 @@ pub fn install_download(download: &Download, layout: &Layout) -> Result<(), Erro
     let unpacked = archive::extract(
         &archive_path,
         download.archive,
-        &download.tool_names(),
+        download.members,
         &layout.bin,
     );
     let _ = fs::remove_file(&archive_path);

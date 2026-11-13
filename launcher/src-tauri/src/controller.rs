@@ -21,6 +21,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::manifest::{self, Platform};
+use crate::opener;
 use crate::paths::{Layout, default_root};
 use crate::plan::{self, Action, Step};
 use crate::process_tree::{self, Member, STOP_GRACE};
@@ -580,10 +581,7 @@ impl Controller {
     /// `repair_app`: reinstall the app.
     pub fn repair_app(&self) -> Result<(), String> {
         self.begin_action(
-            |c| {
-                c.primary == Some(Primary::Repair)
-                    || (c.menu.contains(&MenuItem::Repair) && !c.locked)
-            },
+            |c| c.menu.contains(&MenuItem::Repair) && !c.locked,
             Action::Repair,
         )
     }
@@ -783,7 +781,11 @@ impl Controller {
                     let inner = lock(&self.inner);
                     (inner.prefs.beta, inner.snapshot.installed_version.clone())
                 };
-                let channel = Channel::for_repair(beta, installed.as_deref());
+                let channel = if reinstall {
+                    Channel::for_repair(installed.as_deref())
+                } else {
+                    Channel::for_install(beta)
+                };
                 let args = uv::install_args(platform, reinstall, channel);
                 self.run_uv_step(failed, &args, true)
             }
@@ -1168,8 +1170,6 @@ fn browser_url(port: u16) -> String {
 
 /// The OS-specific actions the real runner cannot do by itself, supplied by the app shell.
 pub struct SystemHooks {
-    /// Open a URL in the default browser.
-    pub open_url: Box<dyn Fn(&str) + Send + Sync>,
     /// Whether the start-at-login entry exists.
     pub autostart_enabled: Box<dyn Fn() -> bool + Send + Sync>,
     /// Create or remove the start-at-login entry; returns the new state.
@@ -1281,7 +1281,7 @@ impl Runner for SystemRunner {
     }
 
     fn open_url(&self, url: &str) {
-        (self.hooks.open_url)(url);
+        let _ = opener::open_url(url);
     }
 
     fn autostart_enabled(&self) -> bool {
@@ -2432,30 +2432,21 @@ mod tests {
     }
 
     #[test]
-    fn repair_with_beta_off_on_a_pre_release_pins_the_installed_version() {
-        let rig = rig();
-        rig.running("0.15.0b3", None);
-        rig.controller.repair_app().unwrap();
-        rig.idle();
-        let args = install_args_of(&rig);
-        assert!(args.contains(&"--reinstall".to_owned()));
-        assert!(
-            args.contains(&"z-vision-generator==0.15.0b3".to_owned()),
-            "{args:?}"
-        );
-        assert!(args.windows(2).any(|w| w == ["--prerelease", "allow"]));
-    }
-
-    #[test]
-    fn repair_with_beta_on_takes_the_newest_including_pre_releases() {
-        let rig = rig();
-        rig.running("0.15.0b3", None);
-        rig.controller.update(|inner| inner.prefs.beta = true);
-        rig.controller.repair_app().unwrap();
-        rig.idle();
-        let args = install_args_of(&rig);
-        assert!(args.contains(&"z-vision-generator".to_owned()));
-        assert!(args.windows(2).any(|w| w == ["--prerelease", "allow"]));
+    fn repair_pins_the_installed_version_without_prerelease_allow_whatever_the_beta_setting() {
+        for (installed, beta) in [("0.15.0b3", false), ("0.15.0b3", true), ("0.14.0", true)] {
+            let rig = rig();
+            rig.running(installed, None);
+            rig.controller.update(|inner| inner.prefs.beta = beta);
+            rig.controller.repair_app().unwrap();
+            rig.idle();
+            let args = install_args_of(&rig);
+            assert!(args.contains(&"--reinstall".to_owned()));
+            assert!(
+                args.contains(&format!("z-vision-generator=={installed}")),
+                "{args:?}"
+            );
+            assert!(!args.contains(&"--prerelease".to_owned()), "{args:?}");
+        }
     }
 
     #[test]
@@ -2792,10 +2783,7 @@ mod tests {
             "retry" => c.primary == Some(Primary::Retry),
             "open_app" => c.primary == Some(Primary::Open),
             "update_app" => c.update,
-            "repair_app" => {
-                c.primary == Some(Primary::Repair)
-                    || (c.menu.contains(&MenuItem::Repair) && !c.locked)
-            }
+            "repair_app" => c.menu.contains(&MenuItem::Repair) && !c.locked,
             "uninstall_app" => c.menu.contains(&MenuItem::Uninstall) && !c.locked,
             "set_autostart" => c.autostart && !c.locked,
             "set_beta" => c.menu.contains(&MenuItem::Beta) && !c.locked,
