@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 
 #### Install
-- **Install and start without a terminal.** The new desktop launcher for macOS, Windows and Linux checks your computer, installs the app and ffmpeg, starts and stops it, offers updates, and has Repair and Uninstall. It can also start the app at login, and **Get beta versions** in its More menu opts into pre-release updates. It installs its own copy, so a terminal install keeps working, and both share your data. The first builds are unsigned, so the system warns you the first time you open it. See [Install with the launcher](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install-with-the-launcher).
+- **Install and start without a terminal.** The new desktop launcher for macOS, Windows and Linux checks your computer, installs the app and ffmpeg, starts and stops it, offers updates, and has Repair and Uninstall. It can also start the app at login, and **Get beta versions** in its More menu opts into pre-release updates. It installs its own copy, so a terminal install keeps working, and both share your data and models unless you moved them with `ZIV_DATA_DIR` or `HF_HOME`. The first builds are unsigned, so the system warns you the first time you open it. See [Install with the launcher](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install-with-the-launcher).
 
 ### Fixed
 

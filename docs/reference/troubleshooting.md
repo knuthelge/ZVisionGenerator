@@ -95,14 +95,14 @@ The window says **Install didn't finish** and gives the cause in its first line.
 
 - **The download didn't finish:** check the internet connection and choose **Retry**.
 - **There is no space left:** free disk space on the drive the launcher installs to, then **Retry**.
-- **A download no longer exists or doesn't match what the launcher expects:** the launcher downloads uv and ffmpeg from the addresses it was built with, and checks them before it uses them. A file that has been removed or changed upstream stops the install. Download the newest launcher from [Install](../get-started/install.md#get-the-launcher).
+- **A download no longer exists or doesn't match what the launcher expects:** the launcher downloads uv and ffmpeg from the addresses it was built with, and checks them before it uses them. A cut-off download or a network login page (a hotel or office Wi-Fi) gives a file that doesn't match, so choose **Retry** first. If it keeps failing, or the window says the download is no longer available, a file has been removed or changed upstream: download the newest launcher from [Install](../get-started/install.md#get-the-launcher).
 - **The installer stopped with an error:** open **Show the log**, then **Retry**. If it keeps failing, [report it](#report-a-problem).
 
 **Show the log** opens the end of the install log. Copy it into a [bug report](#report-a-problem) if **Retry** fails again.
 
 ### The launcher says Didn't start { #launcher-didnt-start }
 
-The window says **Didn't start** when the app did not come up after the launcher started it. **Open Z-Vision Generator** tries again. If it fails again, open **Show the log** for the reason, then choose **Repair** in **More**: it reinstalls the app and keeps your data folder and models. If it still fails, [report it](#report-a-problem) with the log.
+The window says **Didn't start** when the app did not come up after the launcher started it. **Open Z-Vision Generator** tries again. If it fails again, open **Show the log** for the reason, then choose **Repair** in **More**: it reinstalls the app, or installs the update when one is on offer, and keeps your data folder and models. If it still fails, [report it](#report-a-problem) with the log.
 
 ### Installed with pip
 

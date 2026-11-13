@@ -72,6 +72,22 @@ If you installed with the launcher, the app it starts inherits the launcher's ow
 
     A shell profile doesn't reach the launcher, which starts from the applications menu or at login, not from a shell. To move these folders, install from a terminal instead; see [Prefer a terminal?](../get-started/install.md#prefer-a-terminal).
 
+## Open a hidden folder { #open-a-hidden-folder }
+
+Folders such as `~/.ziv` and `~/.cache/huggingface` start with a dot, so the file manager hides them. To open one without a terminal:
+
+=== "macOS"
+
+    In the Finder, choose **Go → Go to Folder…** (++cmd+shift+g++), type the path, such as `~/.ziv`, and press ++enter++. To show hidden folders everywhere, press ++cmd+shift+period++.
+
+=== "Windows"
+
+    Neither folder is hidden here: paste `%USERPROFILE%\.ziv` into the File Explorer address bar and press ++enter++. The Hugging Face cache is at `%USERPROFILE%\.cache\huggingface`.
+
+=== "Linux"
+
+    In GNOME Files, press ++ctrl+l++ and type the path, such as `~/.ziv`, or press ++ctrl+h++ to show hidden folders. Other file managers have a similar shortcut or a **Show hidden files** option.
+
 ## Output files
 
 This is where your pictures are saved, and your videos and audio. The Web UI saves to the **Output folder** on the [Config page](../web-ui/config.md), which sets [`ui.output_dir`](configuration.md#ui); unset, it is `outputs` in the data folder. The CLI saves to the current folder, or to `-o`.

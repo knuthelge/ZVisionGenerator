@@ -32,7 +32,9 @@ Do these in order, on the commit you will tag.
 
 ## Launcher releases { #launcher-releases }
 
-The desktop launcher is released apart from the app. It has its own version, in `launcher/src-tauri/Cargo.toml`, and its own workflow, started by `launcher-v*` tags. A `v*` tag never builds it, and a `launcher-v*` tag never publishes to PyPI. The app's version reads only `v*` tags, so `launcher-v*` tags never affect it. Which app version it installs comes from PyPI, so an app release needs no launcher release, except when the app needs something the launcher doesn't provide, such as a newer Python. See [Desktop launcher](launcher.md) for how it is built.
+The desktop launcher is released apart from the app. It has its own version, in `launcher/src-tauri/Cargo.toml`, and its own workflow, started by `launcher-v*` tags. A `v*` tag never builds it, and a `launcher-v*` tag never publishes to PyPI. The app's version reads only `v*` tags, so `launcher-v*` tags never affect it. Which app version it installs comes from PyPI, so an app release needs no launcher release, except when the app needs something the launcher doesn't provide, such as a newer Python.
+
+The launcher hard-codes things the app owns: the Python version, the CUDA PyTorch index for Windows and the uv version. When the app changes any of these, ship a launcher release first, because older launchers' **Update** will fail or change nothing. See [Desktop launcher](launcher.md) for how it is built.
 
 The launcher release is published as a GitHub release that is not marked latest, so the app's releases stay on top. Because of that, the install guide links to the exact `launcher-v…` release, and the links are updated with each launcher release. The asset names stay the same from release to release. Pushing a `launcher-v*` tag cannot be undone, so push one only when you are releasing the launcher.
 

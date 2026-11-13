@@ -25,7 +25,7 @@ Models download into the Hugging Face cache; to move it to another drive, see [D
 
 The launcher is a small app that installs Z-Vision Generator and ffmpeg for you, starts and stops the app, and opens it in your browser. You never open a terminal. It needs about 10 GB of free disk space. It checks your machine first, as in step 1, and tells you what is missing before it downloads anything.
 
-The launcher installs its own copy of the app, even if `ziv` is already installed with uv. The two copies share the same [data folder](../reference/data-folder.md) and downloaded models.
+The launcher installs its own copy of the app, even if `ziv` is already installed with uv. The two copies share the same [data folder](../reference/data-folder.md) and downloaded models, unless you moved them with `ZIV_DATA_DIR` or `HF_HOME`; see [Use another folder](../reference/data-folder.md#use-another-folder).
 
 ### Get the launcher { #get-the-launcher }
 
@@ -36,7 +36,7 @@ The launcher is not signed yet, so your system warns you the first time you open
     1. Download [the launcher for macOS](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-macos-arm64.dmg) (`.dmg`).
     2. Open the `.dmg` and drag **Z-Vision Generator** into **Applications**. Do this before you open it: the launcher has to live in Applications to start at login and to update.
     3. Open **Z-Vision Generator** from **Applications**. macOS says it can't verify the app and doesn't open it.
-    4. Open **System Settings → Privacy & Security**, scroll to the message about Z-Vision Generator and choose **Open Anyway**. Confirm, and the launcher opens. You do this only once.
+    4. Open **System Settings → Privacy & Security**, scroll to the message about Z-Vision Generator and choose **Open Anyway**. Confirm, and the launcher opens. You do this once for each launcher you download: a new launcher version asks again. Quit the running launcher before you replace it with a new version.
 
     ![The Privacy and Security settings with Open Anyway beside the Z-Vision Generator message](../assets/screenshots/placeholder.svg "launcher-gatekeeper")
 
@@ -58,7 +58,7 @@ The launcher is not signed yet, so your system warns you the first time you open
 
     After a `.deb` or `.rpm`, open **Z-Vision Generator** from your applications menu.
 
-The launcher's window checks your machine. If it is ready, the window says so and shows an **Install** button. The first install downloads several gigabytes, which can take a while on a slow connection. You can close the window: the install carries on, and your browser opens when it is ready. If the window says it can't install, see [The launcher says this computer isn't supported](../reference/troubleshooting.md#launcher-unsupported); if the install stops, see [The launcher's install failed](../reference/troubleshooting.md#launcher-install-failed).
+The launcher's window checks your machine. If it is ready, the window says so and shows an **Install** button. The first install downloads several gigabytes, which can take a while on a slow connection. You can close the window: the install carries on, and your browser opens when it is ready. If something goes wrong, the launcher window comes back. If the window says it can't install, see [The launcher says this computer isn't supported](../reference/troubleshooting.md#launcher-unsupported); if the install stops, see [The launcher's install failed](../reference/troubleshooting.md#launcher-install-failed).
 
 The first time, the app offers to download an image model picked for your machine. [Your first image](first-image.md) takes it from there.
 
@@ -78,13 +78,13 @@ Tick **Start at login** in the launcher window. The app then starts in the backg
 
 When a new version is out, the window offers **Update**. The app stops, updates and starts again. Your data and models stay. If the update doesn't finish, **Open** starts the app again and the update stays on offer. To reinstall, choose **Repair** in **More**.
 
-To try pre-release versions, open **More** and tick **Get beta versions**; it is there before you install too. The window then offers betas as updates (**Beta 0.15.0b1 is out.**) and marks an installed beta next to its version. Unticking it downloads nothing and never goes back to an older version: a beta stays installed, **Repair** reinstalls that same beta, and **Update** offers the next stable version once one newer than your beta is out.
+To try pre-release versions, open **More** and tick **Get beta versions**; it is there before you install too. The window then offers betas as updates (**Beta 0.15.0b1 is out.**) and marks an installed beta next to its version. Unticking it downloads nothing and never goes back to an older version: a beta stays installed, **Repair** reinstalls that beta unless an update is on offer, and **Update** offers the next stable version once one newer than your beta is out.
 
 The launcher doesn't update itself; download a newer one from [Get the launcher](#get-the-launcher).
 
 ### Repair the launcher's install { #launcher-repair }
 
-If the app doesn't start, or reports a missing or outdated package or a missing ffmpeg, open **More** in the launcher window and choose **Repair**. The app stops, the launcher downloads its tools again and reinstalls the same version of the app. Your data folder and downloaded models stay as they are. If the repair doesn't finish, **Open** starts the app again, and **Repair** stays in **More**.
+If the app doesn't start, or reports a missing or outdated package or a missing ffmpeg, open **More** in the launcher window and choose **Repair**. The app stops, the launcher downloads its tools again and reinstalls the app. It reinstalls the version you have; if an update is on offer, it installs that newer version instead. Your data folder and downloaded models stay as they are. If the repair doesn't finish, **Open** starts the app again, and **Repair** stays in **More**.
 
 ### Uninstall the launcher's install { #launcher-uninstall }
 
@@ -92,15 +92,29 @@ Open **More** and choose **Uninstall…**. It stops the app and removes the app,
 
 === "macOS"
 
-    The window then asks you to move Z-Vision Generator to the Trash to finish.
+    Use **Uninstall…** before you move Z-Vision Generator to the Trash. The window then asks you to move it to the Trash to finish.
+
+    If you removed the launcher without **Uninstall…**, delete these yourself:
+
+    - The launcher's folder, `~/Library/Application Support/ZVision`, with the app, its tools and Python.
+    - The start-at-login entry, `~/Library/LaunchAgents/Z-Vision Generator.plist`, if you had turned on **Start at login**.
+
+    Both are hidden; see [Open a hidden folder](../reference/data-folder.md#open-a-hidden-folder).
 
 === "Windows"
 
-    The launcher starts the Windows uninstaller, which asks before it removes anything. **Settings → Apps** reaches the same uninstaller.
+    The launcher starts the Windows uninstaller, which asks before it removes anything. **Settings → Apps** reaches the same uninstaller and removes the launcher's folder, `%LOCALAPPDATA%\ZVision`, and the start-at-login entry with it.
 
 === "Linux"
 
-    The window then asks you to delete the AppImage, or to remove the package with your software installer.
+    Use **Uninstall…** before you delete the AppImage or remove the package. The window then asks you to delete the AppImage, or to remove the package with your software installer.
+
+    If you removed the launcher without **Uninstall…**, delete these yourself:
+
+    - The launcher's folder, `~/.local/share/zvision`, with the app, its tools and Python.
+    - The start-at-login entry, `~/.config/autostart/Z-Vision Generator.desktop`, if you had turned on **Start at login**.
+
+    Both are hidden; see [Open a hidden folder](../reference/data-folder.md#open-a-hidden-folder).
 
 ### Prefer a terminal?
 
