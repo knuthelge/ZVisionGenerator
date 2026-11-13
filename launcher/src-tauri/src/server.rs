@@ -20,7 +20,7 @@ use crate::records::{
     ServerRecord, StopOrDelete, delete_server_record, read_server_record, stale_action,
     write_server_record,
 };
-use crate::spawn::hidden_command;
+use crate::spawn::{hidden_command, inherited_path};
 
 /// The app's default port, and the first of the 100 it scans.
 pub const DEFAULT_PORT: u16 = 8080;
@@ -177,7 +177,7 @@ fn now_secs() -> u64 {
 /// Fails when the log cannot be created, `ziv` cannot be started, or the record cannot be written (the server is
 /// then stopped again).
 pub fn start(layout: &Layout, port: u16) -> io::Result<(Child, ServerRecord)> {
-    let env = server_env(layout, env::var_os("PATH").as_deref()).map_err(io::Error::other)?;
+    let env = server_env(layout, inherited_path().as_deref()).map_err(io::Error::other)?;
     fs::create_dir_all(&layout.root)?;
     let log = File::create(&layout.server_log)?;
     let child = hidden_command(&layout.ziv())

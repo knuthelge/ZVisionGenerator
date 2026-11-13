@@ -121,10 +121,12 @@ pub fn install_args(platform: Platform, reinstall: bool, channel: Channel<'_>) -
     with_platform_index(args, platform)
 }
 
-/// `uv tool upgrade z-vision-generator --refresh-package z-vision-generator`: the refresh makes uv look past its
-/// cached index for a release published after the last install. `beta` adds `--prerelease allow`.
+/// `uv tool upgrade z-vision-generator --reinstall-package z-vision-generator`: `uv tool upgrade` has no
+/// `--refresh-package`, and `--reinstall-package` implies it for that one package, so uv looks past its cached
+/// index (PyPI lets it keep one for ten minutes) and finds a release published just before. It reinstalls only the
+/// small app package, never its dependencies. `beta` adds `--prerelease allow`.
 pub fn upgrade_args(platform: Platform, beta: bool) -> Vec<String> {
-    let mut args: Vec<String> = ["tool", "upgrade", PACKAGE, "--refresh-package", PACKAGE]
+    let mut args: Vec<String> = ["tool", "upgrade", PACKAGE, "--reinstall-package", PACKAGE]
         .map(str::to_owned)
         .into();
     if beta {
@@ -410,14 +412,14 @@ mod tests {
     }
 
     #[test]
-    fn upgrade_refreshes_the_package_and_never_names_python() {
+    fn upgrade_reinstalls_the_package_and_never_names_python() {
         assert_eq!(
             upgrade_args(Platform::LinuxX64, false),
             [
                 "tool",
                 "upgrade",
                 "z-vision-generator",
-                "--refresh-package",
+                "--reinstall-package",
                 "z-vision-generator"
             ]
         );
@@ -441,17 +443,17 @@ mod tests {
     }
 
     #[test]
-    fn only_upgrade_refreshes_the_package() {
+    fn only_upgrade_reinstalls_the_package() {
         for platform in PLATFORMS {
             assert!(!has(
                 &install_args(platform, false, STABLE),
-                "--refresh-package"
+                "--reinstall-package"
             ));
             assert!(!has(
                 &install_args(platform, true, STABLE),
-                "--refresh-package"
+                "--reinstall-package"
             ));
-            assert!(has(&upgrade_args(platform, false), "--refresh-package"));
+            assert!(has(&upgrade_args(platform, false), "--reinstall-package"));
         }
     }
 

@@ -28,7 +28,7 @@ A test never downloads from the network, runs uv or starts a server. The one exc
 
 - **One concept per module, in `launcher/src-tauri/src/`.** Pure logic (parsing, choosing, classifying, building arguments) takes plain inputs and is unit-tested in the same file. Anything that touches the machine (files, processes, the network, Tauri) is a thin edge function around it, so a test needs no mock of a system. The controller is the only module that holds working state, and it runs one action at a time; the command adapters hold none.
 - **Rust sends codes and raw values, the window owns every word.** A snapshot carries phases, error codes and numbers, never sentences, so wording changes touch only the frontend.
-- **Every child process is built by `spawn.rs`.** No shell, arguments and paths stay as OS strings, and on Windows no console window opens.
+- **Every child process is built by `spawn.rs`.** No shell, arguments and paths stay as OS strings, and on Windows no console window opens. Run from an AppImage, a child gets the launcher's own environment back: `spawn.rs` removes the variables `AppRun` and the GTK hook export (`PYTHONHOME`, `GTK_*` and the like) and drops the `$APPDIR` entries from `PATH`, `LD_LIBRARY_PATH` and the other folder lists, because a Python that inherits `PYTHONHOME` cannot start.
 
 ## Invariants
 

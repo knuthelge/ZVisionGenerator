@@ -290,8 +290,8 @@ pub struct Shared {
     idle: Condvar,
     /// Held while shutting down; `true` once done, so the work happens exactly once.
     shutdown_done: Mutex<bool>,
-    /// Dropping the sender ends the update timer.
-    timer_stop: Mutex<Option<Sender<()>>>,
+    /// A flow's end tells the update timer to check; dropping the sender ends the timer.
+    update_signal: Mutex<Option<Sender<()>>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -346,7 +346,7 @@ impl Controller {
             }),
             idle: Condvar::new(),
             shutdown_done: Mutex::new(false),
-            timer_stop: Mutex::new(None),
+            update_signal: Mutex::new(None),
         }))
     }
 
@@ -452,8 +452,9 @@ impl Controller {
 
     // ----- launch ---------------------------------------------------------------------------------------------
 
-    /// Begin: decide what to do from what is on disk, on worker threads, and start the update timer.
-    /// `background` is a start-at-login launch: the server starts without opening the browser.
+    /// Begin: decide what to do from what is on disk, on worker threads, and start the update timer, which waits
+    /// for the first flow to end (the version is only known then). `background` is a start-at-login launch: the
+    /// server starts without opening the browser.
     pub fn start(&self, background: bool) {
         self.spawn_worker(move |me| me.launch(background));
         self.start_update_timer();
@@ -501,10 +502,14 @@ impl Controller {
         });
     }
 
-    /// Settle a flow's end: a failure becomes the `failed` phase, a quit changes nothing.
+    /// Settle a flow's end: a failure becomes the `failed` phase, a quit changes nothing. Whatever the outcome, the
+    /// installed version is as known as it gets and the phase is calm, so the update timer checks now.
     fn end_flow(&self, result: Flow) {
         if let Err(Abort::Fail(failure)) = result {
             self.fail(failure);
+        }
+        if let Some(signal) = lock(&self.update_signal).as_ref() {
+            let _ = signal.send(());
         }
     }
 
@@ -1086,20 +1091,25 @@ impl Controller {
         });
     }
 
-    /// Check for an update now and every [`Timing::update_interval`] until [`Controller::shutdown`].
+    /// Check for an update when a flow ends (the first one is what makes the installed version known) and then
+    /// every [`Timing::update_interval`] until [`Controller::shutdown`]. [`Controller::end_flow`] sends the signal
+    /// each check waits for; dropping the sender ends the thread.
     fn start_update_timer(&self) {
-        let (stop, stopped) = mpsc::channel::<()>();
-        *lock(&self.timer_stop) = Some(stop);
+        let (signal, signalled) = mpsc::channel::<()>();
+        *lock(&self.update_signal) = Some(signal);
         let me = self.clone();
         let interval = self.config.timing.update_interval;
         thread::Builder::new()
             .name("launcher-updates".to_owned())
             .spawn(move || {
+                if signalled.recv().is_err() {
+                    return;
+                }
                 loop {
                     me.check_for_update();
-                    if !matches!(
-                        stopped.recv_timeout(interval),
-                        Err(RecvTimeoutError::Timeout)
+                    if matches!(
+                        signalled.recv_timeout(interval),
+                        Err(RecvTimeoutError::Disconnected)
                     ) {
                         return;
                     }
@@ -1119,7 +1129,7 @@ impl Controller {
             return;
         }
         *done = true;
-        *lock(&self.timer_stop) = None;
+        *lock(&self.update_signal) = None;
         let (uv, server) = {
             let mut inner = lock(&self.inner);
             inner.quitting = true;
@@ -1380,6 +1390,8 @@ mod tests {
         hold_start: bool,
         /// The first `wait_for_server` blocks until `Fake::ready_gate` opens, then answers even if a stop came.
         hold_ready: bool,
+        /// The first `read_version` blocks until `Fake::version_gate` opens.
+        hold_version: bool,
         cache_bytes: u64,
         delete_fails: bool,
         autostart: bool,
@@ -1424,6 +1436,7 @@ mod tests {
         script: Mutex<Script>,
         start_gate: Gate,
         ready_gate: Gate,
+        version_gate: Gate,
         calls: Mutex<Vec<String>>,
         uv_args: Mutex<Vec<Vec<String>>>,
         /// The watchers of the servers that were started and not yet stopped, oldest first.
@@ -1450,12 +1463,14 @@ mod tests {
                     serve: Serve::Ready,
                     hold_start: false,
                     hold_ready: false,
+                    hold_version: false,
                     cache_bytes: 0,
                     delete_fails: false,
                     autostart: false,
                 }),
                 start_gate: Gate::new(),
                 ready_gate: Gate::new(),
+                version_gate: Gate::new(),
                 calls: Mutex::new(Vec::new()),
                 uv_args: Mutex::new(Vec::new()),
                 exit_cbs: Mutex::new(VecDeque::new()),
@@ -1578,6 +1593,9 @@ mod tests {
 
         fn read_version(&self, _: &Layout) -> Option<String> {
             self.note("read_version");
+            if std::mem::take(&mut self.script().hold_version) {
+                self.version_gate.wait();
+            }
             self.script().versions.pop_front().unwrap_or(None)
         }
 
@@ -1875,7 +1893,7 @@ mod tests {
     #[test]
     fn install_shows_its_rows_and_fills_the_ring_only_while_installing_the_app() {
         let rig = rig();
-        rig.fake.script().cache_bytes = 3_500_000_000;
+        rig.fake.script().cache_bytes = manifest::expected_cache_bytes(Platform::LinuxX64) / 2;
         rig.controller.launch(false);
         rig.controller.install().unwrap();
         rig.idle();
@@ -2732,6 +2750,56 @@ mod tests {
             .update(|inner| inner.snapshot.phase = Phase::Updating);
         rig.controller.check_for_update();
         assert_eq!(rig.snap().update_version, None);
+    }
+
+    /// Poll until the snapshot offers an update, for a check that runs on the timer thread.
+    fn wait_for_offer(rig: &Rig) -> Option<String> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if let Some(version) = rig.snap().update_version {
+                return Some(version);
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        None
+    }
+
+    #[test]
+    fn the_first_update_check_waits_for_the_version_read_at_launch() {
+        let rig = rig();
+        {
+            let mut script = rig.fake.script();
+            script.installed = true;
+            script.versions.push_back(Some("0.14.0".to_owned()));
+            script.latest = Some("0.14.1".to_owned());
+            script.hold_version = true;
+        }
+        rig.controller.start(false);
+        while rig.fake.count("read_version") == 0 {
+            thread::sleep(Duration::from_millis(5));
+        }
+        // A timer that checked at start would have done so by now, with the version still unknown.
+        thread::sleep(Duration::from_millis(100));
+        rig.fake.version_gate.open();
+        assert_eq!(wait_for_offer(&rig).as_deref(), Some("0.14.1"));
+        rig.controller.shutdown();
+    }
+
+    #[test]
+    fn an_install_in_this_session_gets_an_update_check_too() {
+        let rig = rig();
+        {
+            let mut script = rig.fake.script();
+            script.versions.push_back(Some("0.14.0".to_owned()));
+            script.latest = Some("0.14.1".to_owned());
+        }
+        rig.controller.start(false);
+        rig.idle();
+        assert_eq!(rig.snap().phase, Phase::NeedsInstall);
+        assert_eq!(rig.fake.count("fetch_latest beta=false"), 0);
+        rig.controller.install().unwrap();
+        assert_eq!(wait_for_offer(&rig).as_deref(), Some("0.14.1"));
+        rig.controller.shutdown();
     }
 
     // ----- uninstall ------------------------------------------------------------------------------------------

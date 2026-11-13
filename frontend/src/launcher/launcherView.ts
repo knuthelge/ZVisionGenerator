@@ -536,7 +536,7 @@ export function launcherView(s: Snapshot, options: ViewOptions = {}): LauncherVi
       notice = {
         kind: 'note',
         icon: 'download',
-        lead: 'About 7 GB to download.',
+        lead: 'About 4 GB to download.',
         text: 'It can take half an hour on a slow connection. Models come later, in your browser.'
       };
       break;

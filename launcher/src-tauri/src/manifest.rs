@@ -76,8 +76,9 @@ pub const WINDOWS_INDEX_ARGS: [&str; 4] = [
 /// uv's per-request network timeout in seconds (`UV_HTTP_TIMEOUT`).
 pub const UV_HTTP_TIMEOUT_SECS: u64 = 300;
 
-/// Expected size of uv's cache at the end of an install on Linux, in bytes. Placeholder until it is measured.
-pub const EXPECTED_CACHE_BYTES_LINUX: u64 = 7_000_000_000;
+/// Expected size of uv's cache at the end of an install on Linux, in bytes. Measured: the cache peaks at about
+/// 6.6 GB just before `uv cache prune`.
+pub const EXPECTED_CACHE_BYTES_LINUX: u64 = 6_600_000_000;
 /// Expected size of uv's cache at the end of an install on Windows, in bytes. Placeholder until it is measured.
 pub const EXPECTED_CACHE_BYTES_WINDOWS: u64 = 7_000_000_000;
 /// Expected size of uv's cache at the end of an install on macOS, in bytes. Placeholder until it is measured.
