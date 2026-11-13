@@ -116,7 +116,7 @@ describe('headline and sub', () => {
 
   it('says where to find the app by platform', () => {
     expect(view('6 running').sub?.text).toContain('the menu bar');
-    expect(view('7 running with update').sub?.text).toContain('the top bar');
+    expect(view('7 running with update').sub?.text).toContain('Open the launcher again');
     const windows = { ...snapshot('6 running'), packaging: 'windows_nsis' as const };
     expect(launcherView(windows).sub?.text).toContain('the notification area');
   });

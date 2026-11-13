@@ -229,11 +229,12 @@ function leftoverText(s: Snapshot): string {
   return s.error?.code === 'uninstall_incomplete' ? 'Some files could not be removed.' : '';
 }
 
-const where: Record<Packaging, string> = {
-  macos_app: 'the menu bar',
-  windows_nsis: 'the notification area',
-  appimage: 'the top bar',
-  linux_package: 'the top bar'
+/** How to bring the window back after closing it: Linux desktops may show no tray icon. */
+const findAgain: Record<Packaging, string> = {
+  macos_app: 'Find it again in the menu bar.',
+  windows_nsis: 'Find it again in the notification area.',
+  appimage: 'Open the launcher again to bring it back.',
+  linux_package: 'Open the launcher again to bring it back.'
 };
 
 const finishLead: Record<Packaging, string> = {
@@ -550,7 +551,7 @@ export function launcherView(s: Snapshot, options: ViewOptions = {}): LauncherVi
       break;
     case 'running':
       headline = 'Running';
-      sub = plain(`Closing this window keeps it running. Find it again in ${where[s.packaging]}.`);
+      sub = plain(`Closing this window keeps it running. ${findAgain[s.packaging]}`);
       if (s.updateVersion) {
         notice = {
           kind: 'update',
