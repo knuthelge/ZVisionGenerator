@@ -66,13 +66,9 @@ impl Download {
 pub const PACKAGE: &str = "z-vision-generator";
 /// The Python the app is installed with.
 pub const PYTHON: &str = "3.14";
-/// Extra uv arguments on Windows: the CUDA 13.2 PyTorch index, tried alongside PyPI for the best match.
-pub const WINDOWS_INDEX_ARGS: [&str; 4] = [
-    "--index",
-    "https://download.pytorch.org/whl/cu132",
-    "--index-strategy",
-    "unsafe-best-match",
-];
+/// Extra uv arguments on Windows: take PyTorch (and only PyTorch) from the CUDA 13.2 index. Needs uv 0.11.29 or
+/// newer; the pinned uv is newer.
+pub const WINDOWS_TORCH_BACKEND_ARGS: [&str; 2] = ["--torch-backend", "cu132"];
 /// uv's per-request network timeout in seconds (`UV_HTTP_TIMEOUT`).
 pub const UV_HTTP_TIMEOUT_SECS: u64 = 300;
 
@@ -312,14 +308,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn windows_index_args_pair_flags_with_values() {
-        assert_eq!(WINDOWS_INDEX_ARGS[0], "--index");
-        assert!(WINDOWS_INDEX_ARGS[1].starts_with("https://download.pytorch.org/whl/"));
-        assert_eq!(WINDOWS_INDEX_ARGS[2], "--index-strategy");
-        assert_eq!(WINDOWS_INDEX_ARGS[3], "unsafe-best-match");
     }
 
     #[test]

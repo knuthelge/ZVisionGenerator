@@ -2071,7 +2071,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("{needle} missing from {calls:?}"))
         };
         assert_eq!(rig.fake.count("fetch_tools"), 1);
-        assert!(at("fetch_tools") < at("uv tool upgrade"));
+        assert!(at("fetch_tools") < at("uv tool install --upgrade"));
         assert_eq!(rig.snap().phase, Phase::Running);
         assert!(
             rig.prefs()
@@ -2116,7 +2116,7 @@ mod tests {
         let snap = rig.snap();
         assert_eq!(snap.failed_action, Some(FailedAction::Update));
         assert_eq!(snap.error.unwrap().code, ErrorCode::DownloadFailed);
-        assert_eq!(rig.fake.count("uv tool upgrade"), 0);
+        assert!(rig.fake.uv_commands().is_empty());
         assert!(rig.prefs().tool_pins.is_empty());
     }
 
@@ -2303,7 +2303,7 @@ mod tests {
             .fake
             .uv_commands()
             .into_iter()
-            .find(|args| args[1] == "upgrade")
+            .find(|args| args.contains(&"--upgrade".to_owned()))
             .unwrap();
         assert!(
             upgrade.windows(2).any(|w| w == ["--prerelease", "allow"]),
@@ -2325,7 +2325,7 @@ mod tests {
             .fake
             .uv_commands()
             .into_iter()
-            .find(|args| args[1] == "upgrade")
+            .find(|args| args.contains(&"--upgrade".to_owned()))
             .unwrap();
         assert!(!upgrade.contains(&"--prerelease".to_owned()));
     }

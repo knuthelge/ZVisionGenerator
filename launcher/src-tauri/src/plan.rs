@@ -26,7 +26,7 @@ pub enum Step {
     CacheClean,
     /// `uv tool install`, with `--reinstall` when repairing.
     ToolInstall { reinstall: bool },
-    /// `uv tool upgrade`.
+    /// `uv tool install --upgrade`, over the installed app.
     ToolUpgrade,
     /// `uv cache prune --ci`.
     CachePrune,

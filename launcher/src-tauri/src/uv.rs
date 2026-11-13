@@ -11,7 +11,9 @@ use std::process::{Child, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
 
-use crate::manifest::{PACKAGE, PYTHON, Platform, UV_HTTP_TIMEOUT_SECS, WINDOWS_INDEX_ARGS};
+use crate::manifest::{
+    PACKAGE, PYTHON, Platform, UV_HTTP_TIMEOUT_SECS, WINDOWS_TORCH_BACKEND_ARGS,
+};
 use crate::paths::Layout;
 use crate::snapshot::{ErrorCode, LauncherError};
 use crate::spawn::hidden_command;
@@ -59,10 +61,15 @@ pub fn uv_env(layout: &Layout) -> Vec<(&'static str, OsString)> {
     ]
 }
 
-/// Append the Windows-only index arguments, which pick the CUDA PyTorch build.
-fn with_platform_index(mut args: Vec<String>, platform: Platform) -> Vec<String> {
+/// Append the Windows-only `--torch-backend cu132`, which takes PyTorch from the CUDA index and everything else
+/// from PyPI.
+fn with_torch_backend(mut args: Vec<String>, platform: Platform) -> Vec<String> {
     if platform == Platform::WindowsX64 {
-        args.extend(WINDOWS_INDEX_ARGS.iter().map(|arg| (*arg).to_owned()));
+        args.extend(
+            WINDOWS_TORCH_BACKEND_ARGS
+                .iter()
+                .map(|arg| (*arg).to_owned()),
+        );
     }
     args
 }
@@ -103,13 +110,11 @@ impl<'a> Channel<'a> {
     }
 }
 
-/// `uv tool install z-vision-generator --python 3.14`, with `--reinstall` when repairing. A [`Channel`] other than
-/// stable adds `--prerelease allow`; a pinned one installs `z-vision-generator==<version>`.
-pub fn install_args(platform: Platform, reinstall: bool, channel: Channel<'_>) -> Vec<String> {
+/// `uv tool install <mode flags> <requirement> --python 3.14`, with `--prerelease allow` for any [`Channel`] but
+/// stable and `--torch-backend cu132` on Windows.
+fn tool_install_args(platform: Platform, mode: &[&str], channel: Channel<'_>) -> Vec<String> {
     let mut args = vec!["tool".to_owned(), "install".to_owned()];
-    if reinstall {
-        args.push("--reinstall".to_owned());
-    }
+    args.extend(mode.iter().map(|arg| (*arg).to_owned()));
     args.extend([
         channel.requirement(),
         "--python".to_owned(),
@@ -118,21 +123,33 @@ pub fn install_args(platform: Platform, reinstall: bool, channel: Channel<'_>) -
     if channel.allows_prerelease() {
         args.extend(["--prerelease".to_owned(), "allow".to_owned()]);
     }
-    with_platform_index(args, platform)
+    with_torch_backend(args, platform)
 }
 
-/// `uv tool upgrade z-vision-generator --reinstall-package z-vision-generator`: `uv tool upgrade` has no
-/// `--refresh-package`, and `--reinstall-package` implies it for that one package, so uv looks past its cached
-/// index (PyPI lets it keep one for ten minutes) and finds a release published just before. It reinstalls only the
-/// small app package, never its dependencies. `beta` adds `--prerelease allow`.
+/// `uv tool install z-vision-generator --python 3.14`, with `--reinstall` when repairing. A [`Channel`] other than
+/// stable adds `--prerelease allow`; a pinned one installs `z-vision-generator==<version>`.
+pub fn install_args(platform: Platform, reinstall: bool, channel: Channel<'_>) -> Vec<String> {
+    tool_install_args(
+        platform,
+        if reinstall { &["--reinstall"] } else { &[] },
+        channel,
+    )
+}
+
+/// `uv tool install --upgrade --reinstall-package z-vision-generator z-vision-generator --python 3.14`: `uv tool
+/// upgrade` cannot take `--torch-backend`, so on Windows it would bring back a PyTorch without CUDA; installing
+/// with `--upgrade` over the existing tool takes the same arguments as the install. `--reinstall-package` implies
+/// `--refresh-package`, so uv looks past its cached index (PyPI lets it keep one for ten minutes) and finds a
+/// release published just before, and it reinstalls only the small app package, never its dependencies. The
+/// requirement on the command line replaces the receipt's, so a pinned repair does not hold the update back.
+/// `beta` adds `--prerelease allow`.
 pub fn upgrade_args(platform: Platform, beta: bool) -> Vec<String> {
-    let mut args: Vec<String> = ["tool", "upgrade", PACKAGE, "--reinstall-package", PACKAGE]
-        .map(str::to_owned)
-        .into();
-    if beta {
-        args.extend(["--prerelease".to_owned(), "allow".to_owned()]);
-    }
-    with_platform_index(args, platform)
+    let channel = if beta { Channel::Beta } else { Channel::Stable };
+    tool_install_args(
+        platform,
+        &["--upgrade", "--reinstall-package", PACKAGE],
+        channel,
+    )
 }
 
 /// `uv cache clean`.
@@ -362,8 +379,10 @@ mod tests {
         args.iter().any(|a| a == arg)
     }
 
+    const TORCH_BACKEND: [&str; 2] = ["--torch-backend", "cu132"];
+
     #[test]
-    fn install_is_the_same_on_every_platform_but_windows_adds_the_index() {
+    fn install_is_the_same_on_every_platform_but_windows_adds_the_torch_backend() {
         let plain = ["tool", "install", "z-vision-generator", "--python", "3.14"];
         assert_eq!(install_args(Platform::LinuxX64, false, STABLE), plain);
         assert_eq!(install_args(Platform::MacosArm64, false, STABLE), plain);
@@ -375,16 +394,14 @@ mod tests {
                 "z-vision-generator",
                 "--python",
                 "3.14",
-                "--index",
-                "https://download.pytorch.org/whl/cu132",
-                "--index-strategy",
-                "unsafe-best-match",
+                "--torch-backend",
+                "cu132",
             ]
         );
     }
 
     #[test]
-    fn reinstall_adds_the_flag_before_the_package_and_keeps_python_and_the_index() {
+    fn reinstall_adds_the_flag_before_the_package_and_keeps_python_and_the_torch_backend() {
         assert_eq!(
             install_args(Platform::LinuxX64, true, STABLE),
             [
@@ -408,19 +425,22 @@ mod tests {
                 "3.14"
             ]
         );
-        assert_eq!(windows[6..], WINDOWS_INDEX_ARGS);
+        assert_eq!(windows[6..], TORCH_BACKEND);
     }
 
     #[test]
-    fn upgrade_reinstalls_the_package_and_never_names_python() {
+    fn upgrade_installs_over_the_tool_reinstalling_only_the_package() {
         assert_eq!(
             upgrade_args(Platform::LinuxX64, false),
             [
                 "tool",
-                "upgrade",
-                "z-vision-generator",
+                "install",
+                "--upgrade",
                 "--reinstall-package",
-                "z-vision-generator"
+                "z-vision-generator",
+                "z-vision-generator",
+                "--python",
+                "3.14"
             ]
         );
         assert_eq!(
@@ -428,17 +448,17 @@ mod tests {
             upgrade_args(Platform::LinuxX64, false)
         );
         let windows = upgrade_args(Platform::WindowsX64, false);
-        assert_eq!(windows[..5], upgrade_args(Platform::LinuxX64, false)[..]);
-        assert_eq!(windows[5..], WINDOWS_INDEX_ARGS);
+        assert_eq!(windows[..8], upgrade_args(Platform::LinuxX64, false)[..]);
+        assert_eq!(windows[8..], TORCH_BACKEND);
     }
 
     #[test]
-    fn only_install_and_reinstall_pass_python() {
+    fn install_reinstall_and_upgrade_all_pass_python() {
         for platform in PLATFORMS {
             assert!(has(&install_args(platform, false, STABLE), "--python"));
             assert!(has(&install_args(platform, true, STABLE), "--python"));
-            assert!(!has(&upgrade_args(platform, false), "--python"));
-            assert!(!has(&upgrade_args(platform, true), "--python"));
+            assert!(has(&upgrade_args(platform, false), "--python"));
+            assert!(has(&upgrade_args(platform, true), "--python"));
         }
     }
 
@@ -458,21 +478,19 @@ mod tests {
     }
 
     #[test]
-    fn only_windows_gets_the_index_arguments() {
+    fn only_windows_gets_the_torch_backend_and_never_an_index() {
         for platform in PLATFORMS {
             let expected = platform == Platform::WindowsX64;
+            let mut all = vec![upgrade_args(platform, false), upgrade_args(platform, true)];
             for channel in [STABLE, Channel::Beta, Channel::Pinned("0.15.0b1")] {
-                assert_eq!(
-                    has(&install_args(platform, false, channel), "--index"),
-                    expected
-                );
-                assert_eq!(
-                    has(&install_args(platform, true, channel), "--index"),
-                    expected
-                );
+                all.push(install_args(platform, false, channel));
+                all.push(install_args(platform, true, channel));
             }
-            assert_eq!(has(&upgrade_args(platform, false), "--index"), expected);
-            assert_eq!(has(&upgrade_args(platform, true), "--index"), expected);
+            for args in all {
+                assert_eq!(has(&args, "--torch-backend"), expected, "{args:?}");
+                assert!(!has(&args, "--index"), "{args:?}");
+                assert!(!has(&args, "--index-strategy"), "{args:?}");
+            }
         }
     }
 
@@ -499,11 +517,12 @@ mod tests {
             let args = upgrade_args(platform, true);
             let at = args.iter().position(|a| a == "--prerelease").unwrap();
             assert_eq!(args[at..at + 2], pair);
+            assert!(!args.iter().any(|a| a.contains("==")));
         }
     }
 
     #[test]
-    fn beta_keeps_the_windows_index_arguments_intact() {
+    fn beta_puts_the_windows_torch_backend_after_prerelease_allow() {
         let install = install_args(Platform::WindowsX64, false, Channel::Beta);
         assert_eq!(
             install[..7],
@@ -517,10 +536,10 @@ mod tests {
                 "allow"
             ]
         );
-        assert_eq!(install[7..], WINDOWS_INDEX_ARGS);
+        assert_eq!(install[7..], TORCH_BACKEND);
         let upgrade = upgrade_args(Platform::WindowsX64, true);
-        assert_eq!(upgrade[5..7], ["--prerelease", "allow"]);
-        assert_eq!(upgrade[7..], WINDOWS_INDEX_ARGS);
+        assert_eq!(upgrade[8..10], ["--prerelease", "allow"]);
+        assert_eq!(upgrade[10..], TORCH_BACKEND);
     }
 
     #[test]
@@ -540,7 +559,7 @@ mod tests {
         );
         let windows = install_args(Platform::WindowsX64, true, Channel::Pinned("0.15.0b2"));
         assert_eq!(windows[3], "z-vision-generator==0.15.0b2");
-        assert_eq!(windows[8..], WINDOWS_INDEX_ARGS);
+        assert_eq!(windows[8..], TORCH_BACKEND);
     }
 
     #[test]
