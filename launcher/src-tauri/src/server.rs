@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::paths::Layout;
 use crate::process_tree;
 use crate::records::{ServerRecord, delete_server_record, read_server_record, write_server_record};
-use crate::spawn::{hidden_command, inherited_path};
+use crate::spawn::{hidden_command, inherited_path, output_lines};
 
 /// The app's default port, and the first of the 100 it scans.
 pub const DEFAULT_PORT: u16 = 8080;
@@ -96,11 +96,7 @@ pub fn parse_version(output: &str) -> Option<String> {
 
 /// The last `count` non-empty lines of `text`. Lines end at `\n` or `\r` (progress bars redraw with `\r`).
 pub fn tail_lines(text: &str, count: usize) -> Vec<String> {
-    let lines: Vec<&str> = text
-        .split(['\n', '\r'])
-        .map(str::trim_end)
-        .filter(|line| !line.is_empty())
-        .collect();
+    let lines: Vec<&str> = output_lines(text).collect();
     lines[lines.len().saturating_sub(count)..]
         .iter()
         .map(|line| (*line).to_owned())

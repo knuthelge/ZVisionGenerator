@@ -251,12 +251,6 @@ describe('action zone', () => {
   it('lists More entries in the snapshot’s order', () => {
     for (const c of CASES) expect(launcherView(c.snapshot).menu.map((m) => m.id), c.name).toEqual(c.snapshot.controls.menu);
   });
-
-  it('carries the stored beta choice on the beta entry only', () => {
-    const entries = (name: string) => view(name).menu;
-    expect(entries('6 running').map((m) => m.checked)).toEqual([undefined, undefined, false]);
-    expect(entries('4a needs_install with beta')[0]).toMatchObject({ id: 'beta', checked: true });
-  });
 });
 
 describe('beta wording', () => {

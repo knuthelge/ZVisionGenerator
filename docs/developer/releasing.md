@@ -14,7 +14,7 @@ The package version comes from the tag (`hatch-vcs`), so the tag must be a valid
 - **Final releases:** `vX.Y.Z`, for example `v0.13.0`.
 - **Betas:** `vX.Y.ZbN`, for example `v0.13.0b1`, then `b2`, `b3` and so on before the final `vX.Y.Z`. Use `aN` and `rcN` the same way for alphas and release candidates.
 
-Pre-release tags are published as GitHub pre-releases, and uv installs them only when asked: `uv tool install --prerelease allow z-vision-generator`, or an exact pin such as `uv tool install z-vision-generator==0.13.0b1`.
+Pre-release tags are published as GitHub pre-releases, and uv installs them only when asked: `uv tool install --prerelease-package z-vision-generator=allow z-vision-generator`, or an exact pin such as `uv tool install z-vision-generator==0.13.0b1`.
 
 Final release tags also run the Deploy Docs workflow, which publishes the docs site from the tagged commit. Pre-release tags leave the published docs unchanged; run the Deploy Docs workflow by hand to publish between releases. A manual run publishes `main`, so the docs of every feature not yet released go live with it.
 

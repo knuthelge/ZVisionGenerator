@@ -143,6 +143,14 @@ fn no_window(command: Command) -> Command {
     command
 }
 
+/// The lines of a child's output: split at `\n` and `\r` (progress bars redraw with `\r`), trailing whitespace
+/// trimmed, empty lines dropped.
+pub fn output_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.split(['\n', '\r'])
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,5 +287,11 @@ mod tests {
         let command = hidden_command(&program);
         assert_eq!(command.get_program(), program.as_os_str());
         assert_eq!(command.get_args().count(), 0);
+    }
+
+    #[test]
+    fn output_splits_at_newlines_and_carriage_returns_without_empty_lines() {
+        let got: Vec<&str> = output_lines("a\r\nb\rc\n\n  d  \n").collect();
+        assert_eq!(got, ["a", "b", "c", "  d"]);
     }
 }

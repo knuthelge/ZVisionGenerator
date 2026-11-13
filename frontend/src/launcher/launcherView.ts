@@ -86,8 +86,6 @@ export interface MenuItemView {
   label: string;
   description: string;
   danger: boolean;
-  /** Set for a checkbox item: whether it is on. */
-  checked?: boolean;
 }
 
 export interface LauncherView {
@@ -108,10 +106,6 @@ export interface LauncherView {
 export interface ViewOptions {
   /** Formats `stoppedAt` (Unix ms) as a clock time; the browser's locale by default. */
   formatTime?: (ms: number) => string;
-}
-
-function isFixable(u: Unsupported): boolean {
-  return u.code === 'driver_too_old' || u.code === 'low_disk';
 }
 
 const NAME = 'Z-Vision Generator';
@@ -314,12 +308,13 @@ function shortGpuName(name: string): string {
   return name.replace(/^NVIDIA\s+/i, '').replace(/^GeForce\s+/i, '');
 }
 
-function unsupportedView(u: Unsupported): {
+function unsupportedView(u: Unsupported, controls: Controls): {
   headline: string;
   sub: SubView;
   notice: NoticeView;
 } {
-  const fixable = isFixable(u);
+  // A fixable problem is the one whose primary button is Check again.
+  const fixable = controls.primary === 'check_again';
   const link: LinkView = { id: 'requirements', label: 'See the requirements' };
   let notice: NoticeView;
   switch (u.code) {
@@ -464,7 +459,7 @@ export function launcherView(s: Snapshot, options: ViewOptions = {}): LauncherVi
       break;
     case 'unsupported':
       if (s.unsupported) {
-        ({ headline, sub, notice } = unsupportedView(s.unsupported));
+        ({ headline, sub, notice } = unsupportedView(s.unsupported, controls));
       } else {
         headline = 'Can’t install yet';
         sub = plain('Nothing was downloaded.');
@@ -565,6 +560,6 @@ export function launcherView(s: Snapshot, options: ViewOptions = {}): LauncherVi
     notice,
     caption: step ? { label: step, line: s.progress?.line ?? null } : null,
     primary: controls.primary ? { id: controls.primary, ...PRIMARIES[controls.primary] } : null,
-    menu: controls.menu.map((id) => (id === 'beta' ? { ...MENU_ITEMS.beta, checked: s.beta } : MENU_ITEMS[id]))
+    menu: controls.menu.map((id) => MENU_ITEMS[id])
   };
 }

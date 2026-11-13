@@ -2392,7 +2392,8 @@ mod tests {
         rig.idle();
         let args = install_args_of(&rig);
         assert!(
-            args.windows(2).any(|w| w == ["--prerelease", "allow"]),
+            args.windows(2)
+                .any(|w| w == ["--prerelease-package", "z-vision-generator=allow"]),
             "{args:?}"
         );
         assert!(!args.iter().any(|a| a.contains("==")));
@@ -2407,7 +2408,9 @@ mod tests {
             .find(|args| args.contains(&"--upgrade".to_owned()))
             .unwrap();
         assert!(
-            upgrade.windows(2).any(|w| w == ["--prerelease", "allow"]),
+            upgrade
+                .windows(2)
+                .any(|w| w == ["--prerelease-package", "z-vision-generator=allow"]),
             "{upgrade:?}"
         );
     }
@@ -2418,7 +2421,11 @@ mod tests {
         rig.controller.launch(false);
         rig.controller.install().unwrap();
         rig.idle();
-        assert!(!install_args_of(&rig).contains(&"--prerelease".to_owned()));
+        assert!(
+            !install_args_of(&rig)
+                .iter()
+                .any(|a| a.starts_with("--prerelease"))
+        );
         rig.running("0.14.0", Some("0.14.1"));
         rig.controller.update_app().unwrap();
         rig.idle();
@@ -2428,11 +2435,11 @@ mod tests {
             .into_iter()
             .find(|args| args.contains(&"--upgrade".to_owned()))
             .unwrap();
-        assert!(!upgrade.contains(&"--prerelease".to_owned()));
+        assert!(!upgrade.iter().any(|a| a.starts_with("--prerelease")));
     }
 
     #[test]
-    fn repair_pins_the_installed_version_without_prerelease_allow_whatever_the_beta_setting() {
+    fn repair_pins_the_installed_version_without_a_prerelease_flag_whatever_the_beta_setting() {
         for (installed, beta) in [("0.15.0b3", false), ("0.15.0b3", true), ("0.14.0", true)] {
             let rig = rig();
             rig.running(installed, None);
@@ -2445,7 +2452,10 @@ mod tests {
                 args.contains(&format!("z-vision-generator=={installed}")),
                 "{args:?}"
             );
-            assert!(!args.contains(&"--prerelease".to_owned()), "{args:?}");
+            assert!(
+                !args.iter().any(|a| a.starts_with("--prerelease")),
+                "{args:?}"
+            );
         }
     }
 

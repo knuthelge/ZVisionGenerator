@@ -12,10 +12,10 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 use crate::paths::{Layout, default_root, root_folder_name};
-use crate::process_tree::STOP_GRACE;
+use crate::process_tree::{Member, STOP_GRACE, start_time_of, stop_members};
 use crate::server::clear_stale_record;
 use crate::snapshot::Packaging;
 
@@ -24,9 +24,6 @@ pub const DELETE_RETRY: Duration = Duration::from_secs(10);
 
 /// The pause between two attempts to delete Root.
 const DELETE_PAUSE: Duration = Duration::from_millis(250);
-
-/// How long to wait, after killing other launcher processes, for them to disappear.
-const KILL_WAIT: Duration = Duration::from_secs(3);
 
 /// How the launcher was installed, from the operating system (a `std::env::consts::OS` value) and the `APPIMAGE`
 /// variable the AppImage runtime sets (`None` or empty when absent).
@@ -170,36 +167,6 @@ fn running_processes() -> Vec<Proc> {
         .collect()
 }
 
-/// Terminate `pids` and wait a moment for them to go.
-fn kill_and_wait(pids: &[u32]) {
-    let Ok(mut system) = System::new() else {
-        return;
-    };
-    let targets: Vec<Pid> = pids.iter().map(|pid| Pid::from_u32(*pid)).collect();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&targets),
-        true,
-        ProcessRefreshKind::nothing(),
-    );
-    for pid in &targets {
-        if let Some(process) = system.process(*pid) {
-            process.kill();
-        }
-    }
-    let deadline = Instant::now() + KILL_WAIT;
-    while Instant::now() < deadline {
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&targets),
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-        if targets.iter().all(|pid| system.process(*pid).is_none()) {
-            return;
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-}
-
 /// Terminate every other process running this launcher's executable (a running window of this launcher would hold
 /// files in Root and would restart the server).
 fn kill_other_launchers() {
@@ -207,9 +174,12 @@ fn kill_other_launchers() {
         return;
     };
     let pids = other_launcher_pids(&running_processes(), &exe, std::process::id());
-    if !pids.is_empty() {
-        kill_and_wait(&pids);
-    }
+    // Only the launcher processes themselves, not their children.
+    let members: Vec<Member> = pids
+        .iter()
+        .filter_map(|&pid| start_time_of(pid).map(|start_time| Member { pid, start_time }))
+        .collect();
+    stop_members(&members, Duration::ZERO);
 }
 
 /// The cleanup of `layout`: `kill_others` first, then the recorded server (only when its pid is alive with the

@@ -16,7 +16,7 @@ use crate::manifest::{
 };
 use crate::paths::Layout;
 use crate::snapshot::ErrorCode;
-use crate::spawn::hidden_command;
+use crate::spawn::{hidden_command, output_lines};
 
 /// How many of uv's last output lines a failure keeps as the log tail.
 pub const TAIL_LINES: usize = 40;
@@ -78,7 +78,8 @@ fn with_torch_backend(mut args: Vec<String>, platform: Platform) -> Vec<String> 
 pub enum Channel<'a> {
     /// Stable releases only, uv's default.
     Stable,
-    /// Pre-releases too (`--prerelease allow`), for a user who opted into betas.
+    /// Pre-releases of the app only (`--prerelease-package z-vision-generator=allow`), for a user who opted into
+    /// betas; its dependencies still resolve to stable releases.
     Beta,
     /// Exactly this installed version (`z-vision-generator==<version>`). uv accepts an explicit pre-release pin
     /// without `--prerelease`.
@@ -105,14 +106,14 @@ impl<'a> Channel<'a> {
         }
     }
 
-    /// Whether uv is told to accept pre-releases for every package.
+    /// Whether uv is told to accept pre-releases of the app.
     fn allows_prerelease(self) -> bool {
         self == Channel::Beta
     }
 }
 
-/// `uv tool install <mode flags> <requirement> --python 3.14`, with `--prerelease allow` for the beta [`Channel`]
-/// and `--torch-backend cu132` on Windows.
+/// `uv tool install <mode flags> <requirement> --python 3.14`, with `--prerelease-package z-vision-generator=allow`
+/// for the beta [`Channel`] and `--torch-backend cu132` on Windows.
 fn tool_install_args(platform: Platform, mode: &[&str], channel: Channel<'_>) -> Vec<String> {
     let mut args = vec!["tool".to_owned(), "install".to_owned()];
     args.extend(mode.iter().map(|arg| (*arg).to_owned()));
@@ -122,13 +123,16 @@ fn tool_install_args(platform: Platform, mode: &[&str], channel: Channel<'_>) ->
         PYTHON.to_owned(),
     ]);
     if channel.allows_prerelease() {
-        args.extend(["--prerelease".to_owned(), "allow".to_owned()]);
+        args.extend([
+            "--prerelease-package".to_owned(),
+            format!("{PACKAGE}=allow"),
+        ]);
     }
     with_torch_backend(args, platform)
 }
 
 /// `uv tool install z-vision-generator --python 3.14`, with `--reinstall` when repairing. The beta [`Channel`] adds
-/// `--prerelease allow`; a pinned one installs `z-vision-generator==<version>`.
+/// `--prerelease-package z-vision-generator=allow`; a pinned one installs `z-vision-generator==<version>`.
 pub fn install_args(platform: Platform, reinstall: bool, channel: Channel<'_>) -> Vec<String> {
     tool_install_args(
         platform,
@@ -141,7 +145,8 @@ pub fn install_args(platform: Platform, reinstall: bool, channel: Channel<'_>) -
 /// on Windows it would bring back a PyTorch without CUDA; installing with `--upgrade` over the existing tool takes
 /// the same arguments as the install. `--upgrade` implies `--refresh`, so uv looks past its cached index (PyPI lets
 /// it keep one for ten minutes) and finds a release published just before. The requirement on the command line
-/// replaces the receipt's, so a pinned repair does not hold the update back. `beta` adds `--prerelease allow`.
+/// replaces the receipt's, so a pinned repair does not hold the update back.
+/// `beta` adds `--prerelease-package z-vision-generator=allow`.
 pub fn upgrade_args(platform: Platform, beta: bool) -> Vec<String> {
     tool_install_args(platform, &["--upgrade"], Channel::for_install(beta))
 }
@@ -210,14 +215,6 @@ pub fn spawn<S: AsRef<OsStr>>(layout: &Layout, args: &[S]) -> io::Result<Child> 
         .spawn()
 }
 
-/// Split output into lines at `\n` and `\r` (uv redraws progress with `\r`), dropping empty ones.
-fn split_lines(bytes: &[u8]) -> impl Iterator<Item = String> + '_ {
-    bytes
-        .split(|byte| *byte == b'\n' || *byte == b'\r')
-        .map(|part| String::from_utf8_lossy(part).trim_end().to_owned())
-        .filter(|line| !line.is_empty())
-}
-
 /// Send each line of `stream` to `sender` until the stream ends.
 fn forward_lines(stream: impl Read, sender: mpsc::Sender<String>) {
     let mut reader = BufReader::new(stream);
@@ -227,8 +224,8 @@ fn forward_lines(stream: impl Read, sender: mpsc::Sender<String>) {
         match reader.read_until(b'\n', &mut buffer) {
             Ok(0) | Err(_) => return,
             Ok(_) => {
-                for line in split_lines(&buffer) {
-                    if sender.send(line).is_err() {
+                for line in output_lines(&String::from_utf8_lossy(&buffer)) {
+                    if sender.send(line.to_owned()).is_err() {
                         return;
                     }
                 }
@@ -482,32 +479,43 @@ mod tests {
     #[test]
     fn the_stable_channel_never_allows_pre_releases() {
         for platform in PLATFORMS {
-            assert!(!has(&install_args(platform, false, STABLE), "--prerelease"));
-            assert!(!has(&install_args(platform, true, STABLE), "--prerelease"));
-            assert!(!has(&upgrade_args(platform, false), "--prerelease"));
+            for args in [
+                install_args(platform, false, STABLE),
+                install_args(platform, true, STABLE),
+                upgrade_args(platform, false),
+            ] {
+                assert!(!args.iter().any(|a| a.starts_with("--prerelease")));
+            }
         }
     }
 
     #[test]
-    fn beta_adds_prerelease_allow_to_install_reinstall_and_upgrade_on_every_platform() {
-        let pair = ["--prerelease", "allow"];
+    fn beta_allows_pre_releases_of_the_app_only_on_install_reinstall_and_upgrade_on_every_platform()
+    {
+        let pair = ["--prerelease-package", "z-vision-generator=allow"];
         for platform in PLATFORMS {
             for reinstall in [false, true] {
                 let args = install_args(platform, reinstall, Channel::Beta);
-                let at = args.iter().position(|a| a == "--prerelease").unwrap();
+                let at = args
+                    .iter()
+                    .position(|a| a == "--prerelease-package")
+                    .unwrap();
                 assert_eq!(args[at..at + 2], pair);
                 assert!(has(&args, "z-vision-generator"));
                 assert!(!args.iter().any(|a| a.contains("==")));
             }
             let args = upgrade_args(platform, true);
-            let at = args.iter().position(|a| a == "--prerelease").unwrap();
+            let at = args
+                .iter()
+                .position(|a| a == "--prerelease-package")
+                .unwrap();
             assert_eq!(args[at..at + 2], pair);
             assert!(!args.iter().any(|a| a.contains("==")));
         }
     }
 
     #[test]
-    fn beta_puts_the_windows_torch_backend_after_prerelease_allow() {
+    fn beta_puts_the_windows_torch_backend_after_the_prerelease_package() {
         let install = install_args(Platform::WindowsX64, false, Channel::Beta);
         assert_eq!(
             install[..7],
@@ -517,18 +525,21 @@ mod tests {
                 "z-vision-generator",
                 "--python",
                 "3.14",
-                "--prerelease",
-                "allow"
+                "--prerelease-package",
+                "z-vision-generator=allow"
             ]
         );
         assert_eq!(install[7..], TORCH_BACKEND);
         let upgrade = upgrade_args(Platform::WindowsX64, true);
-        assert_eq!(upgrade[6..8], ["--prerelease", "allow"]);
+        assert_eq!(
+            upgrade[6..8],
+            ["--prerelease-package", "z-vision-generator=allow"]
+        );
         assert_eq!(upgrade[8..], TORCH_BACKEND);
     }
 
     #[test]
-    fn a_pinned_repair_reinstalls_exactly_the_installed_version_without_prerelease_allow() {
+    fn a_pinned_repair_reinstalls_exactly_the_installed_version_without_a_prerelease_flag() {
         assert_eq!(
             install_args(Platform::LinuxX64, true, Channel::Pinned("0.15.0b2")),
             [
@@ -631,19 +642,6 @@ mod tests {
         assert_eq!(kept.len(), TAIL_LINES);
         assert_eq!(kept.first().map(String::as_str), Some("line 60"));
         assert_eq!(kept.last().map(String::as_str), Some("line 99"));
-    }
-
-    #[test]
-    fn output_splits_at_newlines_and_carriage_returns_without_empty_lines() {
-        let got: Vec<String> = split_lines(b"a\r\nb\rc\n\n  d  \n").collect();
-        assert_eq!(got, ["a", "b", "c", "  d"]);
-    }
-
-    #[test]
-    fn output_that_is_not_utf8_is_kept_lossily() {
-        let got: Vec<String> = split_lines(b"caf\xe9\n").collect();
-        assert_eq!(got.len(), 1);
-        assert!(got[0].starts_with("caf"));
     }
 
     #[cfg(unix)]
