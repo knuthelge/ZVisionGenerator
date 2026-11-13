@@ -26,13 +26,13 @@ A message that names a file, a setting or a model, or that says "use X instead",
 
 Windows and Linux. PyTorch has CUDA, but it can't use a GPU: the NVIDIA driver is too old, or the PC has no NVIDIA GPU. Generation needs an NVIDIA GPU that PyTorch can see; there is no CPU fallback. Check that `nvidia-smi` lists your GPU. When the message mentions the driver, install NVIDIA driver 580 or newer. A PC without an NVIDIA GPU can't generate. See [Install](../get-started/install.md#check-your-machine). A PyTorch without CUDA gives [a different message](#pytorch-has-no-cuda).
 
-### "… cannot run: the installed PyTorch has no CUDA. Install again with PyTorch's CUDA index: …" { #pytorch-has-no-cuda }
+### "… cannot run: the installed PyTorch has no CUDA. Install again with PyTorch's CUDA build: …" { #pytorch-has-no-cuda }
 
-Windows. The install came from PyPI alone, and PyPI's Windows PyTorch is CPU-only, so no driver or GPU change helps. Install again with PyTorch's CUDA index; the message prints the command, and the install page has it under the Windows tab. See [Install](../get-started/install.md#install).
+Windows. The install came from PyPI alone, and PyPI's Windows PyTorch is CPU-only, so no driver or GPU change helps. Reinstall with PyTorch's CUDA build; the message prints the command, and the install page has it under the Windows tab. See [Repair the install](../get-started/install.md#repair-the-install).
 
 ### A package is missing or too old { #a-package-is-missing-or-too-old }
 
-A package the app needs is missing or out of date, usually after a partial install. Reinstall: see [Repair the install](../get-started/install.md#repair-the-install). On Windows, use the command on that page, not the one a message prints: it keeps PyTorch's CUDA index. With the launcher, choose **Repair** in its window instead.
+A package the app needs is missing or out of date, usually after a partial install. Reinstall: see [Repair the install](../get-started/install.md#repair-the-install). On Windows, use the command on that page, not the one a message prints: it reinstalls the package and keeps PyTorch's CUDA build. With the launcher, choose **Repair** in its window instead.
 
 #### "diffusers>=… is required for Windows/Linux LTX video support."
 
@@ -651,7 +651,7 @@ Resume the paused job, or quit it, first.
 
 ### "… written by a newer version of ziv; update ziv to read it"
 
-A file in the data folder was saved by a newer version of the app, so this older one won't read it. Update with `uv tool upgrade z-vision-generator`. See [Install](../get-started/install.md#update).
+A file in the data folder was saved by a newer version of the app, so this older one won't read it. Update the app; see [Install](../get-started/install.md#update).
 
 ### "The app database … is damaged …"
 

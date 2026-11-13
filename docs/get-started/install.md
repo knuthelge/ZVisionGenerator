@@ -157,10 +157,10 @@ Close the terminal and open a new one, so that it finds `uv`.
 === "Windows"
 
     ```powershell
-    uv tool install z-vision-generator --index https://download.pytorch.org/whl/cu132 --index-strategy unsafe-best-match
+    uv tool install z-vision-generator --torch-backend cu132
     ```
 
-    PyPI's PyTorch for Windows has no CUDA, so an install from PyPI alone ends with ["… cannot run: the installed PyTorch has no CUDA"](../reference/troubleshooting.md#pytorch-has-no-cuda) even on an NVIDIA card. The extra index fixes that; the word `unsafe` in the command is expected.
+    PyPI's PyTorch for Windows has no CUDA, so an install from PyPI alone ends with ["… cannot run: the installed PyTorch has no CUDA"](../reference/troubleshooting.md#pytorch-has-no-cuda) even on an NVIDIA card. `--torch-backend cu132` takes PyTorch, and only PyTorch, from PyTorch's CUDA index. It needs uv 0.11.29 or newer (`uv self update` updates an older uv), and uv prints a warning that the option is experimental, which is expected.
 
 === "Linux"
 
@@ -210,9 +210,25 @@ See [Troubleshooting](../reference/troubleshooting.md).
 
 ## Update { #update }
 
-```bash
-uv tool upgrade z-vision-generator
-```
+=== "macOS"
+
+    ```bash
+    uv tool upgrade z-vision-generator
+    ```
+
+=== "Windows"
+
+    ```powershell
+    uv tool install --upgrade z-vision-generator --torch-backend cu132
+    ```
+
+    Use this command, not `uv tool upgrade`. `uv tool upgrade` can't take `--torch-backend`, so on Windows it would bring back a PyTorch without CUDA.
+
+=== "Linux"
+
+    ```bash
+    uv tool upgrade z-vision-generator
+    ```
 
 If you installed with the launcher, use **Update** in its window instead; see [Update the app](#launcher-update).
 
@@ -231,10 +247,10 @@ If the app reports a missing or outdated package, reinstall it. Your data folder
 === "Windows"
 
     ```powershell
-    uv tool install --reinstall z-vision-generator --index https://download.pytorch.org/whl/cu132 --index-strategy unsafe-best-match
+    uv tool install --reinstall z-vision-generator --torch-backend cu132
     ```
 
-    Keep the `--index` options. Without them, uv takes PyTorch from PyPI, which has no CUDA on Windows.
+    Keep `--torch-backend cu132`. Without it, uv takes PyTorch from PyPI, which has no CUDA on Windows.
 
 === "Linux"
 
@@ -264,7 +280,7 @@ The data folder stays, with your LoRAs, outputs and converted models, and so do 
     uv tool install git+https://github.com/knuthelge/ZVisionGenerator.git
     ```
 
-    On Windows, add the same `--index` and `--index-strategy` options as in step 4.
+    On Windows, add `--torch-backend cu132`, as in step 4.
 
     A checkout for working on the code: see [Developer](../developer/index.md).
 

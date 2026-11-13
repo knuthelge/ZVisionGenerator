@@ -8,7 +8,7 @@ from typing import Any
 _CUDA13_MIN_DRIVER = 580
 
 # How to get a CUDA build of PyTorch where PyPI's wheel has none (Windows).
-CUDA_INSTALL_COMMAND = "uv tool install z-vision-generator --index https://download.pytorch.org/whl/cu132 --index-strategy unsafe-best-match"
+CUDA_INSTALL_COMMAND = "uv tool install --reinstall z-vision-generator --torch-backend cu132"
 
 
 def cuda_driver_hint(available: bool, cuda_version: str | None) -> str | None:
@@ -50,7 +50,7 @@ def require_cuda(torch: Any, backend: str) -> None:
     if torch.cuda.is_available() and cuda_version is not None:
         return
     if cuda_version is None:
-        raise RuntimeError(f"{backend} cannot run: the installed PyTorch has no CUDA. Install again with PyTorch's CUDA index: {CUDA_INSTALL_COMMAND}")
+        raise RuntimeError(f"{backend} cannot run: the installed PyTorch has no CUDA. Install again with PyTorch's CUDA build: {CUDA_INSTALL_COMMAND}")
     message = f"CUDA is not available. {backend} requires an NVIDIA GPU with CUDA support."
     hint = cuda_driver_hint(False, cuda_version)
     raise RuntimeError(f"{message} {hint}" if hint else message)
