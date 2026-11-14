@@ -141,7 +141,6 @@ from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_
 from zvisiongenerator.web.extend_api import EXTEND_UNAVAILABLE_MESSAGE, extend_context_from_body, extend_source_response, load_source_video, requested_extend_frames
 from zvisiongenerator.web.gallery import (
     audio_peaks,
-    GALLERY_MEDIA_EXTENSIONS,
     VIDEO_EXTENSIONS,
     build_gallery_page_json,
     delete_gallery_assets,
@@ -150,8 +149,12 @@ from zvisiongenerator.web.gallery import (
     list_gallery_assets,
     move_gallery_assets,
     output_source_folder,
+    resolve_media_asset,
     resolve_output_asset_path,
+    set_asset_starred,
 )
+from zvisiongenerator.web.asset_records import AssetRecordsError
+from zvisiongenerator.web.gallery_zip import zip_stream
 from zvisiongenerator.web.job_log import JOB_LOG_PAGE_SIZE, JobLog, JobLogError
 from zvisiongenerator.web.hub_client import CachedFetch, HubError, validated_file, validated_repo
 from zvisiongenerator.web.json_fields import json_field
@@ -266,9 +269,10 @@ async def docs_asset(asset_name: str) -> FileResponse:
 @app.get("/media/{asset_path:path}")
 def output_media(asset_path: str) -> FileResponse:
     """Serve generated media files by output-root-relative asset ID."""
-    candidate = resolve_output_asset_path(_media_output_root(), asset_path)
-    if candidate is None or candidate.suffix.lower() not in GALLERY_MEDIA_EXTENSIONS or not candidate.is_file():
+    resolved = resolve_media_asset(_media_output_root(), asset_path)
+    if resolved is None or not resolved[1].is_file():
         raise HTTPException(status_code=404, detail=f"Unknown media asset: {asset_path}")
+    _rel_path, candidate, _kind = resolved
     return FileResponse(candidate)
 
 
@@ -2921,16 +2925,31 @@ def api_gallery_json(
     filter: str = Query("all"),
     sort_order: str = Query("newest"),
     project: str = Query(""),
+    starred: bool = Query(False),
 ) -> dict[str, Any]:
-    """Return paginated gallery assets as JSON for the Svelte SPA gallery view, limited to one project when *project* is set."""
+    """Return paginated gallery assets as JSON for the Svelte SPA gallery view, limited to one project when *project* is set and to starred files when *starred* is set."""
     web_config = load_web_config()
     all_assets = filter_and_sort_assets(
         list_gallery_assets(web_config.output_dir),
         media_filter=filter,
         sort_order=sort_order,
         project=project or None,
+        starred=starred,
     )
     return build_gallery_page_json(all_assets, web_config, page=page, page_size=web_config.gallery_page_size)
+
+
+@app.get("/api/gallery/ids")
+def api_gallery_ids(filter: str = Query("all"), project: str = Query(""), starred: bool = Query(False)) -> dict[str, list[str]]:
+    """Return the IDs of every asset the media filter, project and starred toggle match, newest first, for Select all."""
+    assets = filter_and_sort_assets(
+        list_gallery_assets(load_web_config().output_dir),
+        media_filter=filter,
+        sort_order="newest",
+        project=project or None,
+        starred=starred,
+    )
+    return {"ids": [asset.id for asset in assets]}
 
 
 @app.get("/api/config")
@@ -3725,19 +3744,31 @@ def api_gallery_audio_peaks(asset_id: str = Query(..., alias="id", min_length=1)
     return {"id": asset_id, "peaks": peaks}
 
 
-@app.post("/api/gallery/move")
-async def api_move_gallery_assets(request: Request) -> dict[str, Any]:
-    """Move gallery assets into a project (``null`` for the top of the output folder), reporting each file on its own."""
+async def _json_object(request: Request) -> dict[str, Any]:
+    """Read the request body as a JSON object, or raise a 422 saying what is wrong."""
     try:
         payload = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
     if not isinstance(payload, dict):
         raise HTTPException(status_code=422, detail="Expected a JSON object.")
+    return payload
+
+
+async def _asset_ids_payload(request: Request) -> tuple[dict[str, Any], list[str]]:
+    """Read a bulk request's JSON object and its ``asset_ids`` list of strings; return both, or raise a 422."""
+    payload = await _json_object(request)
     asset_ids = payload.get("asset_ids")
-    project = payload.get("project")
     if not isinstance(asset_ids, list) or not all(isinstance(asset_id, str) for asset_id in asset_ids):
         raise HTTPException(status_code=422, detail="Field 'asset_ids' must be a list of strings.")
+    return payload, asset_ids
+
+
+@app.post("/api/gallery/move")
+async def api_move_gallery_assets(request: Request) -> dict[str, Any]:
+    """Move gallery assets into a project (``null`` for the top of the output folder), reporting each file on its own."""
+    payload, asset_ids = await _asset_ids_payload(request)
+    project = payload.get("project")
     if project is not None and not isinstance(project, str):
         raise HTTPException(status_code=422, detail="Field 'project' must be a string or null.")
     try:
@@ -3747,25 +3778,89 @@ async def api_move_gallery_assets(request: Request) -> dict[str, Any]:
 
 
 def _move_assets_response(asset_ids: list[str], project: str | None) -> dict[str, Any]:
-    """Move the assets and describe the outcome; runs off the event loop because building the assets reads the model inventory."""
+    """Move the assets and describe the outcome; runs off the event loop because building the assets reads the model inventory.
+
+    Each moved entry carries ``from_path``, the path the listing reported for the file before the move.
+    """
     result = move_gallery_assets(str(_media_output_root()), asset_ids, project)
     moved: list[dict[str, Any]] = []
     if result.moved:
         web_config = load_web_config()
-        moved = [{"from": item.from_id, "asset": gallery_asset_to_json(item.asset, web_config)} for item in result.moved]
+        moved = [
+            {
+                "from": item.from_id,
+                "from_path": str(Path(web_config.output_dir) / item.from_id),
+                "asset": gallery_asset_to_json(item.asset, web_config),
+            }
+            for item in result.moved
+        ]
     return {
         "moved": moved,
         "failed": [{"id": failure.id, "detail": failure.detail} for failure in result.failed],
     }
 
 
-@app.delete("/api/gallery/{asset_path:path}")
-def api_delete_gallery_asset(asset_path: str) -> dict[str, str]:
-    """Delete a single gallery asset by output-root-relative asset ID."""
-    web_config = load_web_config()
-    root = Path(web_config.output_dir).resolve()
-    candidate = resolve_output_asset_path(root, asset_path)
-    if candidate is None or not candidate.is_file():
-        raise HTTPException(status_code=404, detail=f"Asset not found: {asset_path}")
-    delete_gallery_assets(web_config.output_dir, [asset_path])
-    return {"status": "deleted"}
+@app.post("/api/gallery/delete")
+async def api_delete_gallery_assets(request: Request) -> dict[str, Any]:
+    """Delete gallery assets in one request, reporting each file on its own; a file that is already gone counts as deleted."""
+    _, asset_ids = await _asset_ids_payload(request)
+    return await run_in_threadpool(_delete_assets_response, asset_ids)
+
+
+def _delete_assets_response(asset_ids: list[str]) -> dict[str, Any]:
+    """Delete the assets and describe the outcome: each removed file's facts for the client's lists, and each failure."""
+    result = delete_gallery_assets(load_web_config().output_dir, asset_ids)
+    return {
+        "deleted": [{"id": item.id, "media_type": item.kind, "project": item.project, "starred": item.starred, "file_path": item.file_path} for item in result.deleted],
+        "failed": [{"id": failure.id, "detail": failure.detail} for failure in result.failed],
+    }
+
+
+_DOWNLOAD_FIELD_LIMIT = 16 * 1024 * 1024
+
+
+@app.post("/api/gallery/download")
+async def api_download_gallery_assets(request: Request) -> StreamingResponse:
+    """Stream the files named by the form's ``asset_ids`` (IDs joined by newlines) as one uncompressed zip.
+
+    Invalid IDs and missing files are skipped, so nothing valid gives an empty zip. Each entry is named by its asset ID.
+    """
+    form = await request.form(max_part_size=_DOWNLOAD_FIELD_LIMIT)
+    field = form.get("asset_ids")
+    asset_ids = field.split("\n") if isinstance(field, str) else []
+    entries = await run_in_threadpool(_download_entries, _media_output_root(), asset_ids)
+    filename = f"ziv-gallery-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
+    return StreamingResponse(
+        zip_stream(entries),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
+    )
+
+
+def _download_entries(root: Path, asset_ids: list[str]) -> list[tuple[Path, str]]:
+    """Return ``(path, asset ID)`` for each distinct ID that names an existing media file under *root*, in request order."""
+    entries: dict[str, Path] = {}
+    for asset_id in asset_ids:
+        resolved = resolve_media_asset(root, asset_id)
+        if resolved is None:
+            continue
+        rel_path, candidate, _kind = resolved
+        if rel_path not in entries and candidate.is_file():
+            entries[rel_path] = candidate
+    return [(path, rel_path) for rel_path, path in entries.items()]
+
+
+@app.post("/api/gallery/star")
+async def api_star_gallery_asset(request: Request) -> dict[str, Any]:
+    """Star or unstar one gallery asset from ``{"asset_id", "starred"}`` and return its ID and state."""
+    payload = await _json_object(request)
+    asset_id, starred = payload.get("asset_id"), payload.get("starred")
+    if not isinstance(asset_id, str) or not isinstance(starred, bool):
+        raise HTTPException(status_code=422, detail="Expected a string 'asset_id' and a boolean 'starred'.")
+    try:
+        rel_path = await run_in_threadpool(set_asset_starred, asset_id, starred)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except AssetRecordsError as exc:
+        raise HTTPException(status_code=500, detail="Could not save the star.") from exc
+    return {"id": rel_path, "starred": starred}

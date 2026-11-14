@@ -6,6 +6,7 @@ import os
 import re
 import stat
 import sys
+import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -46,6 +47,7 @@ from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, seedv
 from zvisiongenerator.utils.video_probe import ffprobe_json, parse_probe
 from zvisiongenerator.utils.video_splice import SPLICE_DIR_PREFIX
 from zvisiongenerator.utils.video_upscale import ltx_upscale_problem, ltx_video_option
+from zvisiongenerator.web.asset_records import AssetRecords, AssetRecordsError
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.gallery_audio import audio_asset_facts, audio_asset_json, is_reusable_audio_config
 from zvisiongenerator.web.gallery_index import FactsRead, GalleryIndex, ScannedFile
@@ -58,7 +60,6 @@ from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canoni
 
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
 AUDIO_EXTENSIONS = frozenset({".flac", ".wav", ".mp3", ".m4a", ".ogg"})
-GALLERY_MEDIA_EXTENSIONS = frozenset(IMAGE_EXTENSIONS) | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 _STAGING_DIR_NAMES = frozenset({UPLOADS_FOLDER})
 # Scratch names the video tools create beside the finished outputs: the splice's directories (see ``video_splice``),
 # and the hidden temp files of an in-place MP4 rewrite and the video upscale's work folders (see ``ffmpeg.staging_path``).
@@ -66,6 +67,7 @@ _STAGING_PREFIXES = (SPLICE_DIR_PREFIX, STAGING_FILE_PREFIX)
 EXTEND_UPSCALED_REASON = "Upscaled videos can't be extended yet."
 EXTEND_MISSING_FILE_REASON = "The file is missing."
 _GALLERY_INDEX = GalleryIndex(app_db.app_db_path)
+_ASSET_RECORDS = AssetRecords(app_db.app_db_path)
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,8 @@ class GalleryAsset:
     reference_images: tuple[str, ...] = ()
     # An audio take's facts (kind, duration, peaks, voice, ...; see ``gallery_audio.audio_asset_facts``); empty for images and videos.
     audio: dict[str, Any] = field(default_factory=dict)
+    # Whether the user starred the file; read from the stars store per request, never from the facts.
+    starred: bool = False
 
 
 def list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
@@ -144,8 +148,10 @@ def list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
         return []
 
     files, walk_complete = _scan_output_root(root)
-    facts = _GALLERY_INDEX.facts_for(_index_root_key(root), files, _read_scanned_facts, prune=walk_complete and bool(files))
-    assets = [asset for file in files if (asset := _build_gallery_asset(root, file, facts[file.rel_path])) is not None]
+    root_key = _index_root_key(root)
+    facts = _GALLERY_INDEX.facts_for(root_key, files, _read_scanned_facts, prune=walk_complete and bool(files))
+    starred = _starred_ids()
+    assets = [asset for file in files if (asset := _build_gallery_asset(root, file, facts[file.rel_path], starred)) is not None]
     assets.sort(key=lambda item: (item.modified_at, item.id), reverse=True)
     return assets
 
@@ -153,7 +159,7 @@ def list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
 def gallery_asset_for_output_path(output_dir: str, output_path: str) -> GalleryAsset | None:
     """Build gallery metadata for one generated output under the configured output root.
 
-    The file is read directly: the gallery index is neither consulted nor written.
+    The file is read directly: the gallery index is neither consulted nor written. Its star is looked up.
     """
     root = Path(output_dir).expanduser().resolve()
     candidate = Path(output_path).expanduser()
@@ -167,7 +173,7 @@ def gallery_asset_for_output_path(output_dir: str, output_path: str) -> GalleryA
     file = _scanned_file(root, resolved)
     if file is None:
         return None
-    return _build_gallery_asset(root, file, _read_scanned_facts(file).facts)
+    return _build_gallery_asset(root, file, _read_scanned_facts(file).facts, _starred_ids())
 
 
 def audio_peaks(output_dir: str, asset_id: str) -> list[int] | None:
@@ -209,6 +215,15 @@ def _index_root_key(root: Path) -> str:
         return str(root.expanduser().absolute())
 
 
+def _starred_ids() -> frozenset[str]:
+    """Return the starred IDs; a storage failure warns and gives none, so every file lists unstarred."""
+    try:
+        return _ASSET_RECORDS.starred_ids()
+    except AssetRecordsError as exc:
+        warnings.warn(f"The gallery stars could not be read ({exc}); files are listed unstarred.", stacklevel=2)
+        return frozenset()
+
+
 def _scanned_file(root: Path, path: Path) -> ScannedFile | None:
     """Stat *path* and describe it as a media file under *root*; ``None`` when it vanished or is not a regular file."""
     try:
@@ -240,11 +255,12 @@ def _scan_output_root(root: Path) -> tuple[list[ScannedFile], bool]:
     return files, not errors
 
 
-def filter_and_sort_assets(assets: list[GalleryAsset], *, media_filter: str, sort_order: str, project: str | None = None) -> list[GalleryAsset]:
+def filter_and_sort_assets(assets: list[GalleryAsset], *, media_filter: str, sort_order: str, project: str | None = None, starred: bool = False) -> list[GalleryAsset]:
     """Apply gallery filter and sort controls to a list of assets.
 
     A *project* keeps only the assets whose first ID segment is exactly that name. The ``no_project`` filter keeps the
     assets that sit in no project; it is a value of the media filter because a project folder can be named anything.
+    With *starred* only starred assets are kept, whatever the media filter and project.
     """
     normalized_filter = media_filter.strip().lower()
     if normalized_filter not in {"all", "image", "video", "audio", NO_PROJECT_FILTER}:
@@ -259,6 +275,8 @@ def filter_and_sort_assets(assets: list[GalleryAsset], *, media_filter: str, sor
         filtered = [asset for asset in assets if normalized_filter == "all" or asset.kind == normalized_filter]
     if project:
         filtered = [asset for asset in filtered if asset_project(asset.id) == project]
+    if starred:
+        filtered = [asset for asset in filtered if asset.starred]
     return sorted(filtered, key=lambda asset: asset.modified_at, reverse=normalized_sort == "newest")
 
 
@@ -278,7 +296,7 @@ def build_gallery_page_json(assets: list[GalleryAsset], web_config: WebUiConfig,
 def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]:
     """Convert one gallery asset to the current SPA JSON shape."""
     if asset.kind == "audio":
-        return {**audio_asset_json(asset, web_config), "project": asset_project(asset.id)}
+        return {**audio_asset_json(asset, web_config), "project": asset_project(asset.id), "starred": asset.starred}
     created_at = datetime.fromtimestamp(asset.modified_at, tz=timezone.utc).isoformat()
     default_workflow = default_workflow_for_mode(asset.kind)
     # An upscale is regenerated with the workflow that made its source.
@@ -393,6 +411,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
     return {
         "id": asset.id,
         "project": asset_project(asset.id),
+        "starred": asset.starred,
         "url": asset.media_url,
         "thumbnail_url": f"/thumbs/{quote(asset.id, safe='/')}",
         "filename": asset.name,
@@ -568,18 +587,96 @@ def _reuse_enhance_params(asset: GalleryAsset) -> dict[str, str]:
     return enhance_reuse_param(asset.enhance)
 
 
-def delete_gallery_assets(output_dir: str, selected_paths: list[str]) -> None:
-    """Delete selected gallery media assets."""
+@dataclass(frozen=True)
+class AssetFailure:
+    """Record one file a bulk action could not handle: the ID as requested and why."""
+
+    id: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class RemovedAsset:
+    """Record one file a delete removed, with the facts a client needs to update its lists.
+
+    Attributes:
+        id: The asset ID.
+        kind: ``image``, ``video`` or ``audio``.
+        project: The project folder the file was in, or ``None`` for the output root.
+        starred: Whether the file was starred.
+        file_path: The path the gallery listing reported for the file.
+    """
+
+    id: str
+    kind: str
+    project: str | None
+    starred: bool
+    file_path: str
+
+
+@dataclass(frozen=True)
+class DeleteResult:
+    """Hold the outcome of a delete: the files removed and the files that failed, each in request order."""
+
+    deleted: tuple[RemovedAsset, ...]
+    failed: tuple[AssetFailure, ...]
+
+
+def delete_gallery_assets(output_dir: str, asset_ids: list[str]) -> DeleteResult:
+    """Delete gallery media assets, handling each file on its own.
+
+    An ID that is not a media file under the output root fails with "Not a valid asset ID."; a file that is already
+    gone counts as deleted; a file that cannot be removed fails with the system's reason. The index rows and stars of
+    the deleted files are forgotten, and a failure to do so only warns.
+    """
     root = Path(output_dir).resolve()
-    removed: list[str] = []
-    for asset_id in dict.fromkeys(path for path in selected_paths if path.strip()):
-        rel_path = normalize_asset_id(asset_id)
-        candidate = resolve_output_asset_path(root, asset_id)
-        if rel_path is None or candidate is None or not candidate.is_file():
+    root_key = _index_root_key(root)
+    starred = _starred_ids()
+    deleted: list[RemovedAsset] = []
+    failed: list[AssetFailure] = []
+    for asset_id in dict.fromkeys(asset_ids):
+        resolved = resolve_media_asset(root, asset_id)
+        if resolved is None:
+            failed.append(AssetFailure(asset_id, "Not a valid asset ID."))
             continue
-        candidate.unlink(missing_ok=True)
-        removed.append(rel_path)
-    _GALLERY_INDEX.forget(_index_root_key(root), removed)
+        rel_path, candidate, kind = resolved
+        try:
+            candidate.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            failed.append(AssetFailure(asset_id, f"Could not delete the file: {exc.strerror or exc}"))
+            continue
+        deleted.append(RemovedAsset(rel_path, kind, asset_project(rel_path), rel_path in starred, str(Path(output_dir) / rel_path)))
+    removed_ids = [item.id for item in deleted]
+    _GALLERY_INDEX.forget(root_key, removed_ids)
+    _forget_stars(removed_ids)
+    return DeleteResult(tuple(deleted), tuple(failed))
+
+
+def set_asset_starred(asset_id: str, starred: bool) -> str:
+    """Star or unstar the file *asset_id* and return its canonical ID.
+
+    The file is not checked for existence, so a star can be set for a file that has just gone; it is forgotten
+    by the next delete or kept until then.
+
+    Raises:
+        ValueError: If *asset_id* is not a valid asset ID.
+        AssetRecordsError: If the star cannot be stored.
+    """
+    rel_path = normalize_asset_id(asset_id)
+    if rel_path is None:
+        raise ValueError("Not a valid asset ID.")
+    _ASSET_RECORDS.set_starred(rel_path, starred)
+    return rel_path
+
+
+def _forget_stars(asset_ids: list[str]) -> None:
+    """Drop the stars of deleted files; a storage failure only warns."""
+    try:
+        _ASSET_RECORDS.forget(asset_ids)
+    except AssetRecordsError as exc:
+        warnings.warn(f"The gallery stars could not be updated ({exc}); deleted files may keep a star.", stacklevel=3)
 
 
 @dataclass(frozen=True)
@@ -591,19 +688,11 @@ class MovedAsset:
 
 
 @dataclass(frozen=True)
-class MoveFailure:
-    """Record one file that could not be moved: the ID as requested and why."""
-
-    id: str
-    detail: str
-
-
-@dataclass(frozen=True)
 class MoveResult:
     """Hold the outcome of a move: the files moved and the files that failed, each in request order."""
 
     moved: tuple[MovedAsset, ...]
-    failed: tuple[MoveFailure, ...]
+    failed: tuple[AssetFailure, ...]
 
 
 def move_gallery_assets(output_dir: str, asset_ids: list[str], project: str | None) -> MoveResult:
@@ -622,20 +711,21 @@ def move_gallery_assets(output_dir: str, asset_ids: list[str], project: str | No
     target.mkdir(exist_ok=True)
     target_project = None if target == root else project
     moves: list[tuple[str, Path]] = []
-    failed: list[MoveFailure] = []
+    failed: list[AssetFailure] = []
     for asset_id in dict.fromkeys(asset_ids):
-        rel_path = normalize_asset_id(asset_id)
-        source = resolve_output_asset_path(root, asset_id)
-        if rel_path is None or source is None or _asset_kind(source) is None:
-            failed.append(MoveFailure(asset_id, "Not a valid asset ID."))
-        elif not source.is_file():
-            failed.append(MoveFailure(asset_id, "The file is missing."))
+        resolved = resolve_media_asset(root, asset_id)
+        if resolved is None:
+            failed.append(AssetFailure(asset_id, "Not a valid asset ID."))
+            continue
+        rel_path, source, _kind = resolved
+        if not source.is_file():
+            failed.append(AssetFailure(asset_id, "The file is missing."))
         elif asset_project(rel_path) != target_project:
             destination = unique_output_path(target, source.stem, source.suffix)
             try:
                 os.replace(source, destination)
             except OSError as exc:
-                failed.append(MoveFailure(asset_id, f"Could not move the file: {exc.strerror or exc}"))
+                failed.append(AssetFailure(asset_id, f"Could not move the file: {exc.strerror or exc}"))
             else:
                 moves.append((rel_path, destination))
     return MoveResult(_rekey_moved(root, moves), tuple(failed))
@@ -646,15 +736,25 @@ def _rekey_moved(root: Path, moves: list[tuple[str, Path]]) -> tuple[MovedAsset,
     root_key = _index_root_key(root)
     renamed = [(old_id, _moved_file(root, path)) for old_id, path in moves]
     _GALLERY_INDEX.rename(root_key, renamed)
+    _rename_stars([(old_id, file.rel_path) for old_id, file in renamed])
     files = [file for _old_id, file in renamed]
     facts = _GALLERY_INDEX.facts_for(root_key, files, _read_scanned_facts, prune=False)
+    starred = _starred_ids()
     moved: list[MovedAsset] = []
     for old_id, file in renamed:
-        asset = _build_gallery_asset(root, file, facts[file.rel_path])
+        asset = _build_gallery_asset(root, file, facts[file.rel_path], starred)
         if asset is None:
             raise RuntimeError(f"{file.rel_path} is not a media file after it was moved.")
         moved.append(MovedAsset(old_id, asset))
     return tuple(moved)
+
+
+def _rename_stars(renames: list[tuple[str, str]]) -> None:
+    """Re-key the stars of moved files; a storage failure only warns."""
+    try:
+        _ASSET_RECORDS.rename(renames)
+    except AssetRecordsError as exc:
+        warnings.warn(f"The gallery stars could not be updated ({exc}); moved files may lose their star.", stacklevel=3)
 
 
 def _moved_file(root: Path, path: Path) -> ScannedFile:
@@ -678,6 +778,21 @@ def resolve_output_asset_path(root: Path, asset_id: str) -> Path | None:
     if not candidate.is_relative_to(root):
         return None
     return candidate
+
+
+def resolve_media_asset(root: Path, asset_id: str) -> tuple[str, Path, str] | None:
+    """Resolve *asset_id* to ``(canonical ID, path, kind)`` when it names a media file of a known kind under *root*.
+
+    The ID is normalized and the path is checked to stay inside *root*. The file's existence is not checked, so a
+    caller that treats a missing file in its own way (a delete counts it as gone, a move reports it) tests
+    ``path.is_file()`` itself. ``None`` means the ID is invalid, escapes the root, or has no media extension.
+    """
+    rel_path = normalize_asset_id(asset_id)
+    candidate = resolve_output_asset_path(root, asset_id)
+    kind = _asset_kind(candidate) if candidate is not None else None
+    if rel_path is None or candidate is None or kind is None:
+        return None
+    return rel_path, candidate, kind
 
 
 def normalize_asset_id(asset_id: str) -> str | None:
@@ -709,8 +824,11 @@ def output_source_folder(output_dir: str, source_path: str) -> str | None:
     return str(source.parent)
 
 
-def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any]) -> GalleryAsset | None:
-    """Build the asset of one scanned file from its facts; per-request fields are computed here, never stored."""
+def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any], starred: frozenset[str]) -> GalleryAsset | None:
+    """Build the asset of one scanned file from its facts; per-request fields are computed here, never stored.
+
+    The asset is starred when its ID is in *starred*.
+    """
     candidate = file.path
     kind = _asset_kind(candidate)
     if kind is None:
@@ -769,6 +887,7 @@ def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any]) -
         extend_from=metadata["extend_from"],
         upscaled=metadata["upscaled"],
         audio={**metadata["audio"], "bytes": file.size} if metadata["audio"] else metadata["audio"],
+        starred=asset_id in starred,
     )
 
 

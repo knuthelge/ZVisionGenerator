@@ -97,7 +97,7 @@ Tapping an image grows it out of its tile into the viewer, which fills the scree
 
 A video plays in the page. Swipe over the picture to page, or drag the timeline to seek. Pause it partway and tap the time under it for the frame menu; see [Use a paused frame](gallery.md#use-a-paused-frame).
 
-In the Gallery, a tile shows only its **⋯** button; a tap opens the image. **Select** turns on selecting, and tapping the page's title scrolls back to the top. See [Gallery and viewer](gallery.md).
+In the Gallery, a tap opens the image, and in [Select mode](gallery.md#select-move-download-and-delete) a tap picks a tile, with the actions in a bar at the foot. **Download** saves the zip through the browser, which Safari puts in Files. Tapping the page's title scrolls to the top. See [Gallery and viewer](gallery.md).
 
 ## On a tablet
 

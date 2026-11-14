@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- **Select mode on every screen.** Pick files in the Gallery to move, download or delete them, including every match of the filter, not only the tiles you have scrolled to. See [Select, move, download and delete](https://knuthelge.github.io/ZVisionGenerator/web-ui/gallery/#select-move-download-and-delete).
+- **Download a selection as a zip.** **Download** in Select mode saves the picked files as one uncompressed zip, with their folders kept.
+- **Star the files you want to find again.** Star from a tile or the viewer, in the Gallery and the Workspace, and show starred files only with the **★** toggle. See [Stars](https://knuthelge.github.io/ZVisionGenerator/web-ui/gallery/#stars).
+
+### Changed
+- **On a computer, a click on a tile always opens the viewer.** Picking files goes through Select mode.
+- **Loading spinners are a faint ring with a turning arc** everywhere in the app.
+
 ## [0.14.0] - 2026-11-12
 
 0.14.0 adds audio: songs, speech and sound effects, made in a new Audio tab or with `ziv-audio`. You can also edit images you already have, extend a video from any frame, and keep your work in projects. Every built-in model now shows its licence.

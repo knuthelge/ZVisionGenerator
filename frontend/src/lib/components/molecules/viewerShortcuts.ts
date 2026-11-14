@@ -3,7 +3,7 @@ import type { UpscaleFactor } from '$lib/types';
 
 export type ViewerAction =
   | 'close' | 'prev' | 'next' | 'first' | 'last' | 'details' | 'reuse' | 'reference' | 'edit'
-  | 'download' | 'copy' | 'delete' | 'delete-now' | 'help';
+  | 'download' | 'star' | 'copy' | 'delete' | 'delete-now' | 'help';
 
 type KeyInput = Pick<KeyboardEvent, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey' | 'altKey'>;
 
@@ -12,8 +12,8 @@ const FRAME_STEP_SHORTCUT: ShortcutEntry = { keys: ['←', '→'], label: 'After
 
 /** Shortcuts shown in the viewer's help panel, in display order. */
 export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
-  { keys: ['←', '→'], label: 'Previous / next asset' },
-  { keys: ['Home', 'End'], label: 'First / last asset' },
+  { keys: ['←', '→'], label: 'Previous / next file' },
+  { keys: ['Home', 'End'], label: 'First / last file' },
   FRAME_STEP_SHORTCUT,
   { keys: ['R'], label: 'Reuse settings' },
   { keys: ['E'], label: 'Use as start image or frame (image), extend (video), or audio track or voice (audio)' },
@@ -21,6 +21,7 @@ export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
   { keys: ['X → 2'], label: 'Upscale 2×' },
   { keys: ['X → 4'], label: 'Upscale 4×' },
   { keys: ['D'], label: 'Download' },
+  { keys: ['S'], label: 'Star or unstar' },
   { keys: ['C'], label: 'Copy the prompt' },
   { keys: ['Del', '⌫'], label: 'Delete' },
   { keys: ['⇧+Del'], label: 'Delete without asking' },
@@ -48,6 +49,7 @@ const KEY_ACTIONS: Record<string, ViewerAction> = {
   e: 'reference',
   m: 'edit',
   d: 'download',
+  s: 'star',
   c: 'copy',
   // Mac keyboards send Backspace from the key labelled "delete".
   Delete: 'delete',

@@ -136,10 +136,10 @@ describe('projectsStore.choose', () => {
 
   it('sets the pick and scrolls the remembered Gallery to the top keeping filter and sort, without asking the server for a list', async () => {
     const { projects, pick, memory } = await load();
-    memory.set({ filter: 'video', sort: 'oldest', scrollTop: 480 });
+    memory.set({ filter: 'video', sort: 'oldest', starred: false, scrollTop: 480 });
     projects.choose('Zoo');
     expect(pick.current).toBe('Zoo');
-    expect(memory.get()).toEqual({ filter: 'video', sort: 'oldest', scrollTop: 0 });
+    expect(memory.get()).toEqual({ filter: 'video', sort: 'oldest', starred: false, scrollTop: 0 });
     expect(getGallery).not.toHaveBeenCalled();
   });
 
@@ -148,12 +148,12 @@ describe('projectsStore.choose', () => {
     let release: (page: GalleryPage) => void = () => {};
     getGallery.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
     const before = gallery.refresh();
-    gallery.setView({ filter: 'image', sort: 'newest' }, { assets: [], page: 2, totalPages: 3, totalCount: 9 });
+    gallery.setView({ filter: 'image', sort: 'newest', starred: false }, { assets: [], page: 2, totalPages: 3, totalCount: 9 });
 
     getGallery.mockResolvedValue({ assets: [{ id: 'z1', project: 'Zoo', media_type: 'image' } as never], page: 1, total_pages: 1, total_count: 1 });
     projects.choose('Zoo');
     const after = gallery.refresh();
-    expect(gallery.view({ filter: 'image', sort: 'newest' }).totalCount).toBeNull();
+    expect(gallery.view({ filter: 'image', sort: 'newest', starred: false }).totalCount).toBeNull();
     release({ assets: [{ id: 'stale', project: null, media_type: 'image' } as never], page: 1, total_pages: 1, total_count: 1 });
     await before;
     await after;

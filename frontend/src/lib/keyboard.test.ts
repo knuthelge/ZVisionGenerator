@@ -86,6 +86,10 @@ describe('keyboard', () => {
       expect(entriesOf('Workspace').some((entry) => entry.keys.includes('⌥/Alt+↵') && entry.label.includes('Speech text'))).toBe(true);
       expect(entriesOf('Prompts').some((entry) => entry.keys.includes('⌥/Alt+↵'))).toBe(true);
     });
+
+    it('lists the Gallery shortcuts', () => {
+      expect(entriesOf('Gallery').length).toBeGreaterThan(0);
+    });
   });
 
   describe('stepGoChord', () => {

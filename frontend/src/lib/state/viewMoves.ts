@@ -1,4 +1,4 @@
-import { filterAdmits, type MediaFilter } from '$lib/state/galleryFilter';
+import { viewAdmits, type MediaFilter } from '$lib/state/galleryFilter';
 import type { GalleryView } from '$lib/state/gallery.svelte';
 import { inProject } from '$lib/state/projectPick.svelte';
 import type { GalleryAsset, MovedAsset } from '$lib/types';
@@ -11,24 +11,30 @@ import type { GalleryAsset, MovedAsset } from '$lib/types';
  *
  * @param filter The media filter of the list.
  * @param pick The project the list is scoped to, or null for All files.
+ * @param starred Whether the list shows starred files only.
  */
-export function applyMovesToView(view: GalleryView, filter: MediaFilter, moves: readonly MovedAsset[], pick: string | null): GalleryView {
+export function applyMovesToView(view: GalleryView, filter: MediaFilter, moves: readonly MovedAsset[], pick: string | null, starred: boolean): GalleryView {
   const byOldId = new Map(moves.map((move) => [move.from, move.asset]));
   // A move never changes a file's media, so a media filter knows whether it counted the file. Not in a project is about
   // the project, which the move changed: it counts what it loaded.
   const loaded = new Set(view.assets.map((asset) => asset.id));
-  const counted = ({ from, asset }: MovedAsset): boolean => (filter === 'no_project' ? loaded.has(from) : filterAdmits(filter, asset));
-  const leaving = moves.filter((move) => counted(move) && !belongsToView(move.asset, filter, pick));
+  const counted = ({ from, asset }: MovedAsset): boolean => (filter === 'no_project' ? loaded.has(from) : viewAdmits(filter, starred, asset));
+  const leaving = moves.filter((move) => counted(move) && !belongsToView(move.asset, filter, pick, starred));
   const assets = view.assets.flatMap((asset) => {
     const moved = byOldId.get(asset.id);
     if (!moved) return [asset];
-    return belongsToView(moved, filter, pick) ? [moved] : [];
+    return belongsToView(moved, filter, pick, starred) ? [moved] : [];
   });
   if (leaving.length === 0 && assets.every((asset, index) => asset === view.assets[index])) return view;
   return { ...view, assets, totalCount: view.totalCount === null ? null : Math.max(0, view.totalCount - leaving.length) };
 }
 
-/** Whether a list scoped to *pick* with this filter shows an asset. */
-export function belongsToView(asset: Pick<GalleryAsset, 'media_type' | 'project'>, filter: MediaFilter, pick: string | null): boolean {
-  return inProject(asset, pick) && filterAdmits(filter, asset);
+/** Whether a list scoped to *pick* with this filter, starred only or not, shows an asset. */
+export function belongsToView(
+  asset: Pick<GalleryAsset, 'media_type' | 'project' | 'starred'>,
+  filter: MediaFilter,
+  pick: string | null,
+  starred: boolean
+): boolean {
+  return inProject(asset, pick) && viewAdmits(filter, starred, asset);
 }

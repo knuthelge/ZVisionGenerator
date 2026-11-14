@@ -25,8 +25,9 @@
   .spinner {
     display: inline-block;
     flex-shrink: 0;
-    border: 2px solid currentColor;
-    border-right-color: transparent;
+    /* A faint full ring with a bright arc, so a still frame (reduced motion) still reads as busy. */
+    border: 2px solid color-mix(in srgb, currentColor 22%, transparent);
+    border-top-color: currentColor;
     border-radius: 50%;
     animation: spinner-turn 0.7s linear infinite;
   }

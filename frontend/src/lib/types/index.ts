@@ -119,6 +119,8 @@ export interface GalleryAsset {
   created_at: string;
   /** The project folder the file sits in; null for a file at the top of the output folder. */
   project: string | null;
+  /** Whether the file is starred; the server always sends it, so absent reads as false. */
+  starred?: boolean;
   workflow: Workflow | AudioWorkflow;
   prompt: string;
   /** A video's recorded scene (who and where, look, camera); null for images and videos made without one. */
@@ -1858,12 +1860,23 @@ export interface Project {
 /** One file a move renamed: its old ID and the asset as it now stands. */
 export interface MovedAsset {
   from: string;
+  /** The old file's path on the host, as the listing's `file_path` showed it. */
+  from_path: string;
   asset: GalleryAsset;
 }
 
 /** What a move did: the files it moved, and the ones it could not with the reason. */
 export interface MoveResult {
   moved: MovedAsset[];
+  failed: { id: string; detail: string }[];
+}
+
+/** What a bulk delete reports for one removed file, enough to update the lists without a lookup. */
+export type RemovedAsset = Pick<GalleryAsset, 'id' | 'media_type' | 'project' | 'starred' | 'file_path'>;
+
+/** What a bulk delete did: the files it removed (a missing file counts as removed) and the ones it could not with the reason. */
+export interface DeleteResult {
+  deleted: RemovedAsset[];
   failed: { id: string; detail: string }[];
 }
 

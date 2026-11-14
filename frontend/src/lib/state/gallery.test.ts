@@ -130,7 +130,7 @@ describe('galleryStore paging', () => {
 });
 
 describe('galleryStore views', () => {
-  const videos = { filter: 'video' as const, sort: 'newest' as const };
+  const videos = { filter: 'video' as const, sort: 'newest' as const, starred: false };
 
   it('keeps one list per query, empty until the page commits it', () => {
     expect(store.view(videos).assets).toEqual([]);
@@ -154,8 +154,8 @@ describe('galleryStore views', () => {
   });
 
   it('puts new outputs at the front of every newest-first list whose filter admits them', () => {
-    const images = { filter: 'image' as const, sort: 'newest' as const };
-    const oldest = { filter: 'all' as const, sort: 'oldest' as const };
+    const images = { filter: 'image' as const, sort: 'newest' as const, starred: false };
+    const oldest = { filter: 'all' as const, sort: 'oldest' as const, starred: false };
     store.setView(videos, { assets: [asset(3, 'video')], page: 1, totalPages: 1, totalCount: 1 });
     store.setView(images, { assets: [asset(4)], page: 1, totalPages: 1, totalCount: 1 });
     store.setView(oldest, { assets: [asset(4), asset(3, 'video')], page: 1, totalPages: 1, totalCount: 2 });
@@ -173,8 +173,8 @@ describe('galleryStore views', () => {
 
 describe('galleryStore audio filter', () => {
   it('keeps new audio only in the audio list and the whole list, never in the image list', () => {
-    const audio = { filter: 'audio' as const, sort: 'newest' as const };
-    const images = { filter: 'image' as const, sort: 'newest' as const };
+    const audio = { filter: 'audio' as const, sort: 'newest' as const, starred: false };
+    const images = { filter: 'image' as const, sort: 'newest' as const, starred: false };
     store.setView(audio, { assets: [asset(3, 'audio')], page: 1, totalPages: 1, totalCount: 1 });
     store.setView(images, { assets: [asset(4)], page: 1, totalPages: 1, totalCount: 1 });
 
@@ -266,7 +266,7 @@ describe('galleryStore project scope', () => {
 
   it('leaves out outputs from another project, and admits all with All files', () => {
     pickProject('A');
-    store.setView({ filter: 'all', sort: 'newest' }, view([asset(5, 'image', 'A')]));
+    store.setView({ filter: 'all', sort: 'newest', starred: false }, view([asset(5, 'image', 'A')]));
     store.mergeOutputs([asset(1, 'image', 'B'), asset(2, 'image', 'A'), asset(3, 'image', null)]);
     expect(ids(store)).toEqual(['a2', 'a5']);
     expect(store.totalCount).toBe(2);
@@ -277,21 +277,21 @@ describe('galleryStore project scope', () => {
   });
 
   it('replaces a moved asset in place with All files, keeping the count', () => {
-    store.setView({ filter: 'all', sort: 'newest' }, view([asset(1), asset(2), asset(3)], 9));
-    store.applyMoves([{ from: 'a2', asset: { ...asset(2), id: 'B/a2', project: 'B' } }]);
+    store.setView({ filter: 'all', sort: 'newest', starred: false }, view([asset(1), asset(2), asset(3)], 9));
+    store.applyMoves([{ from: 'a2', from_path: '/o/a2', asset: { ...asset(2), id: 'B/a2', project: 'B' } }]);
     expect(ids(store)).toEqual(['a1', 'B/a2', 'a3']);
     expect(store.totalCount).toBe(9);
   });
 
   it('removes a file moved out of the picked project and lowers every count that admits it', () => {
     pickProject('A');
-    const videos = { filter: 'video' as const, sort: 'newest' as const };
-    const images = { filter: 'image' as const, sort: 'newest' as const };
-    store.setView({ filter: 'all', sort: 'newest' }, view([asset(1, 'image', 'A'), asset(2, 'video', 'A'), asset(3, 'image', 'A')], 8));
+    const videos = { filter: 'video' as const, sort: 'newest' as const, starred: false };
+    const images = { filter: 'image' as const, sort: 'newest' as const, starred: false };
+    store.setView({ filter: 'all', sort: 'newest', starred: false }, view([asset(1, 'image', 'A'), asset(2, 'video', 'A'), asset(3, 'image', 'A')], 8));
     store.setView(videos, view([asset(2, 'video', 'A')], 3));
     store.setView(images, view([asset(1, 'image', 'A'), asset(3, 'image', 'A')], 5));
 
-    store.applyMoves([{ from: 'a2', asset: { ...asset(2, 'video'), id: 'B/a2', project: 'B' } }]);
+    store.applyMoves([{ from: 'a2', from_path: '/o/a2', asset: { ...asset(2, 'video'), id: 'B/a2', project: 'B' } }]);
     expect(ids(store)).toEqual(['a1', 'a3']);
     expect(store.totalCount).toBe(7);
     expect(store.view(videos).assets).toEqual([]);
@@ -302,10 +302,10 @@ describe('galleryStore project scope', () => {
 
   it('keeps a file moved into the picked project under its new ID, and counts one it never loaded', () => {
     pickProject('A');
-    store.setView({ filter: 'all', sort: 'newest' }, view([asset(1, 'image', 'A'), asset(2, 'image', 'A')], 6));
+    store.setView({ filter: 'all', sort: 'newest', starred: false }, view([asset(1, 'image', 'A'), asset(2, 'image', 'A')], 6));
     store.applyMoves([
-      { from: 'a2', asset: { ...asset(2), id: 'A/a2', project: 'A' } },
-      { from: 'a9', asset: { ...asset(9), id: 'B/a9', project: 'B' } },
+      { from: 'a2', from_path: '/o/a2', asset: { ...asset(2), id: 'A/a2', project: 'A' } },
+      { from: 'a9', from_path: '/o/a9', asset: { ...asset(9), id: 'B/a9', project: 'B' } },
     ]);
     expect(ids(store)).toEqual(['a1', 'A/a2']);
     expect(store.totalCount).toBe(5);
@@ -320,13 +320,13 @@ describe('galleryStore project scope', () => {
       total_count: 1,
     }));
     await store.refresh();
-    store.applyMoves([{ from: 'a1', asset: { ...asset(1), id: 'B/a1', project: 'B' } }]);
+    store.applyMoves([{ from: 'a1', from_path: '/o/a1', asset: { ...asset(1), id: 'B/a1', project: 'B' } }]);
     expect(store.allRecent.map((item) => item.id)).toEqual(['B/a1', 'a2']);
   });
 });
 
 describe('galleryStore Not in a project list', () => {
-  const unsorted = { filter: 'no_project' as const, sort: 'newest' as const };
+  const unsorted = { filter: 'no_project' as const, sort: 'newest' as const, starred: false };
   const view = (assets: GalleryAsset[], totalCount: number | null = assets.length) => ({ assets, page: 1, totalPages: 1, totalCount });
 
   it('takes new outputs only when they sit in no project', () => {
@@ -345,7 +345,7 @@ describe('galleryStore Not in a project list', () => {
 
   it('drops a file moved into a project, and lowers the count', () => {
     store.setView(unsorted, view([asset(1), asset(2), asset(3)], 7));
-    store.applyMoves([{ from: 'a2', asset: { ...asset(2), id: 'B/a2', project: 'B' } }]);
+    store.applyMoves([{ from: 'a2', from_path: '/o/a2', asset: { ...asset(2), id: 'B/a2', project: 'B' } }]);
     expect(store.view(unsorted).assets.map((item) => item.id)).toEqual(['a1', 'a3']);
     expect(store.view(unsorted).totalCount).toBe(6);
   });
@@ -353,8 +353,8 @@ describe('galleryStore Not in a project list', () => {
   it('lowers its count only for the files it had loaded', () => {
     store.setView(unsorted, view([asset(1), asset(2)], 7));
     store.applyMoves([
-      { from: 'a2', asset: { ...asset(2), id: 'B/a2', project: 'B' } },
-      { from: 'a9', asset: { ...asset(9), id: 'B/a9', project: 'B' } },
+      { from: 'a2', from_path: '/o/a2', asset: { ...asset(2), id: 'B/a2', project: 'B' } },
+      { from: 'a9', from_path: '/o/a9', asset: { ...asset(9), id: 'B/a9', project: 'B' } },
     ]);
     expect(store.view(unsorted).assets.map((item) => item.id)).toEqual(['a1']);
     expect(store.view(unsorted).totalCount).toBe(6);
@@ -362,9 +362,107 @@ describe('galleryStore Not in a project list', () => {
 
   it('is dropped, to load again, when a file moves out of every project', () => {
     store.setView(unsorted, view([asset(1)], 1));
-    store.setView({ filter: 'all', sort: 'newest' }, view([asset(1), { ...asset(2), id: 'B/a2', project: 'B' }], 2));
-    store.applyMoves([{ from: 'B/a2', asset: asset(2) }]);
+    store.setView({ filter: 'all', sort: 'newest', starred: false }, view([asset(1), { ...asset(2), id: 'B/a2', project: 'B' }], 2));
+    store.applyMoves([{ from: 'B/a2', from_path: '/o/B/a2', asset: asset(2) }]);
     expect(store.view(unsorted).totalCount).toBeNull();
     expect(ids(store)).toEqual(['a1', 'a2']);
+  });
+});
+
+describe('galleryStore starred lists', () => {
+  const starredAll = { filter: 'all' as const, sort: 'newest' as const, starred: true };
+  const starredImages = { filter: 'image' as const, sort: 'newest' as const, starred: true };
+  const plain = { filter: 'all' as const, sort: 'newest' as const, starred: false };
+  const star = (id: number, media_type: 'image' | 'video' | 'audio' = 'image', project: string | null = null, starred = true): GalleryAsset => ({ ...asset(id, media_type, project), starred });
+  const view = (assets: GalleryAsset[], totalCount: number | null = assets.length) => ({ assets, page: 1, totalPages: 1, totalCount });
+
+  it('keeps the starred and the plain list of one filter apart', () => {
+    store.setView(plain, view([asset(1), asset(2)]));
+    store.setView(starredAll, view([star(2)]));
+    expect(store.view(plain).assets).toHaveLength(2);
+    expect(store.view(starredAll).assets.map((item) => item.id)).toEqual(['a2']);
+  });
+
+  it('never gains a merged new output in a starred list', () => {
+    store.setView(plain, view([asset(1)]));
+    store.setView(starredAll, view([star(2)]));
+    store.mergeOutputs([asset(0)]);
+    expect(store.view(plain).assets.map((item) => item.id)).toEqual(['a0', 'a1']);
+    expect(store.view(starredAll).assets.map((item) => item.id)).toEqual(['a2']);
+    expect(store.view(starredAll).totalCount).toBe(1);
+  });
+
+  it('lowers a starred list\'s count for a starred file it admits, and not for an unstarred one', () => {
+    store.setView(starredImages, view([star(1)], 4));
+    store.removeAssets([star(8), star(9, 'video'), star(7, 'image', null, false)]);
+    expect(store.view(starredImages).totalCount).toBe(3);
+    store.removeAssets([star(1)]);
+    expect(store.view(starredImages).assets).toEqual([]);
+    expect(store.view(starredImages).totalCount).toBe(2);
+  });
+
+  it('keeps a moved starred file in a starred list under its new ID and drops it from a list it left', () => {
+    pickProject('A');
+    store.setView(starredAll, view([star(1, 'image', 'A'), star(2, 'image', 'A')], 5));
+    store.applyMoves([
+      { from: 'a1', from_path: '/o/A/a1', asset: { ...star(1, 'image', 'A'), id: 'A/a1' } },
+      { from: 'a2', from_path: '/o/A/a2', asset: { ...star(2, 'image', 'B'), id: 'B/a2' } },
+    ]);
+    expect(store.view(starredAll).assets.map((item) => item.id)).toEqual(['A/a1']);
+    expect(store.view(starredAll).totalCount).toBe(4);
+  });
+
+  it('does not count an unstarred file leaving a project in a starred list', () => {
+    pickProject('A');
+    store.setView(starredAll, view([star(1, 'image', 'A')], 3));
+    store.applyMoves([{ from: 'a9', from_path: '/o/A/a9', asset: { ...star(9, 'image', 'B', false), id: 'B/a9' } }]);
+    expect(store.view(starredAll).totalCount).toBe(3);
+  });
+
+  describe('setStarred', () => {
+    it('replaces the file in every list and the recent list', () => {
+      store.setView(plain, view([asset(1), asset(2)]));
+      store.setStarred('a2', true);
+      expect(store.view(plain).assets.map((item) => item.starred ?? false)).toEqual([false, true]);
+    });
+
+    it('drops the cached starred lists on star, since the file\'s place in them is the server\'s to say', () => {
+      store.setView(plain, view([asset(1)]));
+      store.setView(starredAll, view([star(2)]));
+      store.setView(starredImages, view([star(2)]));
+      store.setStarred('a1', true);
+      expect(store.view(starredAll).totalCount).toBeNull();
+      expect(store.view(starredImages).totalCount).toBeNull();
+      expect(store.view(plain).assets[0].starred).toBe(true);
+    });
+
+    it('takes an unstarred file out of the starred lists at once and lowers their counts', () => {
+      store.setView(plain, view([star(1), star(2)], 6));
+      store.setView(starredAll, view([star(1), star(2)], 4));
+      store.setView(starredImages, view([star(1)], 3));
+      store.setStarred('a1', false);
+      expect(store.view(starredAll).assets.map((item) => item.id)).toEqual(['a2']);
+      expect(store.view(starredAll).totalCount).toBe(3);
+      expect(store.view(starredImages).assets).toEqual([]);
+      expect(store.view(starredImages).totalCount).toBe(2);
+      expect(store.view(plain).assets.map((item) => item.starred)).toEqual([false, true]);
+      expect(store.view(plain).totalCount).toBe(6);
+    });
+
+    it('lowers a starred list\'s count for a file it never loaded when its media filter admits it', () => {
+      store.setView(plain, view([star(1, 'video')], 6));
+      store.setView(starredImages, view([star(5)], 3));
+      store.setView(starredAll, view([star(5)], 4));
+      store.setStarred('a1', false);
+      // The file is a video: the starred images list never counted it.
+      expect(store.view(starredImages).totalCount).toBe(3);
+      expect(store.view(starredAll).totalCount).toBe(3);
+    });
+
+    it('drops a starred list to reload when the file is known nowhere', () => {
+      store.setView(starredAll, view([star(5)], 4));
+      store.setStarred('unknown', false);
+      expect(store.view(starredAll).totalCount).toBeNull();
+    });
   });
 });

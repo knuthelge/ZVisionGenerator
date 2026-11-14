@@ -16,7 +16,7 @@ A message that names a file, a setting or a model, or that says "use X instead",
 - [Prompts and prompt files](#prompts-and-prompt-files): the prompt file isn't found, can't be read or names an undefined snippet, a set is skipped.
 - [Prompt enhancer](#prompt-enhancer): the rewrite failed or the original prompt was used, Smart changed to Fast, the enhancer is slow or won't load.
 - [Models, LoRAs and conversion](#models-loras-and-conversion): a model isn't found or can't be detected, a LoRA does nothing, a converted model looks wrong.
-- [Web UI messages](#web-ui-messages): a picture is missing, the Workspace won't load, the live connection was lost, a file can't be played, an upscale isn't offered.
+- [Web UI messages](#web-ui-messages): a picture is missing, the Workspace won't load, the live connection was lost, a file can't be played, a file can't be deleted, an upscale isn't offered.
 - [Configuration file](#configuration-file): every command fails with a message about `config.yaml`.
 - [Report a problem](#report-a-problem): what to send when nothing here helps.
 
@@ -591,6 +591,14 @@ The page lost its link to the app, for example after the computer slept or `ziv 
 ### "This file can’t be played."
 
 The browser can't play the file; for a video the cause is often a codec it doesn't support. Open the file in a media player. See [The player](../web-ui/gallery.md#the-player).
+
+### "Could not delete the file: …"
+
+The computer refused to delete a file, and the reason follows the colon. It is usually a read-only drive or folder, a file you can't remove or a file another app has open. Fix the cause and try again. A bulk delete counts the files that failed instead; they stay selected.
+
+### "Could not save the star."
+
+The Web UI could not write its app database, so the star did not change. It is usually a read-only or full drive, or a database file another app has locked. Fix the cause and try again. See the [app database](data-folder.md#app-database).
 
 ### An upscale isn't available { #an-upscale-isnt-available }
 

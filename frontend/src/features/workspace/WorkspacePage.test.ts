@@ -81,7 +81,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
 vi.mock('$lib/api/gallery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/gallery')>();
   const { galleryApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAsset: galleryApiMocks.deleteAsset };
+  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAssets: galleryApiMocks.deleteAssets };
 });
 
 vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
@@ -238,17 +238,17 @@ describe('WorkspacePage', () => {
 
     // Before the core context arrives.
     expect(preview()).toContain('Looking for your latest work…');
-    expect(preview()).not.toContain('No generated assets yet');
+    expect(preview()).not.toContain('No generated files yet');
 
     // Context arrived without history; the deferred history fetch is still pending.
     resolveContext(makeContext({ history_assets: [] }));
     await settle();
     expect(preview()).toContain('Looking for your latest work…');
-    expect(preview()).not.toContain('No generated assets yet');
+    expect(preview()).not.toContain('No generated files yet');
 
     resolveHistory(makeGalleryPage([]));
     await settle();
-    expect(preview()).toContain('No generated assets yet');
+    expect(preview()).toContain('No generated files yet');
   });
 
   it('shows the latest video immediately without waiting for load events', async () => {
@@ -4256,7 +4256,7 @@ describe('WorkspacePage images', () => {
     draft.setStartImage('video', { path: '/outputs/out/first.png' }, null);
     draft.setLastFrame({ path: '/outputs/out/first.png' });
     await mountWithHistory([asset]);
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     expect(draft.state.workflow).toBe('img2img');
 
     openMenu(asset);

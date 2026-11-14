@@ -69,7 +69,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
 vi.mock('$lib/api/gallery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/gallery')>();
   const { galleryApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAsset: galleryApiMocks.deleteAsset };
+  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAssets: galleryApiMocks.deleteAssets };
 });
 
 vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
@@ -1007,7 +1007,7 @@ describe('WorkspacePage last frame', () => {
 
     it('clears the last frame when its asset is deleted', async () => {
       await mountLastFrame([asset], { first: true });
-      galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+      galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
       await menuFor();
       (document.querySelector('[role="menu"] [data-action="reference-last-frame"]') as HTMLButtonElement).click();
       await settle();
@@ -1240,7 +1240,7 @@ describe('WorkspacePage references', () => {
   it('keeps a reference row whose asset is deleted from the history strip, flagged missing', async () => {
     const asset = makeAsset({ id: 'out/ref.png', url: '/media/out/ref.png', filename: 'ref.png', file_path: '/outputs/out/ref.png' });
     galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     workspaceApiMocks.checkReferencePaths.mockResolvedValue([]);
     draft.patch({ referenceImagePaths: ['/in/a.png', '/outputs/out/ref.png', '/in/c.png'] });
     await mountWorkspace({ ...referencesContext(), history_assets: [asset] });

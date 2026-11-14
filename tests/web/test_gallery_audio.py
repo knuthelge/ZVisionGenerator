@@ -30,7 +30,6 @@ from zvisiongenerator.web import gallery
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web.gallery import (
     AUDIO_EXTENSIONS,
-    GALLERY_MEDIA_EXTENSIONS,
     build_gallery_page_json,
     filter_and_sort_assets,
     gallery_asset_for_output_path,
@@ -122,7 +121,7 @@ class TestListing:
 
         assert sorted(asset.name for asset in assets) == sorted(names)
         assert {asset.kind for asset in assets} == {"audio"}
-        assert AUDIO_EXTENSIONS == {".flac", ".wav", ".mp3", ".m4a", ".ogg"} and AUDIO_EXTENSIONS <= GALLERY_MEDIA_EXTENSIONS
+        assert AUDIO_EXTENSIONS == {".flac", ".wav", ".mp3", ".m4a", ".ogg"}
 
     def test_a_file_that_cannot_be_decoded_still_lists_with_no_facts(self, tmp_path):
         (tmp_path / "broken.flac").write_bytes(b"not audio")

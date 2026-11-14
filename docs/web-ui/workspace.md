@@ -234,7 +234,7 @@ With no job running, the preview shows your latest output; step through earlier 
 - **The batch grid.** When a job that made several outputs finishes, all of them fill the preview as a grid until you step away. A batch of takes shows each as a player, one under another. Each tile has the same **⋯** menu as the Gallery. A phone goes straight back to the latest output.
 - **Video and takes** play in the preview in the same [player](gallery.md#the-player) as the viewer. Pause a video partway to use that frame; see [Use a paused frame](gallery.md#use-a-paused-frame).
 
-Finished images, videos and audio appear in the **Gallery strip**, newest first. It is the same list as the [Gallery](gallery.md) page, so a new output, a delete or a move shows in both. A strip tile's **⋯** menu has **Move to project…**; see [Move to project](gallery.md#move-to-project). On a phone, swipe up for the Gallery.
+Finished images, videos and audio appear in the **Gallery strip**, newest first. It is the same list as the [Gallery](gallery.md) page, so a new output, a delete or a move shows in both. A strip tile's **⋯** menu has **Move to project…**; see [Move to project](gallery.md#move-to-project). Files can be [starred](gallery.md#stars) here too. On a phone, swipe up for the Gallery.
 
 ### Notices
 

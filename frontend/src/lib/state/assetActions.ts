@@ -48,7 +48,14 @@ export interface AssetActionHandlers {
   ondelete?: (asset: GalleryAsset, options?: DeleteOptions) => void;
   /** Move the asset to a project, or out of every project with null. */
   onmove?: (asset: GalleryAsset, project: string | null) => void;
+  /** Star the asset, or unstar it when `starred` is false. */
+  onstar?: (asset: GalleryAsset, starred: boolean) => void;
+  /** The menu's lead item was picked: Select enters Select mode with the asset selected; View opens the viewer. */
+  onlead?: (lead: MenuLead) => void;
 }
+
+/** The item that leads an asset's menu: Select outside Select mode, View inside it. */
+export type MenuLead = 'select' | 'view';
 
 /** The Use as hints of the audio targets. */
 export const AUDIO_TRACK_HINT = 'Video tab, from 0 s';

@@ -6,12 +6,13 @@
   import { emptySlotsHolding } from '$lib/state/assetRemoval';
   import { projectPick } from '$lib/state/projectPick.svelte';
   import { moveAndReconcile } from '$lib/state/moveAndReconcile';
+  import { starAndReconcile } from '$lib/state/starAndReconcile';
   import { router } from '$lib/state/router.svelte';
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
-  import { getGallery, deleteAsset } from '$lib/api/gallery';
+  import { getGallery, getGalleryIds, deleteAssets, downloadAssets } from '$lib/api/gallery';
   import { getWorkspaceCoreContext } from '$lib/api/workspace';
   import { galleryStore, type GalleryQuery, type SortOrder } from '$lib/state/gallery.svelte';
-  import type { MediaFilter } from '$lib/state/galleryFilter';
+  import { viewAdmits, type MediaFilter } from '$lib/state/galleryFilter';
   import { belongsToView } from '$lib/state/viewMoves';
   import { jobStore } from '$lib/state/job.svelte';
   import { draft } from '$lib/state/draft.svelte';
@@ -21,20 +22,22 @@
   import { heldUploads } from '$lib/state/heldUploads.svelte';
   import { requestReference } from '$lib/state/pendingReference.svelte';
   import { startUpscale } from '$lib/state/upscale';
-  import type { GalleryAsset, MoveResult, UpscaleFactor, UpscaleMethod, WorkspaceContext } from '$lib/types';
-  import { Button, Spinner } from '$lib/components/atoms';
+  import type { GalleryAsset, MoveResult, RemovedAsset, UpscaleFactor, UpscaleMethod, WorkspaceContext } from '$lib/types';
+  import { Button, Icon, Spinner } from '$lib/components/atoms';
   import { Alert, AssetTile, AssetViewer, EmptyState, MoveMenu, PageHeader, SaveVoiceDialog, Select, requestConfirm } from '$lib/components/molecules';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import { hasOpenModal, isCommandKey, isPlainKey, isTyping } from '$lib/keyboard';
   import { gridColumns, moveInGrid } from './gridNav';
+  import { modeLine, rangeIds, selectionProject, tileClickIntent, withAdded, withToggled } from './selection';
   import { layout } from '$lib/state/layoutMode.svelte';
 
-  // Phone: a Select mode, since there is no hover to show a tile's checkbox and no keyboard to select with.
+  // One Select mode on every layout: in it a click or tap toggles a tile, and the header and the phone bar carry the bulk actions.
   let selectMode = $state(false);
+  // The last tile toggled; Shift-click selects the run from it.
+  let anchorId = $state<string | null>(null);
+  // Select all is fetching the matching IDs.
+  let selectingAll = $state(false);
   const compact = $derived(layout.compact);
-  $effect(() => {
-    if (!compact) selectMode = false;
-  });
 
   let loading = $state(true);
   let loadingMore = $state(false);
@@ -43,9 +46,10 @@
 
   let mediaFilter = $state<MediaFilter>('all');
   let sortOrder = $state<SortOrder>('newest');
+  let starredOnly = $state(false);
   // The list is the gallery store's view of the last query that loaded: shared with the Workspace strip, and kept
   // across visits. A view whose replacement failed keeps showing the previous one.
-  let shownQuery = $state<GalleryQuery>({ filter: 'all', sort: 'newest' });
+  let shownQuery = $state<GalleryQuery>({ filter: 'all', sort: 'newest', starred: false });
   const view = $derived(galleryStore.view(shownQuery));
   const assets = $derived(view.assets);
   const page = $derived(view.page);
@@ -65,18 +69,14 @@
   let viewerTrigger = $state<HTMLElement | null>(null);
 
   const selectedCount = $derived(selected.size);
-  const deletableSelectedCount = $derived(
-    Array.from(selected).filter((id) => !deletingIds.has(id)).length
-  );
-  const movableSelection = $derived(assets.filter((asset) => selected.has(asset.id) && !deletingIds.has(asset.id)));
+  // The selection's files that no delete holds: every one, loaded or not.
+  const actionableIds = $derived(Array.from(selected).filter((id) => !deletingIds.has(id)));
   // Where the selected files sit when they share it; undefined for a mix, which checks no row.
-  const selectionProject = $derived.by<string | null | undefined>(() => {
-    const first = movableSelection[0];
-    return first && movableSelection.every((asset) => asset.project === first.project) ? first.project : undefined;
-  });
+  const moveCurrent = $derived(selectionProject(selected, assets, projectPick.current, mediaFilter));
   const hasMore = $derived(page < totalPages);
   const emptyState = $derived(assets.length === 0 && !loading && !error);
-  const filteredEmptyState = $derived(emptyState && mediaFilter !== 'all');
+  const starredEmptyState = $derived(emptyState && starredOnly);
+  const filteredEmptyState = $derived(emptyState && !starredOnly && mediaFilter !== 'all');
   // Not in a project lists the files no project holds; it is offered with All files only, since a project's files are all in it.
   const mediaOptions = $derived([
     { value: 'all', label: 'All media' },
@@ -87,15 +87,17 @@
   ]);
   /** Whether the view shown keeps a moved file. */
   function inView(asset: GalleryAsset): boolean {
-    return belongsToView(asset, mediaFilter, projectPick.current);
+    return belongsToView(asset, mediaFilter, projectPick.current, starredOnly);
   }
   const emptyTitle = $derived(
-    filteredEmptyState ? 'No matching assets'
+    starredEmptyState ? 'No starred files'
+      : filteredEmptyState ? 'No matching files'
       : projectPick.current !== null ? `Nothing in ${projectPick.current} yet`
-      : 'No generated assets yet'
+      : 'No generated files yet'
   );
   const emptyBody = $derived(
-    filteredEmptyState ? (mediaFilter === 'no_project' ? 'Every file is in a project.' : `No ${mediaFilter} assets match the current gallery filter.`)
+    starredEmptyState ? 'Star a file from its ⋯ menu or the viewer.'
+      : filteredEmptyState ? (mediaFilter === 'no_project' ? 'Every file is in a project.' : `No ${mediaFilter} files match the current gallery filter.`)
       : projectPick.current !== null ? 'New work saves here. To add existing files, switch to All files and use Move to project.'
       : 'Generated outputs appear here after a job completes.'
   );
@@ -123,23 +125,24 @@
       // A project picked elsewhere since the visit has no files outside a project to show.
       mediaFilter = visit.filter === 'no_project' && projectPick.current !== null ? 'all' : visit.filter;
       sortOrder = visit.sort;
-      shownQuery = { filter: mediaFilter, sort: visit.sort };
+      starredOnly = visit.starred;
+      shownQuery = { filter: mediaFilter, sort: visit.sort, starred: starredOnly };
     }
     // The store may already hold this view: from the last visit, or the strip's list on the first one.
-    const known = galleryStore.view({ filter: mediaFilter, sort: sortOrder }).assets.length > 0;
+    const known = galleryStore.view({ filter: mediaFilter, sort: sortOrder, starred: starredOnly }).assets.length > 0;
     if (known) {
       loading = false;
       void tick().then(() => { if (scrollRegion && visit) scrollRegion.scrollTop = visit.scrollTop; });
     }
 
     _viewGeneration += 1;
-    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, false, known);
+    void loadPageOne(mediaFilter, sortOrder, starredOnly, _viewGeneration, _mutationRevision, false, known);
     document.addEventListener('keydown', handleGridKeydown);
 
     return () => {
       document.removeEventListener('keydown', handleGridKeydown);
       if (error || loading) galleryMemory.forget();
-      else galleryMemory.set({ filter: mediaFilter, sort: sortOrder, scrollTop });
+      else galleryMemory.set({ filter: mediaFilter, sort: sortOrder, starred: starredOnly, scrollTop });
       // Invalidate every request still awaiting a response after unmount.
       _viewGeneration += 1;
       _mutationRevision += 1;
@@ -164,12 +167,14 @@
     viewGeneration: number,
     mutationRevision: number,
     filter: string,
-    sort: string
+    sort: string,
+    starred: boolean
   ): boolean {
     return viewGeneration === _viewGeneration
       && mutationRevision === _mutationRevision
       && filter === mediaFilter
-      && sort === sortOrder;
+      && sort === sortOrder
+      && starred === starredOnly;
   }
 
   function clearActiveAsset(): void {
@@ -180,6 +185,7 @@
   async function loadPageOne(
     filter: MediaFilter,
     sort: SortOrder,
+    starred: boolean,
     viewGeneration: number,
     mutationRevision: number,
     preserveLocalOnError = false,
@@ -195,24 +201,20 @@
     // from an invalidated replacement request keep hiding those assets.
     error = null;
     try {
-      const result = await getGallery(1, filter, sort, projectPick.current);
-      if (!requestIsCurrent(viewGeneration, mutationRevision, filter, sort)) return;
+      const result = await getGallery(1, filter, sort, projectPick.current, starred);
+      if (!requestIsCurrent(viewGeneration, mutationRevision, filter, sort, starred)) return;
       const returnedDeletedAssets = result.assets.filter((asset) => _successfullyDeletedIds.has(asset.id));
       const pageOne = result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id));
       // A remembered view keeps the pages loaded after page one, so the grid stays where it was scrolled.
       const merged = keepLoaded ? keepLoadedTail(pageOne, assets) : pageOne;
-      const staleDeletedCount = returnedDeletedAssets.filter(
-        (asset) => filter === 'all' || asset.media_type === filter
-      ).length;
-      galleryStore.setView({ filter, sort }, {
+      const staleDeletedCount = returnedDeletedAssets.filter((asset) => viewAdmits(filter, starred, asset)).length;
+      galleryStore.setView({ filter, sort, starred }, {
         assets: merged,
         page: merged.length > pageOne.length ? page : result.page,
         totalPages: result.total_pages,
         totalCount: Math.max(0, result.total_count - staleDeletedCount),
       });
-      shownQuery = { filter, sort };
-      const visibleIds = new Set(assets.map((asset) => asset.id));
-      selected = new Set(Array.from(selected).filter((id) => visibleIds.has(id)));
+      shownQuery = { filter, sort, starred };
 
       if (selectedAsset) {
         const refreshedActive = assets.find((asset) => asset.id === selectedAsset!.id) ?? null;
@@ -223,9 +225,9 @@
         }
       }
     } catch (e) {
-      if (!requestIsCurrent(viewGeneration, mutationRevision, filter, sort)) return;
+      if (!requestIsCurrent(viewGeneration, mutationRevision, filter, sort, starred)) return;
       if (preserveLocalOnError) {
-        addToast('Gallery refresh failed; deleted assets remain removed. Change the view to retry.', 'warning');
+        addToast('Gallery refresh failed; deleted files remain removed. Change the view to retry.', 'warning');
       } else {
         error = errorText(e, 'Failed to load gallery');
       }
@@ -233,7 +235,7 @@
       if (pageOneRequestRevision === _pageOneRequestRevision) {
         pageOnePending = false;
       }
-      if (requestIsCurrent(viewGeneration, mutationRevision, filter, sort)) {
+      if (requestIsCurrent(viewGeneration, mutationRevision, filter, sort, starred)) {
         loading = false;
       }
     }
@@ -248,20 +250,19 @@
     const requestedPage = rereadLastPage ? page : expectedPage;
     const requestedFilter = mediaFilter;
     const requestedSort = sortOrder;
+    const requestedStarred = starredOnly;
     loadingMore = true;
     try {
-      const result = await getGallery(requestedPage, requestedFilter, requestedSort, projectPick.current);
-      if (!requestIsCurrent(viewGeneration, mutationRevision, requestedFilter, requestedSort)) return;
+      const result = await getGallery(requestedPage, requestedFilter, requestedSort, projectPick.current, requestedStarred);
+      if (!requestIsCurrent(viewGeneration, mutationRevision, requestedFilter, requestedSort, requestedStarred)) return;
       // Page one can reset pagination depth without changing the query. Do not
       // append a response that would leave a gap in the current page sequence.
       if (expectedPage !== page + 1) return;
       const returnedDeletedAssets = result.assets.filter((asset) => _successfullyDeletedIds.has(asset.id));
       const loadedIds = new Set(assets.map((asset) => asset.id));
       if (rereadLastPage) _pagesShifted = false;
-      const staleDeletedCount = returnedDeletedAssets.filter(
-        (asset) => requestedFilter === 'all' || asset.media_type === requestedFilter
-      ).length;
-      galleryStore.setView({ filter: requestedFilter, sort: requestedSort }, {
+      const staleDeletedCount = returnedDeletedAssets.filter((asset) => viewAdmits(requestedFilter, requestedStarred, asset)).length;
+      galleryStore.setView({ filter: requestedFilter, sort: requestedSort, starred: requestedStarred }, {
         assets: [...assets, ...result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id) && !loadedIds.has(asset.id))],
         page: result.page,
         totalPages: result.total_pages,
@@ -270,7 +271,7 @@
     } catch {
       // ignore load-more errors silently
     } finally {
-      if (requestIsCurrent(viewGeneration, mutationRevision, requestedFilter, requestedSort)) {
+      if (requestIsCurrent(viewGeneration, mutationRevision, requestedFilter, requestedSort, requestedStarred)) {
         loadingMore = false;
       }
     }
@@ -278,14 +279,17 @@
 
   function beginReplacementView(
     filter: MediaFilter,
-    sort: 'newest' | 'oldest'
+    sort: 'newest' | 'oldest',
+    starred: boolean
   ): void {
     mediaFilter = filter;
     sortOrder = sort;
-    selected = new Set();
+    starredOnly = starred;
+    // A view change leaves Select mode: the selection belongs to the view it was made in.
+    leaveSelectMode();
     clearActiveAsset();
     _viewGeneration += 1;
-    void loadPageOne(filter, sort, _viewGeneration, _mutationRevision);
+    void loadPageOne(filter, sort, starred, _viewGeneration, _mutationRevision);
   }
 
   // A new pick replaces the view like a filter change does (selection cleared, viewer closed, responses from the old
@@ -296,54 +300,137 @@
     if (pick === _shownPick) return;
     _shownPick = pick;
     untrack(() => {
-      beginReplacementView(pick !== null && mediaFilter === 'no_project' ? 'all' : mediaFilter, sortOrder);
+      beginReplacementView(pick !== null && mediaFilter === 'no_project' ? 'all' : mediaFilter, sortOrder, starredOnly);
       if (scrollRegion) scrollRegion.scrollTop = 0;
     });
   });
 
   function onFilterChange(value: MediaFilter): void {
-    beginReplacementView(value, sortOrder);
+    beginReplacementView(value, sortOrder, starredOnly);
   }
 
   function onSortChange(value: 'newest' | 'oldest'): void {
-    beginReplacementView(mediaFilter, value);
+    beginReplacementView(mediaFilter, value, starredOnly);
+  }
+
+  function toggleStarredOnly(): void {
+    beginReplacementView(mediaFilter, sortOrder, !starredOnly);
   }
 
   function clearMediaFilter(): void {
-    beginReplacementView('all', sortOrder);
+    beginReplacementView('all', sortOrder, starredOnly);
+  }
+
+  /** The starred empty state's action: turn ★ off and keep the media filter. */
+  function showAllStarred(): void {
+    beginReplacementView(mediaFilter, sortOrder, false);
   }
 
   function openWorkspace(): void {
     router.navigate('workspace');
   }
 
-  function toggleSelect(asset: GalleryAsset, isSelected: boolean): void {
-    const next = new Set(selected);
-    if (isSelected) {
-      next.add(asset.id);
-    } else {
-      next.delete(asset.id);
-    }
-    selected = next;
+  // --- Select mode -----------------------------------------------------------
+  /** Move focus to one of the bulk controls once the DOM has caught up with the state change that swaps them. */
+  function focusBulk(name: 'select' | 'done' | 'move' | 'delete'): void {
+    void tick().then(() => document.querySelector<HTMLElement>(`#gallery-view [data-bulk="${name}"]`)?.focus());
   }
 
-  function deletableSelection(): GalleryAsset[] {
-    return assets.filter(
-      (asset) => selected.has(asset.id)
-        && !deletingIds.has(asset.id)
-        && !_successfullyDeletedIds.has(asset.id)
-    );
+  function enterSelectMode(): void {
+    selectMode = true;
+  }
+
+  /** Leave Select mode: the selection and the anchor go with it. */
+  function leaveSelectMode(): void {
+    selectMode = false;
+    selected = new Set();
+    anchorId = null;
+  }
+
+  function startSelecting(): void {
+    enterSelectMode();
+    focusBulk('done');
+  }
+
+  function doneSelecting(): void {
+    leaveSelectMode();
+    focusBulk('select');
+  }
+
+  /** Enter the mode with this tile selected: its checkbox ticked outside the mode, and the menu's Select. */
+  function startSelectWith(asset: GalleryAsset): void {
+    enterSelectMode();
+    selected = withAdded(selected, [asset.id]);
+    anchorId = asset.id;
+  }
+
+  /** Set one tile's selection, from its checkbox in the mode. */
+  function setSelected(asset: GalleryAsset, isSelected: boolean): void {
+    const next = new Set(selected);
+    if (isSelected) next.add(asset.id);
+    else next.delete(asset.id);
+    selected = next;
+    anchorId = asset.id;
+  }
+
+  /** A click on a tile's media in the mode: toggle it, or with Shift add the run from the anchor. */
+  function onMediaClick(asset: GalleryAsset, event: MouseEvent): void {
+    if (tileClickIntent(event.shiftKey) === 'range') {
+      selected = withAdded(selected, rangeIds(assets.map((item) => item.id), anchorId, asset.id));
+      anchorId = asset.id;
+    } else {
+      selected = withToggled(selected, asset.id);
+      anchorId = asset.id;
+    }
+  }
+
+  /** Space and X on a focused tile: enter the mode if need be, and toggle the tile. */
+  function toggleTile(asset: GalleryAsset): void {
+    enterSelectMode();
+    selected = withToggled(selected, asset.id);
+    anchorId = asset.id;
+  }
+
+  /** Select every file the view matches, loaded or not: the IDs the server lists now, as a snapshot. */
+  async function selectAllMatching(): Promise<void> {
+    if (selectingAll) return;
+    enterSelectMode();
+    selectingAll = true;
+    const viewGeneration = _viewGeneration;
+    try {
+      const ids = await getGalleryIds(mediaFilter, projectPick.current, starredOnly);
+      if (viewGeneration !== _viewGeneration || !selectMode) return;
+      selected = new Set(ids.filter((id) => !_successfullyDeletedIds.has(id)));
+      anchorId = null;
+    } catch (e) {
+      addToast(`Could not select every file: ${errorText(e, 'the request failed')}`, 'error');
+    } finally {
+      selectingAll = false;
+    }
+  }
+
+  function downloadSelected(): void {
+    if (selected.size === 0) return;
+    // Synchronous, straight from the click: Safari drops a download that starts after an await.
+    downloadAssets(Array.from(selected));
+    addToast(`Downloading ${selected.size.toLocaleString()} file${selected.size !== 1 ? 's' : ''}.`, 'success');
+  }
+
+  /** The selected files that no delete holds and that are not already gone, loaded or not. */
+  function deletableSelection(): string[] {
+    return Array.from(selected).filter((id) => !deletingIds.has(id) && !_successfullyDeletedIds.has(id));
   }
 
   // Retry acts on this page's selection, so its toast must not outlive the page.
   let retryToastId: string | null = null;
   onDestroy(() => { if (retryToastId) dismissToast(retryToastId); });
 
+  /** Delete the whole selection in one request. A clean run ends Select mode; failures stay selected for Retry. */
   async function deleteSelected(): Promise<void> {
     const count = deletableSelection().length;
     if (count === 0) return;
     const approved = await requestConfirm({
-      question: `Delete ${count} selected asset${count !== 1 ? 's' : ''}?`,
+      question: `Delete ${count.toLocaleString()} file${count !== 1 ? 's' : ''}?`,
       info: 'This cannot be undone.',
       confirmLabel: 'Delete',
     });
@@ -352,38 +439,32 @@
     const targets = deletableSelection();
     if (targets.length === 0) return;
 
-    markDeleting(targets.map((asset) => asset.id), true);
+    markDeleting(targets, true);
     bulkDeleteRuns += 1;
+    let leave = false;
     try {
-      const results = await Promise.allSettled(
-        targets.map(async (asset) => deleteAsset(asset.id))
-      );
-      const deletedTargets = targets.filter((_, index) => results[index].status === 'fulfilled');
-      const failedTargets = targets.filter((_, index) => results[index].status === 'rejected');
-      reconcileSuccessfulDeletes(deletedTargets);
-
-      if (failedTargets.length === 0) {
-        addToast(
-          `Deleted ${deletedTargets.length} selected asset${deletedTargets.length !== 1 ? 's' : ''}.`,
-          'success'
-        );
-      } else if (deletedTargets.length > 0) {
-        retryToastId = addToast(
-          `Deleted ${deletedTargets.length}; ${failedTargets.length} failed and remain selected for retry.`,
-          'warning',
-          { action: { label: 'Retry', run: () => void deleteSelected() } }
-        );
+      const result = await deleteAssets(targets);
+      reconcileSuccessfulDeletes(result.deleted);
+      const deleted = result.deleted.length;
+      const failed = result.failed.length;
+      if (failed === 0) {
+        addToast(`Deleted ${deleted.toLocaleString()} file${deleted !== 1 ? 's' : ''}.`, 'success');
+        leave = true;
       } else {
         retryToastId = addToast(
-          `Delete failed for ${failedTargets.length} selected asset${failedTargets.length !== 1 ? 's' : ''}; they remain selected for retry.`,
-          'error',
+          `Deleted ${deleted.toLocaleString()}; ${failed.toLocaleString()} failed and remain selected for retry.`,
+          deleted > 0 ? 'warning' : 'error',
           { action: { label: 'Retry', run: () => void deleteSelected() } }
         );
       }
+    } catch (e) {
+      retryToastId = addToast(errorText(e, 'Delete failed'), 'error', { action: { label: 'Retry', run: () => void deleteSelected() } });
     } finally {
-      markDeleting(targets.map((asset) => asset.id), false);
+      markDeleting(targets, false);
       bulkDeleteRuns = Math.max(0, bulkDeleteRuns - 1);
     }
+    if (leave) leaveSelectMode();
+    focusBulk(leave ? 'select' : 'delete');
   }
 
   async function deleteSingle(asset: GalleryAsset, options: DeleteOptions = {}): Promise<void> {
@@ -392,23 +473,55 @@
     if (deletingIds.has(asset.id) || _successfullyDeletedIds.has(asset.id)) return;
     markDeleting([asset.id], true);
     try {
-      await deleteAsset(asset.id);
+      const { failed } = await deleteAssets([asset.id]);
+      if (failed.length > 0) {
+        addToast(failed[0].detail || 'Delete failed', 'error');
+        return;
+      }
+      // The client's own asset, not the server's answer, so the lists drop the file by the form of path they hold.
       reconcileSuccessfulDeletes([asset]);
       addToast('Deleted', 'success');
-    } catch {
-      addToast('Delete failed', 'error');
+    } catch (e) {
+      addToast(errorText(e, 'Delete failed'), 'error');
     } finally {
       markDeleting([asset.id], false);
     }
   }
 
-  function moveSingle(asset: GalleryAsset, project: string | null): Promise<void> {
-    return moveFiles([asset], project);
+  /**
+   * Star or unstar a file from a tile, its menu or the viewer. In the starred view an unstarred file leaves the list at
+   * once, and the viewer, when it showed that file, steps to its neighbour.
+   */
+  async function starAsset(asset: GalleryAsset, starred: boolean): Promise<void> {
+    const activeIndex = selectedAsset ? Math.max(0, assets.findIndex((item) => item.id === selectedAsset!.id)) : 0;
+    const viewerShowing = selectedAsset?.id === asset.id;
+    if (!(await starAndReconcile(asset, starred))) return;
+    if (starredOnly && !starred) {
+      // The file left this view, so it leaves the selection too: a bulk action must not act on what the view no longer shows.
+      if (selected.has(asset.id)) selected = withToggled(selected, asset.id);
+      afterListShrank(activeIndex, viewerShowing, true);
+    }
   }
 
-  async function moveFiles(targets: GalleryAsset[], project: string | null): Promise<void> {
-    const movable = targets.filter((asset) => !deletingIds.has(asset.id) && !_successfullyDeletedIds.has(asset.id));
-    if (movable.length === 0) return;
+  async function moveSingle(asset: GalleryAsset, project: string | null): Promise<void> {
+    await moveFiles([asset.id], project);
+  }
+
+  /** Move the whole selection, loaded or not. A clean run ends Select mode; files that failed stay selected. */
+  async function moveSelection(project: string | null): Promise<void> {
+    const result = await moveFiles(actionableIds, project);
+    if (result && result.failed.length === 0) {
+      leaveSelectMode();
+      focusBulk('select');
+    } else {
+      focusBulk('move');
+    }
+  }
+
+  /** Move files by ID, loaded or not; resolves to the server's answer, or null when nothing was asked or the request failed. */
+  async function moveFiles(ids: readonly string[], project: string | null): Promise<MoveResult | null> {
+    const movable = ids.filter((id) => !deletingIds.has(id) && !_successfullyDeletedIds.has(id));
+    if (movable.length === 0) return null;
     movesPending += 1;
     try {
       // The position the viewer steps from if its file leaves: read before the move changes the list.
@@ -417,6 +530,7 @@
       // server's to answer: it reports that file as failed and moves the rest.
       const result = await moveAndReconcile(movable, project, workspaceMemory.get());
       if (result) reconcileMoves(movable, result, activeIndex);
+      return result;
     } finally {
       movesPending -= 1;
     }
@@ -427,12 +541,11 @@
    * it still belongs to the view and leaves where it does not. Moved IDs are never recorded as deleted: a file moved back
    * regains its old ID and must show. Files already in the target are done with and leave the selection; failed ones stay.
    */
-  function reconcileMoves(targets: readonly GalleryAsset[], result: MoveResult, activeIndex: number): void {
+  function reconcileMoves(targetIds: readonly string[], result: MoveResult, activeIndex: number): void {
     const moves = result.moved;
     const failedIds = new Set(result.failed.map((failure) => failure.id));
-    const settledIds = new Set(targets.map((asset) => asset.id).filter((id) => !failedIds.has(id)));
-    const visibleIds = new Set(assets.map((asset) => asset.id));
-    selected = new Set(Array.from(selected).filter((id) => !settledIds.has(id) && visibleIds.has(id)));
+    const settledIds = new Set(targetIds.filter((id) => !failedIds.has(id)));
+    selected = new Set(Array.from(selected).filter((id) => !settledIds.has(id)));
     if (moves.length === 0) return;
     const movedFrom = new Set(moves.map((move) => move.from));
 
@@ -482,7 +595,7 @@
     deletingIds = next;
   }
 
-  function reconcileSuccessfulDeletes(targets: GalleryAsset[]): void {
+  function reconcileSuccessfulDeletes(targets: readonly RemovedAsset[]): void {
     const newlyDeleted = targets.filter((asset) => !_successfullyDeletedIds.has(asset.id));
     if (newlyDeleted.length === 0) return;
     const deletedIndex = selectedAsset ? Math.max(0, assets.findIndex((asset) => asset.id === selectedAsset!.id)) : 0;
@@ -496,17 +609,14 @@
     // are unknown, so the start image is assumed usable. A reference row stays, as in the Workspace; the Workspace
     // flags it missing when it next checks its images.
     emptySlotsHolding(newlyDeleted.map((asset) => asset.file_path), null);
-    const visibleIds = new Set(assets.map((asset) => asset.id));
-    selected = new Set(
-      Array.from(selected).filter((id) => !deletedIds.has(id) && visibleIds.has(id))
-    );
+    selected = new Set(Array.from(selected).filter((id) => !deletedIds.has(id)));
 
     afterListShrank(deletedIndex, selectedAsset !== null && deletedIds.has(selectedAsset.id), true);
   }
 
   function refillAfterMutation(): void {
     _refillAfterViewer = false;
-    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, true);
+    void loadPageOne(mediaFilter, sortOrder, starredOnly, _viewGeneration, _mutationRevision, true);
   }
 
   function selectAsset(asset: GalleryAsset): void {
@@ -623,10 +733,19 @@
 
   function handleGridKeydown(e: KeyboardEvent): void {
     if (e.defaultPrevented || isTyping(e.target) || hasOpenModal()) return;
+    // Alt+3 (Option+3) focuses the first tile, as it focuses the newest strip tile in the Workspace. `code`, not `key`:
+    // Alt+3 types "£" on a Mac keyboard.
+    if (e.altKey && !isCommandKey(e) && !e.shiftKey && e.code === 'Digit3') {
+      const first = gridTiles()[0];
+      if (!first) return;
+      e.preventDefault();
+      focusTile(first);
+      return;
+    }
     if (isCommandKey(e) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
       if (assets.length === 0) return;
       e.preventDefault();
-      selected = new Set(assets.map((asset) => asset.id));
+      void selectAllMatching();
       return;
     }
     if (!isPlainKey(e)) return;
@@ -635,9 +754,9 @@
     const index = tiles.findIndex((tile) => tile.contains(document.activeElement));
     const focused = index >= 0 ? assets[index] : undefined;
     if (e.key === 'Escape') {
-      if (selected.size === 0) return;
+      if (!selectMode) return;
       e.preventDefault();
-      selected = new Set();
+      leaveSelectMode();
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       // A held key must not open a second confirmation.
       if (e.repeat) {
@@ -652,7 +771,11 @@
       return;
     } else if (e.key === ' ' || e.key.toLowerCase() === 'x') {
       e.preventDefault();
-      toggleSelect(focused, !selected.has(focused.id));
+      toggleTile(focused);
+    } else if (e.key.toLowerCase() === 's') {
+      // S stars the focused file only, never the selection. A held key must not toggle it again and again.
+      e.preventDefault();
+      if (!e.repeat) void starAsset(focused, focused.starred !== true);
     } else {
       const next = moveInGrid(index, e.key, gridColumns(tiles.map((tile) => tile.offsetTop)), tiles.length);
       if (next === null) return;
@@ -662,44 +785,70 @@
   }
 </script>
 
+{#snippet selectAllButton()}
+  <!-- Busy while the matching IDs load: the label hides under the spinner so the button keeps its width, and aria-label keeps its name. It is not disabled, which would drop focus. -->
+  <button type="button" class="ui-btn sel-all" aria-busy={selectingAll} aria-label={selectingAll ? 'Select all' : undefined} onclick={() => void selectAllMatching()}>
+    <span class="sel-all-label">Select all</span>
+    {#if selectingAll}<span class="sel-all-spin"><Spinner size="sm" /></span>{/if}
+  </button>
+{/snippet}
+
 <div id="gallery-view" class="flex min-h-0 flex-1 flex-col bg-bg-base">
   <PageHeader
     title="Gallery"
-    description="{projectPick.current === null ? '' : `${projectPick.current} · `}Browsing {assets.length} loaded asset{assets.length !== 1 ? 's' : ''} of {totalCount}, {sortOrder === 'newest' ? 'newest' : 'oldest'} first."
+    description={selectMode
+      ? (compact ? undefined : modeLine({ project: projectPick.current, starred: starredOnly, filter: mediaFilter, coarse: layout.coarse }))
+      : `${projectPick.current === null ? '' : `${projectPick.current} · `}Browsing ${assets.length} loaded file${assets.length !== 1 ? 's' : ''} of ${totalCount}, ${sortOrder === 'newest' ? 'newest' : 'oldest'} first.`}
   >
     {#snippet actions()}
-      <Select
-        ariaLabel="Filter gallery media"
-        class={compact ? 'min-w-0 flex-1' : 'w-36'}
-        value={mediaFilter}
-        options={mediaOptions}
-        onchange={(next) => onFilterChange(next as MediaFilter)}
-      />
-      <Select
-        ariaLabel="Sort gallery assets"
-        class={compact ? 'min-w-0 flex-1' : 'w-36'}
-        value={sortOrder}
-        options={[
-          { value: 'newest', label: 'Newest first' },
-          { value: 'oldest', label: 'Oldest first' },
-        ]}
-        onchange={(next) => onSortChange(next as 'newest' | 'oldest')}
-      />
-      {#if compact}
-        <Button aria-pressed={selectMode} onclick={() => { selectMode = !selectMode; if (!selectMode) selected = new Set(); }}>{selectMode ? 'Done' : 'Select'}</Button>
+      {#if !selectMode}
+        <Select
+          ariaLabel="Filter gallery media"
+          class={compact ? 'min-w-0 flex-1' : 'w-36'}
+          value={mediaFilter}
+          options={mediaOptions}
+          onchange={(next) => onFilterChange(next as MediaFilter)}
+        />
+        <Button
+          icon
+          class="star-toggle"
+          aria-label="Starred"
+          aria-pressed={starredOnly}
+          title={starredOnly ? 'Showing starred only' : 'Show starred only'}
+          onclick={toggleStarredOnly}
+        ><Icon name="star" size={16} solid={starredOnly} /></Button>
+        <Select
+          ariaLabel="Sort gallery files"
+          class={compact ? 'min-w-0 flex-1' : 'w-36'}
+          value={sortOrder}
+          options={[
+            { value: 'newest', label: 'Newest first' },
+            { value: 'oldest', label: 'Oldest first' },
+          ]}
+          onchange={(next) => onSortChange(next as 'newest' | 'oldest')}
+        />
+        <Button data-bulk="select" onclick={startSelecting}>Select</Button>
+      {:else if compact}
+        <!-- Phone: the mode line and Done share one row; the actions are in the bar at the foot. -->
+        <p class="ui-page-sub min-w-0 flex-1" data-testid="mode-line">{modeLine({ project: projectPick.current, starred: starredOnly, filter: mediaFilter, coarse: layout.coarse })}</p>
+        <Button data-bulk="done" aria-pressed="true" onclick={doneSelecting}>Done</Button>
       {:else}
-        <span class="text-ui text-text-muted">{selectedCount} selected</span>
+        <Button data-bulk="done" aria-pressed="true" onclick={doneSelecting}>Done</Button>
+        <span class="mode-count" role="status">{selectedCount.toLocaleString()} selected</span>
+        {@render selectAllButton()}
         <span class="inline-flex" bind:this={bulkMoveAnchor}>
           <Button
+            data-bulk="move"
             aria-haspopup="menu"
             aria-expanded={bulkMoveOpen}
-            aria-label={layout.mode === 'tall' ? 'Move selected' : undefined}
-            disabled={movableSelection.length === 0 || moving}
+            aria-label="Move selected"
+            disabled={actionableIds.length === 0 || moving}
             onclick={() => { bulkMoveOpen = !bulkMoveOpen; }}
-          >{moving ? 'Moving…' : layout.mode === 'tall' ? 'Move' : 'Move selected'}</Button>
+          ><Icon name="folder" size={14} />{moving ? 'Moving…' : 'Move'}<Icon name="chevdown" size={12} class="opacity-70" /></Button>
         </span>
-        <Button variant="danger" disabled={selectedCount === 0 || deletableSelectedCount === 0} onclick={deleteSelected}>
-          {bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete selected'}
+        <Button aria-label="Download selected" disabled={selectedCount === 0} onclick={downloadSelected}><Icon name="download" size={14} />Download</Button>
+        <Button data-bulk="delete" variant="danger" aria-label="Delete selected" disabled={actionableIds.length === 0} onclick={deleteSelected}>
+          <Icon name="trash" size={14} />{bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete'}
         </Button>
       {/if}
     {/snippet}
@@ -719,7 +868,9 @@
       <EmptyState title={emptyTitle} class="min-h-96 justify-center">
         <p>{emptyBody}</p>
         {#snippet actions()}
-          {#if filteredEmptyState}
+          {#if starredEmptyState}
+            <Button onclick={showAllStarred}>Show all</Button>
+          {:else if filteredEmptyState}
             <Button onclick={clearMediaFilter}>Show all media</Button>
           {:else}
             <Button variant="primary" onclick={openWorkspace}>Open Workspace</Button>
@@ -735,9 +886,13 @@
             density="card"
             showProject={projectPick.current === null}
             selected={selected.has(asset.id)}
+            {selectMode}
             deleting={deletingIds.has(asset.id)}
-            onselect={compact && !selectMode ? undefined : toggleSelect}
-            onpreview={selectMode ? (asset) => toggleSelect(asset, !selected.has(asset.id)) : openViewer}
+            onselect={setSelected}
+            onmediaclick={onMediaClick}
+            onstartselect={startSelectWith}
+            onpreview={openViewer}
+            onstar={starAsset}
             onreuse={reuseInWorkspace}
             onreference={useAsReference}
             onuseaudio={useAudio}
@@ -768,20 +923,25 @@
       </div>
     {/if}
   </section>
-  {#if selectMode}
+  {#if selectMode && compact}
     <!-- Phone: the selection's actions, docked at the foot. -->
-    <div class="flex shrink-0 items-center gap-2 border-t border-border-subtle bg-bg-overlay px-3 py-2 text-ui text-text-secondary" style="padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px))" data-testid="gallery-select-bar">
-      <span>{selectedCount} selected</span>
-      <span class="flex-1"></span>
-      <Button onclick={() => { selected = new Set(assets.map((asset) => asset.id)); }}>Select all</Button>
+    <div class="ui-action-bar select-bar" data-testid="gallery-select-bar">
+      <span class="sel-count" role="status">{selectedCount.toLocaleString()} selected</span>
+      {@render selectAllButton()}
       <span class="inline-flex" bind:this={bulkMoveAnchor}>
-        <Button aria-haspopup="menu" aria-expanded={bulkMoveOpen} disabled={movableSelection.length === 0 || moving} onclick={() => { bulkMoveOpen = !bulkMoveOpen; }}>
-          {moving ? 'Moving…' : 'Move'}
-        </Button>
+        <Button
+          icon
+          data-bulk="move"
+          aria-haspopup="menu"
+          aria-expanded={bulkMoveOpen}
+          aria-label="Move selected"
+          title={moving ? 'Moving…' : 'Move selected'}
+          disabled={actionableIds.length === 0 || moving}
+          onclick={() => { bulkMoveOpen = !bulkMoveOpen; }}
+        ><Icon name="folder" size={18} /></Button>
       </span>
-      <Button variant="danger" disabled={selectedCount === 0 || deletableSelectedCount === 0} onclick={deleteSelected}>
-        {bulkDeleteRuns > 0 ? 'Deleting…' : selectedCount > 0 ? `Delete ${selectedCount}` : 'Delete'}
-      </Button>
+      <Button icon aria-label="Download selected" title="Download selected" disabled={selectedCount === 0} onclick={downloadSelected}><Icon name="download" size={18} /></Button>
+      <Button icon data-bulk="delete" variant="danger" aria-label="Delete selected" title={bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete selected'} disabled={actionableIds.length === 0} onclick={deleteSelected}><Icon name="trash" size={18} /></Button>
     </div>
   {/if}
 </div>
@@ -790,9 +950,9 @@
   open={bulkMoveOpen}
   anchor={bulkMoveAnchor}
   align="end"
-  count={movableSelection.length}
-  current={selectionProject}
-  onmove={(project) => void moveFiles(movableSelection, project)}
+  count={actionableIds.length}
+  current={moveCurrent}
+  onmove={(project) => void moveSelection(project)}
   onclose={() => { bulkMoveOpen = false; }}
 />
 
@@ -818,11 +978,28 @@
   onupscale={upscaleAsset}
   ondelete={deleteSingle}
   onmove={moveSingle}
+  onstar={starAsset}
 />
 
 <SaveVoiceDialog asset={voiceTake} model={useAs.voiceModel ?? null} vocabulary={context?.audio_settings} onclose={() => { voiceTake = null; }} />
 
 <style>
+  /* The ★ toggle beside the media filter: an outline star, muted; filled amber on an amber tint while on. */
+  :global(.ui-btn.star-toggle) { color: var(--color-text-secondary); }
+  :global(.ui-btn.star-toggle[aria-pressed='true']) { background: color-mix(in srgb, var(--color-star) 14%, transparent); color: var(--color-star); }
+  @media (hover: hover) { :global(.ui-btn.star-toggle[aria-pressed='true']:hover:not(:disabled)) { background: color-mix(in srgb, var(--color-star) 22%, transparent); color: var(--color-star); } }
+  @media (hover: none) { :global(.ui-btn.star-toggle[aria-pressed='true']:active:not(:disabled)) { background: color-mix(in srgb, var(--color-star) 22%, transparent); color: var(--color-star); } }
+  /* The count in Select mode: status text between Done and Select all. */
+  .mode-count { flex-shrink: 0; padding: 0 4px; font-size: var(--text-ui); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--color-text-primary); }
+  /* Select all while the IDs load: the same width, the label hidden under a centred spinner. */
+  .sel-all { position: relative; }
+  .sel-all[aria-busy='true'] > .sel-all-label { visibility: hidden; }
+  .sel-all-spin { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  /* The phone's bar: the selection's actions at the foot. */
+  .select-bar { flex-shrink: 0; gap: 6px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); }
+  .sel-count { min-width: 0; flex: 1; font-size: var(--text-content); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--color-text-primary); }
+  .select-bar :global(.ui-btn) { padding: 0 12px; }
+  .select-bar :global(.ui-btn-icon) { padding: 0; }
   /* A tile's shape while the assets load: the image square over a caption, in the tile's surface. */
   .tile-placeholder { aspect-ratio: 1 / 1.32; border-radius: var(--radius-md); background: var(--color-bg-surface); }
 </style>

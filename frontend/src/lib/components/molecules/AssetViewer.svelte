@@ -44,7 +44,7 @@
   import { hold } from '$lib/actions/hold';
   import { FIT, actualPixelsScale, clampPan, settleZoom, zoomAt, type Zoom } from './viewerZoom';
 
-  interface Props extends Omit<AssetActionHandlers, 'onpreview'> {
+  interface Props extends Omit<AssetActionHandlers, 'onpreview' | 'onlead'> {
     assets: GalleryAsset[];
     /** The id of the open asset: the viewer follows it, so assets landing before or after it never move the view. */
     currentId: string | null;
@@ -88,6 +88,7 @@
     onuseaudio,
     ondelete,
     onmove,
+    onstar,
   }: Props = $props();
 
   // The open asset is found by id. When it leaves the list (a delete), the viewer stays on the place it had, which is
@@ -175,7 +176,7 @@
   let moreButton = $state<HTMLButtonElement | null>(null);
   const moreItems = $derived.by<ActionMenuEntry[]>(() => {
     if (!asset) return [];
-    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onupscale, onuseaudio, ondelete }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined);
+    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onupscale, onuseaudio, ondelete, onstar }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined);
     const copyable = copyableText(asset);
     if (!copyable) return entries;
     const copy: ActionMenuEntry = { kind: 'item', id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(copyable) };
@@ -655,6 +656,10 @@
       case 'download':
         downloadLink?.click();
         return downloadLink !== null;
+      case 'star':
+        if (!onstar) return false;
+        onstar(asset, asset.starred !== true);
+        return true;
       case 'delete':
       case 'delete-now':
         // Ignore key repeat while the first delete is still in flight.
@@ -706,8 +711,8 @@
         }
       }
       const action = viewerActionFor(e);
-      // A held Del must not open a second confirmation.
-      if ((action === 'delete' || action === 'delete-now') && e.repeat) {
+      // A held Del must not open a second confirmation, and a held S must not toggle the star again and again.
+      if ((action === 'delete' || action === 'delete-now' || action === 'star') && e.repeat) {
         e.preventDefault();
         return;
       }
@@ -746,6 +751,9 @@
         <small>{index + 1} of {assets.length}{setLabel ? ` · ${setLabel}` : ''}</small>
       </div>
       {#if compact}
+        {#if onstar}
+          <button type="button" class="viewer-btn viewer-star ui-btn ui-btn-icon" data-action="star" aria-label="Star" aria-pressed={asset.starred === true} title={asset.starred === true ? 'Unstar (S)' : 'Star (S)'} onclick={() => onstar(asset, asset.starred !== true)}><Icon name="star" size={16} solid={asset.starred === true} /></button>
+        {/if}
         <button type="button" class="viewer-btn ui-btn ui-btn-icon" data-action="details" aria-label="Details" aria-expanded={detailsOpen} aria-controls="asset-viewer-details" onclick={toggleDetails}><Icon name="info" size={16} /></button>
         <button type="button" bind:this={moreButton} class="viewer-btn ui-btn ui-btn-icon" data-action="more" aria-label="Actions" aria-haspopup="menu" aria-expanded={moreOpen} onclick={() => { contextAt = null; moreOpen = !moreOpen; }}><Icon name="more" size={16} /></button>
         <button type="button" bind:this={closeButton} class="viewer-btn ui-btn ui-btn-icon" aria-label="Close viewer" onclick={close}><Icon name="close" size={16} /></button>
@@ -814,6 +822,17 @@
           title="Move to project"
           onclick={() => { moveOpen = !moveOpen; }}
         ><Icon name="folder" size={14} /><span class="viewer-btn-label">Move</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
+      {/if}
+      {#if onstar}
+        <button
+          type="button"
+          class="viewer-btn viewer-star ui-btn ui-btn-icon"
+          data-action="star"
+          aria-label="Star"
+          aria-pressed={asset.starred === true}
+          title={asset.starred === true ? 'Unstar (S)' : 'Star (S)'}
+          onclick={() => onstar(asset, asset.starred !== true)}
+        ><Icon name="star" size={16} solid={asset.starred === true} /></button>
       {/if}
       <a
         bind:this={downloadLink}
@@ -888,7 +907,7 @@
         <button
           type="button"
           class="viewer-nav prev ui-btn ui-btn-icon"
-          aria-label="Previous asset"
+          aria-label="Previous file"
           disabled={!hasPrev}
           onclick={() => hasPrev && onnavigate(index - 1)}
         ><Icon name="chevleft" size={20} /></button>
@@ -955,14 +974,14 @@
         <button
           type="button"
           class="viewer-nav next ui-btn ui-btn-icon"
-          aria-label="Next asset"
+          aria-label="Next file"
           disabled={!hasNext}
           onclick={() => hasNext && onnavigate(index + 1)}
         ><Icon name="chevright" size={20} /></button>
       </div>
 
       {#if detailsOpen}
-        <aside id="asset-viewer-details" class="viewer-details" class:ui-sheet={compact} aria-label="Asset details" use:sheetDrag={{ enabled: compact, onclose: () => { if (detailsOpen) toggleDetails(); } }}>
+        <aside id="asset-viewer-details" class="viewer-details" class:ui-sheet={compact} aria-label="File details" use:sheetDrag={{ enabled: compact, onclose: () => { if (detailsOpen) toggleDetails(); } }}>
           {#if compact}
             <div class="ui-sheet-grab" data-sheet-handle aria-hidden="true"></div>
             <div class="ui-sheet-head" data-sheet-handle>
@@ -1040,7 +1059,7 @@
     </div>
 
     {#if assets.length > 1}
-      <div class="viewer-film" aria-label="Assets in this set" bind:this={filmEl}>
+      <div class="viewer-film" aria-label="Files in this set" bind:this={filmEl}>
         {#each assets as item, itemIndex (item.id)}
           <button
             type="button"
@@ -1224,6 +1243,8 @@
   @media (max-width: 1099px) {
     .viewer-btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   }
+  /* A starred file's toggle is amber, with the amber tint under it. */
+  .viewer-star[aria-pressed='true'] { background: color-mix(in srgb, var(--color-star) 14%, transparent); color: var(--color-star); }
   .asset-viewer[data-compact='true'] .viewer-film { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
 
   /* The pager: the shown asset's pane between its neighbours, one pane to each side, moved by transform alone. */

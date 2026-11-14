@@ -70,7 +70,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
 vi.mock('$lib/api/gallery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/gallery')>();
   const { galleryApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAsset: galleryApiMocks.deleteAsset, moveAssets: galleryApiMocks.moveAssets };
+  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAssets: galleryApiMocks.deleteAssets, moveAssets: galleryApiMocks.moveAssets };
 });
 
 vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
@@ -206,7 +206,7 @@ describe('WorkspacePage in a project', () => {
   describe('the stage', () => {
     it('says what an empty project holds, and keeps the old words for All files', async () => {
       await mountWorkspace();
-      expect(target.querySelector('.ui-empty-title')?.textContent).toBe('No generated assets yet');
+      expect(target.querySelector('.ui-empty-title')?.textContent).toBe('No generated files yet');
 
       projectPick.set('Night Bus');
       await settle();
@@ -355,7 +355,7 @@ describe('WorkspacePage Move', () => {
   it('moves a strip tile, keeping it in place under its new ID, and says where it went', async () => {
     const [a, b] = [top('a.png'), top('b.png')];
     await mountWithHistory([a, b]);
-    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: a.id, asset: inBus('a.png') }], failed: [] });
+    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: a.id, from_path: a.file_path ?? '', asset: inBus('a.png') }], failed: [] });
 
     await moveFrom(target.querySelector('#ws-history-shell')!, a, 'Night Bus');
 
@@ -371,7 +371,7 @@ describe('WorkspacePage Move', () => {
     draft.setLastFrame({ path: '/outputs/out/a.png' });
     draft.patch({ referenceImagePaths: ['/outputs/out/a.png', '/outputs/out/b.png'] });
     await mountWithHistory([a, b]);
-    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: a.id, asset: inBus('a.png') }], failed: [] });
+    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: a.id, from_path: a.file_path ?? '', asset: inBus('a.png') }], failed: [] });
 
     await moveFrom(target.querySelector('#ws-history-shell')!, a, 'Night Bus');
 
@@ -384,11 +384,11 @@ describe('WorkspacePage Move', () => {
     const [a, b] = [top('a.png'), top('b.png')];
     await mountWithHistory([a, b]);
     const replaceOutputs = vi.spyOn(jobStore, 'replaceOutputs');
-    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: a.id, asset: inBus('a.png') }], failed: [] });
+    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: a.id, from_path: a.file_path ?? '', asset: inBus('a.png') }], failed: [] });
 
     await moveFrom(target.querySelector('#ws-history-shell')!, a, 'Night Bus');
 
-    expect(replaceOutputs).toHaveBeenCalledWith([{ from: 'out/a.png', asset: inBus('a.png') }]);
+    expect(replaceOutputs).toHaveBeenCalledWith([{ from: 'out/a.png', from_path: '/outputs/out/a.png', asset: inBus('a.png') }]);
     replaceOutputs.mockRestore();
   });
 
@@ -396,7 +396,7 @@ describe('WorkspacePage Move', () => {
     const [a, b] = [top('a.png'), top('b.png')];
     draft.setStartImage('image', { path: '/outputs/out/b.png' }, null);
     await mountWithHistory([a, b]);
-    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: a.id, asset: inBus('a.png') }], failed: [] });
+    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: a.id, from_path: a.file_path ?? '', asset: inBus('a.png') }], failed: [] });
 
     await moveFrom(target.querySelector('#ws-history-shell')!, a, 'Night Bus');
 
@@ -409,7 +409,7 @@ describe('WorkspacePage Move', () => {
     (target.querySelector('button[aria-label="Older output"]') as HTMLButtonElement).click();
     await settle();
     expect(stageId()).toBe('out/b.png');
-    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: b.id, asset: inBus('b.png') }], failed: [] });
+    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: b.id, from_path: b.file_path ?? '', asset: inBus('b.png') }], failed: [] });
 
     await moveFrom(target.querySelector('.latest-region')!, b, 'Night Bus');
 
@@ -421,7 +421,7 @@ describe('WorkspacePage Move', () => {
     await mountWithHistory([a, b]);
     (target.querySelector('#ws-history-shell button[aria-label="View b.png"]') as HTMLButtonElement).click();
     await settle();
-    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: b.id, asset: inBus('b.png') }], failed: [] });
+    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: b.id, from_path: b.file_path ?? '', asset: inBus('b.png') }], failed: [] });
 
     (document.querySelector('[data-testid="asset-viewer"] button[data-action="move"]') as HTMLButtonElement).click();
     await settle();
@@ -450,7 +450,7 @@ describe('WorkspacePage Move', () => {
     const [a, b] = [inBus('a.png'), inBus('b.png')];
     galleryApiMocks.getGallery.mockImplementation(async (...args: unknown[]) => makeGalleryPage(args[3] === 'Night Bus' ? [a, b] : []));
     await mountWorkspace(makeContext({ history_assets: [a, b] }));
-    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: a.id, asset: top('a.png') }], failed: [] });
+    galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: a.id, from_path: a.file_path ?? '', asset: top('a.png') }], failed: [] });
 
     await moveFrom(target.querySelector('#ws-history-shell')!, a, 'No project');
 

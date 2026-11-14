@@ -70,6 +70,7 @@
     brush: 'M18.5 3.5a2 2 0 012.9 2.9L12 15.8 8.2 12zM8.2 12c-2.6.2-4.2 1.7-4.2 4 0 1.3-.6 2.4-1.5 3.1C5 20.2 9.5 20 12 15.8',
     eraser: 'M7 20h13M5.2 16.8l-1.5-1.5a2 2 0 010-2.8l8.8-8.8a2 2 0 012.8 0l4.5 4.5a2 2 0 010 2.8L11 20H8.4zM8.5 9.5l6 6',
     undo: 'M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 010 11H11',
+    star: 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z',
   } as const;
 
   export type IconName = keyof typeof PATHS;
@@ -79,7 +80,7 @@
   interface Props {
     name: IconName;
     size?: number;
-    /** Filled with the current colour instead of stroked: the play glyph of the player. */
+    /** Filled with the current colour instead of stroked: the play glyph of the player, a starred star. */
     solid?: boolean;
     class?: string;
   }

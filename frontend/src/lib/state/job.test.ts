@@ -38,7 +38,7 @@ describe('jobStore reconnect contract', () => {
       const moved = output('Night Bus/a.png', 'Night Bus');
       source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: old, run_index: 1 });
 
-      jobStore.replaceOutputs([{ from: 'a.png', asset: moved as never }]);
+      jobStore.replaceOutputs([{ from: 'a.png', from_path: '/o/a.png', asset: moved as never }]);
       expect(jobStore.current?.outputs[0]).toMatchObject({ id: 'Night Bus/a.png', project: 'Night Bus' });
 
       // The server's record still holds the old ID: neither the finished event nor a repeat brings it back.
@@ -55,11 +55,11 @@ describe('jobStore reconnect contract', () => {
       const inZoo = output('Zoo/a.png', 'Zoo');
       source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: first, run_index: 1 });
 
-      jobStore.replaceOutputs([{ from: 'a.png', asset: inBus as never }]);
-      jobStore.replaceOutputs([{ from: 'Night Bus/a.png', asset: inZoo as never }]);
+      jobStore.replaceOutputs([{ from: 'a.png', from_path: '/o/a.png', asset: inBus as never }]);
+      jobStore.replaceOutputs([{ from: 'Night Bus/a.png', from_path: '/o/Night Bus/a.png', asset: inZoo as never }]);
       expect(outputIds()).toEqual(['Zoo/a.png']);
 
-      jobStore.replaceOutputs([{ from: 'Zoo/a.png', asset: first as never }]);
+      jobStore.replaceOutputs([{ from: 'Zoo/a.png', from_path: '/o/Zoo/a.png', asset: first as never }]);
       expect(outputIds()).toEqual(['a.png']);
       source.emit('job_completed', { type: 'job_completed', job_id: 'job-back', total_runs: 1, outputs: [first] });
       expect(outputIds()).toEqual(['a.png']);
@@ -71,16 +71,44 @@ describe('jobStore reconnect contract', () => {
       const old = output('a.png', null);
       source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: old, run_index: 1 });
 
-      jobStore.replaceOutputs([{ from: 'a.png', asset: output('Night Bus/a.png', 'Night Bus') as never }]);
+      jobStore.replaceOutputs([{ from: 'a.png', from_path: '/o/a.png', asset: output('Night Bus/a.png', 'Night Bus') as never }]);
       jobStore.removeOutputs(['Night Bus/a.png']);
       source.emit('job_completed', { type: 'job_completed', job_id: 'job-del', total_runs: 1, outputs: [old] });
 
       expect(outputIds()).toEqual([]);
     });
 
+    it('carries a star the user set, and keeps it when the server lists the output again', () => {
+      jobStore.startJob({ job_id: 'job-star', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+      const source = lastEventSource();
+      const made = output('a.png', null);
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: made, run_index: 1 });
+      expect(jobStore.current?.outputs[0].starred).toBeUndefined();
+
+      jobStore.setStarred('a.png', true);
+      expect(jobStore.current?.outputs[0].starred).toBe(true);
+
+      source.emit('job_completed', { type: 'job_completed', job_id: 'job-star', total_runs: 1, outputs: [made] });
+      expect(jobStore.current?.outputs[0].starred).toBe(true);
+
+      jobStore.setStarred('a.png', false);
+      expect(jobStore.current?.outputs[0].starred).toBe(false);
+    });
+
+    it('takes the star a move reports over an earlier choice', () => {
+      jobStore.startJob({ job_id: 'job-star-move', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+      const source = lastEventSource();
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: output('a.png', null), run_index: 1 });
+      jobStore.setStarred('a.png', true);
+
+      jobStore.replaceOutputs([{ from: 'a.png', from_path: '/o/a.png', asset: { ...output('Night Bus/a.png', 'Night Bus'), starred: false } as never }]);
+
+      expect(jobStore.current?.outputs[0]).toMatchObject({ id: 'Night Bus/a.png', starred: false });
+    });
+
     it('is forgotten with the job: a new job starts with the IDs the server gives', () => {
       jobStore.startJob({ job_id: 'job-one', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
-      jobStore.replaceOutputs([{ from: 'a.png', asset: output('Night Bus/a.png', 'Night Bus') as never }]);
+      jobStore.replaceOutputs([{ from: 'a.png', from_path: '/o/a.png', asset: output('Night Bus/a.png', 'Night Bus') as never }]);
 
       jobStore.startJob({ job_id: 'job-two', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
       lastEventSource().emit('generation_finished', { type: 'generation_finished', status: 'success', asset: output('a.png', null), run_index: 1 });

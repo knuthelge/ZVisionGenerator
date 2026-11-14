@@ -11,6 +11,7 @@ import json
 import os
 import sqlite3
 import threading
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -1049,8 +1050,8 @@ def test_gallery_asset_id_contract_serves_and_deletes_relative_assets(monkeypatc
     with TestClient(web_server.app) as client:
         gallery_response = client.get("/api/gallery")
         media_response = client.get(f"/media/{quote(asset_id, safe='/')}")
-        absolute_delete_response = client.delete(f"/api/gallery/{quote(str(asset_path), safe='')}")
-        delete_response = client.delete(f"/api/gallery/{quote(asset_id, safe='')}")
+        absolute_delete_response = client.post("/api/gallery/delete", json={"asset_ids": [str(asset_path)]})
+        delete_response = client.post("/api/gallery/delete", json={"asset_ids": [asset_id]})
 
     assert gallery_response.status_code == 200
     payload = gallery_response.json()
@@ -1063,8 +1064,8 @@ def test_gallery_asset_id_contract_serves_and_deletes_relative_assets(monkeypatc
     assert not listed_asset["id"].startswith("/")
 
     assert media_response.status_code == 200
-    assert absolute_delete_response.status_code == 404
-    assert delete_response.status_code == 200
+    assert [item["id"] for item in absolute_delete_response.json()["failed"]] == [str(asset_path)]
+    assert [item["id"] for item in delete_response.json()["deleted"]] == [asset_id]
     assert not asset_path.exists()
     assert sidecar_path.exists()
 
@@ -1180,10 +1181,10 @@ def test_media_and_delete_reject_invalid_asset_ids(monkeypatch, tmp_path):
     with TestClient(web_server.app) as client:
         for asset_id in invalid_ids:
             media_response = client.get(f"/media/{quote(asset_id, safe='')}")
-            delete_response = client.delete(f"/api/gallery/{quote(asset_id, safe='')}")
+            delete_body = client.post("/api/gallery/delete", json={"asset_ids": [asset_id]}).json()
 
             assert media_response.status_code == 404, asset_id
-            assert delete_response.status_code == 404, asset_id
+            assert delete_body["deleted"] == [] and [item["id"] for item in delete_body["failed"]] == [asset_id], asset_id
 
     assert valid_asset.exists()
 
@@ -2459,6 +2460,188 @@ class TestGalleryMove:
 
     def test_a_body_that_is_not_json_is_422(self, env):
         assert env.client.post("/api/gallery/move", content=b"nope", headers={"content-type": "application/json"}).status_code == 422
+
+    def test_each_moved_entry_carries_the_path_the_listing_reported_before_the_move(self, env):
+        listed = {asset["id"]: asset["file_path"] for asset in env.client.get("/api/gallery").json()["assets"]}
+
+        body = env.client.post("/api/gallery/move", json={"asset_ids": ["A/1.png", "3.png"], "project": "B"}).json()
+
+        assert {item["from"]: item["from_path"] for item in body["moved"]} == {"A/1.png": listed["A/1.png"], "3.png": listed["3.png"]}
+
+    def test_a_moved_file_keeps_its_star_under_the_new_id(self, env):
+        env.client.post("/api/gallery/star", json={"asset_id": "A/1.png", "starred": True})
+
+        body = env.client.post("/api/gallery/move", json={"asset_ids": ["A/1.png"], "project": "B"}).json()
+        starred = env.client.get("/api/gallery", params={"starred": "true"}).json()
+
+        assert body["moved"][0]["asset"]["starred"] is True
+        assert [asset["id"] for asset in starred["assets"]] == ["B/1.png"]
+
+
+@pytest.fixture
+def gallery_env(monkeypatch, tmp_path):
+    """A client over an output folder holding ``A/1.png``, ``A/sub/2.png``, ``B/4.png``, ``3.png`` and ``A/clip.mp4``."""
+    web_config = make_web_config()
+    web_config.output_dir = str(tmp_path)
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    monkeypatch.setattr(web_server, "_media_output_root", lambda: tmp_path.resolve())
+    monkeypatch.setattr("zvisiongenerator.web.gallery.ffprobe_json", MagicMock(side_effect=RuntimeError("no ffprobe")))
+    for relative in ("A/1.png", "A/sub/2.png", "B/4.png", "3.png"):
+        write_png(tmp_path / relative)
+    (tmp_path / "A" / "clip.mp4").write_bytes(b"\x00" * 16)
+    with TestClient(web_server.app) as client:
+        yield SimpleNamespace(client=client, root=tmp_path)
+
+
+def _star(env, *asset_ids: str) -> None:
+    for asset_id in asset_ids:
+        assert env.client.post("/api/gallery/star", json={"asset_id": asset_id, "starred": True}).status_code == 200
+
+
+def _listed(env, **params) -> dict[str, dict]:
+    return {asset["id"]: asset for asset in env.client.get("/api/gallery", params={"page": 1, **params}).json()["assets"]}
+
+
+class TestGalleryStar:
+    def test_starring_makes_the_listing_report_starred_and_unstarring_clears_it(self, gallery_env):
+        response = gallery_env.client.post("/api/gallery/star", json={"asset_id": "A/1.png", "starred": True})
+
+        assert (response.status_code, response.json()) == (200, {"id": "A/1.png", "starred": True})
+        assert {asset_id: asset["starred"] for asset_id, asset in _listed(gallery_env).items()}["A/1.png"] is True
+        assert _listed(gallery_env)["3.png"]["starred"] is False
+
+        gallery_env.client.post("/api/gallery/star", json={"asset_id": "A/1.png", "starred": False})
+
+        assert _listed(gallery_env)["A/1.png"]["starred"] is False
+
+    def test_the_starred_parameter_lists_only_starred_files_and_combines_with_the_other_filters(self, gallery_env):
+        _star(gallery_env, "A/1.png", "A/clip.mp4", "3.png")
+
+        body = gallery_env.client.get("/api/gallery", params={"page": 1, "starred": "true", "filter": "image", "project": "A"}).json()
+
+        assert [asset["id"] for asset in body["assets"]] == ["A/1.png"]
+        assert body["total_count"] == 1
+
+    @pytest.mark.parametrize("asset_id", ["../escape.png", "/abs.png", "a\\b.png", ".web_uploads/x.png"])
+    def test_a_bad_asset_id_is_400(self, gallery_env, asset_id):
+        response = gallery_env.client.post("/api/gallery/star", json={"asset_id": asset_id, "starred": True})
+
+        assert response.status_code == 400
+
+    @pytest.mark.parametrize("body", [{}, {"asset_id": "3.png"}, {"asset_id": "3.png", "starred": "yes"}, {"asset_id": 3, "starred": True}, ["3.png"]])
+    def test_a_malformed_body_is_422(self, gallery_env, body):
+        assert gallery_env.client.post("/api/gallery/star", json=body).status_code == 422
+
+    def test_a_body_that_is_not_json_is_422(self, gallery_env):
+        assert gallery_env.client.post("/api/gallery/star", content=b"nope", headers={"content-type": "application/json"}).status_code == 422
+
+    def test_a_file_that_does_not_exist_can_be_starred_without_an_error(self, gallery_env):
+        assert gallery_env.client.post("/api/gallery/star", json={"asset_id": "nope.png", "starred": True}).status_code == 200
+
+    def test_a_storage_failure_is_a_generic_500(self, gallery_env, monkeypatch):
+        from zvisiongenerator.web.asset_records import AssetRecordsError
+
+        monkeypatch.setattr(web_server, "set_asset_starred", MagicMock(side_effect=AssetRecordsError("secret detail")))
+
+        response = gallery_env.client.post("/api/gallery/star", json={"asset_id": "3.png", "starred": True})
+
+        assert response.status_code == 500
+        assert "secret detail" not in response.text
+
+
+class TestGalleryIds:
+    def test_lists_the_ids_of_every_matching_file_in_one_response(self, gallery_env):
+        body = gallery_env.client.get("/api/gallery/ids").json()
+
+        assert set(body) == {"ids"}
+        assert sorted(body["ids"]) == ["3.png", "A/1.png", "A/clip.mp4", "A/sub/2.png", "B/4.png"]
+
+    def test_ids_ignore_the_page_size(self, gallery_env, monkeypatch):
+        web_config = make_web_config()
+        web_config.output_dir = str(gallery_env.root)
+        web_config.gallery_page_size = 2
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+
+        assert len(gallery_env.client.get("/api/gallery/ids").json()["ids"]) == 5
+
+    def test_the_filter_project_and_starred_parameters_narrow_the_ids(self, gallery_env):
+        _star(gallery_env, "A/1.png", "A/clip.mp4", "B/4.png")
+
+        response = gallery_env.client.get("/api/gallery/ids", params={"filter": "image", "project": "A", "starred": "true"})
+
+        assert response.json()["ids"] == ["A/1.png"]
+
+
+class TestGalleryBulkDelete:
+    def test_deletes_every_listed_file_in_one_request_and_reports_what_a_client_needs(self, gallery_env):
+        listed = _listed(gallery_env)
+        _star(gallery_env, "A/1.png")
+
+        response = gallery_env.client.post("/api/gallery/delete", json={"asset_ids": ["A/1.png", "A/clip.mp4", "3.png"]})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["failed"] == []
+        assert body["deleted"] == [
+            {"id": "A/1.png", "media_type": "image", "project": "A", "starred": True, "file_path": listed["A/1.png"]["file_path"]},
+            {"id": "A/clip.mp4", "media_type": "video", "project": "A", "starred": False, "file_path": listed["A/clip.mp4"]["file_path"]},
+            {"id": "3.png", "media_type": "image", "project": None, "starred": False, "file_path": listed["3.png"]["file_path"]},
+        ]
+        assert not (gallery_env.root / "A" / "1.png").exists() and not (gallery_env.root / "3.png").exists()
+        assert (gallery_env.root / "B" / "4.png").exists()
+
+    @pytest.mark.parametrize("body", [{}, {"asset_ids": "3.png"}, {"asset_ids": [1]}, ["3.png"]])
+    def test_a_malformed_body_is_422_and_deletes_nothing(self, gallery_env, body):
+        assert gallery_env.client.post("/api/gallery/delete", json=body).status_code == 422
+        assert (gallery_env.root / "3.png").exists()
+
+    def test_a_body_that_is_not_json_is_422(self, gallery_env):
+        assert gallery_env.client.post("/api/gallery/delete", content=b"nope", headers={"content-type": "application/json"}).status_code == 422
+
+
+class TestGalleryDownload:
+    def _post(self, env, asset_ids: list[str], **kwargs):
+        return env.client.post("/api/gallery/download", data={"asset_ids": "\n".join(asset_ids)}, headers={"Origin": "http://testserver"}, **kwargs)
+
+    def test_a_form_post_returns_a_zip_of_the_existing_files_named_by_asset_id(self, gallery_env):
+        response = self._post(gallery_env, ["A/sub/2.png", "missing.png", "../escape.png", "3.png", "A/clip.mp4", "3.png"])
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/zip"
+        archive = zipfile.ZipFile(io.BytesIO(response.content))
+        assert archive.namelist() == ["A/sub/2.png", "3.png", "A/clip.mp4"]
+        for name in archive.namelist():
+            assert archive.read(name) == (gallery_env.root / name).read_bytes()
+
+    def test_the_response_is_an_attachment_that_is_not_cached(self, gallery_env):
+        response = self._post(gallery_env, ["3.png"])
+
+        assert response.headers["content-disposition"].startswith('attachment; filename="ziv-gallery-')
+        assert response.headers["content-disposition"].endswith('.zip"')
+        assert response.headers["cache-control"] == "no-store"
+
+    def test_a_non_media_file_and_a_staging_path_are_not_zipped(self, gallery_env):
+        (gallery_env.root / "notes.txt").write_text("x")
+        write_png(gallery_env.root / ".web_uploads" / "ref.png")
+
+        archive = zipfile.ZipFile(io.BytesIO(self._post(gallery_env, ["notes.txt", ".web_uploads/ref.png", "3.png"]).content))
+
+        assert archive.namelist() == ["3.png"]
+
+    @pytest.mark.parametrize("data", [{"asset_ids": ""}, {"asset_ids": "missing.png\n../escape.png"}, {"other": "x"}])
+    def test_nothing_valid_gives_an_empty_zip(self, gallery_env, data):
+        response = gallery_env.client.post("/api/gallery/download", data=data, headers={"Origin": "http://testserver"})
+
+        assert response.status_code == 200
+        assert zipfile.ZipFile(io.BytesIO(response.content)).namelist() == []
+
+    def test_a_selection_far_larger_than_the_default_form_limit_is_accepted(self, gallery_env):
+        ids = [f"folder/missing-file-number-{index:06d}.png" for index in range(30_000)]
+        assert sum(len(asset_id) + 1 for asset_id in ids) > 1024 * 1024
+
+        response = self._post(gallery_env, ids + ["3.png"])
+
+        assert zipfile.ZipFile(io.BytesIO(response.content)).namelist() == ["3.png"]
 
 
 class TestJobProject:

@@ -106,9 +106,9 @@ The Web UI keeps a record of finished jobs, with the reason each failed, in the 
 
 ## App database
 
-`ziv.sqlite3` holds the Gallery index, the [job log](#job-log), your recent prompts, and where each LoRA you downloaded in Discover came from. The Gallery index is what was read from each file in the output folder, so the Gallery opens fast after a restart. While the server runs, `ziv.sqlite3-wal` and `ziv.sqlite3-shm` sit beside it.
+`ziv.sqlite3` holds the Gallery index, the [job log](#job-log), your recent prompts, your [stars](../web-ui/gallery.md#stars), and where each LoRA you downloaded in Discover came from. The Gallery index is what was read from each file in the output folder, so the Gallery opens fast after a restart. While the server runs, `ziv.sqlite3-wal` and `ziv.sqlite3-shm` sit beside it.
 
-- The Gallery index rebuilds itself, so deleting the database while the server is stopped is safe for the Gallery; the next Gallery load reads every file once. The job log is not rebuilt, so deleting the database also clears it.
+- The Gallery index rebuilds itself, so deleting the database while the server is stopped is safe for the Gallery; the next Gallery load reads every file once. The job log is not rebuilt, so deleting the database also clears it and your stars.
 - Files you delete, in the app or in the folder, are never shown.
 - Files the CLI writes to the output folder are picked up on the next load.
 - Several Web UIs, even different versions, can share it.

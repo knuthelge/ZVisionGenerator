@@ -16,7 +16,7 @@ Two kinds of component exist, and the difference decides how a change is made:
 | Kind | Components | If the data is lost |
 |---|---|---|
 | Cache, rebuildable from files | `gallery`, `loras` | Re-read from disk; nothing is lost |
-| Data, kept for the user | `jobs`, `recent_prompts`, `lora_sources` | Lost; a migration must copy the rows it keeps, and a quarantine keeps them in the `.corrupt-*` file |
+| Data, kept for the user | `jobs`, `recent_prompts`, `lora_sources`, `assets` | Lost; a migration must copy the rows it keeps, and a quarantine keeps them in the `.corrupt-*` file |
 
 ## Job log
 
@@ -49,6 +49,17 @@ Two kinds of component exist, and the difference decides how a change is made:
 - **Never fails the gallery.** An error while opening or loading falls back to reading every file uncached, with a warning, after `recover_if_corrupt` quarantined a corrupt file. A write error keeps the results already read.
 - **Locking and moves.** One `threading.Lock` surrounds a reconciliation, so concurrent cold requests read each file once; `forget()` does not take it. `GalleryIndex.rename(root_key, moves)` re-keys rows of files moved between projects, so a moved video is not probed again.
 - **Job completion** writes no row. The next listing picks the output up, and `gallery_asset_for_output_path` reads uncached.
+
+## Asset records
+
+`web/asset_records.py` is the `assets` component: one row per file in `assets_entries(asset_id, starred)`, keyed by the output-root-relative path so records survive a moved or renamed output folder. The choices cannot be rebuilt from the files, so it is a data component and not a column of the gallery cache. A new choice is a column with a default, not a new table.
+
+- **Newer versions are accepted.** `migrate` never refuses a stored version above its own, because later versions only add columns, which this code ignores.
+- **Moves and deletes.** `AssetRecords.rename` runs with `GalleryIndex.rename` in `gallery._rekey_moved` and replaces any row at the new ID. Any delete calls `AssetRecords.forget`.
+- **Listing never fails on it.** `list_gallery_assets` reads the starred set once per listing through `_starred_ids`, which warns and lists every file unstarred on an `AssetRecordsError`. The star route turns the same error into a 500, because a star that did not save must not look saved.
+- **Not pruned.** A file deleted or renamed outside ziv keeps its row, and a new file that reuses the name shows the old star.
+
+`tests/web/test_web_asset_records.py` covers the store and `tests/web/test_web_gallery.py` the listing, move and delete.
 
 ## LoRA index
 

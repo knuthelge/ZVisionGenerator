@@ -1,6 +1,6 @@
 import {
   AUDIO_TRACK_HINT, SAVE_VOICE_HINT, VOICE_HINT, canEdit, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, canUseFrame, plainUpscaleMethod, upscaleFactors, voiceTooLongReason,
-  type AssetActionHandlers, type ReferenceTarget, type UseAsState,
+  type AssetActionHandlers, type MenuLead, type ReferenceTarget, type UseAsState,
 } from '$lib/state/assetActions';
 import type { FramePoint } from '$lib/state/framePoint';
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
@@ -8,12 +8,17 @@ import type { ActionMenuEntry } from './ActionMenu.svelte';
 import { extendEntry, frameEntries } from './frameMenu';
 
 /**
- * Build the actions for an asset's menu: reuse, use as, extend, upscale, move, download, delete.
+ * Build the actions for an asset's menu: reuse, use as, extend, upscale, move, star, download, delete.
  *
  * `openMove` opens the Move to project list; the Move item is offered when it is given.
  *
- * Reuse leads when offered: on a touch screen a grid tile shows only the menu button, so the menu is where the
+ * *lead* is the item that comes first, then a separator: Select (the Gallery's tiles outside Select mode) or View (inside
+ * it). It calls `handlers.onlead`. No lead, no item.
+ *
+ * Reuse follows the lead when offered: on a touch screen a grid tile shows only the menu button, so the menu is where the
  * tile's quick action lives.
+ *
+ * Star or Unstar comes after Move, when `onstar` is given; the label flips with the asset's state.
  *
  * *point* is the frame a paused video is on: Use as then offers it as a first or last frame, and Extend reads
  * `Extend from 3.2 s`, or is refused with the reason when the frame is too early; the rows are `frameMenu`'s, as in the
@@ -25,10 +30,17 @@ export function assetMenuEntries(
   deleting = false,
   useAs: UseAsState = {},
   openMove?: () => void,
-  point: FramePoint | null = null
+  point: FramePoint | null = null,
+  lead: MenuLead | null = null
 ): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
-  const { onreuse, onreference, onextend, onedit, onuseframe, onupscale, onuseaudio, ondelete } = handlers;
+  const { onreuse, onreference, onextend, onedit, onuseframe, onupscale, onuseaudio, ondelete, onstar, onlead } = handlers;
+  if (lead) {
+    entries.push(
+      { kind: 'item', id: lead, label: lead === 'select' ? 'Select' : 'View', onselect: () => onlead?.(lead) },
+      { kind: 'separator' }
+    );
+  }
   if (onreuse) {
     const reusable = asset.has_reusable_config === true;
     entries.push(
@@ -64,6 +76,10 @@ export function assetMenuEntries(
   }
   // Move opens the project list, which the menu's owner holds: this menu closes first, so it cannot host the list.
   if (openMove) entries.push({ kind: 'item', id: 'move', label: 'Move to project…', disabled: deleting, onselect: openMove });
+  if (onstar) {
+    const starred = asset.starred === true;
+    entries.push({ kind: 'item', id: 'star', label: starred ? 'Unstar' : 'Star', onselect: () => onstar(asset, !starred) });
+  }
   entries.push({ kind: 'item', id: 'download', label: 'Download', href: asset.url, download: asset.filename });
   if (ondelete) {
     entries.push(

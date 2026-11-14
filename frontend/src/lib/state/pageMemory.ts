@@ -24,10 +24,12 @@ function remembered<T>(): Remembered<T> {
   };
 }
 
-/** How the Gallery page was left: its query and how far it was scrolled. The list itself lives in the gallery store. */
+/** How the Gallery page was left: its query (media filter, sort and the ★ toggle) and how far it was scrolled. The list itself lives in the gallery store. */
 export interface GalleryVisit {
   filter: MediaFilter;
   sort: SortOrder;
+  /** Whether the ★ toggle was on. */
+  starred: boolean;
   scrollTop: number;
 }
 

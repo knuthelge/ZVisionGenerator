@@ -4,7 +4,7 @@ import type { GalleryAsset, MoveResult } from '$lib/types';
 
 import { moveOutcome } from './moveReport';
 
-const moved = (id: string) => ({ from: `out/${id}`, asset: { id } as GalleryAsset });
+const moved = (id: string) => ({ from: `out/${id}`, from_path: `/o/out/${id}`, asset: { id } as GalleryAsset });
 const failure = (id: string, detail: string) => ({ id, detail });
 
 describe('moveOutcome', () => {

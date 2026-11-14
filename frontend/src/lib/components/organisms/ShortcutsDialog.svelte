@@ -14,7 +14,7 @@
 
   let { currentPage, onnavigate, onopenjoblog }: Props = $props();
 
-  const GROUPS: readonly ShortcutGroup[] = [...APP_SHORTCUTS, { title: 'Asset viewer', entries: VIEWER_SHORTCUTS }];
+  const GROUPS: readonly ShortcutGroup[] = [...APP_SHORTCUTS, { title: 'Viewer', entries: VIEWER_SHORTCUTS }];
 
   let open = $state(false);
 

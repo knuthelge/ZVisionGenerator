@@ -75,7 +75,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
 vi.mock('$lib/api/gallery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/gallery')>();
   const { galleryApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAsset: galleryApiMocks.deleteAsset };
+  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAssets: galleryApiMocks.deleteAssets };
 });
 
 vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
@@ -449,23 +449,38 @@ describe('WorkspacePage asset actions and settings', () => {
     const first = makeAsset({ id: 'out/first.png', filename: 'first.png' });
     const second = makeAsset({ id: 'out/second.png', filename: 'second.png' });
     await mountWithHistory([first, second]);
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
 
     openTileMenu(second);
     (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
     await settle();
     expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('Delete "second.png"?');
     await answerConfirm(false);
-    expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalled();
+    expect(galleryApiMocks.deleteAssets).not.toHaveBeenCalled();
 
     openTileMenu(second);
     (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
     await settle();
     await answerConfirm(true);
 
-    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith(second.id);
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledWith([second.id]);
     expect(galleryStore.assets.map((asset) => asset.id)).toEqual([first.id]);
     expect(historyTile(second)).toBeNull();
+  });
+
+  it('keeps an asset in history and reports an error when the server lists it as failed', async () => {
+    const first = makeAsset({ id: 'out/first.png', filename: 'first.png' });
+    await mountWithHistory([first]);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [{ id: first.id, detail: 'Could not delete the file: Permission denied' }] });
+
+    openTileMenu(first);
+    (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    await answerConfirm(true);
+
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledWith([first.id]);
+    expect(toasts.at(-1)).toMatchObject({ type: 'error', message: expect.stringContaining('Permission denied') });
+    expect(galleryStore.assets.map((asset) => asset.id)).toEqual([first.id]);
   });
 
   it('marks settings that differ from the model default and resets one row at a time', async () => {
@@ -797,7 +812,7 @@ describe('WorkspacePage asset actions and settings', () => {
   it('clears the reference when its asset is deleted', async () => {
     const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
     await mountWithHistory([asset]);
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     openTileMenu(asset);
     (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
     await settle();
@@ -1717,11 +1732,11 @@ describe('WorkspacePage extend', () => {
       flushSync();
     }
 
-    it('lists Extend, then Move, Download and Delete, in a history tile\'s menu', async () => {
+    it('lists Extend, then Move, Star, Download and Delete, in a history tile\'s menu', async () => {
       const asset = clip();
       await mountWithClip(asset);
       openMenu(asset);
-      expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'move', 'download', 'delete']);
+      expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'move', 'star', 'download', 'delete']);
     });
 
     it('turns the Workspace to Extend with the clip as source, its scene in the boxes, and checks it', async () => {

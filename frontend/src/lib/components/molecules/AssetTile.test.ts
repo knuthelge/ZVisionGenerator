@@ -568,3 +568,235 @@ describe('AssetTile Move', () => {
     expect(onmove).toHaveBeenCalledWith(asset, 'Bridges');
   });
 });
+
+describe('AssetTile Select mode', () => {
+  let page: ReturnType<typeof mountComponent>;
+  let target: HTMLElement;
+  const asset = makeAsset();
+
+  function mountTile(props: Record<string, unknown>): void {
+    page = mountComponent(AssetTile, { asset, ...props });
+    target = page.target;
+  }
+
+  const mediaButton = (name: string) => target.querySelector(`button[aria-label="${name} ${asset.filename}"]`) as HTMLButtonElement | null;
+  const checkbox = () => target.querySelector(`input[type="checkbox"][aria-label="Select ${asset.filename}"]`) as HTMLInputElement;
+
+  async function openMenu(): Promise<string[]> {
+    (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+    return menuActions();
+  }
+
+  describe('outside the mode', () => {
+    it('names the media View, without a pressed state, and a click opens the viewer', () => {
+      const onpreview = vi.fn();
+      const onmediaclick = vi.fn();
+      const onselect = vi.fn();
+      mountTile({ onpreview, onmediaclick, onselect });
+      const media = mediaButton('View')!;
+      expect(media.hasAttribute('aria-pressed')).toBe(false);
+      media.click();
+      expect(onpreview).toHaveBeenCalledWith(asset, media);
+      expect(onmediaclick).not.toHaveBeenCalled();
+      expect(onselect).not.toHaveBeenCalled();
+    });
+
+    it('keeps the checkbox named Select, and ticking it starts the mode with this tile', () => {
+      const onselect = vi.fn();
+      const onstartselect = vi.fn();
+      mountTile({ onselect, onstartselect });
+      checkbox().click();
+      expect(onstartselect).toHaveBeenCalledWith(asset);
+      expect(onselect).not.toHaveBeenCalled();
+    });
+
+    it('ticks through onselect when nothing can start the mode', () => {
+      const onselect = vi.fn();
+      mountTile({ onselect });
+      checkbox().click();
+      expect(onselect).toHaveBeenCalledWith(asset, true);
+    });
+
+    it('leads the menu with Select, which starts the mode and returns focus to the media', async () => {
+      const onstartselect = vi.fn();
+      mountTile({ onstartselect, onpreview: vi.fn() });
+      expect((await openMenu())[0]).toBe('select');
+      document.querySelector<HTMLElement>('[data-action="select"]')!.click();
+      await settle();
+      expect(onstartselect).toHaveBeenCalledWith(asset);
+      expect(document.activeElement).toBe(mediaButton('View'));
+    });
+
+    it('has no lead on a tile that cannot start the mode', async () => {
+      mountTile({ onpreview: vi.fn(), onreuse: vi.fn() });
+      expect((await openMenu())[0]).toBe('reuse');
+    });
+  });
+
+  describe('in the mode', () => {
+    it('names the media Select with the selected state as aria-pressed', async () => {
+      mountTile({ selectMode: true, selected: false, onselect: vi.fn() });
+      expect(mediaButton('Select')?.getAttribute('aria-pressed')).toBe('false');
+      expect(mediaButton('View')).toBeNull();
+      await page.unmount();
+      mountTile({ selectMode: true, selected: true, onselect: vi.fn() });
+      expect(mediaButton('Select')?.getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it('hands a click on the media to onmediaclick with its event, and does not open the viewer', () => {
+      const onpreview = vi.fn();
+      const onmediaclick = vi.fn();
+      mountTile({ selectMode: true, onpreview, onmediaclick, onselect: vi.fn() });
+      mediaButton('Select')!.dispatchEvent(new MouseEvent('click', { shiftKey: true, bubbles: true }));
+      expect(onmediaclick).toHaveBeenCalledOnce();
+      expect(onmediaclick.mock.calls[0][0]).toBe(asset);
+      expect((onmediaclick.mock.calls[0][1] as MouseEvent).shiftKey).toBe(true);
+      expect(onpreview).not.toHaveBeenCalled();
+    });
+
+    it('opens the viewer on Enter, without a toggle', () => {
+      const onpreview = vi.fn();
+      const onmediaclick = vi.fn();
+      mountTile({ selectMode: true, onpreview, onmediaclick, onselect: vi.fn() });
+      const media = mediaButton('Select')!;
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      media.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(onpreview).toHaveBeenCalledWith(asset, media);
+      expect(onmediaclick).not.toHaveBeenCalled();
+    });
+
+    it('prevents a Shift mousedown only in the mode, so no page text gets selected', async () => {
+      mountTile({ onpreview: vi.fn() });
+      const outside = new MouseEvent('mousedown', { shiftKey: true, bubbles: true, cancelable: true });
+      mediaButton('View')!.dispatchEvent(outside);
+      expect(outside.defaultPrevented).toBe(false);
+      await page.unmount();
+      mountTile({ selectMode: true, onselect: vi.fn() });
+      const shift = new MouseEvent('mousedown', { shiftKey: true, bubbles: true, cancelable: true });
+      mediaButton('Select')!.dispatchEvent(shift);
+      expect(shift.defaultPrevented).toBe(true);
+      const plain = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      mediaButton('Select')!.dispatchEvent(plain);
+      expect(plain.defaultPrevented).toBe(false);
+    });
+
+    it('toggles through onselect when the checkbox is ticked, never starting the mode again', () => {
+      const onselect = vi.fn();
+      const onstartselect = vi.fn();
+      mountTile({ selectMode: true, onselect, onstartselect });
+      checkbox().click();
+      expect(onselect).toHaveBeenCalledWith(asset, true);
+      expect(onstartselect).not.toHaveBeenCalled();
+    });
+
+    it('leads the menu with View, which opens the viewer and leaves the selection alone', async () => {
+      const onpreview = vi.fn();
+      const onstartselect = vi.fn();
+      const onselect = vi.fn();
+      mountTile({ selectMode: true, selected: true, onpreview, onstartselect, onselect });
+      expect((await openMenu())[0]).toBe('view');
+      document.querySelector<HTMLElement>('[data-action="view"]')!.click();
+      await settle();
+      expect(onpreview).toHaveBeenCalledOnce();
+      expect(onstartselect).not.toHaveBeenCalled();
+      expect(onselect).not.toHaveBeenCalled();
+    });
+
+    it('keeps the expand button opening the viewer', () => {
+      const onpreview = vi.fn();
+      mountTile({ selectMode: true, onpreview, onselect: vi.fn() });
+      mediaButtonFullscreen().click();
+      expect(onpreview).toHaveBeenCalledOnce();
+    });
+  });
+
+  function mediaButtonFullscreen(): HTMLButtonElement {
+    return target.querySelector(`button[aria-label="View ${asset.filename} fullscreen"]`) as HTMLButtonElement;
+  }
+});
+
+describe('AssetTile star', () => {
+  let page: ReturnType<typeof mountComponent>;
+  let target: HTMLElement;
+  const asset = makeAsset();
+  const starButton = () => target.querySelector(`button[aria-label="Star ${asset.filename}"]`) as HTMLButtonElement | null;
+
+  function mountTile(props: Record<string, unknown>): void {
+    page = mountComponent(AssetTile, { asset, ...props });
+    target = page.target;
+  }
+
+  describe('on a grid tile', () => {
+    it('is a toggle named Star <filename>, pressed while starred, and absent without onstar', async () => {
+      mountTile({ onstar: vi.fn() });
+      expect(starButton()?.getAttribute('aria-pressed')).toBe('false');
+      await page.unmount();
+      mountTile({ asset: makeAsset({ starred: true }), onstar: vi.fn() });
+      expect(starButton()?.getAttribute('aria-pressed')).toBe('true');
+      await page.unmount();
+      mountTile({});
+      expect(starButton()).toBeNull();
+    });
+
+    it('stars an unstarred file and unstars a starred one', async () => {
+      const onstar = vi.fn();
+      mountTile({ onstar });
+      starButton()!.click();
+      expect(onstar).toHaveBeenCalledWith(asset, true);
+      await page.unmount();
+      const starred = makeAsset({ starred: true });
+      mountTile({ asset: starred, onstar });
+      starButton()!.click();
+      expect(onstar).toHaveBeenLastCalledWith(starred, false);
+    });
+
+    it('never touches the selection or opens the viewer, in Select mode too', () => {
+      const onstar = vi.fn();
+      const onselect = vi.fn();
+      const onmediaclick = vi.fn();
+      const onpreview = vi.fn();
+      const onstartselect = vi.fn();
+      mountTile({ onstar, onselect, onmediaclick, onpreview, onstartselect, selectMode: true, selected: true });
+      starButton()!.click();
+      expect(onstar).toHaveBeenCalledOnce();
+      expect(onselect).not.toHaveBeenCalled();
+      expect(onmediaclick).not.toHaveBeenCalled();
+      expect(onstartselect).not.toHaveBeenCalled();
+      expect(onpreview).not.toHaveBeenCalled();
+    });
+
+    it('keeps Space and X from reaching the grid, which selects the focused tile with them', () => {
+      mountTile({ onstar: vi.fn(), onpreview: vi.fn() });
+      const reached = vi.fn();
+      target.addEventListener('keydown', reached);
+      for (const key of [' ', 'x', 'X']) starButton()!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      expect(reached).not.toHaveBeenCalled();
+      starButton()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      expect(reached).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('on a strip tile', () => {
+    it('shows a mark, with no button, for a starred file and nothing for an unstarred one', async () => {
+      mountTile({ asset: makeAsset({ starred: true }), density: 'compact', onstar: vi.fn() });
+      expect(target.querySelector('[data-testid="starred-mark"]')).not.toBeNull();
+      expect(target.querySelector('[data-testid="starred-mark"]')?.closest('button')).toBeNull();
+      expect(starButton()).toBeNull();
+      await page.unmount();
+      mountTile({ density: 'compact', onstar: vi.fn() });
+      expect(target.querySelector('[data-testid="starred-mark"]')).toBeNull();
+    });
+  });
+
+  describe('on the stage', () => {
+    it('is a button, and no mark', () => {
+      const onstar = vi.fn();
+      mountTile({ density: 'stage', onstar, onpreview: vi.fn() });
+      starButton()!.click();
+      expect(onstar).toHaveBeenCalledWith(asset, true);
+      expect(target.querySelector('[data-testid="starred-mark"]')).toBeNull();
+    });
+  });
+});

@@ -21,9 +21,10 @@
   import { updateConfig } from '$lib/api/config';
   import { workspaceMemory } from '$lib/state/pageMemory';
   import { emptySlotsHolding } from '$lib/state/assetRemoval';
-  import { deleteAsset } from '$lib/api/gallery';
+  import { deleteAssets } from '$lib/api/gallery';
   import { completionToast } from '$lib/state/completionToast';
   import { moveAndReconcile } from '$lib/state/moveAndReconcile';
+  import { starAndReconcile } from '$lib/state/starAndReconcile';
   import { audioTrackParams, canEdit, canExtend, editParams, extendParams, frameParams, referenceParams, reuseParams, frameSetNotice, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type FrameTarget, type ReferenceTarget } from '$lib/state/assetActions';
   import { arrivalFor, flashArrival } from '$lib/arrivalFlash';
   import type { FramePoint } from '$lib/state/framePoint';
@@ -1092,15 +1093,19 @@
     if (deletingIds.has(asset.id)) return;
     deletingIds = new Set([...deletingIds, asset.id]);
     try {
-      await deleteAsset(asset.id);
+      const { failed } = await deleteAssets([asset.id]);
+      if (failed.length > 0) {
+        addToast(failed[0].detail || 'Delete failed', 'error');
+        return;
+      }
       jobStore.removeOutputs([asset.id]);
       galleryStore.removeAssets([asset]);
       // A slot pointing at the deleted file would fail the next run: it empties, and the workflow follows from what is left.
       // A reference row stays, flagged missing, so the prompt's "image 2" keeps meaning the same row.
       if (emptySlotsHolding([asset.file_path], context)) void recheckImages();
       addToast('Deleted', 'success');
-    } catch {
-      addToast('Delete failed', 'error');
+    } catch (e) {
+      addToast(errorText(e, 'Delete failed'), 'error');
     } finally {
       deletingIds = new Set([...deletingIds].filter((id) => id !== asset.id));
     }
@@ -1108,7 +1113,7 @@
 
   async function moveWorkspaceAsset(asset: GalleryAsset, project: string | null): Promise<void> {
     if (deletingIds.has(asset.id)) return;
-    const moved = (await moveAndReconcile([asset], project, context))?.moved.find((move) => move.from === asset.id);
+    const moved = (await moveAndReconcile([asset.id], project, context))?.moved.find((move) => move.from === asset.id);
     // The stage and the viewer follow a file that stays in the list under its new ID; one that left is stepped past.
     if (moved && viewedId === asset.id) viewedId = moved.asset.id;
     if (moved && viewerAssetId === asset.id) viewerAssetId = moved.asset.id;
@@ -1947,6 +1952,7 @@
                   {useAs}
                   ondelete={deleteWorkspaceAsset}
                   onmove={moveWorkspaceAsset}
+                  onstar={starAndReconcile}
                 />
                 {@render assetMeta(output)}
               </div>
@@ -1966,6 +1972,7 @@
                         {useAs}
                         ondelete={deleteWorkspaceAsset}
                         onmove={moveWorkspaceAsset}
+                        onstar={starAndReconcile}
                       />
                       {@render assetMeta(output)}
                     </div>
@@ -2001,6 +2008,7 @@
                       {useAs}
                       ondelete={deleteWorkspaceAsset}
                       onmove={moveWorkspaceAsset}
+                      onstar={starAndReconcile}
                     />
                   {/each}
                 </div>
@@ -2080,6 +2088,7 @@
               {useAs}
               ondelete={deleteWorkspaceAsset}
               onmove={moveWorkspaceAsset}
+              onstar={starAndReconcile}
             />
             {@render assetMeta(latest)}
           </div>
@@ -2097,7 +2106,7 @@
               <p class="text-content text-text-secondary">Looking for your latest work…</p>
             {:else}
               <div>
-                <p class="ui-empty-title">{projectPick.current === null ? 'No generated assets yet' : `Nothing in ${projectPick.current} yet`}</p>
+                <p class="ui-empty-title">{projectPick.current === null ? 'No generated files yet' : `Nothing in ${projectPick.current} yet`}</p>
                 <p class="mt-1 text-ui text-text-muted">Write a prompt and press Generate to get started</p>
               </div>
             {/if}
@@ -2137,6 +2146,7 @@
           {useAs}
           ondelete={deleteWorkspaceAsset}
           onmove={moveWorkspaceAsset}
+          onstar={starAndReconcile}
         />
       {/if}
     </section>
@@ -2355,6 +2365,7 @@
   onupscale={upscaleAsset}
   ondelete={deleteWorkspaceAsset}
   onmove={moveWorkspaceAsset}
+  onstar={starAndReconcile}
 />
 
 <SaveVoiceDialog asset={voiceTake} model={useAs.voiceModel ?? null} vocabulary={context?.audio_settings} onclose={() => { voiceTake = null; }} />

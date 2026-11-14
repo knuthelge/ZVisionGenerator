@@ -62,13 +62,13 @@ describe('AssetViewer', () => {
 
   it('disables previous on the first asset and next on the last', async () => {
     mountViewer({});
-    expect(button('Previous asset')?.disabled).toBe(true);
-    expect(button('Next asset')?.disabled).toBe(false);
+    expect(button('Previous file')?.disabled).toBe(true);
+    expect(button('Next file')?.disabled).toBe(false);
 
     await page.unmount();
     mountViewer({ currentId: assetB.id });
-    expect(button('Previous asset')?.disabled).toBe(false);
-    expect(button('Next asset')?.disabled).toBe(true);
+    expect(button('Previous file')?.disabled).toBe(false);
+    expect(button('Next file')?.disabled).toBe(true);
   });
 
   it('navigates with the arrow keys and closes with Escape', () => {
@@ -865,5 +865,67 @@ describe('AssetViewer Move', () => {
 
     expect(rows().map((row) => row.textContent?.trim())).toEqual(['No project', 'Night Bus', 'Zoo']);
     expect(document.querySelector('.action-menu-heading')).toBeNull();
+  });
+});
+
+describe('AssetViewer star', () => {
+  let page: ReturnType<typeof mountComponent>;
+  beforeEach(() => { localStorage.clear(); touch.compact = false; });
+  function mountViewer(props: Record<string, unknown>): void {
+    const assets = (props.assets as GalleryAsset[] | undefined) ?? [makeAsset(), assetB];
+    page = mountComponent(AssetViewer, { assets, currentId: assets[0].id, open: true, onclose: vi.fn(), onnavigate: vi.fn(), ...props });
+  }
+  const button = (label: string): HTMLButtonElement | null => document.querySelector(`button[aria-label="${label}"]`);
+
+  const starButton = () => document.querySelector<HTMLButtonElement>('button[data-action="star"]');
+
+  it('shows a toggle named Star in the toolbar, pressed for a starred file, only with onstar', async () => {
+    mountViewer({});
+    expect(starButton()).toBeNull();
+    await page.unmount();
+
+    mountViewer({ assets: [makeAsset({ starred: true }), assetB], onstar: vi.fn() });
+    expect(button('Star')?.getAttribute('aria-pressed')).toBe('true');
+    await page.unmount();
+    mountViewer({ onstar: vi.fn() });
+    expect(button('Star')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('stars an unstarred file and unstars a starred one on click', async () => {
+    const onstar = vi.fn();
+    mountViewer({ onstar });
+    starButton()!.click();
+    expect(onstar).toHaveBeenCalledWith(makeAsset(), true);
+    await page.unmount();
+
+    const starred = makeAsset({ starred: true });
+    mountViewer({ assets: [starred, assetB], onstar });
+    starButton()!.click();
+    expect(onstar).toHaveBeenLastCalledWith(starred, false);
+  });
+
+  it('toggles with S', () => {
+    const onstar = vi.fn();
+    mountViewer({ currentId: assetB.id, onstar });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }));
+    expect(onstar).toHaveBeenCalledWith(assetB, true);
+  });
+
+  it('ignores a held S', () => {
+    const onstar = vi.fn();
+    mountViewer({ onstar });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', repeat: true, bubbles: true, cancelable: true }));
+    expect(onstar).not.toHaveBeenCalled();
+  });
+
+  it('offers Star in the phone actions menu with no lead', async () => {
+    touch.compact = true;
+    mountViewer({ onstar: vi.fn() });
+    document.querySelector<HTMLButtonElement>('button[data-action="more"]')!.click();
+    await settle();
+    const items = Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'));
+    expect(items).toContain('star');
+    expect(items).not.toContain('select');
+    expect(items).not.toContain('view');
   });
 });

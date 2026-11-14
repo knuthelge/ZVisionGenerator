@@ -38,6 +38,7 @@ from zvisiongenerator.web.gallery import (
     move_gallery_assets,
     normalize_asset_id,
     output_source_folder,
+    resolve_media_asset,
     resolve_output_asset_path,
 )
 from zvisiongenerator.web.gallery_index import GALLERY_INDEX_VERSION, GalleryIndex
@@ -550,6 +551,19 @@ def test_staging_and_scratch_directories_never_list_as_gallery_assets(tmp_path, 
     assert ids == ["clip.mp4", "kept/nested.mp4"]
     assert gallery_asset_for_output_path(str(tmp_path), str(tmp_path / directory / "scratch.mp4")) is None
     assert resolve_output_asset_path(tmp_path, f"{directory}/scratch.mp4") is None
+
+
+def test_resolve_media_asset_gives_the_canonical_id_path_and_kind_of_a_media_file(tmp_path):
+    (tmp_path / "A").mkdir()
+    (tmp_path / "A" / "clip.MP4").write_bytes(b"\x00")
+
+    assert resolve_media_asset(tmp_path, "A/clip.MP4") == ("A/clip.MP4", (tmp_path / "A" / "clip.MP4").resolve(), "video")
+    assert resolve_media_asset(tmp_path, "A/gone.flac") == ("A/gone.flac", (tmp_path / "A" / "gone.flac").resolve(), "audio")
+
+
+@pytest.mark.parametrize("asset_id", ["", "../x.png", "/x.png", "A\\x.png", ".web_uploads/x.png", "notes.txt", "A/sidecar.json"])
+def test_resolve_media_asset_refuses_an_invalid_escaping_or_non_media_id(tmp_path, asset_id):
+    assert resolve_media_asset(tmp_path, asset_id) is None
 
 
 def test_other_dot_directories_keep_listing_their_assets(tmp_path):
@@ -1512,3 +1526,172 @@ def test_a_recorded_source_link_stays_as_written(tmp_path):
 
     assert moved.id == "B/clip.mp4"
     assert moved.source_video == before.source_video == str(source)
+
+
+# ---------------------------------------------------------------------------
+# Stars
+# ---------------------------------------------------------------------------
+
+
+def _star(*asset_ids: str) -> None:
+    for asset_id in asset_ids:
+        gallery._ASSET_RECORDS.set_starred(asset_id, True)
+
+
+def _starred_ids() -> frozenset[str]:
+    return gallery._ASSET_RECORDS.starred_ids()
+
+
+def _use_unreadable_stars(monkeypatch) -> None:
+    def refuse(*_args, **_kwargs):
+        raise gallery.AssetRecordsError("disk full")
+
+    for name in ("starred_ids", "rename", "forget"):
+        monkeypatch.setattr(gallery._ASSET_RECORDS, name, refuse)
+
+
+def test_a_listing_reports_which_files_are_starred(tmp_path):
+    _make_plain_png(tmp_path / "a.png")
+    _make_plain_png(tmp_path / "b.png")
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 8)
+    (tmp_path / "take.wav").write_bytes(b"\x00" * 8)
+    _star("a.png", "clip.mp4")
+
+    assets = list_gallery_assets(str(tmp_path))
+
+    expected = {"a.png": True, "b.png": False, "clip.mp4": True, "take.wav": False}
+    assert {asset.id: asset.starred for asset in assets} == expected
+    assert {asset.id: gallery_asset_to_json(asset, make_web_config())["starred"] for asset in assets} == expected
+
+
+def test_the_starred_filter_combines_with_the_media_filter_and_the_project(tmp_path):
+    (tmp_path / "A").mkdir()
+    _make_plain_png(tmp_path / "A" / "one.png")
+    _make_plain_png(tmp_path / "A" / "two.png")
+    _make_plain_png(tmp_path / "B.png")
+    (tmp_path / "A" / "clip.mp4").write_bytes(b"\x00" * 8)
+    _star("A/one.png", "A/clip.mp4", "B.png")
+    assets = list_gallery_assets(str(tmp_path))
+
+    def ids(**options) -> set[str]:
+        return {asset.id for asset in filter_and_sort_assets(assets, media_filter=options.pop("media_filter", "all"), sort_order="newest", **options)}
+
+    assert ids(starred=True) == {"A/one.png", "A/clip.mp4", "B.png"}
+    assert ids(starred=True, media_filter="image") == {"A/one.png", "B.png"}
+    assert ids(starred=True, project="A") == {"A/one.png", "A/clip.mp4"}
+    assert ids(starred=True, media_filter="image", project="A") == {"A/one.png"}
+    assert ids(starred=True, media_filter="no_project") == {"B.png"}
+    assert ids() == {"A/one.png", "A/two.png", "A/clip.mp4", "B.png"}
+
+
+def test_a_move_keeps_the_star_under_the_new_id(tmp_path):
+    _make_plain_png(tmp_path / "a.png")
+    _make_plain_png(tmp_path / "b.png")
+    _star("a.png")
+
+    result = move_gallery_assets(str(tmp_path), ["a.png", "b.png"], "B")
+
+    assert {moved.asset.id: moved.asset.starred for moved in result.moved} == {"B/a.png": True, "B/b.png": False}
+    assert _starred_ids() == {"B/a.png"}
+
+
+def test_a_move_succeeds_and_warns_when_the_stars_cannot_be_updated(tmp_path, monkeypatch):
+    _make_plain_png(tmp_path / "a.png")
+    _use_unreadable_stars(monkeypatch)
+
+    with pytest.warns(UserWarning, match="stars"):
+        result = move_gallery_assets(str(tmp_path), ["a.png"], "B")
+
+    assert [moved.asset.id for moved in result.moved] == ["B/a.png"]
+
+
+def test_a_listing_still_lists_every_file_unstarred_when_the_stars_cannot_be_read(tmp_path, monkeypatch):
+    _make_plain_png(tmp_path / "a.png")
+    _make_plain_png(tmp_path / "b.png")
+    _star("a.png")
+    _use_unreadable_stars(monkeypatch)
+
+    with pytest.warns(UserWarning, match="unstarred"):
+        assets = list_gallery_assets(str(tmp_path))
+
+    assert {asset.id: asset.starred for asset in assets} == {"a.png": False, "b.png": False}
+
+
+def test_an_output_path_reports_its_star(tmp_path):
+    starred = _aged_png(tmp_path / "a.png", _CONFIG)
+    plain = _aged_png(tmp_path / "b.png", _CONFIG)
+    _star("a.png")
+
+    assert gallery_asset_for_output_path(str(tmp_path), str(starred)).starred is True
+    assert gallery_asset_for_output_path(str(tmp_path), str(plain)).starred is False
+
+
+# ---------------------------------------------------------------------------
+# Bulk delete
+# ---------------------------------------------------------------------------
+
+
+def test_a_delete_reports_each_file_on_its_own_and_the_rest_still_go(tmp_path, monkeypatch):
+    for name in ("a.png", "b.png", "c.png"):
+        _aged_png(tmp_path / name)
+    list_gallery_assets(str(tmp_path))
+    _star("a.png", "b.png")
+    real_unlink = Path.unlink
+
+    def unlink(self, *args, **kwargs):
+        if self.name == "b.png":
+            raise PermissionError(13, "Permission denied")
+        real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+    result = delete_gallery_assets(str(tmp_path), ["a.png", "b.png", "c.png"])
+
+    assert [item.id for item in result.deleted] == ["a.png", "c.png"]
+    assert [item.id for item in result.failed] == ["b.png"]
+    assert sorted(path.name for path in tmp_path.glob("*.png")) == ["b.png"]
+    assert _stored_rel_paths() == ["b.png"]
+    assert _starred_ids() == {"b.png"}
+
+
+def test_a_file_that_is_already_gone_counts_as_deleted_and_loses_its_star(tmp_path):
+    _star("gone.png")
+
+    result = delete_gallery_assets(str(tmp_path), ["gone.png"])
+
+    assert [(item.id, item.kind, item.starred) for item in result.deleted] == [("gone.png", "image", True)]
+    assert result.failed == ()
+    assert _starred_ids() == frozenset()
+
+
+def test_an_id_that_is_not_a_media_file_under_the_root_fails(tmp_path):
+    (tmp_path / "notes.txt").write_text("x")
+    (tmp_path / "folder.png").mkdir()
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.png"
+    _make_plain_png(outside)
+
+    result = delete_gallery_assets(str(tmp_path), ["notes.txt", "../escape.png", f"../{outside.name}", "", "folder.png"])
+
+    assert [failure.id for failure in result.failed] == ["notes.txt", "../escape.png", f"../{outside.name}", "", "folder.png"]
+    assert result.deleted == ()
+    assert (tmp_path / "notes.txt").exists() and outside.exists() and (tmp_path / "folder.png").is_dir()
+
+
+def test_a_repeated_id_is_deleted_once(tmp_path):
+    _aged_png(tmp_path / "a.png")
+
+    result = delete_gallery_assets(str(tmp_path), ["a.png", "a.png"])
+
+    assert [item.id for item in result.deleted] == ["a.png"]
+    assert result.failed == ()
+
+
+def test_a_delete_succeeds_and_warns_when_the_stars_cannot_be_updated(tmp_path, monkeypatch):
+    _aged_png(tmp_path / "a.png")
+    _use_unreadable_stars(monkeypatch)
+
+    with pytest.warns(UserWarning, match="stars"):
+        result = delete_gallery_assets(str(tmp_path), ["a.png"])
+
+    assert [item.id for item in result.deleted] == ["a.png"]
+    assert not (tmp_path / "a.png").exists()

@@ -61,23 +61,27 @@ A held key moves the handle without asking; the point is set when the key lifts.
 
 | Key | Action |
 |---|---|
-| Arrow keys | Move between assets |
-| ++enter++ | Open the viewer |
-| ++space++ / ++x++ | Select or deselect the focused asset |
-| ++cmd+a++ | Select all loaded assets |
-| ++delete++ / ++backspace++ | Delete the selection, or the focused asset (asks first) |
-| ++esc++ | Clear the selection |
+| Arrow keys | Move between files |
+| ++alt+3++ | Focus the first file |
+| ++enter++ | Open the viewer, also in Select mode |
+| ++space++ / ++x++ | Select or deselect the focused file; turns on [Select mode](gallery.md#select-move-download-and-delete) |
+| ++s++ | Star or unstar the focused file |
+| ++shift++ and click | In Select mode, select the run from the last file you clicked |
+| ++cmd+a++ | Select every file the view shows, loaded or not; turns on Select mode |
+| ++delete++ / ++backspace++ | Delete the selection, or the focused file (asks first) |
+| ++esc++ | Leave Select mode and clear the selection |
 
 ## Viewer
 
 | Key | Action |
 |---|---|
-| ++left++ / ++right++ | Previous / next asset |
-| ++home++ / ++end++ | First / last asset |
+| ++left++ / ++right++ | Previous / next file |
+| ++home++ / ++end++ | First / last file |
 | ++r++ | Reuse settings |
 | ++e++ | Use as (image or audio) or Extend (video) |
 | ++m++ | [Edit an image](workspace.md#edit-an-image) |
 | ++x++ then ++2++ / ++4++ | Plain upscale 2× / 4× of an image (a creative upscale where the plain one isn't offered); ++x++ then ++2++ upscales a video where its **Upscale** menu offers one |
+| ++s++ | Star or unstar the file |
 | ++d++ | Download |
 | ++c++ | Copy the prompt |
 | ++delete++ / ++backspace++ | Delete (asks first: ++enter++ confirms, ++esc++ cancels) |

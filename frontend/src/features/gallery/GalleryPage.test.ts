@@ -8,11 +8,15 @@ import { galleryMemory, workspaceMemory } from '$lib/state/pageMemory';
 import { projectPick } from '$lib/state/projectPick.svelte';
 import { projectsStore } from '$lib/state/projects.svelte';
 import { hasPendingReference, takeReference } from '$lib/state/pendingReference.svelte';
-import type { GalleryAsset, GalleryPage as GalleryPageResponse, MoveResult, SavedVoice, WorkspaceContext } from '$lib/types';
+import { modeLine } from './selection';
+import type { DeleteResult, GalleryAsset, GalleryPage as GalleryPageResponse, MoveResult, RemovedAsset, SavedVoice, WorkspaceContext } from '$lib/types';
 
 const galleryApiMocks = vi.hoisted(() => ({
   getGallery: vi.fn<() => Promise<GalleryPageResponse>>(),
-  deleteAsset: vi.fn<(assetId: string) => Promise<void>>(),
+  getGalleryIds: vi.fn<(filter?: string, project?: string | null, starred?: boolean) => Promise<string[]>>(),
+  deleteAssets: vi.fn<(ids: string[]) => Promise<DeleteResult>>(),
+  downloadAssets: vi.fn<(ids: readonly string[]) => void>(),
+  setStarred: vi.fn<(id: string, starred: boolean) => Promise<{ id: string; starred: boolean }>>(),
   moveAssets: vi.fn<(ids: string[], project: string | null) => Promise<MoveResult>>(),
 }));
 
@@ -68,7 +72,10 @@ vi.mock('$lib/api/gallery', async (importOriginal) => {
   return {
     ...actual,
     getGallery: galleryApiMocks.getGallery,
-    deleteAsset: galleryApiMocks.deleteAsset,
+    deleteAssets: galleryApiMocks.deleteAssets,
+    downloadAssets: galleryApiMocks.downloadAssets,
+    getGalleryIds: galleryApiMocks.getGalleryIds,
+    setStarred: galleryApiMocks.setStarred,
     moveAssets: galleryApiMocks.moveAssets,
   };
 });
@@ -146,11 +153,28 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
   return { promise, resolve, reject };
 }
 
+/** The bulk action button of the Select mode's header (or the phone bar) by its fixed accessible name. */
+function bulkButton(name: 'Done' | 'Select all' | 'Move selected' | 'Download selected' | 'Delete selected'): HTMLButtonElement | null {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('#gallery-view button')).find((button) => (button.getAttribute('aria-label') ?? button.textContent?.trim()) === name) ?? null;
+}
+
+/** What a bulk Delete or Move reports for one file. */
+function removed(asset: GalleryAsset): RemovedAsset {
+  return { id: asset.id, media_type: asset.media_type, project: asset.project, starred: asset.starred ?? false, file_path: asset.file_path };
+}
+
+/** Turn Select mode on from the header's Select button. */
+async function enterSelectMode(): Promise<void> {
+  queryButtonByName(target, 'Select')!.click();
+  await settle();
+}
+
 function selectAssetForBatch(container: ParentNode, asset: GalleryAsset): HTMLInputElement {
   const checkbox = container.querySelector(`input[aria-label="Select ${asset.filename}"]`) as HTMLInputElement | null;
   expect(checkbox).not.toBeNull();
   checkbox!.checked = true;
   checkbox!.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
   return checkbox!;
 }
 
@@ -174,7 +198,9 @@ function mountPage(): void {
 
 /** Click the tile of *filename* to open it in the viewer. */
 async function openViewer(filename: string): Promise<void> {
-  (target.querySelector(`button[aria-label="View ${filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  // A tile is named View outside Select mode; inside it, the expand button opens the viewer.
+  const opener = target.querySelector(`button[aria-label="View ${filename}"]`) ?? target.querySelector(`button[aria-label="View ${filename} fullscreen"]`);
+  (opener as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
   await settle();
 }
 
@@ -184,7 +210,10 @@ beforeEach(() => {
   galleryMemory.forget();
   galleryStore.reset();
   galleryApiMocks.getGallery.mockReset();
-  galleryApiMocks.deleteAsset.mockReset();
+  galleryApiMocks.deleteAssets.mockReset();
+  galleryApiMocks.downloadAssets.mockReset();
+  galleryApiMocks.getGalleryIds.mockReset();
+  galleryApiMocks.setStarred.mockReset().mockImplementation(async (id, starred) => ({ id, starred }));
   galleryApiMocks.moveAssets.mockReset();
   projectApiMocks.listProjects.mockReset().mockResolvedValue([{ name: 'Night Bus', path: '/out/Night Bus' }, { name: 'Zoo', path: '/out/Zoo' }]);
   workspaceApiMocks.getWorkspaceCoreContext.mockReset();
@@ -201,33 +230,335 @@ beforeEach(() => {
   globalThis.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
 });
 
-describe('GalleryPage active detail selection behavior', () => {
-  it('keeps active detail separate from batch selection until the checkbox is toggled', async () => {
-    const asset = makeAsset();
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [asset],
-      page: 1,
-      total_pages: 1,
-      total_count: 1,
-    });
+describe('GalleryPage Select mode', () => {
+  const tiles = ['a.png', 'b.png', 'c.png', 'd.png', 'e.png', 'f.png'].map((name) => makeAsset({ id: name, filename: name, prompt: `prompt of ${name}` }));
+  const reply = (assets: GalleryAsset[], total = assets.length) => ({ assets, page: 1, total_pages: 1, total_count: total });
 
+  const media = (filename: string) => target.querySelector<HTMLButtonElement>(`button[aria-label$=" ${filename}"]:not([aria-label$=" fullscreen"]):not([aria-label^="More"])`)!;
+  const checkbox = (filename: string) => target.querySelector<HTMLInputElement>(`input[aria-label="Select ${filename}"]`)!;
+  const selectedNames = () => tiles.filter((asset) => checkbox(asset.filename)?.checked).map((asset) => asset.filename);
+  const header = () => target.querySelector('header')!;
+  const modeLineText = () => target.querySelector('.ui-page-sub')?.textContent ?? '';
+  const status = () => target.querySelector('[role="status"]:not([aria-label])')?.textContent ?? '';
+  const click = (el: HTMLElement, init: MouseEventInit = {}) => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, ...init })); flushSync(); };
+  const press = (key: string, init: KeyboardEventInit = {}) => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
+    flushSync();
+  };
+
+  async function mountTiles(assets: GalleryAsset[] = tiles): Promise<void> {
+    galleryApiMocks.getGallery.mockResolvedValue(reply(assets));
     mountPage();
     await settle();
+  }
 
-    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
-    const checkbox = target.querySelector(`input[aria-label="Select ${asset.filename}"]`) as HTMLInputElement | null;
+  it('opens the viewer on a click outside the mode and selects nothing', async () => {
+    await mountTiles();
+    expect(media('a.png').getAttribute('aria-label')).toBe('View a.png');
+    expect(media('a.png').hasAttribute('aria-pressed')).toBe(false);
 
-    expect(card).not.toBeNull();
-    expect(checkbox).not.toBeNull();
-    expect(checkbox?.checked).toBe(false);
-
-    card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    click(media('a.png'));
     await settle();
 
-    expect(checkbox?.checked).toBe(false);
-    expect(target.textContent).toContain(asset.prompt);
+    expect(getViewer()?.textContent).toContain('prompt of a.png');
+    expect(selectedNames()).toEqual([]);
+    expect(queryButtonByName(target, 'Select')).not.toBeNull();
+    expect(bulkButton('Done')).toBeNull();
   });
 
+  it('enters the mode with the tile selected when its checkbox is ticked outside the mode', async () => {
+    await mountTiles();
+
+    selectAssetForBatch(target, tiles[2]);
+    await settle();
+
+    expect(bulkButton('Done')?.getAttribute('aria-pressed')).toBe('true');
+    expect(selectedNames()).toEqual(['c.png']);
+    expect(status()).toBe('1 selected');
+    expect(media('c.png').getAttribute('aria-label')).toBe('Select c.png');
+    expect(media('c.png').getAttribute('aria-pressed')).toBe('true');
+    expect(media('a.png').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('enters the mode from the Select button, focuses Done, and Done leaves it, clears the selection and focuses Select', async () => {
+    await mountTiles();
+    await enterSelectMode();
+
+    expect(document.activeElement).toBe(bulkButton('Done'));
+    expect(status()).toBe('0 selected');
+    click(media('a.png'));
+    expect(selectedNames()).toEqual(['a.png']);
+
+    click(bulkButton('Done')!);
+    await settle();
+
+    expect(selectedNames()).toEqual([]);
+    expect(bulkButton('Done')).toBeNull();
+    expect(document.activeElement).toBe(queryButtonByName(target, 'Select'));
+    expect(media('a.png').getAttribute('aria-label')).toBe('View a.png');
+  });
+
+  it('enters the mode with the tile selected from the tile menu, whose Select item leads outside the mode', async () => {
+    await mountTiles();
+    target.querySelector<HTMLButtonElement>('button[aria-label="More actions for b.png"]')!.click();
+    flushSync();
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menu"] [data-action]'));
+    expect(items[0].dataset.action).toBe('select');
+
+    items[0].click();
+    await settle();
+
+    expect(selectedNames()).toEqual(['b.png']);
+    expect(bulkButton('Done')).not.toBeNull();
+    expect(document.activeElement).toBe(media('b.png'));
+  });
+
+  it('leads the tile menu with View inside the mode, and View opens the viewer without changing the selection', async () => {
+    await mountTiles();
+    await enterSelectMode();
+    click(media('a.png'));
+    target.querySelector<HTMLButtonElement>('button[aria-label="More actions for b.png"]')!.click();
+    flushSync();
+    const lead = document.querySelector<HTMLElement>('[role="menu"] [data-action]')!;
+    expect(lead.dataset.action).toBe('view');
+
+    lead.click();
+    await settle();
+
+    expect(getViewer()?.textContent).toContain('prompt of b.png');
+    expect(selectedNames()).toEqual(['a.png']);
+  });
+
+  it('enters the mode and toggles the focused tile with Space and X', async () => {
+    await mountTiles();
+    media('b.png').focus();
+
+    press(' ');
+    await settle();
+    expect(bulkButton('Done')).not.toBeNull();
+    expect(selectedNames()).toEqual(['b.png']);
+
+    press('x');
+    expect(selectedNames()).toEqual([]);
+    // The mode stays on with nothing selected.
+    expect(bulkButton('Done')).not.toBeNull();
+  });
+
+  it('enters the mode and selects every matching file with Ctrl+A, loaded or not', async () => {
+    await mountTiles(tiles.slice(0, 3));
+    const ids = Array.from({ length: 30 }, (_, index) => `file-${index}.png`);
+    galleryApiMocks.getGalleryIds.mockResolvedValue(ids);
+
+    press('a', { ctrlKey: true });
+    await settle();
+
+    expect(galleryApiMocks.getGalleryIds).toHaveBeenCalledWith('all', null, false);
+    expect(bulkButton('Done')).not.toBeNull();
+    expect(status()).toBe('30 selected');
+  });
+
+  it('toggles a tile with a click in the mode, and the media button names what a click does', async () => {
+    await mountTiles();
+    await enterSelectMode();
+
+    click(media('d.png'));
+    expect(media('d.png').getAttribute('aria-pressed')).toBe('true');
+    expect(checkbox('d.png').checked).toBe(true);
+    click(media('d.png'));
+    expect(media('d.png').getAttribute('aria-pressed')).toBe('false');
+    expect(selectedNames()).toEqual([]);
+    expect(getViewer()).toBeNull();
+  });
+
+  it('selects the run from the anchor with Shift-click, in grid order either way, and never removes', async () => {
+    await mountTiles();
+    await enterSelectMode();
+
+    click(media('b.png'));
+    click(media('e.png'), { shiftKey: true });
+    expect(selectedNames()).toEqual(['b.png', 'c.png', 'd.png', 'e.png']);
+
+    click(media('a.png'), { shiftKey: true });
+    expect(selectedNames()).toEqual(['a.png', 'b.png', 'c.png', 'd.png', 'e.png']);
+  });
+
+  it('opens the viewer on a Shift-click outside the mode, like a click', async () => {
+    await mountTiles();
+
+    click(media('c.png'), { shiftKey: true });
+    await settle();
+
+    expect(getViewer()?.textContent).toContain('prompt of c.png');
+    expect(bulkButton('Done')).toBeNull();
+  });
+
+  it('opens the viewer in the mode from the expand button and from Enter', async () => {
+    await mountTiles();
+    await enterSelectMode();
+    click(media('a.png'));
+
+    click(target.querySelector<HTMLButtonElement>('button[aria-label="View b.png fullscreen"]')!);
+    await settle();
+    expect(getViewer()?.textContent).toContain('prompt of b.png');
+    expect(selectedNames()).toEqual(['a.png']);
+
+    document.querySelector<HTMLButtonElement>('[data-testid="asset-viewer"] button[aria-label="Close"]')?.click();
+    await settle();
+    media('c.png').focus();
+    press('Enter');
+    await settle();
+    expect(getViewer()?.textContent).toContain('prompt of c.png');
+    expect(selectedNames()).toEqual(['a.png']);
+  });
+
+  it('leaves the mode and clears the selection on Escape', async () => {
+    await mountTiles();
+    await enterSelectMode();
+    click(media('a.png'));
+    click(media('b.png'));
+    media('a.png').focus();
+
+    press('Escape');
+    await settle();
+
+    expect(selectedNames()).toEqual([]);
+    expect(bulkButton('Done')).toBeNull();
+    expect(queryButtonByName(target, 'Select')).not.toBeNull();
+  });
+
+  for (const mode of ['wide', 'compact'] as const) {
+    it(`hides the filter, the star toggle and the sort in the mode on ${mode}, and shows them at rest`, async () => {
+      layoutState.mode = mode;
+      await mountTiles();
+      const controls = () => ({
+        filter: target.querySelector('[aria-label="Filter gallery media"]'),
+        starred: target.querySelector('button[aria-label="Starred"]'),
+        sort: target.querySelector('[aria-label="Sort gallery files"]'),
+      });
+      expect(Object.values(controls()).every((el) => el !== null)).toBe(true);
+
+      await enterSelectMode();
+
+      expect(Object.values(controls()).every((el) => el === null)).toBe(true);
+    });
+  }
+
+  it('offers Done, Select all, Move, Download and Delete in the header on a wide screen', async () => {
+    await mountTiles();
+    await enterSelectMode();
+
+    const names = Array.from(header().querySelectorAll('button')).map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim());
+    expect(names).toEqual(expect.arrayContaining(['Done', 'Select all', 'Move selected', 'Download selected', 'Delete selected']));
+    expect(target.querySelector('[data-testid="gallery-select-bar"]')).toBeNull();
+  });
+
+  it('offers Select all, Move, Download and Delete in the bar at the foot on the phone', async () => {
+    layoutState.mode = 'compact';
+    await mountTiles();
+    await enterSelectMode();
+
+    const bar = target.querySelector<HTMLElement>('[data-testid="gallery-select-bar"]')!;
+    const names = Array.from(bar.querySelectorAll('button')).map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim());
+    expect(names).toEqual(expect.arrayContaining(['Select all', 'Move selected', 'Download selected', 'Delete selected']));
+    expect(bulkButton('Done')).not.toBeNull();
+  });
+
+  it('describes the view being selected from in the mode line, without a count', async () => {
+    await mountTiles();
+    pickOption(target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement, 'video');
+    await settle();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Starred"]')!.click();
+    await settle();
+    await enterSelectMode();
+
+    expect(modeLineText()).toBe(modeLine({ project: null, starred: true, filter: 'video', coarse: false }));
+  });
+
+  it('selects every matching file with Select all, shows the server\'s count, and sends one request while it is busy', async () => {
+    await mountTiles();
+    await enterSelectMode();
+    const ids = Array.from({ length: 240 }, (_, index) => `file-${index}.png`);
+    const answer = deferred<string[]>();
+    galleryApiMocks.getGalleryIds.mockReturnValue(answer.promise);
+
+    click(bulkButton('Select all')!);
+    await settle();
+    click(bulkButton('Select all')!);
+    expect(galleryApiMocks.getGalleryIds).toHaveBeenCalledTimes(1);
+
+    answer.resolve(ids);
+    await settle();
+
+    expect(status()).toBe('240 selected');
+  });
+
+  it('asks for the IDs of the view the mode was entered from: media filter, picked project and the star toggle', async () => {
+    projectPick.set('Night Bus');
+    galleryApiMocks.getGallery.mockResolvedValue(reply([makeAsset({ id: 'Night Bus/a.png', filename: 'a.png', project: 'Night Bus' })]));
+    mountPage();
+    await settle();
+    pickOption(target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement, 'image');
+    await settle();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Starred"]')!.click();
+    await settle();
+    galleryApiMocks.getGalleryIds.mockResolvedValue(['Night Bus/a.png']);
+    await enterSelectMode();
+
+    click(bulkButton('Select all')!);
+    await settle();
+
+    expect(galleryApiMocks.getGalleryIds).toHaveBeenCalledWith('image', 'Night Bus', true);
+  });
+
+  it('reports a Select all that fails and leaves the selection as it was', async () => {
+    await mountTiles();
+    await enterSelectMode();
+    click(media('a.png'));
+    galleryApiMocks.getGalleryIds.mockRejectedValue(new Error('offline'));
+
+    click(bulkButton('Select all')!);
+    await settle();
+
+    expect(toastMocks.addToast).toHaveBeenCalledWith(expect.stringContaining('offline'), 'error');
+    expect(selectedNames()).toEqual(['a.png']);
+  });
+
+  it('keeps the selected files that are not loaded when page one refills, and shows them selected once their page loads', async () => {
+    const pageTwo = makeAsset({ id: 'later.png', filename: 'later.png' });
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: tiles.slice(0, 2), page: 1, total_pages: 2, total_count: 3 })
+      .mockResolvedValue({ assets: tiles.slice(0, 2), page: 1, total_pages: 2, total_count: 3 });
+    mountPage();
+    await settle();
+    galleryApiMocks.getGalleryIds.mockResolvedValue(['a.png', 'b.png', 'later.png']);
+    press('a', { ctrlKey: true });
+    await settle();
+    expect(status()).toBe('3 selected');
+
+    // A delete elsewhere refills page one: the unloaded selected file stays selected.
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
+    deleteAssetFromCard(target, tiles[1]);
+    await settle();
+    expect(status()).toBe('2 selected');
+
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [pageTwo], page: 2, total_pages: 2, total_count: 2 });
+    MockIntersectionObserver.instances.at(-1)?.trigger(true);
+    await settle();
+    expect(checkbox('later.png').checked).toBe(true);
+  });
+
+  it('leaves the mode when the view changes, here a project pick', async () => {
+    await mountTiles();
+    await enterSelectMode();
+    click(media('a.png'));
+
+    projectsStore.choose('Night Bus');
+    await settle();
+
+    expect(bulkButton('Done')).toBeNull();
+    expect(queryButtonByName(target, 'Select')).not.toBeNull();
+    expect(selectedNames()).toEqual([]);
+  });
 });
 
 describe('GalleryPage regressions', () => {
@@ -245,25 +576,25 @@ describe('GalleryPage regressions', () => {
     await settle();
 
     const filterSelect = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement | null;
-    const sortSelect = target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement | null;
+    const sortSelect = target.querySelector('[role="combobox"][aria-label="Sort gallery files"]') as HTMLButtonElement | null;
     expect(filterSelect).not.toBeNull();
     expect(sortSelect).not.toBeNull();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(1, 1, 'all', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(1, 1, 'all', 'newest', null, false);
 
     pickOption(filterSelect!, 'video');
     await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'video', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'video', 'newest', null, false);
     expect(filterSelect!.dataset.value).toBe('video');
 
     pickOption(sortSelect!, 'oldest');
     await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'video', 'oldest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'video', 'oldest', null, false);
     expect(sortSelect!.dataset.value).toBe('oldest');
 
     MockIntersectionObserver.instances.at(-1)?.trigger(true);
     await settle();
 
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(4, 2, 'video', 'oldest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(4, 2, 'video', 'oldest', null, false);
     expect(target.textContent).toContain('video-2.mp4');
   });
 
@@ -353,7 +684,7 @@ describe('GalleryPage regressions', () => {
     const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
     galleryStore.seed([asset]);
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     draft.reset();
     draft.setStartImage('image', { path: '/outputs/nested/asset.png' }, null);
     draft.setLastFrame({ path: '/outputs/nested/asset.png' });
@@ -371,7 +702,7 @@ describe('GalleryPage regressions', () => {
     const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
     galleryStore.seed([asset]);
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     draft.reset();
     draft.setTab('video');
     draft.setStartImage('video', { path: '/outputs/nested/asset.png' }, null);
@@ -391,7 +722,7 @@ describe('GalleryPage regressions', () => {
     const other = makeAsset({ id: 'other.png', filename: 'other.png', file_path: '/outputs/other.png' });
     galleryStore.seed([used, other]);
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [used, other], page: 1, total_pages: 1, total_count: 2 });
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     draft.reset();
     draft.setStartImage('image', { path: '/outputs/used.png' }, null);
     draft.setTab('video');
@@ -411,7 +742,7 @@ describe('GalleryPage regressions', () => {
     const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
     galleryStore.seed([asset]);
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     draft.reset();
     draft.setTab('video');
     draft.setStartImage('video', { path: '/outputs/nested/asset.png' }, null);
@@ -501,7 +832,7 @@ describe('GalleryPage regressions', () => {
     const asset = makeAsset();
     galleryStore.seed([asset]);
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     confirmMocks.requestConfirm.mockResolvedValue(true);
 
     mountPage();
@@ -520,7 +851,7 @@ describe('GalleryPage regressions', () => {
       .mockResolvedValueOnce({ assets: pageOne, page: 1, total_pages: 2, total_count: 3 })
       .mockResolvedValueOnce({ assets: pageTwo, page: 2, total_pages: 2, total_count: 3 })
       .mockResolvedValue({ assets: pageOne, page: 1, total_pages: 2, total_count: 2 });
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     confirmMocks.requestConfirm.mockResolvedValue(true);
 
     mountPage();
@@ -540,7 +871,7 @@ describe('GalleryPage regressions', () => {
     await settle();
     expect(getViewer()).toBeNull();
     expect(galleryApiMocks.getGallery).toHaveBeenCalledTimes(3);
-    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest', null, false);
     vi.restoreAllMocks();
   });
 
@@ -569,7 +900,7 @@ describe('GalleryPage regressions', () => {
       // After deleting a, the server's page one starts at b and pulls f forward from page two.
       .mockResolvedValueOnce({ assets: [b, c, d, e, f], page: 1, total_pages: 2, total_count: 6 })
       .mockResolvedValueOnce({ assets: [g], page: 2, total_pages: 2, total_count: 6 });
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     confirmMocks.requestConfirm.mockResolvedValue(true);
     const press = async (key: string): Promise<void> => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
@@ -584,8 +915,8 @@ describe('GalleryPage regressions', () => {
     await settle();
     for (let step = 0; step < 4; step += 1) await press('ArrowRight');
 
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'all', 'newest', null);
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 2, 'all', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'all', 'newest', null, false);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 2, 'all', 'newest', null, false);
     expect(Array.from(document.querySelectorAll('[data-film-index]')).map((el) => el.getAttribute('aria-label'))).toEqual(
       ['b', 'c', 'd', 'e', 'f', 'g'].map((name) => `Show ${name}.png`)
     );
@@ -606,14 +937,14 @@ describe('GalleryPage regressions', () => {
     pickOption(filterSelect!, 'video');
     await settle();
 
-    expect(target.textContent).toContain('No matching assets');
+    expect(target.textContent).toContain('No matching files');
 
     const clearButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Show all media');
     expect(clearButton).not.toBeUndefined();
     clearButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'newest', null, false);
     expect(filterSelect!.dataset.value).toBe('all');
   });
 
@@ -623,7 +954,7 @@ describe('GalleryPage regressions', () => {
     mountPage();
     await settle();
 
-    expect(target.textContent).toContain('No generated assets yet');
+    expect(target.textContent).toContain('No generated files yet');
 
     const workspaceButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Open Workspace');
     expect(workspaceButton).not.toBeUndefined();
@@ -738,7 +1069,7 @@ describe('GalleryPage request ownership (F07)', () => {
     expect(target.textContent).toContain('current.mp4');
     expect(target.textContent).not.toContain('stale request failed');
     expect(target.textContent).not.toContain('stale.png');
-    expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
+    expect(target.textContent).toContain('Browsing 1 loaded file of 1');
   });
 
   it('invalidates an in-flight old pagination request and permits pagination for the new query', async () => {
@@ -775,7 +1106,7 @@ describe('GalleryPage request ownership (F07)', () => {
     newPage.resolve({ assets: [pagedAsset], page: 2, total_pages: 2, total_count: 2 });
     await settle();
 
-    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(2, 'video', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(2, 'video', 'newest', null, false);
     expect(target.textContent).toContain('video-page-2.mp4');
   });
 
@@ -797,14 +1128,16 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     confirmMocks.requestConfirm.mockResolvedValue(true);
   });
 
+  const reply = (assets: GalleryAsset[], total = assets.length) => ({ assets, page: 1, total_pages: 1, total_count: total });
+  const checkboxOf = (asset: GalleryAsset) => target.querySelector<HTMLInputElement>(`input[aria-label="Select ${asset.filename}"]`);
+
   it('keeps failed IDs selected and preserves selections added while a mixed deletion is in flight', async () => {
     const assetA = makeAsset({ id: 'a.png', filename: 'a.png' });
     const assetB = makeAsset({ id: 'b.png', filename: 'b.png' });
     const assetC = makeAsset({ id: 'c.png', filename: 'c.png' });
-    const deleteA = deferred<void>();
-    const deleteB = deferred<void>();
-    galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB, assetC], page: 1, total_pages: 1, total_count: 3 });
-    galleryApiMocks.deleteAsset.mockImplementation((id) => id === assetA.id ? deleteA.promise : deleteB.promise);
+    const answer = deferred<DeleteResult>();
+    galleryApiMocks.getGallery.mockResolvedValue(reply([assetA, assetB, assetC]));
+    galleryApiMocks.deleteAssets.mockReturnValue(answer.promise);
 
     mountPage();
     await settle();
@@ -813,101 +1146,211 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     selectAssetForBatch(target, assetB);
     await settle();
 
-    const deleteButton = queryButtonByName(target, 'Delete selected')!;
+    const deleteButton = bulkButton('Delete selected')!;
     deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     expect(deleteButton.disabled).toBe(true);
     deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledTimes(2);
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledTimes(1);
 
     selectAssetForBatch(target, assetC);
-    deleteA.resolve();
-    deleteB.reject(new Error('blocked'));
+    answer.resolve({ deleted: [removed(assetA)], failed: [{ id: 'b.png', detail: 'blocked' }] });
     await settle();
 
     expect(target.textContent).not.toContain('a.png');
     expect(target.textContent).toContain('b.png');
     expect(target.textContent).toContain('c.png');
-    expect(target.textContent).toContain('Browsing 2 loaded assets of 2');
     expect(target.textContent).toContain('2 selected');
     // The viewer moves on to the neighbouring asset instead of closing.
     expect(getViewer()?.textContent).toContain('b.png');
-    expect(queryButtonByName(target, 'Delete selected')?.disabled).toBe(false);
+    expect(bulkButton('Delete selected')?.disabled).toBe(false);
     expect(toastMocks.addToast).toHaveBeenCalledWith(expect.any(String), 'warning', {
       action: expect.objectContaining({ label: 'Retry' })
     });
   });
 
-  it('removes only successful originals, moves the viewer past them, and reports a full success', async () => {
+  it('removes only the files the server reports deleted, moves the viewer past them, and leaves the mode on a clean run', async () => {
     const assetA = makeAsset({ id: 'a.png', filename: 'a.png' });
     const assetB = makeAsset({ id: 'b.png', filename: 'b.png' });
     const assetC = makeAsset({ id: 'c.png', filename: 'c.png' });
-    const deleteA = deferred<void>();
-    const deleteB = deferred<void>();
-    galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB, assetC], page: 1, total_pages: 1, total_count: 3 });
-    galleryApiMocks.deleteAsset.mockImplementation((id) => id === assetA.id ? deleteA.promise : deleteB.promise);
+    galleryApiMocks.getGallery.mockResolvedValue(reply([assetA, assetB, assetC]));
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [removed(assetA), removed(assetB)], failed: [] });
 
     mountPage();
     await settle();
     await openViewer(assetA.filename);
     selectAssetForBatch(target, assetA);
     selectAssetForBatch(target, assetB);
-    queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-    selectAssetForBatch(target, assetC);
-    deleteA.resolve();
-    deleteB.resolve();
+    bulkButton('Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     expect(target.textContent).not.toContain('a.png');
     expect(target.textContent).not.toContain('b.png');
     expect(target.textContent).toContain('c.png');
-    expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
-    expect(target.textContent).toContain('1 selected');
+    expect(target.textContent).toContain('Browsing 1 loaded file of 1');
     expect(getViewer()?.textContent).toContain('c.png');
-    expect(toastMocks.addToast).toHaveBeenCalledWith(expect.any(String), 'success');
+    expect(toastMocks.addToast).toHaveBeenCalledWith(expect.stringContaining('2'), 'success');
+    // No file failed: the gallery is back to browsing, with focus on Select.
+    expect(bulkButton('Done')).toBeNull();
+    expect(document.activeElement).toBe(queryButtonByName(target, 'Select'));
   });
 
-  it('retains all failed originals, their active detail, retryability, and an error outcome', async () => {
+  it('retains all failed files, their active detail, retryability, and an error outcome, and the mode stays on', async () => {
     const assetA = makeAsset({ id: 'a.png', filename: 'a.png' });
     const assetB = makeAsset({ id: 'b.png', filename: 'b.png', prompt: 'active failed asset' });
-    galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB], page: 1, total_pages: 1, total_count: 2 });
-    galleryApiMocks.deleteAsset.mockRejectedValue(new Error('blocked'));
+    galleryApiMocks.getGallery.mockResolvedValue(reply([assetA, assetB]));
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [{ id: 'a.png', detail: 'blocked' }, { id: 'b.png', detail: 'blocked' }] });
 
     mountPage();
     await settle();
     await openViewer(assetB.filename);
     selectAssetForBatch(target, assetA);
     selectAssetForBatch(target, assetB);
-    queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    bulkButton('Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     expect(target.textContent).toContain('a.png');
     expect(target.textContent).toContain('b.png');
-    expect(target.textContent).toContain('Browsing 2 loaded assets of 2');
     expect(target.textContent).toContain('2 selected');
     expect(getViewer()?.textContent).toContain('active failed asset');
-    expect(queryButtonByName(target, 'Delete selected')?.disabled).toBe(false);
+    expect(bulkButton('Delete selected')?.disabled).toBe(false);
+    expect(document.activeElement).toBe(bulkButton('Delete selected'));
     expect(toastMocks.addToast).toHaveBeenCalledWith(expect.any(String), 'error', {
       action: expect.objectContaining({ label: 'Retry' })
     });
   });
 
+  it('re-runs the delete for the files that failed when Retry is pressed', async () => {
+    const assetA = makeAsset({ id: 'a.png', filename: 'a.png' });
+    galleryApiMocks.getGallery.mockResolvedValue(reply([assetA]));
+    galleryApiMocks.deleteAssets
+      .mockResolvedValueOnce({ deleted: [], failed: [{ id: 'a.png', detail: 'blocked' }] })
+      .mockResolvedValueOnce({ deleted: [removed(assetA)], failed: [] });
+    toastMocks.addToast.mockReturnValue('toast-1');
+
+    mountPage();
+    await settle();
+    selectAssetForBatch(target, assetA);
+    bulkButton('Delete selected')!.click();
+    await settle();
+    const retry = toastMocks.addToast.mock.calls.find((call) => call[2]?.action?.label === 'Retry')![2]!.action!;
+    retry.run();
+    await settle();
+
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledTimes(2);
+    expect(galleryApiMocks.deleteAssets).toHaveBeenLastCalledWith(['a.png']);
+    expect(bulkButton('Done')).toBeNull();
+  });
+
+  it('keeps the selection and the mode, with a Retry toast, when the delete request itself fails', async () => {
+    const asset = makeAsset({ id: 'a.png', filename: 'a.png' });
+    galleryApiMocks.getGallery.mockResolvedValue(reply([asset]));
+    galleryApiMocks.deleteAssets.mockRejectedValue(new Error('offline'));
+
+    mountPage();
+    await settle();
+    selectAssetForBatch(target, asset);
+    bulkButton('Delete selected')!.click();
+    await settle();
+
+    expect(toastMocks.addToast).toHaveBeenCalledWith('offline', 'error', { action: expect.objectContaining({ label: 'Retry' }) });
+    expect(target.textContent).toContain('1 selected');
+    expect(bulkButton('Done')).not.toBeNull();
+  });
+
   it('closes its Retry toast when the page unmounts, so Retry cannot act on a page that is gone', async () => {
     const asset = makeAsset({ id: 'a.png', filename: 'a.png' });
-    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
-    galleryApiMocks.deleteAsset.mockRejectedValue(new Error('blocked'));
+    galleryApiMocks.getGallery.mockResolvedValue(reply([asset]));
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [{ id: 'a.png', detail: 'blocked' }] });
     toastMocks.addToast.mockReturnValue('toast-7');
 
     mountPage();
     await settle();
     selectAssetForBatch(target, asset);
-    queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    bulkButton('Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     expect(toastMocks.dismissToast).not.toHaveBeenCalled();
 
     await page.unmount();
     expect(toastMocks.dismissToast).toHaveBeenCalledWith('toast-7');
+  });
+
+  it('asks to confirm the count and sends every selected ID in one request', async () => {
+    const assets = ['a', 'b', 'c'].map((name) => makeAsset({ id: `${name}.png`, filename: `${name}.png` }));
+    galleryApiMocks.getGallery.mockResolvedValue(reply(assets));
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: assets.map(removed), failed: [] });
+
+    mountPage();
+    await settle();
+    assets.forEach((asset) => selectAssetForBatch(target, asset));
+    bulkButton('Delete selected')!.click();
+    await settle();
+
+    expect(confirmMocks.requestConfirm).toHaveBeenCalledWith(expect.objectContaining({ question: expect.stringContaining('3'), confirmLabel: 'Delete' }));
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledTimes(1);
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledWith(['a.png', 'b.png', 'c.png']);
+  });
+
+  describe('with files that are not loaded', () => {
+    // 30 files match; the first page holds 12.
+    const names = Array.from({ length: 30 }, (_, index) => `f${String(index).padStart(2, '0')}.png`);
+    const loaded = names.slice(0, 12).map((name) => makeAsset({ id: name, filename: name }));
+
+    async function mountThirty(): Promise<void> {
+      galleryApiMocks.getGallery.mockResolvedValue({ assets: loaded, page: 1, total_pages: 3, total_count: 30 });
+      galleryApiMocks.getGalleryIds.mockResolvedValue(names);
+      mountPage();
+      await settle();
+      await enterSelectMode();
+      bulkButton('Select all')!.click();
+      await settle();
+    }
+
+    it('keeps the other 29 selected, and the mode on, when one loaded file is deleted from its menu', async () => {
+      await mountThirty();
+      expect(target.textContent).toContain('30 selected');
+      galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
+
+      deleteAssetFromCard(target, loaded[0]);
+      await settle();
+
+      expect(target.textContent).toContain('29 selected');
+      expect(bulkButton('Done')).not.toBeNull();
+    });
+
+    it('deletes all 30 in one request, unloaded files included, and asks about 30', async () => {
+      await mountThirty();
+      galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: names.map((name) => ({ id: name, media_type: 'image', project: null, starred: false, file_path: `/outputs/${name}` })), failed: [] });
+
+      bulkButton('Delete selected')!.click();
+      await settle();
+
+      expect(confirmMocks.requestConfirm).toHaveBeenCalledWith(expect.objectContaining({ question: expect.stringContaining('30') }));
+      expect(galleryApiMocks.deleteAssets).toHaveBeenCalledWith(names);
+      expect(bulkButton('Done')).toBeNull();
+    });
+
+    it('leaves the two unloaded files that failed selected, with the mode on', async () => {
+      await mountThirty();
+      const failedNames = names.slice(20, 22);
+      const deletedNames = names.filter((name) => !failedNames.includes(name));
+      galleryApiMocks.deleteAssets.mockResolvedValue({
+        deleted: deletedNames.map((name) => ({ id: name, media_type: 'image' as const, project: null, starred: false, file_path: `/outputs/${name}` })),
+        failed: failedNames.map((id) => ({ id, detail: 'Could not delete the file: Permission denied' })),
+      });
+
+      bulkButton('Delete selected')!.click();
+      await settle();
+
+      expect(target.textContent).toContain('2 selected');
+      expect(bulkButton('Done')).not.toBeNull();
+      expect(toastMocks.addToast).toHaveBeenCalledWith(expect.stringContaining(String(deletedNames.length)), 'warning', { action: expect.objectContaining({ label: 'Retry' }) });
+      // Retry asks again for exactly those two.
+      galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
+      toastMocks.addToast.mock.calls.at(-1)![2]!.action!.run();
+      await settle();
+      expect(galleryApiMocks.deleteAssets).toHaveBeenLastCalledWith(failedNames);
+    });
   });
 });
 
@@ -928,25 +1371,23 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
 
     mountPage();
     await settle();
-    selectAssetForBatch(target, image);
     await openViewer(image.filename);
     await settle();
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 
     const filter = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
-    const sort = target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement;
+    const sort = target.querySelector('[role="combobox"][aria-label="Sort gallery files"]') as HTMLButtonElement;
     routerMocks.replace.mockReset();
     pickOption(filter, 'video');
     await settle();
 
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'video', 'newest', null);
-    expect(target.textContent).toContain('0 selected');
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'video', 'newest', null, false);
     expect(getViewer()).toBeNull();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
 
     pickOption(sort, 'oldest');
     await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'video', 'oldest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'video', 'oldest', null, false);
 
     // The empty filtered view exposes the clear-filter path, which must use the
     // same reset and retain the selected sort order.
@@ -954,34 +1395,34 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     await settle();
     queryButtonByName(target, 'Show all media')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(5, 1, 'all', 'oldest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(5, 1, 'all', 'oldest', null, false);
   });
 
   it('prevents a stale sort response from resurrecting a successful deletion and refills page one', async () => {
     const deleted = makeAsset({ id: 'deleted.png', filename: 'deleted.png' });
     const survivor = makeAsset({ id: 'survivor.png', filename: 'survivor.png' });
-    const deleteRequest = deferred<void>();
+    const deleteRequest = deferred<DeleteResult>();
     const staleSort = deferred<GalleryPageResponse>();
     const refill = deferred<GalleryPageResponse>();
     galleryApiMocks.getGallery
       .mockResolvedValueOnce({ assets: [deleted, survivor], page: 1, total_pages: 2, total_count: 2 })
       .mockReturnValueOnce(staleSort.promise)
       .mockReturnValueOnce(refill.promise);
-    galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
+    galleryApiMocks.deleteAssets.mockReturnValue(deleteRequest.promise);
 
     mountPage();
     await settle();
     deleteAssetFromCard(target, deleted);
     await settle();
 
-    const sort = target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement;
+    const sort = target.querySelector('[role="combobox"][aria-label="Sort gallery files"]') as HTMLButtonElement;
     pickOption(sort, 'oldest');
     await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'all', 'oldest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'all', 'oldest', null, false);
 
-    deleteRequest.resolve();
+    deleteRequest.resolve({ deleted: [removed(deleted)], failed: [] });
     await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'oldest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'oldest', null, false);
 
     staleSort.resolve({ assets: [deleted], page: 1, total_pages: 1, total_count: 2 });
     refill.resolve({ assets: [deleted, survivor], page: 1, total_pages: 1, total_count: 2 });
@@ -989,7 +1430,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
 
     expect(target.textContent).not.toContain('deleted.png');
     expect(target.textContent).toContain('survivor.png');
-    expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
+    expect(target.textContent).toContain('Browsing 1 loaded file of 1');
   });
 
   it('keeps a deleted asset removed and warns when the refresh after the delete fails', async () => {
@@ -998,7 +1439,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     galleryApiMocks.getGallery
       .mockResolvedValueOnce({ assets: [deleted, survivor], page: 1, total_pages: 1, total_count: 2 })
       .mockRejectedValueOnce(new Error('refresh unavailable'));
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
 
     mountPage();
     await settle();
@@ -1020,7 +1461,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
       total_pages: 1,
       total_count: 3,
     });
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
 
     mountPage();
     await settle();
@@ -1043,13 +1484,13 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     expect(getViewer()?.textContent).toContain('other prompt');
   });
 
-  it('guards repeated IDs and single/bulk overlap while allowing distinct deletes to settle independently', async () => {
+  it('guards repeated IDs and single/bulk overlap: a file whose delete is in flight is left out of a bulk delete', async () => {
     const assetA = makeAsset({ id: 'a.png', filename: 'a.png' });
     const assetB = makeAsset({ id: 'b.png', filename: 'b.png' });
-    const deleteA = deferred<void>();
-    const deleteB = deferred<void>();
+    const deleteA = deferred<DeleteResult>();
+    const deleteBulk = deferred<DeleteResult>();
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB], page: 1, total_pages: 1, total_count: 2 });
-    galleryApiMocks.deleteAsset.mockImplementation((id) => id === assetA.id ? deleteA.promise : deleteB.promise);
+    galleryApiMocks.deleteAssets.mockReturnValueOnce(deleteA.promise).mockReturnValueOnce(deleteBulk.promise);
 
     mountPage();
     await settle();
@@ -1058,22 +1499,38 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     deleteAssetFromCard(target, assetA);
     await settle();
     deleteAssetFromCard(target, assetA);
-    queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    bulkButton('Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledTimes(2);
-    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith(assetA.id);
-    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith(assetB.id);
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledTimes(2);
+    expect(galleryApiMocks.deleteAssets).toHaveBeenNthCalledWith(1, [assetA.id]);
+    expect(galleryApiMocks.deleteAssets).toHaveBeenNthCalledWith(2, [assetB.id]);
+    expect(confirmMocks.requestConfirm).toHaveBeenLastCalledWith(expect.objectContaining({ question: expect.stringContaining('1') }));
 
-    deleteA.resolve();
+    deleteA.resolve({ deleted: [removed(assetA)], failed: [] });
     await settle();
     // B remains independently in flight after A has reconciled and requested a refill.
     expect(target.textContent).toContain('b.png');
-    deleteB.resolve();
+    deleteBulk.resolve({ deleted: [removed(assetB)], failed: [] });
     await settle();
 
     expect(target.textContent).not.toContain('a.png');
     expect(target.textContent).not.toContain('b.png');
+  });
+
+  it('keeps a file and reports an error when the server lists it as failed in a single delete', async () => {
+    const asset = makeAsset({ id: 'stuck.png', filename: 'stuck.png' });
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [{ id: asset.id, detail: 'Could not delete the file: Permission denied' }] });
+
+    mountPage();
+    await settle();
+    deleteAssetFromCard(target, asset);
+    await settle();
+
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledWith([asset.id]);
+    expect(toastMocks.addToast).toHaveBeenCalledWith(expect.stringContaining('Permission denied'), 'error');
+    expect(target.textContent).toContain('stuck.png');
   });
 
   it('does not call the API or alter active state when deletion is cancelled', async () => {
@@ -1088,7 +1545,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     deleteAssetFromCard(target, asset);
     await settle();
 
-    expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalled();
+    expect(galleryApiMocks.deleteAssets).not.toHaveBeenCalled();
     expect(target.textContent).toContain('cancelled.png');
     expect(getViewer()?.textContent).toContain('keep me');
   });
@@ -1104,18 +1561,18 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
       .mockResolvedValueOnce({ assets: [pageTwo], page: 2, total_pages: 3, total_count: 3 })
       .mockReturnValueOnce(refill.promise)
       .mockReturnValueOnce(resumedPageTwo.promise);
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
 
     mountPage();
     await settle();
     MockIntersectionObserver.instances.at(-1)?.trigger(true);
     await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 2, 'all', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 2, 'all', 'newest', null, false);
     expect(target.textContent).toContain('page-two.png');
 
     deleteAssetFromCard(target, deleted);
     await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'newest', null, false);
 
     // A callback held by a now-disconnected observer must not skip to page 3
     // while the authoritative page-one refill is unresolved.
@@ -1127,7 +1584,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     await settle();
     MockIntersectionObserver.instances.at(-1)?.trigger(true);
     await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(4, 2, 'all', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(4, 2, 'all', 'newest', null, false);
 
     resumedPageTwo.resolve({ assets: [pageThree], page: 2, total_pages: 2, total_count: 2 });
     await settle();
@@ -1166,6 +1623,36 @@ describe('GalleryPage keyboard shortcuts', () => {
     return (target.querySelector(`input[aria-label="Select ${filename}"]`) as HTMLInputElement).checked;
   }
 
+  it('leaves every tile reachable with Tab, the first before the rest', async () => {
+    await mountGallery();
+    const tabStops = Array.from(target.querySelectorAll<HTMLElement>('#gallery-scroll-region button, #gallery-scroll-region input')).filter((el) => el.tabIndex >= 0 && !el.hasAttribute('disabled'));
+    expect(tabStops[0]).toBe(tileButton('a.png'));
+    for (const name of ['a.png', 'b.png', 'c.png']) expect(tabStops).toContain(tileButton(name));
+  });
+
+  it('focuses the first tile with Alt+3, also from Select mode, and by key code as Option+3 types another character', async () => {
+    await mountGallery();
+    const event = press('£', { code: 'Digit3', altKey: true });
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(tileButton('a.png'));
+
+    tileButton('c.png').focus();
+    press(' ');
+    expect(checked('c.png')).toBe(true);
+    press('£', { code: 'Digit3', altKey: true });
+    expect(document.activeElement).toBe(target.querySelector('button[aria-label="Select a.png"]'));
+  });
+
+  it('leaves Alt+3 alone while typing in a field', async () => {
+    await mountGallery();
+    const field = document.createElement('input');
+    target.append(field);
+    field.focus();
+    const event = press('£', { code: 'Digit3', altKey: true });
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(field);
+  });
+
   it('moves focus between tiles with the arrow keys', async () => {
     await mountGallery();
     tileButton('a.png').focus();
@@ -1189,9 +1676,11 @@ describe('GalleryPage keyboard shortcuts', () => {
     expect(checked('b.png')).toBe(false);
   });
 
-  it('selects every loaded asset with Ctrl+A', async () => {
+  it('selects every matching asset with Ctrl+A', async () => {
     await mountGallery();
+    galleryApiMocks.getGalleryIds.mockResolvedValue(assets.map((asset) => asset.id));
     expect(press('a', { ctrlKey: true }).defaultPrevented).toBe(true);
+    await settle();
     expect(assets.every((asset) => checked(asset.filename))).toBe(true);
   });
 
@@ -1205,26 +1694,27 @@ describe('GalleryPage keyboard shortcuts', () => {
     await settle();
     expect(confirmMocks.requestConfirm).toHaveBeenCalledTimes(1);
     expect(confirmMocks.requestConfirm).toHaveBeenCalledWith(expect.objectContaining({ question: 'Delete "c.png"?', confirmLabel: 'Delete' }));
-    expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalled();
+    expect(galleryApiMocks.deleteAssets).not.toHaveBeenCalled();
   });
 
   it('deletes the selection with Delete, else the focused tile', async () => {
     const confirmSpy = confirmMocks.requestConfirm.mockResolvedValue(true);
-    galleryApiMocks.deleteAsset.mockResolvedValue();
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [], failed: [] });
     await mountGallery();
 
     tileButton('c.png').focus();
     press('Backspace');
     await settle();
-    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith('c.png');
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledWith(['c.png']);
 
-    galleryApiMocks.deleteAsset.mockClear();
+    galleryApiMocks.deleteAssets.mockClear();
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [removed(assets[0])], failed: [] });
     selectAssetForBatch(target, assets[0]);
     flushSync();
     press('Delete');
     await settle();
-    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith('a.png');
-    expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalledWith('b.png');
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledTimes(1);
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledWith(['a.png']);
   });
 });
 
@@ -1291,8 +1781,8 @@ describe('GalleryPage with a project picked', () => {
     MockIntersectionObserver.instances.at(-1)?.trigger(true);
     await settle();
 
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(1, 1, 'all', 'newest', 'Night Bus');
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 2, 'all', 'newest', 'Night Bus');
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(1, 1, 'all', 'newest', 'Night Bus', false);
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 2, 'all', 'newest', 'Night Bus', false);
     expect(tiles()).toEqual(['View a.png', 'View b.png']);
   });
 
@@ -1300,15 +1790,15 @@ describe('GalleryPage with a project picked', () => {
     galleryApiMocks.getGallery.mockResolvedValue(reply([makeAsset()]));
     mountPage();
     await settle();
-    expect(subtitle()).toBe('Browsing 1 loaded asset of 1, newest first.');
+    expect(subtitle()).toBe('Browsing 1 loaded file of 1, newest first.');
 
     projectsStore.choose('Night Bus');
     await settle();
-    expect(subtitle()).toBe('Night Bus · Browsing 1 loaded asset of 1, newest first.');
+    expect(subtitle()).toBe('Night Bus · Browsing 1 loaded file of 1, newest first.');
 
     projectsStore.choose(null);
     await settle();
-    expect(subtitle()).toBe('Browsing 1 loaded asset of 1, newest first.');
+    expect(subtitle()).toBe('Browsing 1 loaded file of 1, newest first.');
   });
 
   it('replaces the view on a pick change: new project, selection cleared, viewer closed, back at the top, filter and sort kept', async () => {
@@ -1318,10 +1808,11 @@ describe('GalleryPage with a project picked', () => {
     mountPage();
     await settle();
     pickOption(target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement, 'video');
-    pickOption(target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement, 'oldest');
+    pickOption(target.querySelector('[role="combobox"][aria-label="Sort gallery files"]') as HTMLButtonElement, 'oldest');
     await settle();
     selectAssetForBatch(target, mine);
     await openViewer('mine.mp4');
+    expect(bulkButton('Done')).not.toBeNull();
     const region = target.querySelector('#gallery-scroll-region') as HTMLElement;
     region.scrollTop = 400;
     region.dispatchEvent(new Event('scroll'));
@@ -1330,13 +1821,15 @@ describe('GalleryPage with a project picked', () => {
     projectsStore.choose('Night Bus');
     await settle();
 
-    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'video', 'oldest', 'Night Bus');
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'video', 'oldest', 'Night Bus', false);
     expect(tiles()).toEqual(['View theirs.mp4']);
-    expect(target.textContent).toContain('0 selected');
+    // The selection and the mode went with the old view.
+    expect(bulkButton('Done')).toBeNull();
+    expect(target.querySelector('input[aria-label="Select theirs.mp4"]')).toHaveProperty('checked', false);
     expect(getViewer()).toBeNull();
     expect(region.scrollTop).toBe(0);
     expect((target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLElement).dataset.value).toBe('video');
-    expect((target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLElement).dataset.value).toBe('oldest');
+    expect((target.querySelector('[role="combobox"][aria-label="Sort gallery files"]') as HTMLElement).dataset.value).toBe('oldest');
   });
 
   it('asks the server once for the new project\'s default list when the pick changes under it', async () => {
@@ -1349,7 +1842,7 @@ describe('GalleryPage with a project picked', () => {
     await settle();
 
     expect(galleryApiMocks.getGallery).toHaveBeenCalledTimes(1);
-    expect(galleryApiMocks.getGallery).toHaveBeenCalledWith(1, 'all', 'newest', 'Night Bus');
+    expect(galleryApiMocks.getGallery).toHaveBeenCalledWith(1, 'all', 'newest', 'Night Bus', false);
   });
 
   it('drops a response still in flight from the old project, for a query other than the default one', async () => {
@@ -1373,7 +1866,7 @@ describe('GalleryPage with a project picked', () => {
     await settle();
 
     expect(tiles()).toEqual(['View fresh.mp4']);
-    expect(galleryStore.view({ filter: 'video', sort: 'newest' }).assets.map((asset) => asset.id)).toEqual(['Night Bus/fresh.mp4']);
+    expect(galleryStore.view({ filter: 'video', sort: 'newest', starred: false }).assets.map((asset) => asset.id)).toEqual(['Night Bus/fresh.mp4']);
   });
 
   it('opens at the top with the new project when the pick changed while the page was away', async () => {
@@ -1398,7 +1891,7 @@ describe('GalleryPage with a project picked', () => {
     galleryApiMocks.getGallery.mockResolvedValue(reply([]));
     mountPage();
     await settle();
-    expect(target.textContent).toContain('No generated assets yet');
+    expect(target.textContent).toContain('No generated files yet');
 
     projectsStore.choose('Night Bus');
     await settle();
@@ -1408,7 +1901,7 @@ describe('GalleryPage with a project picked', () => {
 
     pickOption(target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement, 'video');
     await settle();
-    expect(target.textContent).toContain('No matching assets');
+    expect(target.textContent).toContain('No matching files');
     expect(target.textContent).not.toContain('Nothing in Night Bus yet');
   });
 
@@ -1441,7 +1934,7 @@ describe('GalleryPage Not in a project', () => {
     pickOption(filterBox(), 'no_project');
     await settle();
 
-    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'no_project', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'no_project', 'newest', null, false);
     expect(filterBox().dataset.value).toBe('no_project');
   });
 
@@ -1464,7 +1957,7 @@ describe('GalleryPage Not in a project', () => {
     projectsStore.choose('Night Bus');
     await settle();
 
-    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest', 'Night Bus');
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest', 'Night Bus', false);
     expect(filterBox().dataset.value).toBe('all');
   });
 
@@ -1475,7 +1968,7 @@ describe('GalleryPage Not in a project', () => {
     pickOption(filterBox(), 'no_project');
     await settle();
 
-    expect(target.textContent).toContain('No matching assets');
+    expect(target.textContent).toContain('No matching files');
     expect(queryButtonByName(target, 'Show all media')).not.toBeNull();
   });
 });
@@ -1493,7 +1986,7 @@ describe('GalleryPage with audio', () => {
     pickOption(filterSelect, 'audio');
     await settle();
 
-    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'audio', 'newest', null);
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'audio', 'newest', null, false);
     expect(filterSelect.dataset.value).toBe('audio');
   });
 
@@ -1655,7 +2148,7 @@ describe('GalleryPage Move', () => {
   const tileIds = () => Array.from(target.querySelectorAll('.asset-tile')).map((tile) => tile.getAttribute('data-asset-id'));
   const rows = () => Array.from(document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitemradio"]'));
   const row = (label: string) => rows().find((item) => item.textContent?.trim() === label)!;
-  const moved = (from: string, asset: GalleryAsset) => ({ from, asset });
+  const moved = (from: string, asset: GalleryAsset) => ({ from, from_path: `/outputs/${from}`, asset });
   const lastToastTone = () => toastMocks.addToast.mock.calls.at(-1)?.[1];
   const lastToastMessage = () => String(toastMocks.addToast.mock.calls.at(-1)?.[0]);
 
@@ -1752,7 +2245,7 @@ describe('GalleryPage Move', () => {
 
     expect(galleryApiMocks.moveAssets).toHaveBeenCalledWith(['Night Bus/a.png'], null);
     expect(tileIds()).toEqual(['Night Bus/b.png']);
-    expect(target.querySelector('.ui-page-sub')?.textContent).toContain('Browsing 1 loaded asset of 1');
+    expect(target.querySelector('.ui-page-sub')?.textContent).toContain('Browsing 1 loaded file of 1');
     expect(galleryApiMocks.getGallery).toHaveBeenCalledTimes(2);
     expect(lastToastTone()).toBe('success');
   });
@@ -1783,7 +2276,7 @@ describe('GalleryPage Move', () => {
     projectsStore.choose('Night Bus');
     await settle();
     expect(tileIds()).toEqual(['Night Bus/a.png', 'Night Bus/z.png']);
-    expect(target.querySelector('.ui-page-sub')?.textContent).toContain('Browsing 2 loaded assets of 2');
+    expect(target.querySelector('.ui-page-sub')?.textContent).toContain('Browsing 2 loaded files of 2');
   });
 
   it('points the draft slots that held the file at its new path', async () => {
@@ -1868,16 +2361,19 @@ describe('GalleryPage Move', () => {
   });
 
   describe('selection', () => {
-    const moveButton = () => queryButtonByName(target, 'Move selected');
+    const moveButton = () => bulkButton('Move selected');
 
     it('disables the header button with nothing selected, and offers the list once files are selected', async () => {
       galleryApiMocks.getGallery.mockResolvedValue(reply([top('a.png'), top('b.png')]));
       mountPage();
       await settle();
+      // The button belongs to Select mode.
+      expect(moveButton()).toBeNull();
+      await enterSelectMode();
       expect(moveButton()?.disabled).toBe(true);
       expect(moveButton()?.getAttribute('aria-haspopup')).toBe('menu');
-      // It sits between the count and Delete selected.
-      const order = moveButton()!.compareDocumentPosition(queryButtonByName(target, 'Delete selected')!);
+      // It sits between Select all and Delete.
+      const order = moveButton()!.compareDocumentPosition(bulkButton('Delete selected')!);
       expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
       selectAssetForBatch(target, top('a.png'));
@@ -1903,7 +2399,7 @@ describe('GalleryPage Move', () => {
       expect(rows().filter((item) => item.getAttribute('aria-checked') === 'true')).toHaveLength(0);
     });
 
-    it('moves the selection in one call; a refused file stays selected and the toast says so', async () => {
+    it('moves the selection in one call; a refused file stays selected, the mode stays on, and the toast says so', async () => {
       const [a, b, c] = [top('a.png'), top('b.png'), top('c.png')];
       galleryApiMocks.getGallery.mockResolvedValue(reply([a, b, c]));
       galleryApiMocks.moveAssets.mockResolvedValue({
@@ -1925,11 +2421,36 @@ describe('GalleryPage Move', () => {
       expect(tileIds()).toEqual(['Night Bus/a.png', 'Night Bus/b.png', 'c.png']);
       expect(target.textContent).toContain('1 selected');
       expect(target.querySelector<HTMLInputElement>('input[aria-label="Select c.png"]')?.checked).toBe(true);
+      expect(bulkButton('Done')).not.toBeNull();
+      expect(document.activeElement).toBe(moveButton());
       expect(lastToastTone()).toBe('warning');
       expect(lastToastMessage()).toContain('A file named c.png is already there');
     });
 
-    it('counts a file already in the destination as done: it leaves the selection and nothing is reported as an error', async () => {
+    it('moves every selected file in one call, unloaded ones included, and leaves the mode when none failed', async () => {
+      const names = Array.from({ length: 30 }, (_, index) => `f${String(index).padStart(2, '0')}.png`);
+      const loaded = names.slice(0, 12).map((name) => top(name));
+      galleryApiMocks.getGallery.mockResolvedValue({ assets: loaded, page: 1, total_pages: 3, total_count: 30 });
+      galleryApiMocks.getGalleryIds.mockResolvedValue(names);
+      galleryApiMocks.moveAssets.mockResolvedValue({ moved: names.map((name) => moved(name, inBus(name))), failed: [] });
+      mountPage();
+      await settle();
+      await enterSelectMode();
+      bulkButton('Select all')!.click();
+      await settle();
+
+      moveButton()!.click();
+      await settle();
+      expect(document.querySelector('.action-menu-heading')?.textContent).toBe('Move 30 files to');
+      row('Night Bus').click();
+      await settle();
+
+      expect(galleryApiMocks.moveAssets).toHaveBeenCalledWith(names, 'Night Bus');
+      expect(bulkButton('Done')).toBeNull();
+      expect(document.activeElement).toBe(queryButtonByName(target, 'Select'));
+    });
+
+    it('counts a file already in the destination as done: it leaves the selection, the mode ends and nothing is reported as an error', async () => {
       const [a, b] = [top('a.png'), inBus('b.png')];
       galleryApiMocks.getGallery.mockResolvedValue(reply([a, b]));
       // The server leaves a file that is already in the target out of both lists.
@@ -1944,7 +2465,8 @@ describe('GalleryPage Move', () => {
       row('Night Bus').click();
       await settle();
 
-      expect(target.textContent).toContain('0 selected');
+      expect(bulkButton('Done')).toBeNull();
+      expect(target.querySelector<HTMLInputElement>('input[aria-label="Select b.png"]')?.checked).toBe(false);
       expect(lastToastTone()).toBe('success');
     });
 
@@ -1962,38 +2484,59 @@ describe('GalleryPage Move', () => {
       row('No project').click();
       await settle();
 
-      expect(target.textContent).toContain('0 selected');
+      expect(bulkButton('Done')).toBeNull();
       expect(lastToastTone()).not.toBe('error');
     });
 
-    it('shows the short Move label on a tablet, named Move selected', async () => {
+    it('keeps the mode and the selection when the move request itself fails', async () => {
+      const a = top('a.png');
+      galleryApiMocks.getGallery.mockResolvedValue(reply([a]));
+      galleryApiMocks.moveAssets.mockRejectedValue(new Error('down'));
+      mountPage();
+      await settle();
+      selectAssetForBatch(target, a);
+      await settle();
+
+      moveButton()!.click();
+      await settle();
+      row('Night Bus').click();
+      await settle();
+
+      expect(bulkButton('Done')).not.toBeNull();
+      expect(target.textContent).toContain('1 selected');
+      expect(lastToastTone()).toBe('error');
+    });
+
+    it('shows the Move label on a tablet, named Move selected', async () => {
       layoutState.mode = 'tall';
       galleryApiMocks.getGallery.mockResolvedValue(reply([top('a.png')]));
       mountPage();
       await settle();
+      await enterSelectMode();
 
       const button = target.querySelector<HTMLButtonElement>('button[aria-label="Move selected"]')!;
       expect(button.textContent?.trim()).toBe('Move');
       expect(button.disabled).toBe(true);
     });
 
-    it('puts Move on the phone select bar between Select all and Delete, and moves the selection from there', async () => {
+    it('puts Move on the phone select bar between Select all and Download, and moves the selection from there', async () => {
       layoutState.mode = 'compact';
       const [a, b] = [top('a.png'), top('b.png')];
       galleryApiMocks.getGallery.mockResolvedValue(reply([a, b]));
       galleryApiMocks.moveAssets.mockResolvedValue({ moved: [moved('a.png', inBus('a.png'))], failed: [] });
       mountPage();
       await settle();
-      queryButtonByName(target, 'Select')!.click();
-      await settle();
+      await enterSelectMode();
 
       const bar = target.querySelector<HTMLElement>('[data-testid="gallery-select-bar"]')!;
-      expect(Array.from(bar.querySelectorAll('button')).map((el) => el.textContent?.trim())).toEqual(['Select all', 'Move', 'Delete']);
-      expect(queryButtonByName(bar, 'Move')?.disabled).toBe(true);
+      const names = () => Array.from(bar.querySelectorAll('button')).map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim());
+      expect(names()).toEqual(['Select all', 'Move selected', 'Download selected', 'Delete selected']);
+      const barMove = bar.querySelector<HTMLButtonElement>('button[aria-label="Move selected"]')!;
+      expect(barMove.disabled).toBe(true);
 
       selectAssetForBatch(target, a);
       await settle();
-      queryButtonByName(bar, 'Move')!.click();
+      barMove.click();
       await settle();
       // The phone's list is a sheet, which names itself: no heading.
       expect(document.querySelector('.action-menu-heading')).toBeNull();
@@ -2041,7 +2584,288 @@ describe('GalleryPage Move', () => {
 
       expect(lastToastTone()).toBe('success');
       expect(lastToastMessage()).toContain('Night Bus');
-      expect(target.textContent).toContain('0 selected');
+      expect(bulkButton('Done')).toBeNull();
     });
+  });
+});
+
+describe('GalleryPage Download', () => {
+  const names = Array.from({ length: 30 }, (_, index) => `f${String(index).padStart(2, '0')}.png`);
+  const loaded = names.slice(0, 12).map((name) => makeAsset({ id: name, filename: name }));
+
+  async function mountSelectedAll(): Promise<void> {
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: loaded, page: 1, total_pages: 3, total_count: 30 });
+    galleryApiMocks.getGalleryIds.mockResolvedValue(names);
+    mountPage();
+    await settle();
+    await enterSelectMode();
+    bulkButton('Select all')!.click();
+    await settle();
+  }
+
+  it('is off with nothing selected', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: loaded, page: 1, total_pages: 1, total_count: 12 });
+    mountPage();
+    await settle();
+    await enterSelectMode();
+
+    expect(bulkButton('Download selected')?.disabled).toBe(true);
+  });
+
+  it('downloads every selected ID, unloaded ones included, straight from the click, and keeps the selection and the mode', async () => {
+    await mountSelectedAll();
+
+    // No await between the click and the check: the form must be submitted inside the click handler.
+    bulkButton('Download selected')!.click();
+
+    expect(galleryApiMocks.downloadAssets).toHaveBeenCalledTimes(1);
+    expect(galleryApiMocks.downloadAssets).toHaveBeenCalledWith(names);
+    expect(toastMocks.addToast).toHaveBeenCalledWith(expect.stringContaining(String(names.length)), 'success');
+    await settle();
+    expect(target.textContent).toContain('30 selected');
+    expect(bulkButton('Done')).not.toBeNull();
+  });
+
+});
+
+describe('GalleryPage stars', () => {
+  const reply = (assets: GalleryAsset[]) => ({ assets, page: 1, total_pages: 1, total_count: assets.length });
+  const starToggle = () => target.querySelector<HTMLButtonElement>('button[aria-label="Starred"]')!;
+  const tileStar = (filename: string) => target.querySelector<HTMLButtonElement>(`button[aria-label="Star ${filename}"]`);
+  const tileNames = () => Array.from(target.querySelectorAll('.asset-tile')).map((tile) => tile.getAttribute('aria-label'));
+  const filterSelect = () => target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
+  const a = makeAsset({ id: 'a.png', filename: 'a.png', prompt: 'prompt of a' });
+  const b = makeAsset({ id: 'b.png', filename: 'b.png', prompt: 'prompt of b' });
+  const starredA = makeAsset({ id: 'a.png', filename: 'a.png', prompt: 'prompt of a', starred: true });
+  const starredB = makeAsset({ id: 'b.png', filename: 'b.png', prompt: 'prompt of b', starred: true });
+
+  it('shows a ★ toggle at rest that requests the starred files', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([a, b]));
+    mountPage();
+    await settle();
+    expect(starToggle().getAttribute('aria-pressed')).toBe('false');
+
+    galleryApiMocks.getGallery.mockResolvedValue(reply([starredA]));
+    starToggle().click();
+    await settle();
+
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest', null, true);
+    expect(starToggle().getAttribute('aria-pressed')).toBe('true');
+    expect(tileNames()).toEqual(['a.png']);
+  });
+
+  it('combines with the media filter in both orders, and with the picked project', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([a, b]));
+    mountPage();
+    await settle();
+
+    pickOption(filterSelect(), 'video');
+    await settle();
+    starToggle().click();
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'video', 'newest', null, true);
+
+    pickOption(filterSelect(), 'image');
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'image', 'newest', null, true);
+
+    projectsStore.choose('Night Bus');
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'image', 'newest', 'Night Bus', true);
+    expect(starToggle().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('pages the starred view with the toggle still on', async () => {
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce(reply([a]))
+      .mockResolvedValueOnce({ assets: [starredA], page: 1, total_pages: 2, total_count: 2 })
+      .mockResolvedValueOnce({ assets: [starredB], page: 2, total_pages: 2, total_count: 2 });
+    mountPage();
+    await settle();
+    starToggle().click();
+    await settle();
+    MockIntersectionObserver.instances.at(-1)?.trigger(true);
+    await settle();
+
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 2, 'all', 'newest', null, true);
+  });
+
+  it('remembers the toggle across visits', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([starredA]));
+    mountPage();
+    await settle();
+    starToggle().click();
+    await settle();
+    await page.unmount();
+
+    mountPage();
+    await settle();
+
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest', null, true);
+    expect(starToggle().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('shows the starred empty state, and Show all turns the toggle off and keeps the media filter', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([a]));
+    mountPage();
+    await settle();
+    pickOption(filterSelect(), 'image');
+    await settle();
+    galleryApiMocks.getGallery.mockResolvedValue(reply([]));
+    starToggle().click();
+    await settle();
+
+    expect(target.textContent).toContain('No starred files');
+    expect(queryButtonByName(target, 'Show all media')).toBeNull();
+
+    galleryApiMocks.getGallery.mockResolvedValue(reply([a]));
+    queryButtonByName(target, 'Show all')!.click();
+    await settle();
+
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'image', 'newest', null, false);
+    expect(starToggle().getAttribute('aria-pressed')).toBe('false');
+    expect(filterSelect().dataset.value).toBe('image');
+    expect(tileNames()).toEqual(['a.png']);
+  });
+
+  it('leaves the tile as it was and tells the user when the star cannot be saved', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([a]));
+    galleryApiMocks.setStarred.mockRejectedValue(new Error('offline'));
+    mountPage();
+    await settle();
+
+    tileStar('a.png')!.click();
+    await settle();
+
+    expect(tileStar('a.png')!.getAttribute('aria-pressed')).toBe('false');
+    expect(toastMocks.addToast).toHaveBeenCalledWith('offline', 'error');
+  });
+
+  it('drops a file from the starred view at once when it is unstarred, and lowers the count', async () => {
+    galleryApiMocks.getGallery.mockResolvedValueOnce(reply([a])).mockResolvedValueOnce(reply([starredA, starredB]));
+    mountPage();
+    await settle();
+    starToggle().click();
+    await settle();
+    expect(tileNames()).toEqual(['a.png', 'b.png']);
+    // The refill after the unstar never answers: what shows is the store's.
+    galleryApiMocks.getGallery.mockImplementation(() => new Promise(() => undefined));
+
+    tileStar('a.png')!.click();
+    await settle();
+
+    expect(galleryApiMocks.setStarred).toHaveBeenCalledWith('a.png', false);
+    expect(tileNames()).toEqual(['b.png']);
+    expect(target.querySelector('.ui-page-sub')?.textContent).toContain('of 1');
+  });
+
+  it('stars the focused tile with S, in and out of Select mode, and ignores a held S', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([a, b]));
+    mountPage();
+    await settle();
+    const tileMedia = (name: string) => target.querySelector<HTMLButtonElement>(`button[aria-label$=" ${name}"]:not([aria-label$=" fullscreen"]):not([aria-label^="More"]):not([aria-label^="Star"])`)!;
+    const pressS = (init: KeyboardEventInit = {}) => {
+      (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true, ...init }));
+    };
+    tileMedia('a.png').focus();
+
+    pressS({ repeat: true });
+    await settle();
+    expect(galleryApiMocks.setStarred).not.toHaveBeenCalled();
+    expect(tileStar('a.png')!.getAttribute('aria-pressed')).toBe('false');
+
+    pressS();
+    await settle();
+    expect(galleryApiMocks.setStarred).toHaveBeenCalledTimes(1);
+    expect(galleryApiMocks.setStarred).toHaveBeenCalledWith('a.png', true);
+    expect(tileStar('a.png')!.getAttribute('aria-pressed')).toBe('true');
+    expect(tileStar('b.png')!.getAttribute('aria-pressed')).toBe('false');
+
+    await enterSelectMode();
+    tileMedia('b.png').focus();
+    pressS();
+    await settle();
+    expect(galleryApiMocks.setStarred).toHaveBeenLastCalledWith('b.png', true);
+  });
+
+  it('takes a file out of the selection when it is unstarred in the starred view, so Delete acts on the rest', async () => {
+    const c = makeAsset({ id: 'c.png', filename: 'c.png', starred: true });
+    galleryApiMocks.getGallery.mockResolvedValueOnce(reply([a])).mockResolvedValueOnce(reply([starredA, starredB, c]));
+    confirmMocks.requestConfirm.mockResolvedValue(true);
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [removed(starredB), removed(c)], failed: [] });
+    mountPage();
+    await settle();
+    starToggle().click();
+    await settle();
+    await enterSelectMode();
+    for (const name of ['a.png', 'b.png', 'c.png']) (target.querySelector(`button[aria-label="Select ${name}"]`) as HTMLElement).click();
+    flushSync();
+    expect(target.textContent).toContain('3 selected');
+    // The refill after the unstar never answers: what shows is the store's.
+    galleryApiMocks.getGallery.mockImplementation(() => new Promise(() => undefined));
+
+    tileStar('a.png')!.click();
+    await settle();
+    expect(target.textContent).toContain('2 selected');
+
+    bulkButton('Delete selected')!.click();
+    await settle();
+
+    expect(confirmMocks.requestConfirm).toHaveBeenLastCalledWith(expect.objectContaining({ question: expect.stringContaining('2') }));
+    expect(galleryApiMocks.deleteAssets).toHaveBeenCalledWith(['b.png', 'c.png']);
+  });
+
+  it('does not change the selection when a tile star is clicked in Select mode', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([a, b]));
+    mountPage();
+    await settle();
+    await enterSelectMode();
+    (target.querySelector('button[aria-label="Select b.png"]') as HTMLElement).click();
+    flushSync();
+
+    tileStar('a.png')!.click();
+    await settle();
+
+    expect(galleryApiMocks.setStarred).toHaveBeenCalledWith('a.png', true);
+    expect(target.querySelector<HTMLInputElement>('input[aria-label="Select a.png"]')!.checked).toBe(false);
+    expect(target.querySelector<HTMLInputElement>('input[aria-label="Select b.png"]')!.checked).toBe(true);
+    expect(target.textContent).toContain('1 selected');
+  });
+
+  it('steps the viewer on to the next file when the button or S unstars one in the starred view, lowers the count and refills once it closes', async () => {
+    const starredC = makeAsset({ id: 'c.png', filename: 'c.png', prompt: 'prompt of c', starred: true });
+    galleryApiMocks.getGallery.mockResolvedValueOnce(reply([a])).mockResolvedValueOnce(reply([starredA, starredB, starredC]));
+    mountPage();
+    await settle();
+    starToggle().click();
+    await settle();
+    await openViewer('a.png');
+    const title = () => document.querySelector('#asset-viewer-title')?.textContent;
+    expect(title()).toBe('a.png');
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('1 of 3');
+    galleryApiMocks.getGallery.mockClear();
+    galleryApiMocks.getGallery.mockResolvedValue(reply([starredC]));
+
+    document.querySelector<HTMLButtonElement>('[data-testid="asset-viewer"] button[data-action="star"]')!.click();
+    await settle();
+
+    expect(galleryApiMocks.setStarred).toHaveBeenLastCalledWith('a.png', false);
+    expect(title()).toBe('b.png');
+    expect(tileNames()).toEqual(['b.png', 'c.png']);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true }));
+    await settle();
+
+    expect(galleryApiMocks.setStarred).toHaveBeenLastCalledWith('b.png', false);
+    expect(title()).toBe('c.png');
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('1 of 1');
+    expect(target.querySelector('.ui-page-sub')?.textContent).toContain('of 1');
+    // The page reloads once the viewer closes, so the list is the server's again.
+    expect(galleryApiMocks.getGallery).not.toHaveBeenCalled();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(getViewer()).toBeNull();
+    expect(galleryApiMocks.getGallery).toHaveBeenCalledTimes(1);
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest', null, true);
   });
 });

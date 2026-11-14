@@ -72,7 +72,7 @@ Code above the backends asks capability questions, such as `supports_video_exten
 | Settings saved in outputs, Reuse | `utils/provenance.py` | `web/gallery.py` | `tests/common/test_provenance.py` |
 | Web API routes | `web/server.py` | `web/*.py`, one module per concern | `tests/web/` |
 | Job queue, events, Stop | `web/web_runner.py` | `web/job_contract.py`, `core/progress_events.py` | `tests/web/test_web_runner.py` |
-| Gallery, job log, LoRA index | `utils/app_db.py` | `web/gallery_index.py`, `web/job_log.py`, `web/lora_index.py` | `tests/common/test_app_db.py`, `tests/web/test_web_gallery_index.py` |
+| Gallery, job log, LoRA index, stars | `utils/app_db.py` | `web/gallery_index.py`, `web/asset_records.py`, `web/job_log.py`, `web/lora_index.py` | `tests/common/test_app_db.py`, `tests/web/test_web_gallery_index.py`, `tests/web/test_web_asset_records.py` |
 | A Web UI page | `frontend/src/features/<page>/` | `frontend/src/lib/` | `*.test.ts` beside the source |
 | Checkpoint converters | `converters/convert_checkpoint.py` | `converters/*_convert.py` | `tests/converters/` |
 | Vendored upstream code | `packages/` | the contract tests | `tests/contracts/` |
@@ -129,7 +129,7 @@ Configuration is split in two by who may change it.
 | Models, LoRAs, stored quantized copies | `~/.ziv/models/`, `~/.ziv/loras/` | `utils/paths.py`, `utils/stored_quant.py` |
 | Hugging Face downloads | The Hugging Face cache | `downloads/`, `utils/hf_cache.py` |
 | User settings | `~/.ziv/config.yaml` | `utils/config.py`, `web/config_contract.py` |
-| Gallery and LoRA index, job log, recent prompts, LoRA sources | `~/.ziv/ziv.sqlite3` | `utils/app_db.py` and the components that use it. See [App database](app-database.md) |
+| Gallery and LoRA index, job log, recent prompts, LoRA sources, stars | `~/.ziv/ziv.sqlite3` | `utils/app_db.py` and the components that use it. See [App database](app-database.md) |
 | Presets | `~/.ziv/presets/` | `web/presets.py`. See [Settings presets](web-server.md#settings-presets) |
 | Saved voices and voice design candidates | `~/.ziv/voices/`, `~/.ziv/voice-design/` | `utils/voice_library.py`, `utils/voice_candidates.py`. See [Saved voices](web-server.md#saved-voices) |
 | Error logs | `~/.ziv/logs/` | `utils/app_log.py` |

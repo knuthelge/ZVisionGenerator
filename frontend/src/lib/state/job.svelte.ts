@@ -192,14 +192,19 @@ const _removedOutputIds = new Set<string>();
 // that old ID, so every later list it sends (the terminal output list, a snapshot after a reload) is read through this.
 const _movedOutputs = new Map<string, GalleryAsset>();
 
-/** Drop duplicate outputs and outputs the user deleted, and show a moved output as the asset it now is. */
+// Outputs the user starred or unstarred during this job, by the ID they have now. The server's record of the job keeps the
+// star the output was made with, so every later list it sends is read through this.
+const _starredOutputs = new Map<string, boolean>();
+
+/** Drop duplicate outputs and outputs the user deleted, show a moved output as the asset it now is, and carry the user's stars. */
 function dedupeOutputs(outputs: GalleryAsset[]): GalleryAsset[] {
   const seen = new Set<string>();
   return outputs.flatMap((output) => {
-    const current = _movedOutputs.get(output.id) ?? output;
-    if (seen.has(current.id) || _removedOutputIds.has(current.id)) return [];
-    seen.add(current.id);
-    return [current];
+    const moved = _movedOutputs.get(output.id) ?? output;
+    if (seen.has(moved.id) || _removedOutputIds.has(moved.id)) return [];
+    seen.add(moved.id);
+    const starred = _starredOutputs.get(moved.id);
+    return [starred === undefined || (moved.starred ?? false) === starred ? moved : { ...moved, starred }];
   });
 }
 
@@ -540,6 +545,7 @@ function followActive(active: JobSnapshot | null): void {
   cancelRecovery();
   _removedOutputIds.clear();
   _movedOutputs.clear();
+  _starredOutputs.clear();
   connectSnapshot(active);
 }
 
@@ -654,7 +660,18 @@ export const jobStore = {
     for (const { from, asset } of moves) {
       for (const [oldId, current] of _movedOutputs) if (current.id === from) _movedOutputs.set(oldId, asset);
       _movedOutputs.set(from, asset);
+      // The move's answer carries the file's star, so an earlier choice under either ID is out of date.
+      _starredOutputs.delete(from);
+      _starredOutputs.delete(asset.id);
     }
+    if (_job) _job = { ..._job, outputs: dedupeOutputs(_job.outputs) };
+  },
+
+  /**
+   * Show the current job's output as starred or unstarred, and keep doing so for the outputs the server sends later.
+   */
+  setStarred(id: string, starred: boolean): void {
+    _starredOutputs.set(id, starred);
     if (_job) _job = { ..._job, outputs: dedupeOutputs(_job.outputs) };
   },
 
@@ -735,6 +752,7 @@ export const jobStore = {
     cancelRecovery();
     _removedOutputIds.clear();
     _movedOutputs.clear();
+    _starredOutputs.clear();
     _job = makeInitialJobState(ctx);
     _previewEventFloor = 0;
     _lastEventId = 0;

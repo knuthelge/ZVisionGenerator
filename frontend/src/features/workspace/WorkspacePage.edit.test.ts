@@ -69,7 +69,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
 vi.mock('$lib/api/gallery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/gallery')>();
   const { galleryApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAsset: galleryApiMocks.deleteAsset };
+  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAssets: galleryApiMocks.deleteAssets };
 });
 
 vi.mock('$lib/api/promptEnhance', async (importOriginal) => {

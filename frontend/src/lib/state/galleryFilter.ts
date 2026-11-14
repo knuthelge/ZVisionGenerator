@@ -12,3 +12,11 @@ export function filterAdmits(filter: MediaFilter, asset: Pick<GalleryAsset, 'med
   if (filter === 'no_project') return asset.project === null;
   return asset.media_type === filter;
 }
+
+/**
+ * Whether a view shows the asset: its media filter admits it and, in a starred view, it is starred. An asset with no
+ * `starred` reads as unstarred.
+ */
+export function viewAdmits(filter: MediaFilter, starred: boolean, asset: Pick<GalleryAsset, 'media_type' | 'project' | 'starred'>): boolean {
+  return filterAdmits(filter, asset) && (!starred || asset.starred === true);
+}

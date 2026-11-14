@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { AudioWorkflow, CuratedList, DownloadItem, GalleryPage, JobContext, JobDownloadPlan, JobSnapshot, MoveResult, RecentMode, RecentPrompt, RowDownloadPlan, SavedVoice, SettingsPreset, VoiceDesignState, WorkflowMode, WorkspaceContext } from '$lib/types';
+import type { AudioWorkflow, CuratedList, DeleteResult, DownloadItem, GalleryPage, JobContext, JobDownloadPlan, JobSnapshot, MoveResult, RecentMode, RecentPrompt, RowDownloadPlan, SavedVoice, SettingsPreset, VoiceDesignState, WorkflowMode, WorkspaceContext } from '$lib/types';
 import { stubBrowseInfo, stubBrowseMediaUrl, stubBrowsePreviewUrl, stubBrowseSpriteUrl } from './pathBrowser';
 
 // The API mocks of the Workspace page tests. A test file wires them in with `vi.mock(path, async () => ...)`
@@ -56,8 +56,9 @@ export const videoMemoryApiMocks = {
 
 export const galleryApiMocks = {
   getGallery: vi.fn<(page?: number, filter?: string, sort?: string) => Promise<GalleryPage>>(),
-  deleteAsset: vi.fn<(assetId: string) => Promise<void>>(),
+  deleteAssets: vi.fn<(assetIds: string[]) => Promise<DeleteResult>>(),
   moveAssets: vi.fn<(assetIds: string[], project: string | null) => Promise<MoveResult>>(),
+  setStarred: vi.fn<(assetId: string, starred: boolean) => Promise<{ id: string; starred: boolean }>>(),
 };
 
 export const enhanceApiMocks = {

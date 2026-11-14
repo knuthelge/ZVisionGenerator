@@ -1,21 +1,23 @@
-import type { GalleryAsset, MovedAsset } from '$lib/types';
+import type { GalleryAsset, MovedAsset, RemovedAsset } from '$lib/types';
 import { getGallery } from '$lib/api/gallery';
 import { keepLoadedTail } from '$lib/state/pageMerge';
 import { inProject, projectPick } from '$lib/state/projectPick.svelte';
-import { filterAdmits, type MediaFilter } from '$lib/state/galleryFilter';
+import { filterAdmits, viewAdmits, type MediaFilter } from '$lib/state/galleryFilter';
 import { applyMovesToView } from '$lib/state/viewMoves';
 
 export type { MediaFilter };
 export type SortOrder = 'newest' | 'oldest';
 
-/** What a Gallery view shows: the media it keeps and the order it runs in. */
+/** What a Gallery view shows: the media it keeps, the order it runs in and whether it keeps starred files only. */
 export interface GalleryQuery {
   filter: MediaFilter;
   sort: SortOrder;
+  /** The ★ toggle. */
+  starred: boolean;
 }
 
 /** The whole Gallery, newest first: the Workspace strip, the stage's history and the Gallery page's first view. */
-export const DEFAULT_QUERY: GalleryQuery = { filter: 'all', sort: 'newest' };
+export const DEFAULT_QUERY: GalleryQuery = { filter: 'all', sort: 'newest', starred: false };
 
 /** The loaded pages of one query, as the Gallery page shows them. */
 export interface GalleryView {
@@ -28,7 +30,13 @@ export interface GalleryView {
 }
 
 export function queryKey(query: GalleryQuery): string {
-  return `${query.filter}|${query.sort}`;
+  return `${query.filter}|${query.sort}|${query.starred ? 1 : 0}`;
+}
+
+/** The query a key stands for: the inverse of `queryKey`. */
+export function parseQueryKey(key: string): GalleryQuery {
+  const [filter, sort, starred] = key.split('|');
+  return { filter: filter as MediaFilter, sort: sort as SortOrder, starred: starred === '1' };
 }
 
 const DEFAULT_KEY = queryKey(DEFAULT_QUERY);
@@ -117,7 +125,8 @@ export const galleryStore = {
   },
 
   /**
-   * Put a finished job's outputs at the front of every newest-first list whose filter admits them. Outputs from
+   * Put a finished job's outputs at the front of every newest-first list whose filter admits them (a starred list
+   * admits only starred files, so a new output does not join one). Outputs from
    * another project than the pick are left out. An oldest-first list would need its last page for them, so it is
    * dropped and its next visit reloads it.
    */
@@ -128,10 +137,10 @@ export const galleryStore = {
     const newestFirst = [...scoped].reverse();
     const next: Record<string, GalleryView> = {};
     for (const key of new Set([DEFAULT_KEY, ...Object.keys(_views)])) {
-      const [filter, sort] = key.split('|') as [MediaFilter, SortOrder];
+      const { filter, sort, starred } = parseQueryKey(key);
       if (sort !== 'newest') continue;
       const view = _views[key] ?? EMPTY_VIEW;
-      const incoming = newestFirst.filter((asset) => filterAdmits(filter, asset));
+      const incoming = newestFirst.filter((asset) => viewAdmits(filter, starred, asset));
       const incomingIds = new Set(incoming.map((asset) => asset.id));
       const added = incoming.filter((asset) => !view.assets.some((item) => item.id === asset.id)).length;
       next[key] = {
@@ -143,17 +152,20 @@ export const galleryStore = {
     _views = next;
   },
 
-  /** Take deleted assets out of every list, and out of each list's count. */
-  removeAssets(removed: readonly GalleryAsset[]): void {
+  /**
+   * Take deleted assets out of every list, and out of each list's count. A list drops the count of every removed file
+   * its view admits (media filter and, in a starred list, the star), whether or not it had loaded that file.
+   */
+  removeAssets(removed: readonly RemovedAsset[]): void {
     if (removed.length === 0) return;
     const removedIds = new Set(removed.map((asset) => asset.id));
     _recent = _recent.filter((asset) => !removedIds.has(asset.id));
     for (const key of Object.keys(_views)) {
       const view = _views[key];
-      const filter = key.split('|')[0] as MediaFilter;
+      const { filter, starred } = parseQueryKey(key);
       const assets = view.assets.filter((asset) => !removedIds.has(asset.id));
-      // A list is shorter by every removed asset its filter admits, whether or not it had loaded it yet.
-      const gone = removed.filter((asset) => filterAdmits(filter, asset)).length;
+      // A list is shorter by every removed asset its view admits, whether or not it had loaded it yet.
+      const gone = removed.filter((asset) => viewAdmits(filter, starred, asset)).length;
       if (gone === 0 && assets.length === view.assets.length) continue;
       _views[key] = { ...view, assets, totalCount: view.totalCount === null ? null : Math.max(0, view.totalCount - gone) };
     }
@@ -166,13 +178,47 @@ export const galleryStore = {
     // A file moved out of every project now belongs to the Not in a project list, at a place only its next load knows.
     const joinsUnsorted = moves.some((move) => move.asset.project === null);
     for (const key of Object.keys(_views)) {
-      const filter = key.split('|')[0] as MediaFilter;
+      const { filter, starred } = parseQueryKey(key);
       if (filter === 'no_project' && joinsUnsorted) delete _views[key];
-      else _views[key] = applyMovesToView(_views[key], filter, moves, pick);
+      else _views[key] = applyMovesToView(_views[key], filter, moves, pick, starred);
     }
     // The recent list ignores the pick, so a moved file stays in it under its new ID.
     const byOldId = new Map(moves.map((move) => [move.from, move.asset]));
     if (_recent.some((asset) => byOldId.has(asset.id))) _recent = _recent.map((asset) => byOldId.get(asset.id) ?? asset);
+  },
+
+  /**
+   * Record a file's new star in every list that holds it. Unstarring takes the file out of the starred lists, and out of
+   * their counts (a list that never loaded it counts it when its media filter admits the file, which is known from a copy
+   * loaded anywhere; with no copy at all that list is dropped, to reload). Starring drops the starred lists, since the
+   * file's place in them is only known to the server.
+   */
+  setStarred(id: string, starred: boolean): void {
+    const copies = [...Object.values(_views).flatMap((view) => view.assets), ..._recent];
+    const known = copies.find((asset) => asset.id === id);
+    const update = (asset: GalleryAsset): GalleryAsset => (asset.id === id && (asset.starred ?? false) !== starred ? { ...asset, starred } : asset);
+    _recent = _recent.map(update);
+    for (const key of Object.keys(_views)) {
+      const view = _views[key];
+      const query = parseQueryKey(key);
+      if (query.starred && starred) {
+        delete _views[key];
+      } else if (query.starred) {
+        const loaded = view.assets.some((asset) => asset.id === id);
+        if (!loaded && !known) {
+          delete _views[key];
+          continue;
+        }
+        const counted = loaded || (known?.starred === true && filterAdmits(query.filter, known));
+        _views[key] = {
+          ...view,
+          assets: view.assets.filter((asset) => asset.id !== id),
+          totalCount: view.totalCount === null || !counted ? view.totalCount : Math.max(0, view.totalCount - 1),
+        };
+      } else if (view.assets.some((asset) => asset.id === id)) {
+        _views[key] = { ...view, assets: view.assets.map(update) };
+      }
+    }
   },
 
   /**

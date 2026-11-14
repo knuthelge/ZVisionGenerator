@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+  import { on } from 'svelte/events';
   import { Icon, Spinner, Waveform } from '$lib/components/atoms';
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import type { AssetActionHandlers, UseAsState } from '$lib/state/assetActions';
@@ -8,6 +10,7 @@
   import type { FramePoint } from '$lib/state/framePoint';
   import { busyFor } from '$lib/state/frameGrab.svelte';
   import type { GalleryAsset } from '$lib/types';
+  import type { MenuLead } from '$lib/state/assetActions';
   import { hold } from '$lib/actions/hold';
   import ActionMenu from './ActionMenu.svelte';
   import MediaPlayer from './MediaPlayer.svelte';
@@ -20,8 +23,14 @@
     /** `compact`: filmstrip thumbnail. `card`: gallery card with footer. `stage`: full image, letterboxed. */
     density?: 'compact' | 'card' | 'stage';
     selected?: boolean;
-    /** Shows a selection checkbox when provided. */
+    /** Select mode is on: a click on the media toggles the tile instead of opening the viewer, and the checkbox shows on every tile. */
+    selectMode?: boolean;
+    /** Shows a selection checkbox when provided; ticking it toggles the tile. */
     onselect?: (asset: GalleryAsset, selected: boolean) => void;
+    /** A click on the media in Select mode, with its event so the owner can tell a Shift-click. */
+    onmediaclick?: (asset: GalleryAsset, event: MouseEvent) => void;
+    /** Enter Select mode with this tile selected: the checkbox ticked outside the mode, and the menu's Select. */
+    onstartselect?: (asset: GalleryAsset) => void;
     deleting?: boolean;
     /** What the Use as items show: which targets are disabled, and their hints. */
     useAs?: UseAsState;
@@ -36,7 +45,10 @@
     asset,
     density = 'card',
     selected = false,
+    selectMode = false,
     onselect,
+    onmediaclick,
+    onstartselect,
     deleting = false,
     useAs = {},
     eager = false,
@@ -52,6 +64,7 @@
     onuseaudio,
     ondelete,
     onmove,
+    onstar,
     class: extraClass = '',
   }: Props = $props();
 
@@ -59,6 +72,7 @@
   // The Move list opens after the ⋯ menu has closed, anchored at the ⋯ button, which is there on every tile.
   let moveOpen = $state(false);
   let moreButton = $state<HTMLButtonElement | null>(null);
+  let mediaButton = $state<HTMLButtonElement | null>(null);
 
   const isVideo = $derived(asset.media_type === 'video');
   const isAudio = $derived(asset.media_type === 'audio');
@@ -80,7 +94,10 @@
   let point = $state<FramePoint | null>(null);
   const extracting = $derived(busyFor(asset.id) !== null);
   const frameActions = $derived(point ? frameMenuEntries(asset, point, { onextend, onuseframe }, useAs) : []);
-  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onuseframe, onupscale, onuseaudio, ondelete }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined, point));
+  // Only a tile that can start Select mode has a lead: Select outside the mode, View inside it.
+  const lead = $derived(onstartselect ? (selectMode ? 'view' : 'select') : null);
+  const starred = $derived(asset.starred === true);
+  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onuseframe, onupscale, onuseaudio, ondelete, onstar, onlead: onLead }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined, point, lead));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   const thumbnail = $derived(asset.thumbnail_url || asset.url);
@@ -109,13 +126,61 @@
     onpreview?.(asset, trigger);
   }
 
+  function onLead(picked: MenuLead): void {
+    if (picked === 'view') {
+      if (moreButton) preview(moreButton);
+      return;
+    }
+    onstartselect?.(asset);
+    // The menu's item had focus and goes with it: the tile's media takes it back.
+    void tick().then(() => mediaButton?.focus());
+  }
+
+  // In Select mode the media toggles; outside it, it opens the viewer.
+  function onMediaClick(event: MouseEvent & { currentTarget: HTMLButtonElement }): void {
+    if (!selectMode) preview(event.currentTarget);
+    else onmediaclick?.(asset, event);
+  }
+
+  // Enter always opens the viewer, in Select mode too, where a click would toggle.
+  function onMediaKeydown(event: KeyboardEvent & { currentTarget: HTMLButtonElement }): void {
+    if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    event.preventDefault();
+    preview(event.currentTarget);
+  }
+
+  // A Shift-click adds a range: the browser must not also select the text between the two tiles.
+  function onMediaMousedown(event: MouseEvent): void {
+    if (selectMode && event.shiftKey) event.preventDefault();
+  }
+
+  // Outside Select mode ticking the box starts it, with this tile selected.
+  function onCheckChange(event: Event & { currentTarget: HTMLInputElement }): void {
+    if (!selectMode && onstartselect) onstartselect(asset);
+    else onselect?.(asset, event.currentTarget.checked);
+  }
+
+  // The star toggles the star alone: not the selection, and not the grid's Space and X, which select the tile.
+  function onStarClick(event: MouseEvent): void {
+    event.stopPropagation();
+    onstar?.(asset, !starred);
+  }
+
+  // A native listener: the grid listens on the document, which a delegated handler would not stop.
+  function keepSelectKeys(node: HTMLElement): { destroy: () => void } {
+    const off = on(node, 'keydown', (event) => {
+      if (event.key === ' ' || event.key.toLowerCase() === 'x') event.stopPropagation();
+    });
+    return { destroy: off };
+  }
+
   // A right-click opens the menu at the pointer: a 1px anchor there stands in for the ⋯ button.
   let contextAt = $state<{ x: number; y: number } | null>(null);
   let contextAnchorEl = $state<HTMLSpanElement | null>(null);
   function onContextMenu(event: MouseEvent): void {
     // A finger's hold already prevented the browser's menu and opened ours. A video keeps the browser's own menu
     // (loop, picture in picture), and the tile's buttons their defaults, as the hold leaves them alone too.
-    if (event.defaultPrevented || (event.target as Element).closest('video, .asset-tile-actions, .asset-tile-check')) return;
+    if (event.defaultPrevented || (event.target as Element).closest('video, .asset-tile-actions, .asset-tile-check, .asset-tile-star')) return;
     event.preventDefault();
     contextAt = { x: event.clientX, y: event.clientY };
     menuOpen = true;
@@ -124,7 +189,7 @@
 
 <!-- A finger's long press opens the same menu as ⋯; so does a right-click, at the pointer. -->
 <article
-  use:hold={{ onhold: () => { contextAt = null; menuOpen = true; }, ignore: '.asset-tile-actions, .asset-tile-check, video, [data-own-drag]' }}
+  use:hold={{ onhold: () => { contextAt = null; menuOpen = true; }, ignore: '.asset-tile-actions, .asset-tile-check, .asset-tile-star, video, [data-own-drag]' }}
   oncontextmenu={onContextMenu}
   class="asset-tile {extraClass}"
   data-density={density}
@@ -133,6 +198,7 @@
   data-audio={isAudio}
   data-transparent={transparent}
   data-selected={selected}
+  data-select-mode={selectMode}
   data-menu-open={menuOpen || moveOpen}
   aria-busy={deleting}
   aria-label={asset.filename}
@@ -194,9 +260,13 @@
   {:else}
     <button
       type="button"
+      bind:this={mediaButton}
       class="asset-tile-media"
-      aria-label="View {asset.filename}"
-      onclick={(event) => preview(event.currentTarget)}
+      aria-label="{selectMode ? 'Select' : 'View'} {asset.filename}"
+      aria-pressed={selectMode ? selected : undefined}
+      onmousedown={onMediaMousedown}
+      onclick={onMediaClick}
+      onkeydown={onMediaKeydown}
     >{@render media()}</button>
   {/if}
 
@@ -206,8 +276,13 @@
       class="asset-tile-check ui-checkbox"
       checked={selected}
       aria-label="Select {asset.filename}"
-      onchange={(event) => onselect(asset, (event.currentTarget as HTMLInputElement).checked)}
+      onchange={onCheckChange}
     >
+  {/if}
+
+  <!-- A strip tile has no caption and no room for a button: a starred file shows a mark, which is not a control. -->
+  {#if density === 'compact' && starred}
+    <span class="asset-tile-star-mark" role="img" aria-label="Starred" data-testid="starred-mark"><Icon name="star" size={12} solid /></span>
   {/if}
 
   <div class="asset-tile-actions">
@@ -230,6 +305,18 @@
         onclick={() => onreuse(asset)}
       ><Icon name="reuse" size={14} /></button>
     {/if}
+    {#if onstar && density === 'stage'}
+      <button
+        type="button"
+        class="asset-tile-action asset-tile-star ui-media-action"
+        data-starred={starred}
+        title={starred ? 'Unstar' : 'Star'}
+        aria-label="Star {asset.filename}"
+        aria-pressed={starred}
+        onclick={onStarClick}
+        use:keepSelectKeys
+      ><Icon name="star" size={14} solid={starred} /></button>
+    {/if}
     <button
       type="button"
       bind:this={moreButton}
@@ -244,9 +331,23 @@
   </div>
 
   {#if density === 'card'}
-    <div class="asset-tile-foot ui-media-foot">
-      <p class="truncate text-ui font-medium text-text-secondary">{asset.filename}</p>
-      <p class="mt-0.5 truncate text-meta text-text-muted">{#if isAudio}{audioFoot(asset, new Date(asset.created_at).toLocaleDateString(), showProject)}{:else}{showProject && asset.project !== null ? asset.project : asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}{/if}</p>
+    <div class="asset-tile-foot ui-media-foot" class:has-star={onstar}>
+      <div class="foot-text">
+        <p class="truncate text-ui font-medium text-text-secondary">{asset.filename}</p>
+        <p class="mt-0.5 truncate text-meta text-text-muted">{#if isAudio}{audioFoot(asset, new Date(asset.created_at).toLocaleDateString(), showProject)}{:else}{showProject && asset.project !== null ? asset.project : asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}{/if}</p>
+      </div>
+      {#if onstar}
+        <button
+          type="button"
+          class="asset-tile-star"
+          data-starred={starred}
+          title={starred ? 'Unstar' : 'Star'}
+          aria-label="Star {asset.filename}"
+          aria-pressed={starred}
+          onclick={onStarClick}
+          use:keepSelectKeys
+        ><Icon name="star" size={16} solid={starred} /></button>
+      {/if}
     </div>
   {/if}
 
@@ -388,6 +489,56 @@
   }
 
   .asset-tile-check { position: absolute; top: 8px; left: 8px; z-index: 2; width: 16px; height: 16px; border-radius: 4px; }
+  /* A finger gets the touch checkbox size and a 44px target: the box sits in the top-left corner, so the extra reach only
+     covers the corner of the media button, never its middle. */
+  @media (pointer: coarse) {
+    .asset-tile-check { width: 20px; height: 20px; }
+    .asset-tile-check::before { content: ''; position: absolute; inset: -12px; }
+  }
+  /* The checkbox is a way into Select mode: with a mouse it shows on hover or focus (and while the mode is on), on touch
+     always. Hidden it still takes focus, which shows it. */
+  @media (hover: hover) {
+    .asset-tile-check { opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
+    .asset-tile:hover .asset-tile-check, .asset-tile:focus-within .asset-tile-check, .asset-tile[data-menu-open='true'] .asset-tile-check,
+    .asset-tile[data-select-mode='true'] .asset-tile-check { opacity: 1; pointer-events: auto; }
+  }
+
+  /* In Select mode a click toggles: the cursor says so, and hovering a tile that is not selected previews the ring. */
+  .asset-tile[data-select-mode='true'] .asset-tile-media { cursor: pointer; }
+  @media (hover: hover) { .asset-tile[data-select-mode='true'][data-selected='false']:hover { box-shadow: 0 0 0 2px var(--color-primary-border); } }
+
+  /* The star. In the caption row it sits at the right end, beside the filename and date; 28px (32px on touch) with a 44px
+     hit area. With a mouse it shows on hover or focus and stays while starred; on touch only a starred one shows, and a
+     tap unstars it. */
+  .asset-tile-star { position: relative; }
+  .asset-tile-foot.has-star { display: flex; align-items: center; gap: 6px; padding-right: 6px; }
+  .foot-text { min-width: 0; flex: 1; }
+  .asset-tile-foot > .asset-tile-star {
+    display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm);
+    color: var(--color-text-muted); opacity: 0; transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+  }
+  .asset-tile-foot > .asset-tile-star:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 1px; }
+  .asset-tile:focus-within .asset-tile-foot > .asset-tile-star, .asset-tile[data-menu-open='true'] .asset-tile-foot > .asset-tile-star { opacity: 1; }
+  /* Amber only for a starred star, and after the resting colour above so it wins at rest (the same specificity, so the
+     order decides). Focus shows the star but leaves its colour alone. */
+  .asset-tile-foot > .asset-tile-star[aria-pressed='true'] { opacity: 1; color: var(--color-star); }
+  @media (hover: hover) {
+    .asset-tile:hover .asset-tile-foot > .asset-tile-star { opacity: 1; }
+    .asset-tile-foot > .asset-tile-star:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+    .asset-tile-foot > .asset-tile-star[aria-pressed='true']:hover { color: var(--color-star); }
+  }
+  @media (hover: none) { .asset-tile-foot > .asset-tile-star:not([aria-pressed='true']) { display: none; } }
+  @media (pointer: coarse) {
+    .asset-tile-foot > .asset-tile-star::before { content: ''; position: absolute; inset: -6px; }
+    .asset-tile-foot > .asset-tile-star { width: 32px; height: 32px; }
+  }
+  /* The stage keeps the star among its corner buttons, before ⋯. */
+  .asset-tile-actions > .asset-tile-star[aria-pressed='true'] { color: var(--color-star); }
+  /* A strip tile's starred mark: top-left, a mark and not a control. */
+  .asset-tile-star-mark {
+    position: absolute; top: 4px; left: 4px; z-index: 2; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+    background: color-mix(in srgb, var(--color-bg-base) 78%, transparent); color: var(--color-star); pointer-events: none;
+  }
   .asset-tile-context-anchor { position: fixed; width: 1px; height: 1px; pointer-events: none; }
   .asset-tile-foot { padding: 8px 12px; }
 </style>

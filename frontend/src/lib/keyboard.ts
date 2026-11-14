@@ -154,12 +154,15 @@ export const APP_SHORTCUTS: readonly ShortcutGroup[] = [
   {
     title: 'Gallery',
     entries: [
-      { keys: ['←', '↑', '↓', '→'], label: 'Move between assets' },
-      { keys: ['↵'], label: 'Open the viewer' },
-      { keys: ['Space', 'X'], label: 'Select or deselect' },
-      { keys: ['⌘/Ctrl+A'], label: 'Select all loaded assets' },
-      { keys: ['Del', '⌫'], label: 'Delete the selection or focused asset' },
-      { keys: ['Esc'], label: 'Clear the selection' },
+      { keys: ['←', '↑', '↓', '→'], label: 'Move between files' },
+      { keys: ['Alt+3'], label: 'Focus the first file' },
+      { keys: ['↵'], label: 'Open the viewer (also in Select mode)' },
+      { keys: ['Space', 'X'], label: 'Select or deselect the focused file (starts Select mode)' },
+      { keys: ['S'], label: 'Star or unstar the focused file' },
+      { keys: ['⇧+Click'], label: 'In Select mode: add every file from the last one clicked' },
+      { keys: ['⌘/Ctrl+A'], label: 'Select every file matching the view (starts Select mode)' },
+      { keys: ['Del', '⌫'], label: 'Delete the selection or focused file' },
+      { keys: ['Esc'], label: 'Leave Select mode and clear the selection' },
     ],
   },
 ];

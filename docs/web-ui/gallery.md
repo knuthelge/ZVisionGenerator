@@ -1,14 +1,14 @@
 # Gallery and viewer
 
-The **Gallery** (++g++ ++g++) shows every image, video and audio file in your output folder, including ones the command line made there, or just those of the [project](#projects) you have picked. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both. A click on a tile opens the viewer.
+The **Gallery** (++g++ ++g++) shows every image, video and audio file in your output folder, including ones the command line made there, or just those of the [project](#projects) you have picked. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both. A click on a tile opens the viewer; [Select mode](#select-move-download-and-delete) acts on many files at once.
 
 ![The Gallery page: a grid of images, a video and audio takes, newest first](../assets/screenshots/gallery-page.webp)
 
 ## Browse
 
-Filter by kind and sort by date; with **All files** picked, the filter also offers **Not in a project**. More files load as you scroll, and coming back to the Gallery restores your place.
+Filter by kind and sort by date; with **All files** picked, the filter also offers **Not in a project**. The **★** toggle beside the filter shows only [starred](#stars) files and combines with the filter and the project. More files load as you scroll, and coming back to the Gallery restores your place.
 
-Each tile's **⋯** menu has the same actions as the viewer, led by **Reuse settings**. Right-click a tile with a mouse, or press and hold it on a touch screen, for the same menu. Transparent images show over a checkerboard, which is only a display aid; the file holds real transparency.
+Each tile's **⋯** menu has the same actions as the viewer, led by **Reuse settings**, plus **Select**. Right-click a tile with a mouse, or press and hold it on a touch screen, for the same menu. Transparent images show over a checkerboard, which is only a display aid; the file holds real transparency.
 
 **On a phone:** see [Viewer and Gallery on a phone](devices.md#the-viewer-on-a-phone).
 
@@ -16,13 +16,21 @@ Each tile's **⋯** menu has the same actions as the viewer, led by **Reuse sett
 
 The Gallery shows the files of the picked [project](../concepts/projects.md). Changing the project clears the selection, closes the viewer and scrolls back to the top; the filter and sort stay.
 
-## Select, move and delete
+## Select, move, download and delete { #select-move-download-and-delete }
 
-Select several tiles to move or delete them together; the keys are in [Keyboard shortcuts](shortcuts.md#gallery). Deleting removes the file from the output folder, after asking, and a file that can't be deleted stays selected.
+**Select** in the header, or a tile's checkbox, turns on Select mode. Outside it a click on a tile opens the viewer; inside it a click or tap picks the tile, and Shift-click picks a run. **Done** or ++esc++ ends it. The keys are in [Keyboard shortcuts](shortcuts.md#gallery).
+
+**Select all** picks every file the filter, the **★** toggle and the project match, not only the loaded tiles. **Move**, **Download** and **Delete** act on the picked files, and a file that fails stays picked so you can try again. **Download** saves one uncompressed zip with the folders kept.
 
 ### Move to project { #move-to-project }
 
 **Move to project…** is in the **⋯** menu of a Gallery tile, a Workspace strip tile, the preview and the viewer, and in the viewer's toolbar as **Move**. The rules are in [Move a file to another project](../concepts/projects.md#move-a-file-to-another-project).
+
+## Stars { #stars }
+
+A star marks a file you want to find again. Star it from the star in its tile's caption, **⋯** → **Star** or the viewer's **Star** button (++s++); the **★** toggle beside the filter shows starred files only, and unstarring there takes the file out of the list. On a tablet or phone a tile shows its star only while starred, so star from **⋯** or the viewer. Stars also work in the Workspace strip and viewer.
+
+Stars are kept by the Web UI, so every device sees the same ones. They follow a file when you [move it to another project](#move-to-project) and survive moving or renaming the output folder. A file you rename, move or delete outside the app loses its star, and a new file that takes its name shows it.
 
 ## The viewer
 
@@ -30,7 +38,7 @@ Clicking a tile grows it into the viewer. On a computer or iPad the viewer is a 
 
 ![The viewer with the Details panel open, showing how the prompt was enhanced](../assets/screenshots/viewer-details.webp)
 
-The toolbar offers **Reuse settings**, **Use as**, **Extend** (videos), **Edit** (images), **Upscale**, **Move**, **Download**, **Delete** and **Details**, described below. **Delete** asks first. The keys are in [Keyboard shortcuts](shortcuts.md#viewer).
+The toolbar offers **Reuse settings**, **Use as**, **Extend** (videos), **Edit** (images), **Upscale**, **Move**, **Star**, **Download**, **Delete** and **Details**, described below. **Delete** asks first. The keys are in [Keyboard shortcuts](shortcuts.md#viewer).
 
 **Edit** (++m++) opens an image in **Image** on its **Edit** kind, with an empty prompt and no paint. What to do next is in [Edit a picture](../guides/images.md#edit), and the screen is described in [Edit an image](workspace.md#edit-an-image).
 

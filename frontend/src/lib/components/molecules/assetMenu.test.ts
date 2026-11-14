@@ -224,6 +224,53 @@ describe('assetMenuEntries Move', () => {
   });
 });
 
+describe('assetMenuEntries lead and star', () => {
+  const ids = (entries: ReturnType<typeof assetMenuEntries>) => entries.map((entry) => (entry.kind === 'item' ? entry.id : entry.kind));
+  const asset = makeAsset(undefined);
+
+  it('puts the lead first, then a separator, ahead of Reuse', () => {
+    const handlers = { onreuse: vi.fn(), onlead: vi.fn() };
+    const select = assetMenuEntries(asset, handlers, false, {}, undefined, null, 'select');
+    expect(ids(select).slice(0, 3)).toEqual(['select', 'separator', 'reuse']);
+    expect(select[0]).toMatchObject({ label: 'Select' });
+    const view = assetMenuEntries(asset, handlers, false, {}, undefined, null, 'view');
+    expect(view[0]).toMatchObject({ id: 'view', label: 'View' });
+  });
+
+  it('reports the picked lead to onlead', () => {
+    const onlead = vi.fn();
+    const [select] = assetMenuEntries(asset, { onlead }, false, {}, undefined, null, 'select');
+    if (select.kind === 'item') select.onselect?.();
+    const [view] = assetMenuEntries(asset, { onlead }, false, {}, undefined, null, 'view');
+    if (view.kind === 'item') view.onselect?.();
+    expect(onlead.mock.calls).toEqual([['select'], ['view']]);
+  });
+
+  it('has no lead item without a lead', () => {
+    expect(ids(assetMenuEntries(asset, { onlead: vi.fn() }))).toEqual(['download']);
+  });
+
+  it('offers Star after Move and before Download, reading Unstar for a starred file, and none without onstar', () => {
+    const onstar = vi.fn();
+    const plain = assetMenuEntries(asset, { onstar }, false, {}, vi.fn());
+    expect(ids(plain)).toEqual(['move', 'star', 'download']);
+    expect(plain[1]).toMatchObject({ label: 'Star' });
+    const starred = assetMenuEntries({ ...asset, starred: true }, { onstar });
+    expect(starred[0]).toMatchObject({ id: 'star', label: 'Unstar' });
+    expect(ids(assetMenuEntries(asset, {}))).toEqual(['download']);
+  });
+
+  it('calls onstar with the flipped state', () => {
+    const onstar = vi.fn();
+    const [star] = assetMenuEntries(asset, { onstar });
+    if (star.kind === 'item') star.onselect?.();
+    expect(onstar).toHaveBeenCalledWith(asset, true);
+    const [unstar] = assetMenuEntries({ ...asset, starred: true }, { onstar });
+    if (unstar.kind === 'item') unstar.onselect?.();
+    expect(onstar).toHaveBeenLastCalledWith({ ...asset, starred: true }, false);
+  });
+});
+
 describe('assetMenuEntries for a paused video frame', () => {
   const video = (overrides: Partial<GalleryAsset> = {}): GalleryAsset => ({
     ...makeAsset(undefined), id: 'out/c.mp4', url: '/media/out/c.mp4', filename: 'c.mp4', media_type: 'video', file_path: '/outputs/out/c.mp4', extend: { available: true, reason: null }, ...overrides,

@@ -47,6 +47,8 @@
   /* Blob accents: the coral beret ($snippets) and the amber brush ({a|b} choices). */
   --color-accent-coral: #fb8f7c;
   --color-accent-amber: #fbbf24;
+  /* A starred file: the star glyph and its tint. */
+  --color-star: var(--color-accent-amber);
   --color-success: #34d399;
   --color-error: #f87171;
   --color-warning: #fbbf24;
