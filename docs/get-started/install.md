@@ -34,8 +34,6 @@ The launcher installs the app and ffmpeg, starts the app and opens it in your br
     2. Open it, drag **Z-Vision Generator** into **Applications**, then open it from **Applications**. macOS says it can't verify the app.
     3. Open **System Settings → Privacy & Security**, scroll to the message about Z-Vision Generator and choose **Open Anyway**.
 
-    ![The Privacy and Security settings with Open Anyway beside the Z-Vision Generator message](../assets/screenshots/placeholder.svg "launcher-gatekeeper")
-
 === "Windows"
 
     1. Download [the launcher for Windows](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-windows-x64-setup.exe) (`.exe`) and run it.
