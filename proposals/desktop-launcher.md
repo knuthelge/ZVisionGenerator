@@ -1,6 +1,6 @@
 # A desktop launcher
 
-**Status:** In progress (2026-11-13). Round 1 (unsigned, for testing) is built and verified end to end on Linux. It awaits the macOS and Windows checks below and has no `launcher-v*` release yet. No changes to the app: the launcher uses only `ziv ui`'s public flags.
+**Status:** In progress (2026-11-13). Round 1 (unsigned, for testing) is built and verified end to end on Linux. It awaits the macOS and Windows checks below and has no `launcher-v*` release yet. The launcher needs no change to the app's code: it uses only `ziv ui`'s public flags (the app's version now reads only `v*` tags).
 
 ## Why
 
@@ -106,6 +106,7 @@ Linux was verified end to end. What remains is the macOS and Windows pass, plus 
 - **macOS 15 and 26 (Apple silicon):** first open from the `.dmg` shows the move-to-Applications message; Gatekeeper blocks the first open and Open Anyway works (`codesign -dv` reports an ad-hoc signature); the uv, Python and ffmpeg the launcher downloads aren't quarantined; install, start, Quit, start at login (LaunchAgent), the menu-bar icon, Update, Repair and Uninstall work.
 - **Windows 11 (RTX 20-series or newer):** SmartScreen allows the setup `.exe` (per-user, no admin); no console window appears; CUDA torch survives an Update; a username with spaces or non-ASCII characters works; start at login (Run value) and the tray icon work; Quit, a shutdown with the app running and Uninstall (from the window and from Settings, Apps) leave nothing running or behind.
 - **Measured size:** the install size and first-install time on both, to replace the Windows and macOS `EXPECTED_CACHE_BYTES` placeholders in `launcher/src-tauri/src/manifest.rs` (Linux is measured), and the folder size staying flat after an Update that changes torch.
+- **Third-party notices:** before the first `launcher-v*` tag, a generated notice file for the Rust crates compiled into the launcher and the npm packages in the bundled window (for example with cargo-about), shipped in the bundle or the release.
 - **Linux distros:** the AppImage on a fresh Ubuntu 24.04 (no `libfuse2`) and on Fedora, the tray on KDE and on Fedora GNOME without AppIndicator, and the `.deb` from Ubuntu's App Center.
 
 ## Alternatives
@@ -122,8 +123,7 @@ Linux was verified end to end. What remains is the macOS and Windows pass, plus 
 
 - Warning before Update, Repair or Quit stops a running job or model download, adopting a server left behind by a crashed launcher instead of stopping it, and noticing a `ziv ui` already running from a terminal. Left out of the test round.
 - Data and model folders moved with `ZIV_DATA_DIR` or `HF_HOME` in a shell profile: a launcher started from the Finder or at login doesn't see them.
-- Rolling back to the previous version after a bad update. Repair reinstalls the newest version; a rollback would re-download several GB, because the cache is pruned after each update.
-- CI and Rust unit tests for the launcher code: planned in the build phase, not in this proposal.
+- Rolling back to the previous version after a bad update. Repair reinstalls the installed version, or the update on offer when there is one, never an older one; a rollback would re-download several GB, because the cache is pruned after each update.
 - Gated models that need `hf auth login`; none of the built-in models do.
 - Reaching the app from other devices (`--host local`).
 - A `ziv` command on the user's `PATH`; CLI users keep installing with uv.

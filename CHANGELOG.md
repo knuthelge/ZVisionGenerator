@@ -9,12 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 
 #### Install
-- **Install and start without a terminal.** The new desktop launcher for macOS, Windows and Linux checks your computer, installs the app and ffmpeg, starts and stops it, offers updates, and has Repair and Uninstall. It can also start the app at login, and **Get beta versions** in its More menu opts into pre-release updates. It installs its own copy, so a terminal install keeps working, and both share your data and models unless you moved them with `ZIV_DATA_DIR` or `HF_HOME`. The first builds are unsigned, so the system warns you the first time you open it. See [Install with the launcher](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install-with-the-launcher).
+- **Install without a terminal.** A desktop launcher for macOS, Windows and Linux installs the app and ffmpeg, starts it in your browser and offers updates. It installs its own copy beside a terminal install and shares your data and models. Its first builds are unsigned, so your system warns you the first time you open it. See [Install with the launcher](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install-with-the-launcher).
 
 ### Fixed
 
 #### Install
-- **Windows installs take only PyTorch from PyTorch's CUDA index.** The install command is now `uv tool install z-vision-generator --torch-backend cu132`, so other packages no longer come from outdated copies on that index, and a lagging PyTorch index can no longer leave you with a PyTorch without CUDA. It needs uv 0.11.29 or newer. To update on Windows, run `uv tool install --upgrade z-vision-generator --torch-backend cu132`, because `uv tool upgrade` would bring back a PyTorch without CUDA. See [Install](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install).
+- **Windows installs take only PyTorch from PyTorch's CUDA index.** Install with `uv tool install z-vision-generator --torch-backend cu132` (uv 0.11.29 or newer) and update with `uv tool install --upgrade z-vision-generator --torch-backend cu132`, because `uv tool upgrade` would bring back a PyTorch without CUDA. See [Install](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install).
 
 ## [0.14.0] - 2026-11-12
 

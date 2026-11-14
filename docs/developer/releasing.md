@@ -34,9 +34,9 @@ Do these in order, on the commit you will tag.
 
 The desktop launcher is released apart from the app. It has its own version, in `launcher/src-tauri/Cargo.toml`, and its own workflow, started by `launcher-v*` tags. A `v*` tag never builds it, and a `launcher-v*` tag never publishes to PyPI. The app's version reads only `v*` tags, so `launcher-v*` tags never affect it. Which app version it installs comes from PyPI, so an app release needs no launcher release, except when the app needs something the launcher doesn't provide, such as a newer Python.
 
-The launcher hard-codes things the app owns: the Python version, the CUDA PyTorch index for Windows and the uv version. When the app changes any of these, ship a launcher release first, because older launchers' **Update** will fail or change nothing. See [Desktop launcher](launcher.md) for how it is built.
+The launcher hard-codes things the app owns: the Python version, the Windows `--torch-backend cu132` and the uv version. When the app changes any of these, ship a launcher release first, because older launchers' **Update** will fail or change nothing. See [Desktop launcher](launcher.md) for how it is built.
 
-The launcher release is published as a GitHub release that is not marked latest, so the app's releases stay on top. Because of that, the install guide links to the exact `launcher-v…` release, and the links are updated with each launcher release. The asset names stay the same from release to release. Pushing a `launcher-v*` tag cannot be undone, so push one only when you are releasing the launcher.
+The release is not marked latest, so app releases stay on top; that is why the install guide links to the exact `launcher-v…` release and the asset names stay fixed. A pushed `launcher-v*` tag cannot be undone.
 
 Do these in order.
 
@@ -44,7 +44,13 @@ Do these in order.
 2. **Bump the version.** Set `version` in `launcher/src-tauri/Cargo.toml`. The workflow fails a tag whose version differs from it.
 3. **Update the pins** if a tool has moved or a download has gone, as in [Pins](launcher.md#pins).
 4. **Run a test build.** Start the Launcher release workflow by hand from the branch. It builds the installers for macOS, Windows and Linux and uploads them as artifacts, and publishes nothing.
-5. **Check each platform** with the installers from the test build: a fresh install, start, Quit, Update, Repair and Uninstall, and the first-open steps on the install page. Include a Windows account whose name has spaces or non-ASCII characters, the tray on stock GNOME and the AppImage on a fresh Ubuntu.
+5. **Check each platform** with the installers from the test build: a fresh install, start, Quit, Update, Repair and Uninstall, and the first-open steps on the install page. Include a Windows account whose name has spaces or non-ASCII characters, the tray on stock GNOME and the AppImage on a fresh Ubuntu. These need a real machine:
+    - **Windows:** turn on **Start at login**, then sign out and in. The launcher starts hidden and opens no browser.
+    - **Windows:** Quit, Update and Uninstall with other apps open. Only the launcher's own processes stop.
+    - **macOS:** the first install on a Mac without the Command Line Tools shows no "install developer tools" popup.
+    - **macOS:** open the launcher from the disk image. The window says to quit and move it; after the move, the copy in Applications opens.
+    - **macOS:** log out with **Reopen windows when logging back in** ticked. The launcher does not reopen its window.
+    - **macOS:** after **Open Anyway**, install and start both work, so Gatekeeper does not kill the managed Python.
 6. **Update the install guide.** Point the download links in [Install](../get-started/install.md#get-the-launcher) at the new `launcher-v<version>` release.
 7. **Tag and push.** Create `launcher-v<version>` on the commit and push the commit and the tag. The workflow builds the installers again and creates the GitHub release with the five files.
 8. **Deploy the docs** once the release exists, so that the install page's links work: run the Deploy Docs workflow by hand, since a `launcher-v*` tag does not run it.

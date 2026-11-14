@@ -6,6 +6,7 @@ Install the app and open it in your browser. No account or payment is needed.
 
 - **Mac:** Apple silicon (M1 or newer) and macOS 14 Sonoma or newer.
 - **Windows and Linux:** an NVIDIA RTX 20-series or newer, with driver 580 or newer. There is no CPU fallback.
+- **Disk:** about 10 GB free for the app, plus room for the models you download.
 
 === "macOS"
 
@@ -23,106 +24,36 @@ Models download into the Hugging Face cache; to move it to another drive, see [D
 
 ## Install with the launcher { #install-with-the-launcher }
 
-The launcher is a small app that installs Z-Vision Generator and ffmpeg for you, starts and stops the app, and opens it in your browser. You never open a terminal. It needs about 10 GB of free disk space. It checks your machine first, as in step 1, and tells you what is missing before it downloads anything.
-
-The launcher installs its own copy of the app, even if `ziv` is already installed with uv. The two copies share the same [data folder](../reference/data-folder.md) and downloaded models, unless you moved them with `ZIV_DATA_DIR` or `HF_HOME`; see [Use another folder](../reference/data-folder.md#use-another-folder).
+The launcher installs the app and ffmpeg, starts the app and opens it in your browser, so you never open a terminal. It isn't signed yet, so your system warns you the first time you open it; the steps below get past it.
 
 ### Get the launcher { #get-the-launcher }
-
-The launcher is not signed yet, so your system warns you the first time you open it. The warning is expected; the steps below get past it.
 
 === "macOS"
 
     1. Download [the launcher for macOS](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-macos-arm64.dmg) (`.dmg`).
-    2. Open the `.dmg` and drag **Z-Vision Generator** into **Applications**. Do this before you open it: the launcher has to live in Applications to start at login and to update.
-    3. Open **Z-Vision Generator** from **Applications**. macOS says it can't verify the app and doesn't open it.
-    4. Open **System Settings → Privacy & Security**, scroll to the message about Z-Vision Generator and choose **Open Anyway**. Confirm, and the launcher opens. You do this once for each launcher you download: a new launcher version asks again. Quit the running launcher before you replace it with a new version.
+    2. Open it, drag **Z-Vision Generator** into **Applications**, then open it from **Applications**. macOS says it can't verify the app.
+    3. Open **System Settings → Privacy & Security**, scroll to the message about Z-Vision Generator and choose **Open Anyway**.
 
     ![The Privacy and Security settings with Open Anyway beside the Z-Vision Generator message](../assets/screenshots/placeholder.svg "launcher-gatekeeper")
 
 === "Windows"
 
     1. Download [the launcher for Windows](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-windows-x64-setup.exe) (`.exe`) and run it.
-    2. Windows shows **Windows protected your PC**. Choose **More info**, then **Run anyway**.
+    2. At the **Windows protected your PC** warning, choose **More info**, then **Run anyway**.
     3. Follow the installer, then open **Z-Vision Generator** from the Start menu.
 
-    ![The Windows protected your PC dialog with More info opened and the Run anyway button](../assets/screenshots/placeholder.svg "launcher-smartscreen")
-
 === "Linux"
 
-    Pick the format that suits your distribution:
+    - [AppImage](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-linux-x86_64.AppImage): in its **Properties**, tick **Allow executing file as program**, then open it.
+    - [`.deb`](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-linux-amd64.deb) (Ubuntu, Debian) or [`.rpm`](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-linux-x86_64.rpm) (Fedora): open it with your software installer, then open **Z-Vision Generator** from your applications menu.
 
-    - [AppImage](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-linux-x86_64.AppImage): works on most distributions. Allow it to run as a program (in your file manager: **Properties**, then **Allow executing file as program**; or `chmod +x` on the file), then open it.
-    - [`.deb`](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-linux-amd64.deb): for Ubuntu, Debian and their relatives. Open it with your software installer.
-    - [`.rpm`](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-linux-x86_64.rpm): for Fedora and its relatives. Open it with your software installer.
+Choose **Install** in the launcher window. When it is done, your browser opens at the app, which offers an image model picked for your machine; [Your first image](first-image.md) takes it from there. Next time, open the launcher to start the app; **Quit** stops it. If it can't install, see [Troubleshooting](../reference/troubleshooting.md#launcher-install-failed).
 
-    After a `.deb` or `.rpm`, open **Z-Vision Generator** from your applications menu.
-
-The launcher's window checks your machine. If it is ready, the window says so and shows an **Install** button. The first install downloads several gigabytes, which can take a while on a slow connection. You can close the window: the install carries on, and your browser opens when it is ready. If something goes wrong, the launcher window comes back. If the window says it can't install, see [The launcher says this computer isn't supported](../reference/troubleshooting.md#launcher-unsupported); if the install stops, see [The launcher's install failed](../reference/troubleshooting.md#launcher-install-failed).
-
-The first time, the app offers to download an image model picked for your machine. [Your first image](first-image.md) takes it from there.
-
-### Start and stop { #launcher-start-and-stop }
-
-Open the launcher to start the app. Your browser opens at the app when it is ready. While the window says **Running**, **Open Z-Vision Generator** opens it again; if the app has stopped, it starts it first.
-
-Closing the window only hides it; the app keeps running. Find the launcher again in the menu bar (macOS), the notification area (Windows) or the tray (Linux), or open it like any other app to bring its window forward. Some Linux desktops, such as stock GNOME, show no tray icon; open the launcher from the applications menu instead.
-
-**Quit**, in the window or in the tray menu, stops the app and closes the launcher. If the app stops on its own, for example when it runs out of memory, the window says **Stopped** and shows the end of its log; **Open Z-Vision Generator** starts it again.
-
-### Start at login { #launcher-start-at-login }
-
-Tick **Start at login** in the launcher window. The app then starts in the background when you log in, with the tray icon showing and no browser window; open it from the launcher when you want it. On a desktop with no tray icon nothing shows, and opening the launcher brings up its window. Untick it to stop.
-
-### Update the app { #launcher-update }
-
-When a new version is out, the window offers **Update**. The app stops, updates and starts again. Your data and models stay. If the update doesn't finish, **Open** starts the app again and the update stays on offer. To reinstall, choose **Repair** in **More**.
-
-To try pre-release versions, open **More** and tick **Get beta versions**; it is there before you install too. The window then offers betas as updates (**Beta 0.15.0b1 is out.**) and marks an installed beta next to its version. Unticking it downloads nothing and never goes back to an older version: a beta stays installed, **Repair** reinstalls that beta unless an update is on offer, and **Update** offers the next stable version once one newer than your beta is out.
-
-The launcher doesn't update itself; download a newer one from [Get the launcher](#get-the-launcher).
-
-### Repair the launcher's install { #launcher-repair }
-
-If the app doesn't start, or reports a missing or outdated package or a missing ffmpeg, open **More** in the launcher window and choose **Repair**. The app stops, the launcher downloads its tools again and reinstalls the app. It reinstalls the version you have; if an update is on offer, it installs that newer version instead. Your data folder and downloaded models stay as they are. If the repair doesn't finish, **Open** starts the app again, and **Repair** stays in **More**.
-
-### Uninstall the launcher's install { #launcher-uninstall }
-
-Open **More** and choose **Uninstall…**. It stops the app and removes the app, its tools and the start-at-login entry. Your data folder, with your LoRAs, outputs and settings, and the downloaded models stay; both locations are in [Data folder](../reference/data-folder.md).
-
-=== "macOS"
-
-    Use **Uninstall…** before you move Z-Vision Generator to the Trash. The window then asks you to move it to the Trash to finish.
-
-    If you removed the launcher without **Uninstall…**, delete these yourself:
-
-    - The launcher's folder, `~/Library/Application Support/ZVision`, with the app, its tools and Python.
-    - The start-at-login entry, `~/Library/LaunchAgents/Z-Vision Generator.plist`, if you had turned on **Start at login**.
-
-    Both are hidden; see [Open a hidden folder](../reference/data-folder.md#open-a-hidden-folder).
-
-=== "Windows"
-
-    The launcher starts the Windows uninstaller, which asks before it removes anything. **Settings → Apps** reaches the same uninstaller and removes the launcher's folder, `%LOCALAPPDATA%\ZVision`, and the start-at-login entry with it.
-
-=== "Linux"
-
-    Use **Uninstall…** before you delete the AppImage or remove the package. The window then asks you to delete the AppImage, or to remove the package with your software installer.
-
-    If you removed the launcher without **Uninstall…**, delete these yourself:
-
-    - The launcher's folder, `~/.local/share/zvision`, with the app, its tools and Python.
-    - The start-at-login entry, `~/.config/autostart/Z-Vision Generator.desktop`, if you had turned on **Start at login**.
-
-    Both are hidden; see [Open a hidden folder](../reference/data-folder.md#open-a-hidden-folder).
+**Update**, **Repair**, **Uninstall…** and **Get beta versions** are in the launcher window (the last three in the **⋯** menu) and keep your data and models. Use **Uninstall…** before you delete the launcher; if you already did, see [The launcher's folder](../reference/data-folder.md#the-launchers-folder). The launcher doesn't update itself: quit it and download it again from [Get the launcher](#get-the-launcher); on macOS, choose **Open Anyway** again.
 
 ### Prefer a terminal?
 
-Steps 2 to 6 install the same app from a terminal instead of the launcher. Use them if you want any of these, or if you prefer commands. Skip them if you used the launcher.
-
-- The `ziv` commands on your path.
-- The [data folder](../reference/data-folder.md#use-another-folder) or the Hugging Face cache on another drive on macOS or Linux.
-- Phone, tablet and other-computer access: the launcher's app answers only on this computer. See [Phones, tablets and other computers](../web-ui/devices.md).
+Steps 2 to 6 install the same app from a terminal; use them for the `ziv` commands, for [phones, tablets and other computers](../web-ui/devices.md), or to keep the [data folder](../reference/data-folder.md#use-another-folder) or models on another drive on macOS or Linux, and skip them if you used the launcher.
 
 ## 2. Open a terminal { #open-a-terminal }
 
@@ -248,7 +179,7 @@ See [Troubleshooting](../reference/troubleshooting.md).
     uv tool upgrade z-vision-generator
     ```
 
-If you installed with the launcher, use **Update** in its window instead; see [Update the app](#launcher-update).
+If you installed with the launcher, use **Update** in its window instead.
 
 Your LoRAs, settings and outputs live in the [data folder](../reference/data-folder.md), and downloaded models in the Hugging Face cache, not in the install, so they survive an update.
 
@@ -276,7 +207,7 @@ If the app reports a missing or outdated package, reinstall it. Your data folder
     uv tool install --reinstall z-vision-generator
     ```
 
-In a checkout, run `uv sync` instead. If you installed with the launcher, use **Repair** in its window instead; see [Repair the launcher's install](#launcher-repair).
+In a checkout, run `uv sync` instead. If you installed with the launcher, use **Repair** in its window instead.
 
 ## Uninstall { #uninstall }
 
@@ -284,7 +215,7 @@ In a checkout, run `uv sync` instead. If you installed with the launcher, use **
 uv tool uninstall z-vision-generator
 ```
 
-If you installed with the launcher, use **Uninstall…** in its window instead; see [Uninstall the launcher's install](#launcher-uninstall).
+If you installed with the launcher, use **Uninstall…** in its window instead; if you already deleted the launcher, see [The launcher's folder](../reference/data-folder.md#the-launchers-folder).
 
 The data folder stays, with your LoRAs, outputs and converted models, and so do the downloaded models in the Hugging Face cache. Delete them to free the space; both locations are in [Data folder](../reference/data-folder.md).
 

@@ -58,11 +58,11 @@ Set `ZIV_DATA_DIR` to keep the data folder somewhere else, for example on a fast
 
 Set it for every command you run, so they all use the same folder.
 
-If you installed with the launcher, the app it starts inherits the launcher's own environment, so the variables have to be set where the launcher can see them.
+The launcher and a terminal install share the data folder and the model cache. The app the launcher starts sees only the variables the launcher itself was started with.
 
 === "macOS"
 
-    A shell profile doesn't reach the launcher, which starts from the Finder or at login, not from a shell. To move these folders, install from a terminal instead; see [Prefer a terminal?](../get-started/install.md#prefer-a-terminal).
+    Variables set in a terminal or in `~/.zshrc` don't reach the app the launcher starts. To move these folders, install from a terminal instead; see [Prefer a terminal?](../get-started/install.md#prefer-a-terminal).
 
 === "Windows"
 
@@ -70,7 +70,7 @@ If you installed with the launcher, the app it starts inherits the launcher's ow
 
 === "Linux"
 
-    A shell profile doesn't reach the launcher, which starts from the applications menu or at login, not from a shell. To move these folders, install from a terminal instead; see [Prefer a terminal?](../get-started/install.md#prefer-a-terminal).
+    Variables set in a terminal or in `~/.bashrc` don't reach the app the launcher starts. To move these folders, install from a terminal instead; see [Prefer a terminal?](../get-started/install.md#prefer-a-terminal).
 
 ## Open a hidden folder { #open-a-hidden-folder }
 
@@ -143,3 +143,19 @@ The Web UI keeps a record of finished jobs, with the reason each failed, in the 
 - Files the CLI writes to the output folder are picked up on the next load.
 - Several Web UIs, even different versions, can share it.
 - If it's ever found damaged, it is moved aside as `ziv.sqlite3.corrupt-<date>-<time>` and a new one is started with an empty job log; the old jobs stay in that copy. Delete those copies when you don't need them.
+
+## The launcher's folder { #the-launchers-folder }
+
+The launcher keeps the app, Python, uv and ffmpeg in a folder of its own, and **Uninstall…** in its window removes it. If you deleted the launcher first, delete the folder yourself, and the start-at-login entry if you turned it on.
+
+=== "macOS"
+
+    Delete `~/Library/Application Support/ZVision` and `~/Library/LaunchAgents/Z-Vision Generator.plist`. Both are hidden; see [Open a hidden folder](#open-a-hidden-folder).
+
+=== "Windows"
+
+    The folder is `%LOCALAPPDATA%\ZVision`. Uninstalling from **Settings → Apps** removes it and the start-at-login entry.
+
+=== "Linux"
+
+    Delete `~/.local/share/zvision` and `~/.config/autostart/Z-Vision Generator.desktop`. Both are hidden; see [Open a hidden folder](#open-a-hidden-folder).

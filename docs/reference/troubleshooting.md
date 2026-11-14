@@ -2,7 +2,7 @@
 
 What an error message or a slowdown means, and what to do. Find your problem by the words of the message, or by what you see: slow, stuck, frozen, nothing happens.
 
-A message that names a file, a setting or a model, or that says "use X instead", means exactly that. Do what it says first. The data folder is `~/.ziv` by default, and `ZIV_DATA_DIR` moves it. If you installed with the [launcher](../get-started/install.md#install-with-the-launcher), the end of its log is one click away: **Show the log** in its window shows it when something fails.
+A message that names a file, a setting or a model, or that says "use X instead", means exactly that. Do what it says first. The data folder is `~/.ziv` by default, and `ZIV_DATA_DIR` moves it.
 
 ## Where to look { #where-to-look }
 
@@ -80,29 +80,15 @@ The app answers only on this computer unless you ask it to share. Start it with 
 
 ### The launcher says this computer isn't supported { #launcher-unsupported }
 
-The launcher checked your machine before downloading anything and found something the app can't run on. The window names it, what it found and what is needed:
-
-- **NVIDIA driver:** Windows and Linux need driver 580 or newer. Install a newer driver, then choose **Check again**.
-- **NVIDIA driver isn't working:** the driver is installed but doesn't answer. This happens after a driver update before a restart, or on Linux when Secure Boot hasn't accepted the driver's key. Restart the computer, or reinstall the driver, then choose **Check again**. `nvidia-smi` in a terminal shows the same failure.
-- **Free disk space:** the launcher needs about 10 GB free on the drive it installs to. Free some space, then choose **Check again**.
-- **NVIDIA graphics card:** Windows and Linux need an RTX 20-series or newer. With no NVIDIA card, or an older one, the app can't run, and nothing was downloaded. **See the requirements** opens [Install](../get-started/install.md#check-your-machine).
-
-A Mac needs Apple silicon and macOS 14 or newer. See [Install](../get-started/install.md#check-your-machine).
+The launcher checked the machine before downloading anything. The window names what it found and what is needed; when it is something you can fix, fix it and choose **Check again**. A driver that is installed but isn't working usually needs a restart after a driver update, or, on Linux, a driver key that Secure Boot accepts. Without an NVIDIA RTX 20-series or newer card the app can't run; see [Install](../get-started/install.md#check-your-machine).
 
 ### The launcher's install failed { #launcher-install-failed }
 
-The window says **Install didn't finish** and gives the cause in its first line. What was downloaded is kept, so **Retry** carries on from there.
-
-- **The download didn't finish:** check the internet connection and choose **Retry**.
-- **There is no space left:** free disk space on the drive the launcher installs to, then **Retry**.
-- **A download no longer exists or doesn't match what the launcher expects:** the launcher downloads uv and ffmpeg from the addresses it was built with, and checks them before it uses them. A cut-off download or a network login page (a hotel or office Wi-Fi) gives a file that doesn't match, so choose **Retry** first. If it keeps failing, or the window says the download is no longer available, a file has been removed or changed upstream: download the newest launcher from [Install](../get-started/install.md#get-the-launcher).
-- **The installer stopped with an error:** open **Show the log**, then **Retry**. If it keeps failing, [report it](#report-a-problem).
-
-**Show the log** opens the end of the install log. Copy it into a [bug report](#report-a-problem) if **Retry** fails again.
+The window says why, and **Retry** carries on with what was already downloaded. A file that doesn't match usually comes from a cut-off download or a hotel or office Wi-Fi login page; retry, or try another network. If the window says a newer launcher fixes it, download it from [Install](../get-started/install.md#get-the-launcher). If **Retry** keeps failing, copy **Show the log** into a [bug report](#report-a-problem).
 
 ### The launcher says Didn't start { #launcher-didnt-start }
 
-The window says **Didn't start** when the app did not come up after the launcher started it. **Open Z-Vision Generator** tries again. If it fails again, open **Show the log** for the reason, then choose **Repair** in **More**: it reinstalls the app, or installs the update when one is on offer, and keeps your data folder and models. If it still fails, [report it](#report-a-problem) with the log.
+**Open Z-Vision Generator** tries again, and **Repair** in the **⋯** menu reinstalls. If it keeps failing, copy **Show the log** into a [bug report](#report-a-problem).
 
 ### Installed with pip
 
