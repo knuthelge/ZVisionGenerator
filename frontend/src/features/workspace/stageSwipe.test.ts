@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { galleryPullReady, stageSwipeOutcome, wheelStep } from './stageSwipe';
+import { stageSwipeOutcome, wheelStep } from './stageSwipe';
 
 const all = { older: true, newer: true, gallery: true };
 
@@ -24,13 +24,6 @@ describe('stageSwipeOutcome', () => {
     expect(stageSwipeOutcome({ axis: 'y', offset: -30, velocity: -1 }, all)).toBe('gallery');
     expect(stageSwipeOutcome({ axis: 'y', offset: -40, velocity: -0.1 }, all)).toBe('stay');
     expect(stageSwipeOutcome({ axis: 'y', offset: -200, velocity: -1 }, { ...all, gallery: false })).toBe('stay');
-  });
-});
-
-describe('galleryPullReady', () => {
-  it('is ready once the pull passes the threshold', () => {
-    expect(galleryPullReady(-40)).toBe(false);
-    expect(galleryPullReady(-90)).toBe(true);
   });
 });
 

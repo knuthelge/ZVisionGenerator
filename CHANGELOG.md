@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Select mode on every screen.** Pick files in the Gallery to move, download or delete them, including every match of the filter, not only the tiles you have scrolled to. See [Select, move, download and delete](https://knuthelge.github.io/ZVisionGenerator/web-ui/gallery/#select-move-download-and-delete).
 - **Download a selection as a zip.** **Download** in Select mode saves the picked files as one uncompressed zip, with their folders kept.
 - **Star the files you want to find again.** Star from a tile or the viewer, in the Gallery and the Workspace, and show starred files only with the **★** toggle. See [Stars](https://knuthelge.github.io/ZVisionGenerator/web-ui/gallery/#stars).
+- **Pull down in the Gallery to go back to the Workspace.** On a phone, drag down from the top of the grid, as swiping up on the Workspace preview opens the Gallery.
 
 ### Changed
 - **On a computer, a click on a tile always opens the viewer.** Picking files goes through Select mode.

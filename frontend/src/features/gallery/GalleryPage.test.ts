@@ -2869,3 +2869,125 @@ describe('GalleryPage stars', () => {
     expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest', null, true);
   });
 });
+
+describe('GalleryPage pull down to the Workspace', () => {
+  const tiles = ['a.png', 'b.png'].map((name) => makeAsset({ id: name, filename: name }));
+
+  const region = () => target.querySelector<HTMLElement>('#gallery-scroll-region')!;
+  const hint = () => target.querySelector('.pull-hint');
+
+  /** Dispatch a touch event with one finger at (x, y), *at* ms into the touch: the release speed reads from these. */
+  function touch(node: Element, type: string, x: number, y: number, at = 0): void {
+    const point = { clientX: x, clientY: y, target: node } as unknown as Touch;
+    const event = new Event(type, { bubbles: true, cancelable: true }) as TouchEvent;
+    Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [point] });
+    Object.defineProperty(event, 'changedTouches', { value: [point] });
+    Object.defineProperty(event, 'timeStamp', { value: at });
+    node.dispatchEvent(event);
+  }
+
+  /** Drag the finger from (100, 100) down by *dy* over *ms* and lift it; *held* keeps it on the screen instead. */
+  function pull(dy: number, from: Element = region(), { ms = 600, held = false } = {}): void {
+    touch(from, 'touchstart', 100, 100, 0);
+    touch(from, 'touchmove', 100, 104, ms / 2);
+    touch(from, 'touchmove', 100, 100 + dy, ms);
+    if (!held) touch(from, 'touchend', 100, 100 + dy, ms);
+    flushSync();
+  }
+
+  async function mountPhone(): Promise<void> {
+    layoutState.mode = 'compact';
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: tiles, page: 1, total_pages: 1, total_count: tiles.length });
+    mountPage();
+    await settle();
+  }
+
+  /** Make the grid look scrolled by *top* px, as a browser would report it. */
+  function scrollRegionTo(top: number): void {
+    Object.defineProperty(region(), 'scrollHeight', { configurable: true, value: 2000 });
+    Object.defineProperty(region(), 'clientHeight', { configurable: true, value: 600 });
+    region().scrollTop = top;
+  }
+
+  it('goes to the Workspace on a long pull down at the top of the grid', async () => {
+    await mountPhone();
+    pull(120);
+    expect(routerMocks.navigate).toHaveBeenCalledExactlyOnceWith('workspace');
+  });
+
+  it('springs back from a short, slow pull', async () => {
+    await mountPhone();
+    pull(30);
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
+    expect(hint()).toBeNull();
+  });
+
+  it('goes to the Workspace on a short flick down', async () => {
+    await mountPhone();
+    pull(30, region(), { ms: 40 });
+    expect(routerMocks.navigate).toHaveBeenCalledExactlyOnceWith('workspace');
+  });
+
+  it('shows the hint while the finger is down, and says to release once the pull is long enough', async () => {
+    await mountPhone();
+    pull(30, region(), { held: true });
+    expect(hint()?.textContent).toBe('Workspace');
+    touch(region(), 'touchmove', 100, 220, 800);
+    flushSync();
+    expect(hint()?.textContent).toBe('Release for the Workspace');
+  });
+
+  it('leaves a drag to the grid once it is scrolled down', async () => {
+    await mountPhone();
+    scrollRegionTo(300);
+    pull(120, target.querySelector('.asset-tile')!);
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
+    expect(hint()).toBeNull();
+  });
+
+  it('stays with the grid when a drag that began scrolled down reaches the top mid-touch', async () => {
+    await mountPhone();
+    scrollRegionTo(60);
+    touch(region(), 'touchstart', 100, 100, 0);
+    touch(region(), 'touchmove', 100, 104, 100);
+    region().scrollTop = 0;
+    touch(region(), 'touchmove', 100, 140, 200);
+    touch(region(), 'touchmove', 100, 260, 300);
+    flushSync();
+    expect(hint()).toBeNull();
+    touch(region(), 'touchend', 100, 260, 300);
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it('ignores a pull up', async () => {
+    await mountPhone();
+    touch(region(), 'touchstart', 100, 300, 0);
+    touch(region(), 'touchmove', 100, 296, 300);
+    touch(region(), 'touchmove', 100, 150, 600);
+    touch(region(), 'touchend', 100, 150, 600);
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
+    expect(hint()).toBeNull();
+  });
+
+  it('does nothing on a wide screen', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: tiles, page: 1, total_pages: 1, total_count: tiles.length });
+    mountPage();
+    await settle();
+    pull(120);
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it('does nothing in Select mode, which keeps its drags for the selection', async () => {
+    await mountPhone();
+    await enterSelectMode();
+    pull(120);
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it('does nothing while the viewer is open', async () => {
+    await mountPhone();
+    await openViewer('a.png');
+    pull(120);
+    expect(routerMocks.navigate).not.toHaveBeenCalled();
+  });
+});

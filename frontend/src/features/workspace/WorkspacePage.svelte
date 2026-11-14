@@ -13,7 +13,8 @@
   import { router } from '$lib/state/router.svelte';
   import { hold } from '$lib/actions/hold';
   import { canScrollToward, OWN_DRAG, pan, rubberBand, type PanEnd, type PanMove, type PanStart } from '$lib/actions/pan';
-  import { GALLERY_PULL_PX, galleryPullReady, stageSwipeOutcome, wheelStep, type StageMoves } from './stageSwipe';
+  import { pagePullReady, pullProgress } from '$lib/actions/pagePull';
+  import { stageSwipeOutcome, wheelStep, type StageMoves } from './stageSwipe';
   import { addToast } from '$lib/state/toasts.svelte';
   import { firstValues } from '$lib/prefillParams';
   import { checkReferencePaths, getWorkspaceCoreContext, planGenerate, sendJobControl, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
@@ -31,7 +32,7 @@
   import { runFrameGrab } from '$lib/state/frameGrab.svelte';
   import { audioModelLabel, cutNote } from '$lib/state/audioAsset';
   import { formatClock } from '$lib/state/clock';
-  import { Badge, Icon, MascotSpot, Tooltip } from '$lib/components/atoms';
+  import { Badge, Icon, MascotSpot, PullHint, Tooltip } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import {
@@ -1909,11 +1910,9 @@
         use:stageWheel
       >
         {#if stageDrag?.axis === 'y'}
-          <span class="gallery-pull" class:ready={galleryPullReady(stageDrag.offset)} style:opacity={Math.min(1, -stageDrag.offset / GALLERY_PULL_PX)} aria-hidden="true">
-            <Icon name="grid" size={14} />{galleryPullReady(stageDrag.offset) ? 'Release for the Gallery' : 'Gallery'}
-          </span>
+          <PullHint icon="grid" label="Gallery" readyLabel="Release for the Gallery" ready={pagePullReady(stageDrag.offset, 'up')} progress={pullProgress(stageDrag.offset, 'up')} placement="bottom" />
         {:else if stageDrag?.axis === 'x' && galleryStore.assets.length > 0}
-          <span class="gallery-pull" aria-hidden="true">{viewedIndex + 1} of {historyTotal}</span>
+          <span class="stage-drag-count" aria-hidden="true">{viewedIndex + 1} of {historyTotal}</span>
         {/if}
         {#if loadError}
           <div class="flex flex-col items-center gap-3 text-center p-8">
@@ -2458,11 +2457,10 @@
   .review-overlay :global(.review-mascot) { position: absolute; left: 12px; bottom: 12px; pointer-events: none; }
   .job-view-card { display: flex; flex: none; width: 400px; max-width: 46%; flex-direction: column; gap: 12px; overflow-y: auto; }
   /* A drag moves what the stage shows with the finger, and lets it settle back or away when it lifts. */
-  .stage-body > :global(:not(.gallery-pull)) { transition: translate 260ms cubic-bezier(0.32, 0.72, 0, 1); }
-  .stage-body.moved > :global(:not(.gallery-pull)) { translate: var(--stage-dx, 0px) var(--stage-dy, 0px); }
-  .stage-body.dragging > :global(:not(.gallery-pull)) { transition: none; }
-  .gallery-pull { position: absolute; bottom: 16px; left: 50%; z-index: 4; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 16px; translate: -50% 0; background: color-mix(in srgb, var(--color-bg-overlay) 85%, transparent); font-size: var(--text-ui); font-weight: 600; white-space: nowrap; color: var(--color-text-secondary); pointer-events: none; }
-  .gallery-pull.ready { background: var(--color-primary-main); color: var(--color-primary-ink); }
+  .stage-body > :global(:not(.stage-drag-count, .pull-hint)) { transition: translate 260ms cubic-bezier(0.32, 0.72, 0, 1); }
+  .stage-body.moved > :global(:not(.stage-drag-count, .pull-hint)) { translate: var(--stage-dx, 0px) var(--stage-dy, 0px); }
+  .stage-body.dragging > :global(:not(.stage-drag-count, .pull-hint)) { transition: none; }
+  .stage-drag-count { position: absolute; bottom: 16px; left: 50%; z-index: 4; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 16px; translate: -50% 0; background: color-mix(in srgb, var(--color-bg-overlay) 85%, transparent); font-size: var(--text-ui); font-weight: 600; white-space: nowrap; color: var(--color-text-secondary); pointer-events: none; }
   /* The in-place history arrows: visible while the pointer is over the stage, never for a finger (it swipes). */
   .stage-nav { position: absolute; top: 50%; z-index: 3; transform: translateY(-50%); opacity: 0; transition: opacity 0.12s ease; }
   .stage-nav.prev { left: 12px; }

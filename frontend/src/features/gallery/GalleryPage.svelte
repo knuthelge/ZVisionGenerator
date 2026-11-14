@@ -23,13 +23,15 @@
   import { requestReference } from '$lib/state/pendingReference.svelte';
   import { startUpscale } from '$lib/state/upscale';
   import type { GalleryAsset, MoveResult, RemovedAsset, UpscaleFactor, UpscaleMethod, WorkspaceContext } from '$lib/types';
-  import { Button, Icon, Spinner } from '$lib/components/atoms';
+  import { Button, Icon, PullHint, Spinner } from '$lib/components/atoms';
   import { Alert, AssetTile, AssetViewer, EmptyState, MoveMenu, PageHeader, SaveVoiceDialog, Select, requestConfirm } from '$lib/components/molecules';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import { hasOpenModal, isCommandKey, isPlainKey, isTyping } from '$lib/keyboard';
   import { gridColumns, moveInGrid } from './gridNav';
   import { modeLine, rangeIds, selectionProject, tileClickIntent, withAdded, withToggled } from './selection';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import { canScrollToward, OWN_DRAG, pan, rubberBand, type PanEnd, type PanMove, type PanStart } from '$lib/actions/pan';
+  import { pagePullCommits, pagePullReady, pullDistance, pullProgress } from '$lib/actions/pagePull';
 
   // One Select mode on every layout: in it a click or tap toggles a tile, and the header and the phone bar carry the bulk actions.
   let selectMode = $state(false);
@@ -423,7 +425,10 @@
 
   // Retry acts on this page's selection, so its toast must not outlive the page.
   let retryToastId: string | null = null;
-  onDestroy(() => { if (retryToastId) dismissToast(retryToastId); });
+  onDestroy(() => {
+    if (retryToastId) dismissToast(retryToastId);
+    clearTimeout(pullSettleTimer);
+  });
 
   /** Delete the whole selection in one request. A clean run ends Select mode; failures stay selected for Retry. */
   async function deleteSelected(): Promise<void> {
@@ -723,6 +728,32 @@
   // Where the grid is scrolled, kept as it scrolls: the element is gone by the time the page is torn down.
   let scrollTop = 0;
 
+  // On a phone, a pull down from the top of the grid goes back to the Workspace, as a pull up on its stage came here.
+  // The grid follows the finger, then the page changes or it springs back. Select mode keeps its drags for the selection.
+  let pagePull = $state<PanMove | null>(null);
+  // After the finger lifts, the grid slides back into place for a moment before the pull lets go of it.
+  let pullSettling = $state(false);
+  let pullSettleTimer: ReturnType<typeof setTimeout> | undefined;
+  const PULL_SETTLE_MS = 260;
+  const pullEnabled = $derived(compact && !selectMode && !lightboxOpen);
+  const pullOffset = $derived(pagePull ? rubberBand(pullDistance(pagePull.offset, 'down'), 120) : 0);
+
+  function claimPagePull({ axis, dy, target }: PanStart): boolean {
+    return axis === 'y' && dy > 0 && scrollRegion !== null && !target.closest(OWN_DRAG) && !canScrollToward(target, scrollRegion, 'y', 1);
+  }
+
+  function releasePagePull(): void {
+    pagePull = null;
+    pullSettling = true;
+    clearTimeout(pullSettleTimer);
+    pullSettleTimer = setTimeout(() => { pullSettling = false; }, PULL_SETTLE_MS);
+  }
+
+  function onPagePullEnd(end: PanEnd): void {
+    releasePagePull();
+    if (pagePullCommits(end, 'down')) router.navigate('workspace');
+  }
+
   function gridTiles(): HTMLElement[] {
     return Array.from(gridEl?.querySelectorAll<HTMLElement>('.asset-tile') ?? []);
   }
@@ -854,75 +885,89 @@
     {/snippet}
   </PageHeader>
 
-  <section bind:this={scrollRegion} id="gallery-scroll-region" class="min-h-0 flex-1 overflow-y-auto p-4" onscroll={(event) => { scrollTop = event.currentTarget.scrollTop; }}>
-    {#if loading}
-      <!-- The frame first: the grid's shape is drawn before the assets arrive, so nothing moves when they do. -->
-      <div class="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6" role="status" aria-label="Loading" data-testid="gallery-placeholders">
-        {#each { length: 12 } as _, i (i)}
-          <div class="tile-placeholder" aria-hidden="true"></div>
-        {/each}
-      </div>
-    {:else if error}
-      <Alert tone="error" live>{error}</Alert>
-    {:else if emptyState}
-      <EmptyState title={emptyTitle} class="min-h-96 justify-center">
-        <p>{emptyBody}</p>
-        {#snippet actions()}
-          {#if starredEmptyState}
-            <Button onclick={showAllStarred}>Show all</Button>
-          {:else if filteredEmptyState}
-            <Button onclick={clearMediaFilter}>Show all media</Button>
-          {:else}
-            <Button variant="primary" onclick={openWorkspace}>Open Workspace</Button>
-          {/if}
-        {/snippet}
-      </EmptyState>
-    {:else}
-      <!-- Grid -->
-      <div bind:this={gridEl} class="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-        {#each assets as asset (asset.id)}
-          <AssetTile
-            {asset}
-            density="card"
-            showProject={projectPick.current === null}
-            selected={selected.has(asset.id)}
-            {selectMode}
-            deleting={deletingIds.has(asset.id)}
-            onselect={setSelected}
-            onmediaclick={onMediaClick}
-            onstartselect={startSelectWith}
-            onpreview={openViewer}
-            onstar={starAsset}
-            onreuse={reuseInWorkspace}
-            onreference={useAsReference}
-            onuseaudio={useAudio}
-            {useAs}
-            onextend={extendAsset}
-            onedit={editAsset}
-            onupscale={upscaleAsset}
-            ondelete={deleteSingle}
-            onmove={moveSingle}
-          />
-        {/each}
-      </div>
-
-      <!-- Infinite scroll sentinel + pagination -->
-      <div id="gallery-pagination" class="flex items-center justify-center py-10">
-        {#if hasMore}
-          <div bind:this={sentinelEl} class="flex items-center gap-2 text-ui text-text-muted">
-            {#if loadingMore}
-              <Spinner size="sm" class="text-primary-main" />
-              <span>Loading more…</span>
-            {:else}
-              <span>Scroll for more</span>
-            {/if}
-          </div>
-        {:else if assets.length > 0}
-          <p class="text-ui text-text-muted">All assets loaded</p>
-        {/if}
-      </div>
+  <div class="relative flex min-h-0 flex-1 flex-col">
+    {#if pagePull}
+      <PullHint icon="bolt" label="Workspace" readyLabel="Release for the Workspace" ready={pagePullReady(pagePull.offset, 'down')} progress={pullProgress(pagePull.offset, 'down')} placement="top" />
     {/if}
-  </section>
+    <section
+      bind:this={scrollRegion}
+      id="gallery-scroll-region"
+      class="pull-region min-h-0 flex-1 overflow-y-auto p-4"
+      class:dragging={pagePull !== null}
+      class:moved={pagePull !== null || pullSettling}
+      style:--pull-dy="{pullOffset}px"
+      onscroll={(event) => { scrollTop = event.currentTarget.scrollTop; }}
+      use:pan={{ axes: ['y'], enabled: pullEnabled, claim: claimPagePull, onmove: (move) => { pagePull = move; }, onend: onPagePullEnd, oncancel: releasePagePull }}
+    >
+      {#if loading}
+        <!-- The frame first: the grid's shape is drawn before the assets arrive, so nothing moves when they do. -->
+        <div class="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6" role="status" aria-label="Loading" data-testid="gallery-placeholders">
+          {#each { length: 12 } as _, i (i)}
+            <div class="tile-placeholder" aria-hidden="true"></div>
+          {/each}
+        </div>
+      {:else if error}
+        <Alert tone="error" live>{error}</Alert>
+      {:else if emptyState}
+        <EmptyState title={emptyTitle} class="min-h-96 justify-center">
+          <p>{emptyBody}</p>
+          {#snippet actions()}
+            {#if starredEmptyState}
+              <Button onclick={showAllStarred}>Show all</Button>
+            {:else if filteredEmptyState}
+              <Button onclick={clearMediaFilter}>Show all media</Button>
+            {:else}
+              <Button variant="primary" onclick={openWorkspace}>Open Workspace</Button>
+            {/if}
+          {/snippet}
+        </EmptyState>
+      {:else}
+        <!-- Grid -->
+        <div bind:this={gridEl} class="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+          {#each assets as asset (asset.id)}
+            <AssetTile
+              {asset}
+              density="card"
+              showProject={projectPick.current === null}
+              selected={selected.has(asset.id)}
+              {selectMode}
+              deleting={deletingIds.has(asset.id)}
+              onselect={setSelected}
+              onmediaclick={onMediaClick}
+              onstartselect={startSelectWith}
+              onpreview={openViewer}
+              onstar={starAsset}
+              onreuse={reuseInWorkspace}
+              onreference={useAsReference}
+              onuseaudio={useAudio}
+              {useAs}
+              onextend={extendAsset}
+              onedit={editAsset}
+              onupscale={upscaleAsset}
+              ondelete={deleteSingle}
+              onmove={moveSingle}
+            />
+          {/each}
+        </div>
+
+        <!-- Infinite scroll sentinel + pagination -->
+        <div id="gallery-pagination" class="flex items-center justify-center py-10">
+          {#if hasMore}
+            <div bind:this={sentinelEl} class="flex items-center gap-2 text-ui text-text-muted">
+              {#if loadingMore}
+                <Spinner size="sm" class="text-primary-main" />
+                <span>Loading more…</span>
+              {:else}
+                <span>Scroll for more</span>
+              {/if}
+            </div>
+          {:else if assets.length > 0}
+            <p class="text-ui text-text-muted">All assets loaded</p>
+          {/if}
+        </div>
+      {/if}
+    </section>
+  </div>
   {#if selectMode && compact}
     <!-- Phone: the selection's actions, docked at the foot. -->
     <div class="ui-action-bar select-bar" data-testid="gallery-select-bar">
@@ -984,6 +1029,10 @@
 <SaveVoiceDialog asset={voiceTake} model={useAs.voiceModel ?? null} vocabulary={context?.audio_settings} onclose={() => { voiceTake = null; }} />
 
 <style>
+  /* A pull down from the top moves the grid with the finger and lets it settle back when it lifts; the hint stays put. */
+  .pull-region > :global(*) { transition: translate 260ms cubic-bezier(0.32, 0.72, 0, 1); }
+  .pull-region.moved > :global(*) { translate: 0 var(--pull-dy, 0px); }
+  .pull-region.dragging > :global(*) { transition: none; }
   /* The ★ toggle beside the media filter: an outline star, muted; filled amber on an amber tint while on. */
   :global(.ui-btn.star-toggle) { color: var(--color-text-secondary); }
   :global(.ui-btn.star-toggle[aria-pressed='true']) { background: color-mix(in srgb, var(--color-star) 14%, transparent); color: var(--color-star); }
