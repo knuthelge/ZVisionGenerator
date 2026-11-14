@@ -62,7 +62,7 @@ The launcher and a terminal install share the data folder and the model cache. T
 
 === "macOS"
 
-    Variables set in a terminal or in `~/.zshrc` don't reach the app the launcher starts. To move these folders, install from a terminal instead; see [Prefer a terminal?](../get-started/install.md#prefer-a-terminal).
+    Variables set in a terminal or in `~/.zshrc` don't reach the app the launcher starts. To move these folders, install from a terminal instead; see [Install from a terminal](../get-started/install.md#install-from-a-terminal).
 
 === "Windows"
 
@@ -70,7 +70,7 @@ The launcher and a terminal install share the data folder and the model cache. T
 
 === "Linux"
 
-    Variables set in a terminal or in `~/.bashrc` don't reach the app the launcher starts. To move these folders, install from a terminal instead; see [Prefer a terminal?](../get-started/install.md#prefer-a-terminal).
+    Variables set in a terminal or in `~/.bashrc` don't reach the app the launcher starts. To move these folders, install from a terminal instead; see [Install from a terminal](../get-started/install.md#install-from-a-terminal).
 
 ## Open a hidden folder { #open-a-hidden-folder }
 

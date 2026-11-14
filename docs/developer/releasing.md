@@ -51,7 +51,7 @@ Do these in order.
     - **macOS:** open the launcher from the disk image. The window says to quit and move it; after the move, the copy in Applications opens.
     - **macOS:** log out with **Reopen windows when logging back in** ticked. The launcher does not reopen its window.
     - **macOS:** after **Open Anyway**, install and start both work, so Gatekeeper does not kill the managed Python.
-6. **Update the install guide.** Point the download links in [Install](../get-started/install.md#get-the-launcher) at the new `launcher-v<version>` release.
+6. **Update the install guide.** Point the download links in [Install](../get-started/install.md#install-with-the-launcher) at the new `launcher-v<version>` release.
 7. **Tag and push.** Create `launcher-v<version>` on the commit and push the commit and the tag. The workflow builds the installers again and creates the GitHub release with the five files.
 8. **Deploy the docs** once the release exists, so that the install page's links work: run the Deploy Docs workflow by hand, since a `launcher-v*` tag does not run it.
 9. **Check the result.** The release is not marked latest, each of the five files downloads, and the install page links to them.

@@ -2,7 +2,7 @@
 
 From a running Web UI to a first take in the **Audio** tab. Start with speech: it needs nothing but a few words.
 
-If the Web UI isn't open yet, run `ziv ui` in a terminal and keep the terminal open; see [Install](install.md). Audio also needs ffmpeg: [step 5 of Install](install.md#ffmpeg).
+If the Web UI isn't open yet, run `ziv ui` in a terminal and keep the terminal open; see [Install](install.md). Audio also needs ffmpeg: [step 4 of Install](install.md#ffmpeg).
 
 Takes are saved as FLAC files in the output folder, each with the settings it was made with; see [Output files](../reference/data-folder.md#output-files). Nothing moving for a long time? See [The first job seems stuck](../reference/troubleshooting.md#the-first-job-seems-stuck).
 

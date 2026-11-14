@@ -84,7 +84,7 @@ The launcher checked the machine before downloading anything. The window names w
 
 ### The launcher's install failed { #launcher-install-failed }
 
-The window says why, and **Retry** carries on with what was already downloaded. A file that doesn't match usually comes from a cut-off download or a hotel or office Wi-Fi login page; retry, or try another network. If the window says a newer launcher fixes it, download it from [Install](../get-started/install.md#get-the-launcher). If **Retry** keeps failing, copy **Show the log** into a [bug report](#report-a-problem).
+The window says why, and **Retry** carries on with what was already downloaded. A file that doesn't match usually comes from a cut-off download or a hotel or office Wi-Fi login page; retry, or try another network. If the window says a newer launcher fixes it, download it from [Install](../get-started/install.md#install-with-the-launcher). If **Retry** keeps failing, copy **Show the log** into a [bug report](#report-a-problem).
 
 ### The launcher says Didn't start { #launcher-didnt-start }
 
