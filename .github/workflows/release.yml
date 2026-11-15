@@ -64,12 +64,24 @@ jobs:
       - name: Build package
         run: make build
 
+      - name: Take the release notes from the changelog
+        # A final release's description is its CHANGELOG.md section; a pre-release gets none, as before.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          case "$TAG" in
+            *a*|*b*|*rc*) : > release-notes.md ;;
+            *) awk -v v="${TAG#v}" 'index($0, "## [" v "]") == 1 {f = 1; next} f && /^## \[/ {exit} f' CHANGELOG.md | sed '/./,$!d' > release-notes.md
+               [ -s release-notes.md ] || { echo "::error::No CHANGELOG.md section for ${TAG#v}"; exit 1; } ;;
+          esac
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          body_path: release-notes.md
           generate_release_notes: true
           # PEP 440 pre-release tags (v0.13.0a1, v0.13.0b1, v0.13.0rc1) become GitHub pre-releases, never "Latest".
           prerelease: ${{ contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'rc') }}
