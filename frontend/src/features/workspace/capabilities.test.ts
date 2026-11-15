@@ -11,7 +11,7 @@ const VIDEO_CONTROLS = ['workflow', 'model', 'runs', 'frame_count', 'steps', 'se
 function videoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoModelDefaults {
   return {
     ratio: '16:9', size: 's', steps: 8, width: 768, height: 448, frame_count: 121, audio: true, low_memory: true, supports_i2v: true,
-    supports_quantize: false, quantize: null, max_steps: 8, fps: 24, frame_rule: { alignment: 1, offset: 1, round: 'nearest' }, supports_extend: true, supports_audio_track_upscale: true, extend_frame_step: 8, upscale: { enabled: false, factor: 2, steps: null }, ...overrides,
+    supports_quantize: false, quantize: null, max_steps: 8, fps: 24, frame_rule: { alignment: 1, offset: 1, round: 'nearest' }, supports_extend: true, supports_audio_track_upscale: true, extend_frame_step: 8, max_reference_images: 0, upscale: { enabled: false, factor: 2, steps: null }, ...overrides,
   };
 }
 
@@ -151,6 +151,41 @@ describe('workspaceCapabilities for references', () => {
 
   it('hides it where the workflow does not list the controls', () => {
     expect(workspaceCapabilities(imageContext(4, []), stateOf('klein')).maxReferences).toBe(0);
+  });
+});
+
+describe('workspaceCapabilities for Video references', () => {
+  const REFERENCE_CONTROLS = [...VIDEO_CONTROLS, 'references', 'references_clear'];
+  const videoContext = (cap: number, controls: Record<string, string[]> = { txt2vid: REFERENCE_CONTROLS, img2vid: REFERENCE_CONTROLS, extend: REFERENCE_CONTROLS }): WorkspaceContext => ({
+    video_model_defaults: { h3: videoDefaults({ max_reference_images: cap }), ltx: videoDefaults({ max_reference_images: 0 }) },
+    prompt_sources: ['inline'],
+    scheduler_options: [],
+    workflow_contract: {
+      values: Object.keys(controls),
+      definitions: Object.fromEntries(Object.entries(controls).map(([workflow, visible]) => [workflow, { mode: 'video', model_kind: 'video', visible_controls: visible, requires_reference_image: false, requires_source_video: workflow === 'extend', clear_fields: [] }])),
+      field_precedence: { defaults: [], dimensions: '' },
+    },
+  }) as unknown as WorkspaceContext;
+  const stateOf = (workflow: string, model: string): DraftState => ({ workflow, model, referenceImagePaths: [], videoReferencePaths: [] }) as unknown as DraftState;
+
+  it.each(['txt2vid', 'img2vid', 'extend'])('shows the section on %s with the video model\'s cap', (workflow) => {
+    expect(workspaceCapabilities(videoContext(2), stateOf(workflow, 'h3')).maxReferences).toBe(2);
+  });
+
+  it('hides it for a model without references', () => {
+    expect(workspaceCapabilities(videoContext(2), stateOf('txt2vid', 'ltx')).maxReferences).toBe(0);
+  });
+
+  it('hides it where the workflow does not list the controls', () => {
+    const context = videoContext(2, { txt2vid: VIDEO_CONTROLS, extend: REFERENCE_CONTROLS });
+    expect(workspaceCapabilities(context, stateOf('txt2vid', 'h3')).maxReferences).toBe(0);
+    expect(workspaceCapabilities(context, stateOf('extend', 'h3')).maxReferences).toBe(2);
+  });
+
+  it('hides it when the model lists the control among those it does not have', () => {
+    const context = videoContext(2);
+    context.video_model_defaults.h3 = videoDefaults({ max_reference_images: 2, hidden_controls: ['references'] });
+    expect(workspaceCapabilities(context, stateOf('txt2vid', 'h3')).maxReferences).toBe(0);
   });
 });
 

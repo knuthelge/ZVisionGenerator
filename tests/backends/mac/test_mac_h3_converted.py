@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -15,8 +16,11 @@ from zvisiongenerator.backends.mac import h3_converted
 from zvisiongenerator.backends.mac.h3_converted import native_tensors, write_converted
 from zvisiongenerator.converters import h3_checkpoint
 from zvisiongenerator.converters.h3_checkpoint import diffusers_tensors, inspect_h3
+from zvisiongenerator.downloads.target import HubFiles
 from zvisiongenerator.utils.h3_converted import read_converted_h3
+from zvisiongenerator.utils.h3_preset import h3_turbo_lora
 from zvisiongenerator.utils.safetensors_stream import iter_tensors, shard_files
+from zvisiongenerator.utils.stored_quant import MANIFEST_NAME
 
 
 @pytest.fixture(autouse=True)
@@ -142,3 +146,84 @@ def test_stocks_time_embedder_is_range_read_from_the_one_int8_shard_holding_it(t
     assert {name: tensor[0].item() for name, tensor in state.items()} == {"linear_1.weight": 0.0, "linear_1.bias": 1.0, "linear_2.weight": 2.0, "linear_2.bias": 3.0}
     assert fetched == ["model.safetensors.index.json"]  # only the index is downloaded
     assert opened == ["model-00001-of-00001.safetensors"]  # the one shard holding it is read by range
+
+
+class _Writes:
+    """The shared writer replaced: records the LoRA file and scale each folder was written with."""
+
+    def __init__(self, monkeypatch, tmp_path: Path) -> None:
+        self.models = tmp_path / "models"
+        self.calls: list[tuple[Path | None, float]] = []
+        self.flushed: list[bool] = []
+        self.transformer = tmp_path / "ref2va.safetensors"
+        self.transformer.write_bytes(b"transformer")
+        self.lora = tmp_path / "ref2v-turbo.safetensors"
+        self.lora.write_bytes(b"lora")
+        self.fl2va = tmp_path / "fl2va-turbo.safetensors"
+        self.fl2va.write_bytes(b"fl2va")
+        self.preset = SimpleNamespace(reference_transformer=HubFiles("org/ref", "r2", ("ref2va.safetensors",)), reference_lora=HubFiles("org/turbo", "r3", ("ref2v-turbo.safetensors",)))
+        files = {"ref2va.safetensors": self.transformer, "ref2v-turbo.safetensors": self.lora, h3_turbo_lora("darwin")[0].files[0]: self.fl2va}
+        monkeypatch.setattr(h3_converted, "snapshot_file", lambda hub, download: files[hub.files[0]])
+        monkeypatch.setattr(h3_converted, "inspect_h3", lambda path: SimpleNamespace(path=path))
+        monkeypatch.setattr(h3_converted, "_write", self._write)
+        real = h3_converted.ensure_stored_copy
+        monkeypatch.setattr(h3_converted, "ensure_stored_copy", lambda *args, flush=False, **kwargs: (self.flushed.append(flush), real(*args, flush=flush, **kwargs))[1])
+
+    def _write(self, checkpoint, target, preset, lora_file, lora_scale, report) -> None:
+        self.calls.append((lora_file, lora_scale))
+        (target / "weights").write_text("x")
+
+    def ensure(self, scale: float = 0.0625) -> Path:
+        return h3_converted.ensure_ref2va_copy(self.models, self.preset, scale)
+
+
+@pytest.fixture
+def writes(monkeypatch, tmp_path):
+    return _Writes(monkeypatch, tmp_path)
+
+
+def test_the_ref2va_copy_is_built_once_with_its_own_lora_and_flushed(writes):
+    copy = writes.ensure()
+
+    assert copy == writes.models / "h3@ref2va-q8"
+    assert writes.calls == [(writes.lora, 0.0625)]
+    assert (copy / "weights").is_file() and (copy / MANIFEST_NAME).is_file()
+    assert writes.flushed == [True]
+
+
+def test_a_current_ref2va_copy_is_reused(writes):
+    first = writes.ensure()
+
+    assert writes.ensure() == first
+    assert len(writes.calls) == 1
+
+
+def test_a_changed_lora_or_scale_rebuilds_the_ref2va_copy(writes):
+    writes.ensure()
+    writes.lora.write_bytes(b"a different lora")
+    writes.ensure()
+    writes.ensure(scale=0.125)
+
+    assert [scale for _lora, scale in writes.calls] == [0.0625, 0.0625, 0.125]
+
+
+def test_an_interrupted_ref2va_write_leaves_no_copy(writes, monkeypatch):
+    def fail(checkpoint, target, preset, lora_file, lora_scale, report):
+        (target / "weights").write_text("half")
+        raise RuntimeError("out of disk")
+
+    monkeypatch.setattr(h3_converted, "_write", fail)
+
+    with pytest.raises(RuntimeError, match="out of disk"):
+        writes.ensure()
+
+    assert not (writes.models / "h3@ref2va-q8").exists()
+
+
+@pytest.mark.parametrize("turbo", [True, False])
+def test_convert_still_merges_the_fl2va_lora_unless_the_checkpoint_is_distilled(writes, tmp_path, turbo):
+    (tmp_path / "out").mkdir()
+
+    h3_converted.convert(SimpleNamespace(), tmp_path / "out", turbo=turbo, report=lambda *_: None)
+
+    assert writes.calls == [(None, 0.0) if turbo else (writes.fl2va, h3_turbo_lora("darwin")[1])]

@@ -249,13 +249,18 @@ video_families:
       4: { forwards: 4, video_shift: 6.0, audio_shift: 3.0 }
     text_encoder_layers: 50 # the 50 layers of the Qwen3-VL text encoder the model reads
     lora_scale: 0.0625 # the turbo LoRA's scale replaces alpha/rank and is never multiplied by it
+    max_reference_images: 2 # the Ref2VA model takes up to two reference images
     # macOS: the text encoder is converted once to this 4-bit form and kept next to the model as <name>@mlx-te4.
     mlx_text_encoder: { bits: 4, group_size: 64, layers: 50 }
     companions:
       darwin:
         # The 8-step turbo LoRA; the INT8 transformer applies it unfused at run time.
         - &h3_lora { ref: "lightx2v/Minimax-h3-Turbo@30f485ed874aa44c8183348ad361c5eabad318da", files: [minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors], role: lora }
-      # Windows/Linux, in this order: the text encoder, the turbo LoRA (merged into the stored copy) and the latent upscaler.
+        # The Ref2VA transformer and its turbo LoRA, used by a job with reference images and downloaded only for one
+        # (licence minimax-h3-community, checked 2026-11-13). Both platforms read the same two files.
+        - &h3_ref2va { ref: "Comfy-Org/MiniMax-H3@54472221d27c695fca9621b0c3ed52f06c4af707", files: [diffusion_models/minimax_h3_ref2va_pruned_w6a8.safetensors], role: ref2va }
+        - &h3_ref2va_lora { ref: "lightx2v/Minimax-h3-Turbo@1a4a150fc6707329409eb52e5d75a0e987ac1928", files: [minimax_h3_ref2v_turbo_8step_v1.1_768p_bf16.safetensors], role: ref2va_lora }
+      # Windows/Linux, in this order: the text encoder, the turbo LoRA (merged into the stored copy), the latent upscaler and the Ref2VA files.
       win32: &h3_cuda_companions
         # Qwen3-VL 32B Instruct, NF4: the first four of five weight shards hold the 50 layers the model reads.
         - { ref: "unsloth/Qwen3-VL-32B-Instruct-bnb-4bit@48cfc6496841742a77892646c15a7f3e8da44348", files: [config.json, model.safetensors.index.json, model-00001-of-00005.safetensors, model-00002-of-00005.safetensors, model-00003-of-00005.safetensors, model-00004-of-00005.safetensors], role: text_encoder }
@@ -265,6 +270,8 @@ video_families:
         # Run in fp16. There is no runtime hash check: the revision pin fixes the file and the strict load rejects a wrong one.
         # The file is in a subfolder of the repository.
         - { ref: "LBH-123-AI/Minimax_h3_latent_Upscaler@3f941d5d182014dd5c0a5e16330420ee2d4aa0c6", files: [minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors], role: latent_upsampler }
+        - *h3_ref2va
+        - *h3_ref2va_lora
       linux: *h3_cuda_companions
 
 models:

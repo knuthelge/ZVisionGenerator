@@ -268,7 +268,29 @@ class TestJobFlow:
         assert types.index(DOWNLOADING_EVENT) < types.index("model_loading")
         assert first["mode"] == "video"
         assert first["model"] == "ltx-q4"
-        assert calls == [(("owner/ltx",), {"family": "ltx", "config": {"k": 1}, "model_name": "ltx-q4", "platform_key": sys.platform, "upscale": True})]
+        assert calls == [(("owner/ltx",), {"family": "ltx", "config": {"k": 1}, "model_name": "ltx-q4", "platform_key": sys.platform, "upscale": True, "references": False})]
+
+    @pytest.mark.parametrize(("reference_paths", "references"), [(("/in/a.png",), True), ((), False)])
+    def test_a_video_job_plans_and_loads_for_its_references_only_when_it_has_them(self, monkeypatch, reference_paths, references):
+        planned: list = []
+        loaded: list = []
+        monkeypatch.setattr(job_downloads_module, "video_plan", lambda *_a, **kw: (planned.append(kw), (_TARGET,))[1])
+        monkeypatch.setattr(web_runner_module, "video_load_options", lambda *_a, **kw: (loaded.append(kw), {})[1])
+        _fake_ensure(monkeypatch, run=_child_that_reports(1))
+        stub_request_job(monkeypatch)
+        monkeypatch.setattr(
+            web_runner_module, "run_video_batch", lambda *, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+        )
+        runner = _runner()
+        try:
+            request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="h3", model_name="h3", reference_paths=reference_paths)
+            job_id = runner.submit_video_request_job(request=request, prompts_data=_PROMPTS, config={"k": 1}, args=_make_video_args(), model_ref="owner/h3")
+            assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
+        finally:
+            runner.shutdown()
+
+        assert [kw["references"] for kw in planned] == [references]
+        assert [kw["references"] for kw in loaded] == [references]
 
     def test_a_plan_that_cannot_be_made_skips_the_ensure_step(self, monkeypatch):
         """``None`` means the plan is unknown (offline): the ensure step is not called and the model loads as before."""

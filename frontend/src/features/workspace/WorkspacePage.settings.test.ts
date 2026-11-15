@@ -1387,6 +1387,135 @@ describe('WorkspacePage references', () => {
     expect((await submit()).getAll('reference')).toEqual([upload]);
   });
 
+  describe('on the Video tab', () => {
+    /** "h3" takes 2 references on every video workflow and "ltx-8" none; the Image tab's "zit" takes 3. */
+    function videoReferencesContext(): WorkspaceContext {
+      const context = referencesContext();
+      context.video_models = [{ id: 'ltx-8', label: 'ltx-8', type: 'video' }, { id: 'h3', label: 'h3', type: 'video' }];
+      context.video_model_defaults = { 'ltx-8': makeVideoDefaults(), h3: makeVideoDefaults({ max_reference_images: 2 }) };
+      context.current_video_model = 'h3';
+      for (const workflow of ['txt2vid', 'img2vid'] as const) context.workflow_contract.definitions[workflow].visible_controls.push('references', 'references_clear');
+      return context;
+    }
+
+    async function mountVideoReferences(workflow: 'txt2vid' | 'img2vid' = 'txt2vid'): Promise<void> {
+      draft.update('workflow', workflow);
+      await mountWorkspace(videoReferencesContext());
+      draft.update('model', 'h3');
+      await settle();
+    }
+
+    it('asks the memory check with the number of references the job sends', async () => {
+      videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue({ memory_fit: null, width: 704, height: 448, frames: 49 });
+      fakeDebounceTimers();
+      await mountVideoReferences();
+      await waitDebounce();
+      expect(videoMemoryApiMocks.checkVideoMemoryFit.mock.calls.at(-1)?.[0]).not.toHaveProperty('references');
+
+      draft.update('videoReferencePaths', ['/in/v1.png', '/in/v2.png']);
+      await settle();
+      await waitDebounce();
+
+      expect(videoMemoryApiMocks.checkVideoMemoryFit.mock.calls.at(-1)?.[0]).toMatchObject({ model: 'h3', references: 2 });
+    });
+
+    it('offers a row labelled <Picture 1>, in place of the Image tab\'s list', async () => {
+      draft.patch({ referenceImagePaths: ['/in/image-tab.png'] });
+      await mountVideoReferences();
+
+      expect(summary()).toBe('None');
+      expect(referenceLabels()).toEqual([]);
+      expect(section()?.querySelector('#ws-ref-add-label')?.textContent?.trim()).toBe('<Picture 1>');
+
+      draft.update('videoReferencePaths', ['/in/v1.png']);
+      await settle();
+
+      expect(referenceLabels()).toEqual(['<Picture 1>']);
+      expect(summary()).toBe('1 reference');
+    });
+
+    it('takes what fits of the 2, and keeps what it took in the Video list and its held uploads, not the Image tab\'s', async () => {
+      await mountVideoReferences();
+      const [a, b] = [image('a.png'), image('b.png')];
+
+      await addReferences(a, b, image('c.png'));
+
+      expect(summary()).toBe('2 references');
+      expect(section()?.querySelector('#ws-ref-add-label')).toBeNull();
+      expect(draft.state).toMatchObject({ videoReferencePaths: ['', ''], referenceImagePaths: [] });
+      expect(heldUploads.videoReferences).toEqual([a, b]);
+      expect(heldUploads.references).toEqual([]);
+      expect(toasts).toHaveLength(1);
+    });
+
+    it.each(['txt2vid', 'img2vid'] as const)('submits the Video rows as `reference` on %s, in order, and never the Image or Extend rows', async (workflow) => {
+      draft.patch({ referenceImagePaths: ['/in/image-tab.png'], extendReferencePaths: ['/in/extend.png'] });
+      heldUploads.setReferencesOf('image', [image('image-tab-upload.png')]);
+      await mountVideoReferences(workflow);
+      if (workflow === 'img2vid') draft.setStartImage('video', { path: '/in/first.png' }, null);
+      draft.update('videoReferencePaths', ['/in/v1.png']);
+      await settle();
+      const upload = image('v2.png');
+      await addReferences(upload);
+
+      const submitted = await submit();
+
+      expect(submitted.get('workflow')).toBe(workflow);
+      expect(submitted.getAll('reference')).toEqual(['/in/v1.png', upload]);
+    });
+
+    it('hides the rows on a model without references, sends none and keeps the list for the model that takes them', async () => {
+      await mountVideoReferences();
+      draft.update('videoReferencePaths', ['/in/v1.png']);
+      await settle();
+
+      pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'ltx-8');
+      await settle();
+      expect(target.querySelector('#ws-references-group')).toBeNull();
+      expect(summary()).toBe('None');
+      expect((await submit()).has('reference')).toBe(false);
+      expect(draft.state.videoReferencePaths).toEqual(['/in/v1.png']);
+
+      pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'h3');
+      await settle();
+      expect(referenceLabels()).toEqual(['<Picture 1>']);
+      expect((await submit()).getAll('reference')).toEqual(['/in/v1.png']);
+    });
+
+    it('blocks Generate on a missing row by its tag', async () => {
+      await mountVideoReferences();
+      draft.patch({ videoReferencePaths: ['/in/v1.png', '/in/gone.png'], missingReferencePaths: ['/in/gone.png'] });
+      await settle();
+
+      expect(target.querySelector('#ws-generate-reason')?.textContent).toBe('<Picture 2> is missing.');
+      expect(summary()).toBe('2 references');
+      expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('a Reuse of a video fills the Video list and drops the old held uploads, and leaves the Image tab\'s list', async () => {
+      const clip = makeAsset({
+        id: 'out/clip.mp4', url: '/media/out/clip.mp4', filename: 'clip.mp4', media_type: 'video', file_path: '/outputs/out/clip.mp4', has_reusable_config: true,
+        reuse_workspace_url: '#/workspace?workflow=txt2vid&model=h3&prompt=a%20clip&reference_path=%2Fin%2Fa.png',
+      });
+      galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([clip]));
+      draft.update('workflow', 'txt2vid');
+      await mountWorkspace({ ...videoReferencesContext(), history_assets: [clip] });
+      draft.update('model', 'h3');
+      draft.patch({ referenceImagePaths: ['/in/image-tab.png'] });
+      await addReferences(image('old.png'));
+
+      const tile = target.querySelector('#ws-history-shell article[aria-label="clip.mp4"]') as HTMLElement;
+      (tile.querySelector('button[aria-label="More actions for clip.mp4"]') as HTMLButtonElement).click();
+      flushSync();
+      (document.querySelector('[role="menu"] [data-action="reuse"]') as HTMLButtonElement).click();
+      await settle();
+
+      expect(draft.state).toMatchObject({ videoReferencePaths: ['/in/a.png'], referenceImagePaths: ['/in/image-tab.png'] });
+      expect(heldUploads.videoReferences).toEqual([]);
+      expect((await submit()).getAll('reference')).toEqual(['/in/a.png']);
+    });
+  });
+
   describe('dropping files', () => {
     const addRow = () => (target.querySelector('#ws-ref-add-label') as HTMLElement).closest('.reference-drop') as HTMLElement;
 

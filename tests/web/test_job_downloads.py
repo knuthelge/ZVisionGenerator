@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+from dataclasses import replace
 import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -40,7 +41,9 @@ def _fake_planners(tmp_path) -> SimpleNamespace:
     """Return planners whose targets name the inputs they were given, so a part built from other inputs differs."""
     return SimpleNamespace(
         image=lambda model_ref, *, family, platform_key: _image_target(model_ref, f"{family}:{platform_key}"),
-        video=lambda model_ref, *, family, config, model_name, platform_key, upscale: (DownloadTarget(f"video/{model_ref}", allow_patterns=(f"{family}:{model_name}:{upscale}",)),),
+        video=lambda model_ref, *, family, config, model_name, platform_key, upscale, references=False: (
+            DownloadTarget(f"video/{model_ref}", allow_patterns=(f"{family}:{model_name}:{upscale}{':refs' if references else ''}",)),
+        ),
         matte=lambda: (DownloadTarget("matte/pinned"),),
         seedvr2=lambda model, *, platform_key, models_dir, weights: (DownloadTarget("seedvr2/tier", allow_patterns=(model, str(models_dir)), local_dir=models_dir),),
         enhancer=lambda repo, revision: (DownloadTarget(repo, revision),),
@@ -170,6 +173,28 @@ class TestPartsMatchTheRunner:
 
         assert [part.role for part in parts] == ["enhancer", "model"]
         assert parts[1].targets[0].allow_patterns == ("ltx:ltx-8:True",)  # the upscale files are planned
+        _same_downloads(parts, runner_planners)
+
+    def test_a_video_job_with_references_downloads_the_reference_files(self, monkeypatch, runner_planners):
+        stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "video_load_options", lambda *_a, **_kw: {})
+        monkeypatch.setattr(
+            web_runner_module, "run_video_batch", lambda *, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+        )
+        request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="h3", model_name="h3", reference_paths=("/in/a.png",))
+        args = _make_video_args(enhance=EnhanceSettings(), no_enhance=True, enhance_model=None, scene=None)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = runner.submit_video_request_job(request=request, prompts_data=_PROMPTS, config=_CONFIG, args=args, model_ref="owner/h3")
+            assert wait_for_status(runner, job_id, "completed", timeout=3.0)["status"] == "completed"
+        finally:
+            runner.shutdown()
+
+        parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM, model_ref="owner/h3", args=args)
+        without = job_download_parts(replace(request, reference_paths=()), _CONFIG, platform_key=_PLATFORM, model_ref="owner/h3", args=args)
+
+        assert parts[0].targets[0].allow_patterns == ("h3:h3:False:refs",)
+        assert without[0].targets[0].allow_patterns == ("h3:h3:False",)
         _same_downloads(parts, runner_planners)
 
     def test_an_image_upscale_with_seedvr2_downloads_the_tier_labelled_with_its_name(self, monkeypatch, runner_planners, tmp_path):

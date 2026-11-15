@@ -75,6 +75,7 @@ class VideoFamily:
         default_upscale_steps: The steps of an upscaled clip when none are given.
         extend_fps: The one frame rate an extension source must run at, or ``None`` when the family extends a clip at its own rate.
         platform_carry_frames: Per ``sys.platform``, the ``carry_frames`` that differ there (H3 on macOS continues from the last frame alone).
+        max_reference_images: The most reference images a clip takes; 0 when the family takes none.
     """
 
     name: str
@@ -91,6 +92,7 @@ class VideoFamily:
     default_upscale_steps: int
     extend_fps: int | None = None
     platform_carry_frames: dict[str, int] = field(default_factory=dict)
+    max_reference_images: int = 0
 
 
 @dataclass(frozen=True)

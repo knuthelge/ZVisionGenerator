@@ -369,7 +369,7 @@ describe('SettingPopover images', () => {
     it('removing a reference writes the rows and the held uploads together', () => {
       const upload = new File(['x'], 'mine.png', { type: 'image/png' });
       draft.update('referenceImagePaths', ['/in/a.png', '']);
-      heldUploads.setReferences([null, upload]);
+      heldUploads.setReferencesOf('image', [null, upload]);
       const onclose = vi.fn();
       open({ onclose });
 
@@ -409,6 +409,54 @@ describe('SettingPopover images', () => {
       expect(button('Clear last frame')).not.toBeNull();
       expect(popover().querySelector('[data-unused="true"]')).not.toBeNull();
       expect(popover().querySelector('input[aria-label="Strength"]')).toBeNull();
+    });
+
+    describe('with a model that takes references', () => {
+      /** "ltx-8" here takes 2 references on every video workflow, as H3 does. */
+      const referencesContext = (): WorkspaceContext => {
+        const context = makeContext({ video_model_defaults: { 'ltx-8': makeVideoDefaults({ max_reference_images: 2 }) } });
+        for (const workflow of ['txt2vid', 'img2vid', 'extend'] as const) context.workflow_contract.definitions[workflow].visible_controls.push('references', 'references_clear');
+        return context;
+      };
+
+      it('puts References between the First frame and the Last frame, each row as <Picture N> over its name', () => {
+        draft.patch({ videoReferencePaths: ['/in/jacket.png', '/in/portrait.png'], referenceImagePaths: ['/in/image-tab.png'] });
+        open({}, referencesContext());
+
+        expect(groups()).toEqual(['First frame', 'References', 'Last frame']);
+        expect(popover().querySelector('#pop-ref-add-device')).toBeNull();
+      });
+
+      it('offers the way to add the next row while there is room', () => {
+        draft.patch({ videoReferencePaths: ['/in/jacket.png'] });
+        open({}, referencesContext());
+
+        expect(popover().querySelector('#pop-ref-add-device')).not.toBeNull();
+        expect(popover().textContent).toContain('Add reference 2');
+      });
+
+      it('removing a row writes the Video list and its held uploads together, and leaves the Image tab\'s', () => {
+        const upload = new File(['x'], 'mine.png', { type: 'image/png' });
+        draft.patch({ videoReferencePaths: ['/in/a.png', ''], referenceImagePaths: ['/in/image-tab.png'] });
+        heldUploads.setReferencesOf('video', [null, upload]);
+        heldUploads.setReferencesOf('image', [null]);
+        open({}, referencesContext());
+
+        button('Remove reference 1')!.click();
+        flushSync();
+
+        expect(draft.state).toMatchObject({ videoReferencePaths: [''], referenceImagePaths: ['/in/image-tab.png'] });
+        expect(heldUploads.videoReferences).toEqual([upload]);
+        expect(heldUploads.references).toEqual([null]);
+      });
+
+      it('holds only References in Extend, with the same wording', () => {
+        draft.patch({ workflow: 'extend', extendReferencePaths: ['/in/a.png'], videoReferencePaths: ['/in/v.png', '/in/w.png'] });
+        open({}, referencesContext());
+
+        expect(groups()).toEqual(['References']);
+        expect(Array.from(popover().querySelectorAll('.ref-num')).map((el) => el.textContent)).toEqual(['<Picture 1>']);
+      });
     });
 
     it('offers no clear button on an empty Last frame', () => {

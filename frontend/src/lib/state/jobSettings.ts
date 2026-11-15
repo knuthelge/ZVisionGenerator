@@ -142,8 +142,8 @@ export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: Enha
   }
   // An edit asked for its painted area (`edit_painted`); the mask itself is never recorded, so it has to be painted again.
   if (first(settings, 'edit_painted') === 'true') params.edit_repaint = 'true';
-  // The references the job ran with, in prompt order; none named clears them, as the job had none.
-  if (first(settings, 'mode') !== 'video') params.reference_path = values(settings, 'reference_path');
+  // The references the job ran with, in prompt order; none named clears them, as the job had none. A video job's go to the Video tab's list.
+  params.reference_path = values(settings, 'reference_path');
 
   const promptSource = (first(settings, 'prompt_source') ?? 'inline') as PromptSource;
   const isVideo = first(settings, 'mode') === 'video';

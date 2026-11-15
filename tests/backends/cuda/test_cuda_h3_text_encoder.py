@@ -16,6 +16,7 @@ pytest.importorskip("diffusers")
 pytest.importorskip("torchvision")  # Qwen3-VL's processor needs it; macOS does not install it
 safetensors_torch = pytest.importorskip("safetensors.torch")
 PIL_Image = pytest.importorskip("PIL.Image")
+np = pytest.importorskip("numpy")
 
 from zvisiongenerator.backends.cuda.video.h3 import text_encoder  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.text_encoder import (  # noqa: E402
@@ -24,6 +25,7 @@ from zvisiongenerator.backends.cuda.video.h3.text_encoder import (  # noqa: E402
     empty_text_encoder,
     encode,
     load_text_encoder,
+    tokenize_continuation,
     tokenize_presentation,
     wanted_tensor,
 )
@@ -45,7 +47,9 @@ def tiny(tmp_path_factory):
     tokenizer.save_pretrained(root / "tokenizer")
     tokenizer = Qwen2TokenizerFast.from_pretrained(str(root / "tokenizer"))
     images = Qwen2VLImageProcessor(patch_size=4, merge_size=2, temporal_patch_size=2, size={"shortest_edge": 64, "longest_edge": 4096})
-    processor = Qwen3VLProcessor(image_processor=images, tokenizer=tokenizer, video_processor=Qwen3VLVideoProcessor())
+    processor = Qwen3VLProcessor(
+        image_processor=images, tokenizer=tokenizer, video_processor=Qwen3VLVideoProcessor(patch_size=4, merge_size=2, temporal_patch_size=2, size={"shortest_edge": 64, "longest_edge": 4096})
+    )
     processor.save_pretrained(root / "processor")
     ids = {token: tokenizer.convert_tokens_to_ids(token) for token in _SPECIAL}
     config = Qwen3VLConfig(
@@ -108,6 +112,7 @@ def _diffusers_step(tiny, step_class, **inputs):
         _execution_device=torch.device("cpu"),
         text_tag=TEXT_TAG,
         video_tag=VIDEO_TAG,
+        fps=24.0,
     )
     state = PipelineState()
     for name, value in inputs.items():
@@ -226,6 +231,69 @@ def test_keyframe_presentation_matches_the_fl2va_step(tiny):
     assert pads == count * 15  # a 40x24 image is a 10x6 patch grid, 15 merged positions
     assert embeds.shape == expected.shape == (1, len(presentation.token_ids), 32)
     torch.testing.assert_close(embeds, expected, rtol=1e-5, atol=1e-6)
+
+
+def _tail(count: int = 22):
+    return np.random.default_rng(3).integers(0, 256, (count, 32, 48, 3), dtype=np.uint8)
+
+
+def _text_of(tiny, presentation) -> str:
+    """Return the presentation's text with every vision block collapsed to a marker."""
+    ids = list(presentation.token_ids)
+    start, end = (tiny.tokenizer.convert_tokens_to_ids(token) for token in ("<|vision_start|>", "<|vision_end|>"))
+    out, inside = [], False
+    for token in ids:
+        if token == start:
+            inside = True
+            out.append("[vision]")
+        elif token == end:
+            inside = False
+        elif not inside:
+            out.append(tiny.tokenizer.decode([token]))
+    return "".join(out)
+
+
+@pytest.mark.parametrize("sound", [None, "held"], ids=["silent", "sound"])
+def test_continuation_presentation_matches_the_ref2va_step(tiny, sound):
+    from diffusers.modular_pipelines.minimax_h3 import MiniMaxH3ImageReference, MiniMaxH3VideoReference
+    from diffusers.modular_pipelines.minimax_h3.encoders import MiniMaxH3Ref2VATextEncoderStep
+
+    images, tail = _keyframes(2), _tail()
+    references = [*(MiniMaxH3ImageReference(image=image) for image in images), MiniMaxH3VideoReference(frames=tail, fps=24.0, audio=torch.zeros(2, 8) if sound else None)]
+    expected, expected_tags = _diffusers_step(tiny, MiniMaxH3Ref2VATextEncoderStep, prompt=_PROMPT, normalized_references=references)
+
+    presentation = tokenize_continuation(_PROMPT, tiny.root / "tokenizer", tiny.root / "processor", images, tail, bool(sound))
+    embeds = encode(_cut_model(tiny), presentation, "cpu")
+
+    assert torch.equal(torch.tensor(presentation.token_tags), expected_tags)
+    assert set(presentation.mm_token_type_ids) == {0, 1, 2}  # text, picture, video
+    assert set(presentation.vision_inputs) == {"pixel_values", "image_grid_thw", "pixel_values_videos", "video_grid_thw"}
+    assert embeds.shape == expected.shape
+    torch.testing.assert_close(embeds, expected, rtol=1e-5, atol=1e-6)
+
+
+def test_the_continuation_labels_run_pictures_then_audio_then_video_then_the_prompt(tiny):
+    presentation = tokenize_continuation(_PROMPT, tiny.root / "tokenizer", tiny.root / "processor", _keyframes(2), _tail(), True)
+
+    text = _text_of(tiny, presentation)
+
+    labels = ["<Picture 1>: ", "<Picture 2>: ", "<Audio 1>: ", "<Video 1>: "]
+    assert [text.index(label) for label in labels] == sorted(text.index(label) for label in labels)
+    assert text.endswith(f"[vision]{_PROMPT}")
+    assert "<0.2 seconds>" in text  # the first merged pair of the 2 fps tail
+
+
+def test_the_continuation_pictures_are_the_presentations_pictures(tiny):
+    images = _keyframes(2)
+    pictures = tokenize_presentation("", tiny.root / "tokenizer", tiny.root / "processor", images)
+
+    presentation = tokenize_continuation(_PROMPT, tiny.root / "tokenizer", tiny.root / "processor", images, _tail(), False)
+
+    size = len(pictures.token_ids)
+    assert presentation.token_ids[:size] == pictures.token_ids
+    assert presentation.token_tags[:size] == pictures.token_tags
+    assert torch.equal(presentation.vision_inputs["pixel_values"], pictures.vision_inputs["pixel_values"])
+    assert torch.equal(presentation.vision_inputs["image_grid_thw"], pictures.vision_inputs["image_grid_thw"])
 
 
 # --- the NF4 loader ----------------------------------------------------------------------------------------------

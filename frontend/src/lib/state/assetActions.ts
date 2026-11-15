@@ -4,6 +4,7 @@ import { fileName } from '$lib/components/molecules/assetDetails';
 import { EXTEND_SHORT_REASON, pointLabel, type FramePoint } from '$lib/state/framePoint';
 import { hasPath, imageSupport, slotSet } from '$lib/state/imageSlots';
 import { workflowMode } from '$lib/state/promptEnhance';
+import { referenceListOf, referencePathsKey } from '$lib/state/references';
 import { stripMarks } from '$lib/state/speechDelivery';
 import { workspaceTab } from '$lib/state/workspaceTab';
 import type { AssetUpscaleFactor, DraftState, GalleryAsset, JobWorkflow, PrefillParams, SpeechAudioModel, UpscaleFactor, UpscaleMethod, Workflow, WorkspaceContext } from '$lib/types';
@@ -181,10 +182,15 @@ export function useAsState(ctx: WorkspaceContext | null, state: DraftState): Use
   const ownTab = workspaceTab(state.workflow);
   const imageModel = (ownTab === 'image' ? state.model : state.savedSettings.image?.model) || (ctx.current_image_model ?? '');
   const videoModel = (ownTab === 'video' ? state.model : state.savedSettings.video?.model) || (ctx.current_video_model ?? '');
+  // Extend is a kind of the Video tab: its Reference entry follows the open (Extend) model, while the targets that open the
+  // Video tab (first frame, last frame, audio track) follow the model that tab saved.
+  const onVideo = ownTab === 'video' || ownTab === 'extend';
+  const referenceModel = (onVideo ? state.model : state.savedSettings.video?.model) || (ctx.current_video_model ?? '');
   const imageName = modelLabel(ctx.image_models, imageModel);
   const videoName = modelLabel(ctx.video_models, videoModel);
   const imageSupports = imageSupport(ctx, imageModel, 'image');
   const videoSupports = imageSupport(ctx, videoModel, 'video');
+  const referenceSupports = imageSupport(ctx, referenceModel, 'video');
   const result: UseAsState = {};
 
   Object.assign(result, audioUseState(ctx, videoModel, videoName));
@@ -193,11 +199,20 @@ export function useAsState(ctx: WorkspaceContext | null, state: DraftState): Use
     ? { disabled: false }
     : { disabled: true, hint: `${imageName} can't use a start image` };
 
-  const max = imageSupports.references;
-  const used = state.referenceImagePaths.length;
-  if (max === 0) result.reference = { disabled: true, hint: `${imageName} takes none` };
-  else if (used >= max) result.reference = { disabled: true, hint: `all ${max} in use` };
-  else result.reference = { disabled: false, hint: `as image ${used + 1}` };
+  // On the Video tab, with a model that takes references, Use as → Reference fills the open kind's own list (New's or Extend's)
+  // and stays there; anywhere else it fills the Image tab's.
+  if (onVideo && referenceSupports.references > 0) {
+    const used = state[referencePathsKey(referenceListOf(state.workflow))].length;
+    result.reference = used >= referenceSupports.references
+      ? { disabled: true, hint: `all ${referenceSupports.references} in use` }
+      : { disabled: false, hint: `as <Picture ${used + 1}>` };
+  } else {
+    const max = imageSupports.references;
+    const used = state.referenceImagePaths.length;
+    if (max === 0) result.reference = { disabled: true, hint: `${imageName} takes none` };
+    else if (used >= max) result.reference = { disabled: true, hint: `all ${max} in use` };
+    else result.reference = { disabled: false, hint: `as image ${used + 1}` };
+  }
 
   result.video = videoSupports.start ? { disabled: false } : { disabled: true, hint: `${videoName} can't start from an image` };
   if (!videoSupports.start) result.last = { disabled: true, hint: `${videoName} can't start from an image` };

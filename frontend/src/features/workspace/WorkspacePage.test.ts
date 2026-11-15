@@ -4182,7 +4182,7 @@ describe('WorkspacePage images', () => {
     const asset = makeAsset({ id: 'out/text.png', filename: 'text.png', has_reusable_config: true, reuse_workspace_url: '#/workspace?workflow=txt2img&prompt=reused+prompt' });
     await mountWithHistory([asset]);
     draft.setStartImage('image', { file: png('start.png') }, makeContext());
-    heldUploads.setReferences([png('ref.png')]);
+    heldUploads.setReferencesOf('image', [png('ref.png')]);
     draft.patch({ referenceImagePaths: [''] });
     // Video's uploads belong to another tab.
     heldUploads.setStart('video', png('first.png'));

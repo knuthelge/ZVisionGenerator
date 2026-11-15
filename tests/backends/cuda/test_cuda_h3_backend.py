@@ -47,6 +47,8 @@ PRESET = H3Preset(
     lora_scale=0.0625,
     latent_upsampler=HubFiles("upsampler/repo", "rev-up", ("upsampler.safetensors",)),
     schedules={8: H3Schedule(8, 6.0, 3.0), 4: H3Schedule(4, 6.0, 3.0)},
+    reference_transformer=HubFiles("ref/repo", "rev-ref", ("transformer.safetensors",)),
+    reference_lora=HubFiles("ref-lora/repo", "rev-ref-lora", ("turbo.safetensors",)),
 )
 
 
@@ -94,7 +96,7 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Rig:
     monkeypatch.setattr(h3_backend, "configure_torch_runtime", lambda *_a, **_k: rig.note("configure_torch_runtime"))
     monkeypatch.setattr(h3_backend, "_models_dir", lambda: tmp_path / "models")
     monkeypatch.setattr(h3_backend, "_gpu_total_bytes", lambda device: rig.gpu_bytes)
-    monkeypatch.setattr(h3_backend, "_check_system_memory", lambda loras: None)
+    monkeypatch.setattr(h3_backend, "_check_system_memory", lambda loras, **_kwargs: None)
     files = H3Files(tmp_path / "repo", tmp_path / "te", (tmp_path / "te" / "model-1.safetensors",), tmp_path / "turbo.safetensors")
     monkeypatch.setattr(h3_backend, "resolve_files", lambda ref, preset, *, upscale=False: (rig.note("resolve_files", ref=ref, upscale=upscale), files)[1])
     monkeypatch.setattr(h3_backend, "transformer_files", lambda repo_dir: ([repo_dir / "transformer" / "a.safetensors"], {"config": 1}))
@@ -710,7 +712,7 @@ class TestUpscale:
         lora.write_bytes(b"12345")
         model = _load(rig, mode="i2v", upscale=True, loras=[(str(lora), 0.7)])
         H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "x", 128, 64, FRAMES, 3, 8, str(tmp_path / "out.mp4"), stage1_steps=4)
-        assert asked == [((128, 64, FRAMES, rig.gpu_bytes), {"mode": "i2v", "loras_bytes": 5})]
+        assert asked == [((128, 64, FRAMES, rig.gpu_bytes), {"mode": "i2v", "loras_bytes": 5, "references": ()})]
         assert len(rig.calls["copy.load"]) == 2
 
     def test_the_shared_transformer_is_let_go_before_the_full_size_decode(self, rig, tmp_path, monkeypatch):
@@ -1167,6 +1169,257 @@ class TestAudioTrack:
         assert segment.audio_path == tmp_path / "segment.wav"
 
 
+# --- reference images ----------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def refs(rig: Rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Rig:
+    """The rig with the Ref2VA copy, the continuation presentation and the reference encoder replaced by recorders."""
+    files = H3Files(tmp_path / "repo", tmp_path / "te", (tmp_path / "te" / "model-1.safetensors",), tmp_path / "turbo.safetensors")
+    ref2va_dir = tmp_path / "models" / "h3@ref2va-q4"
+    monkeypatch.setattr(h3_backend.converted_h3, "ensure_ref2va_copy", lambda models_dir, preset, device: (rig.note("ensure_ref2va_copy", models_dir=models_dir, preset=preset), ref2va_dir)[1])
+    monkeypatch.setattr(h3_backend, "_converted_copy", lambda folder, manifest, preset, upscale: (rig.note("converted_copy", folder=folder, upscale=upscale), (files, folder))[1])
+    monkeypatch.setattr(
+        text_encoder,
+        "tokenize_continuation",
+        lambda prompt, tokenizer_dir, processor_dir, images, tail, has_sound: (
+            rig.note("continuation", prompt=prompt, images=list(images), tail=tuple(tail.shape), has_sound=has_sound),
+            SimpleNamespace(token_tags=(1,) * 2 + (0,) * (len(images) + 1) + (1,)),
+        )[1],
+    )
+    monkeypatch.setattr(conditioning, "encode_reference", lambda enc, image: (rig.note("reference", size=image.size), torch.zeros(1, 24, 1, image.size[1] // 16, image.size[0] // 16))[1])
+    return rig
+
+
+def _load_refs(rig: Rig, **kwargs: Any) -> Any:
+    return _load(rig, references=True, **kwargs)
+
+
+def _picture(path: Path, color: tuple[int, int, int] = (30, 30, 200)) -> str:
+    return _image(path, (200, 100), color)  # prepares to 2048 x 1024: the short edge becomes 1024
+
+
+REFERENCE_SIZE = (2048, 1024)
+
+
+class TestReferencesLoad:
+    def test_the_ref2va_copy_is_built_after_the_runtime_is_configured_and_serves_the_stock_model(self, refs, tmp_path):
+        model, _ = H3VideoBackend().load_model("MiniMaxAI/MiniMax-H3", preset=PRESET, references=True)
+        assert refs.events.index("configure_torch_runtime") < refs.events.index("ensure_ref2va_copy")
+        assert refs.last("ensure_ref2va_copy")["models_dir"] == tmp_path / "models" and refs.last("ensure_ref2va_copy")["preset"] is PRESET
+        assert refs.last("converted_copy") == {"folder": tmp_path / "models" / "h3@ref2va-q4", "upscale": False}
+        assert model.copy_dir == tmp_path / "models" / "h3@ref2va-q4"
+        assert "ensure_copy" not in refs.calls and "resolve_files" not in refs.calls  # stock's own transformer is never read
+
+    def test_a_converted_folder_loads_the_ref2va_copy_not_its_own(self, refs, tmp_path):
+        from zvisiongenerator.utils.h3_converted import write_converted_h3
+
+        folder = tmp_path / "my-tune"
+        folder.mkdir()
+        write_converted_h3(folder, {"storage": "nf4-folded", "turbo": "distilled"})
+        model, _ = H3VideoBackend().load_model(str(folder), preset=PRESET, references=True, model_name="my-tune")
+        assert model.copy_dir == tmp_path / "models" / "h3@ref2va-q4"
+        assert refs.last("converted_copy")["folder"] == model.copy_dir
+
+    def test_an_upscale_load_asks_for_the_upsampler(self, refs):
+        H3VideoBackend().load_model("MiniMaxAI/MiniMax-H3", preset=PRESET, references=True, upscale=True)
+        assert refs.last("converted_copy")["upscale"] is True
+
+    def test_user_loras_apply_to_the_ref2va_copy(self, refs, tmp_path):
+        lora = tmp_path / "style.safetensors"
+        lora.write_bytes(b"x")
+        model = _load_refs(refs, loras=[(str(lora), 0.7)])
+        _t2v(model, tmp_path / "out.mp4", references=[_picture(tmp_path / "r.png")])
+        assert refs.last("copy.load")["loras"] == ((lora, 0.7),)
+
+    def test_a_load_without_references_keeps_the_stock_route(self, refs):
+        H3VideoBackend().load_model("MiniMaxAI/MiniMax-H3", preset=PRESET)
+        assert "ensure_ref2va_copy" not in refs.calls and "ensure_copy" in refs.calls
+
+
+class TestReferencesTextToVideo:
+    def test_the_references_are_encoded_at_their_own_size_and_not_fitted_to_the_canvas(self, refs, tmp_path):
+        _t2v(_load_refs(refs), tmp_path / "out.mp4", references=[_picture(tmp_path / "a.png"), _picture(tmp_path / "b.png")])
+        assert [call["size"] for call in refs.calls["reference"]] == [REFERENCE_SIZE, REFERENCE_SIZE]
+        assert [image.size for image in refs.last("presentation")["images"]] == [REFERENCE_SIZE, REFERENCE_SIZE]
+        held = refs.last("denoise")["conditioning"]
+        assert [tuple(latents.shape) for latents in held.references] == [(1, 24, 1, 64, 128)] * 2
+        assert held.keyframes == () and "keyframe" not in refs.calls
+
+    def test_the_vision_tower_loads_and_the_vae_encoder_runs_for_the_references(self, refs, tmp_path):
+        _t2v(_load_refs(refs), tmp_path / "out.mp4", references=[_picture(tmp_path / "a.png")])
+        assert refs.last("text_encoder.load")["vision"] is True
+        assert refs.events.index("text_encoder.encode") < refs.events.index("vae_encoder.load") < refs.events.index("denoise")
+
+    def test_the_prompt_is_the_task_tag_then_the_users_text(self, refs, tmp_path):
+        _t2v(_load_refs(refs), tmp_path / "out.mp4", references=[_picture(tmp_path / "a.png")])
+        assert refs.last("presentation")["prompt"] == "[reference generation] waves"
+
+    def test_the_row_set_has_the_reference_rows(self, refs, tmp_path):
+        _t2v(_load_refs(refs), tmp_path / "out.mp4", references=[_picture(tmp_path / "a.png")])
+        assert refs.row_sets == ["keyframe"]
+        assert refs.last("copy.load")["keys"] == [("fold", "keyframe")]
+
+    def test_a_clip_without_references_sends_the_plain_prompt_and_holds_none(self, refs, tmp_path):
+        _t2v(_load_refs(refs), tmp_path / "out.mp4")
+        assert refs.last("presentation")["prompt"] == "waves" and refs.last("denoise")["conditioning"].references == ()
+        assert refs.row_sets == ["plain"] and "reference" not in refs.calls
+
+    def test_an_audio_track_adds_the_audio_reuse_clause_and_the_track_row_set(self, refs, track_reads, tmp_path):
+        _t2v(_load_refs(refs), tmp_path / "out.mp4", references=[_picture(tmp_path / "a.png")], audio_track=TRACK)
+        assert refs.last("presentation")["prompt"] == "[reference generation + audio reuse] waves"
+        assert refs.row_sets == ["track_keyframe"]
+
+    def test_a_missing_reference_fails_before_any_model_loads(self, refs, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            _t2v(_load_refs(refs), tmp_path / "out.mp4", references=[str(tmp_path / "missing.png")])
+        assert "presentation" not in refs.calls
+
+
+class TestReferencesImageToVideo:
+    def test_the_first_frame_follows_the_references_as_the_next_picture_at_the_canvas_size(self, refs, tmp_path):
+        model = _load_refs(refs, mode="i2v")
+        H3VideoBackend().image_to_video(
+            model, _image(tmp_path / "first.png"), "waves", WIDTH, HEIGHT, FRAMES, 3, 8, str(tmp_path / "out.mp4"), references=[_picture(tmp_path / "a.png"), _picture(tmp_path / "b.png")]
+        )
+        assert refs.last("presentation")["prompt"] == "[reference generation + keyframe completion] waves"
+        assert [image.size for image in refs.last("presentation")["images"]] == [REFERENCE_SIZE, REFERENCE_SIZE, (WIDTH, HEIGHT)]
+        held = refs.last("denoise")["conditioning"]
+        assert (len(held.references), len(held.keyframes), held.anchors) == (2, 1, ("first",))
+        assert [call["canvas"] for call in refs.calls["keyframe"]] == [(WIDTH, HEIGHT)]
+        assert refs.row_sets == ["keyframe"]
+
+    def test_the_last_frame_follows_the_first_as_the_last_picture(self, refs, tmp_path):
+        model = _load_refs(refs, mode="i2v")
+        H3VideoBackend().image_to_video(
+            model,
+            _image(tmp_path / "first.png"),
+            "waves",
+            WIDTH,
+            HEIGHT,
+            FRAMES,
+            3,
+            8,
+            str(tmp_path / "out.mp4"),
+            references=[_picture(tmp_path / "a.png")],
+            end_image=_image(tmp_path / "last.png"),
+        )
+        assert refs.last("presentation")["prompt"] == "[reference generation + keyframe completion] waves"
+        assert [image.size for image in refs.last("presentation")["images"]] == [REFERENCE_SIZE, (WIDTH, HEIGHT), (WIDTH, HEIGHT)]
+        held = refs.last("denoise")["conditioning"]
+        assert (len(held.references), len(held.keyframes), held.anchors) == (1, 2, ("first", "last"))
+        assert refs.row_sets == ["keyframe"]
+
+    def test_an_audio_track_adds_the_audio_reuse_clause(self, refs, track_reads, tmp_path):
+        model = _load_refs(refs, mode="i2v")
+        H3VideoBackend().image_to_video(
+            model, _image(tmp_path / "f.png"), "waves", WIDTH, HEIGHT, TRACK_FRAMES, 3, 8, str(tmp_path / "out.mp4"), references=[_picture(tmp_path / "a.png")], audio_track=TRACK
+        )
+        assert refs.last("presentation")["prompt"] == "[reference generation + keyframe completion + audio reuse] waves"
+        assert refs.row_sets == ["track_keyframe"]
+
+
+class TestReferencesExtend:
+    def _extend(self, rig: Rig, tmp_path: Path, **kwargs: Any) -> Any:
+        source = kwargs.pop("source", None) or make_extend_source(width=WIDTH, height=HEIGHT)
+        arguments: dict[str, Any] = dict(extend_frames=EXTEND, seed=7, steps=8, segment_dir=tmp_path, audio_output=True, references=[_picture(tmp_path / "a.png")])
+        arguments.update(kwargs)
+        return H3VideoBackend().extend_video(_load_refs(rig, mode="extend"), source, "she waves", **arguments)
+
+    def test_the_tail_is_presented_as_a_video_after_the_pictures_with_the_tagged_prompt(self, refs, tmp_path):
+        self._extend(refs, tmp_path)
+        call = refs.last("continuation")
+        assert call["prompt"] == ("[video continuation + reference generation] The target video continues <Video 1> as one continuous shot with no cut. she waves")
+        assert [image.size for image in call["images"]] == [REFERENCE_SIZE]
+        assert call["tail"] == (22, HEIGHT, WIDTH, 3) and call["has_sound"] is True
+        assert "presentation" not in refs.calls and refs.last("text_encoder.load")["vision"] is True
+
+    def test_the_tail_and_the_references_are_pinned_with_the_extend_row_set(self, refs, tmp_path):
+        self._extend(refs, tmp_path)
+        held = refs.last("denoise")["conditioning"]
+        assert tuple(held.tail_latents.shape[:3]) == (1, 24, 7) and len(held.references) == 1 and held.keyframes == ()
+        assert refs.row_sets == ["extend"]
+        assert refs.last("tail")["shape"] == (22, HEIGHT, WIDTH, 3) and [call["size"] for call in refs.calls["reference"]] == [REFERENCE_SIZE]
+
+    def test_a_silent_source_holds_no_sound_and_has_no_audio_label(self, refs, tmp_path):
+        self._extend(refs, tmp_path, source=make_extend_source(width=WIDTH, height=HEIGHT, has_audio=False))
+        assert refs.last("continuation")["has_sound"] is False
+        assert refs.row_sets == ["keyframe"]
+
+    def test_an_audio_track_runs_with_the_audio_reuse_tag(self, refs, track_reads, tmp_path):
+        segment = self._extend(refs, tmp_path, audio_track=TRACK, audio_output=False)
+        call = refs.last("continuation")
+        assert call["prompt"] == ("[video continuation + reference generation + audio reuse] The target video continues <Video 1> as one continuous shot with no cut. she waves")
+        assert call["has_sound"] is True
+        assert refs.row_sets == ["track_keyframe"]
+        assert segment.audio_path is None
+
+
+class TestReferencesUpscale:
+    def _run(self, refs: Rig, tmp_path: Path, frames: int = FRAMES, **kwargs: Any) -> Any:
+        model = _load_refs(refs, mode="i2v", upscale=True)
+        return H3VideoBackend().image_to_video(
+            model,
+            _image(tmp_path / "first.png"),
+            "waves",
+            128,
+            64,
+            frames,
+            3,
+            8,
+            str(tmp_path / "out.mp4"),
+            stage1_steps=4,
+            references=[_picture(tmp_path / "a.png"), _picture(tmp_path / "b.png")],
+            **kwargs,
+        )
+
+    def test_stage_one_holds_the_references_and_the_half_size_first_frame_as_the_next_picture(self, refs, tmp_path):
+        self._run(refs, tmp_path)
+        assert refs.last("presentation")["prompt"] == "[reference generation + keyframe completion] waves"
+        assert [image.size for image in refs.last("presentation")["images"]] == [REFERENCE_SIZE, REFERENCE_SIZE, (64, 32)]
+        assert len(refs.last("denoise")["conditioning"].references) == 2
+
+    def test_the_references_are_encoded_once_and_every_window_holds_the_same_latents(self, refs, tmp_path):
+        self._run(refs, tmp_path, frames=175)
+        assert len(refs.calls["reference"]) == 2  # stage 1 only; the refine reuses them
+        stage_one = refs.last("denoise")["conditioning"].references
+        windows = [call["conditioning"] for call in refs.calls["refine"]]
+        assert len(windows) == 3
+        for held in windows:
+            assert len(held.references) == 2 and all(a is b for a, b in zip(held.references, stage_one, strict=True))
+        assert [len(held.keyframes) for held in windows] == [1, 0, 0]  # the full-size first frame, window 0 only
+        assert [call["canvas"] for call in refs.calls["keyframe"]] == [(64, 32), (128, 64)]
+
+    def test_the_last_frame_is_held_with_the_references_in_the_final_window_only(self, refs, tmp_path):
+        self._run(refs, tmp_path, frames=175, end_image=_image(tmp_path / "last.png"))
+        windows = [call["conditioning"] for call in refs.calls["refine"]]
+        assert [held.anchors for held in windows] == [("first",), (), ("last",)]
+        assert all(len(held.references) == 2 for held in windows)
+        assert [call["canvas"] for call in refs.calls["keyframe"]] == [(64, 32), (64, 32), (128, 64), (128, 64)]
+
+    def test_the_keep_loaded_decision_is_asked_with_the_references_prepared_sizes(self, refs, tmp_path, monkeypatch):
+        asked: list[dict[str, Any]] = []
+        monkeypatch.setattr(h3_backend, "h3_upscale_keeps_transformer", lambda *args, **kwargs: (asked.append(kwargs), False)[1])
+        self._run(refs, tmp_path)
+        assert [call["references"] for call in asked] == [(REFERENCE_SIZE, REFERENCE_SIZE)]
+
+    def test_the_stage_one_text_conditioning_is_reused_by_every_window(self, refs, tmp_path):
+        self._run(refs, tmp_path, frames=175)
+        assert len(refs.calls["presentation"]) == 1
+        assert all(call["embeds"] is refs.calls["refine"][0]["embeds"] for call in refs.calls["refine"])
+
+    def test_every_window_uses_the_keyframe_fold_keys_on_the_shared_transformer(self, refs, tmp_path):
+        self._run(refs, tmp_path, frames=175)
+        assert len(refs.calls["copy.load"]) == 1
+        assert set(refs.calls["copy.load"][0]["keys"]) == {("fold", "keyframe"), ("fold", "keyframe", 6)}
+
+    def test_a_text_to_video_upscale_with_references_needs_no_plain_keys(self, refs, tmp_path):
+        model = _load_refs(refs, upscale=True)
+        _t2v(model, tmp_path / "out.mp4", width=128, height=64, stage1_steps=4, references=[_picture(tmp_path / "a.png")], num_frames=175)
+        assert {key[1] for key in refs.calls["copy.load"][-1]["keys"]} == {"keyframe"}
+        assert all(len(call["conditioning"].references) == 1 for call in refs.calls["refine"])
+
+
 class TestRealEncode:
     def test_a_clip_encodes_to_an_mp4_with_video_and_stereo_audio(self, rig, tmp_path):
         av = pytest.importorskip("av")
@@ -1487,6 +1740,14 @@ class TestSystemMemoryCheck:
             h3_backend._check_system_memory(())
 
         assert seen[0].filename == __file__
+
+    def test_references_load_the_vision_tower_and_count_toward_the_estimate(self, machine):
+        machine(18.5)
+        with pytest.warns(UserWarning, match="leaving little"):
+            h3_backend._check_system_memory(())
+
+        with pytest.raises(RuntimeError, match=r"needs about 19 GB of system memory; this machine has 18 GB"):
+            h3_backend._check_system_memory((), references=True)
 
     def test_a_roomy_machine_loads_silently(self, machine, recwarn):
         machine(32)

@@ -100,9 +100,9 @@ describe('what Edit shows', () => {
   });
 
   it('takes the reason Generate is off from the image to edit', () => {
-    const state = { ...draft.state, referenceImagePath: null, referenceImageUpload: null, referenceImagePaths: [] };
+    const state = { ...draft.state, referenceImagePath: null, referenceImageUpload: null, referenceImagePaths: [], videoReferencePaths: [], extendReferencePaths: [] };
     const caps = { showRefImage: false, takesLastFrame: false, maxReferences: 0, showI2IStrength: false };
-    const files = { startImage: null, firstFrame: null, lastFrame: null, references: [] };
+    const files = { startImage: null, firstFrame: null, lastFrame: null, references: [], videoReferences: [], extendReferences: [] };
     const view = imagesView({ state, caps, files, restored: true, edit: { block: 'Choose an image to edit' } });
     expect([view.visible, view.block, view.sent.image]).toEqual([false, 'Choose an image to edit', null]);
     expect(imagesView({ state, caps, files, restored: true }).block).toBeNull();

@@ -255,6 +255,76 @@ describe('useAsState', () => {
   });
 });
 
+describe('useAsState on the Video tab with references', () => {
+  const state = (overrides: Partial<DraftState> = {}): DraftState => ({ ...draft.state, savedSettings: {}, referenceImagePaths: [], videoReferencePaths: [], extendReferencePaths: [], ...overrides });
+  const context = () => makeContext({
+    image_models: [{ id: 'klein', label: 'Klein 9B', type: 'image' }],
+    video_models: [{ id: 'ltx-8', label: 'LTX 2.3', type: 'video' }, { id: 'h3', label: 'MiniMax H3', type: 'video' }],
+    image_model_defaults: { klein: makeImageDefaults({ max_reference_images: 4 }) },
+    video_model_defaults: { 'ltx-8': makeVideoDefaults(), h3: makeVideoDefaults({ max_reference_images: 2 }) },
+    current_image_model: 'klein',
+    current_video_model: 'h3',
+  });
+
+  it.each([['txt2vid', 'videoReferencePaths'], ['img2vid', 'videoReferencePaths'], ['extend', 'extendReferencePaths']] as const)('is enabled by the video model\'s cap on %s, counting its own list', (workflow, key) => {
+    const open = useAsState(context(), state({ workflow, model: 'h3', [key]: ['/a.png'] }));
+    expect(open.reference).toEqual({ disabled: false, hint: 'as <Picture 2>' });
+
+    const first = useAsState(context(), state({ workflow, model: 'h3' }));
+    expect(first.reference).toEqual({ disabled: false, hint: 'as <Picture 1>' });
+  });
+
+  it('counts only the open kind\'s list: New\'s rows do not fill Extend\'s, nor Extend\'s New\'s', () => {
+    const extending = useAsState(context(), state({ workflow: 'extend', model: 'h3', videoReferencePaths: ['/a.png', '/b.png'] }));
+    expect(extending.reference).toEqual({ disabled: false, hint: 'as <Picture 1>' });
+
+    const full = useAsState(context(), state({ workflow: 'extend', model: 'h3', extendReferencePaths: ['/a.png', '/b.png'] }));
+    expect(full.reference).toEqual({ disabled: true, hint: 'all 2 in use' });
+
+    const creating = useAsState(context(), state({ workflow: 'txt2vid', model: 'h3', extendReferencePaths: ['/a.png', '/b.png'] }));
+    expect(creating.reference).toEqual({ disabled: false, hint: 'as <Picture 1>' });
+  });
+
+  it('is disabled at the cap, whatever the Image list holds', () => {
+    const full = useAsState(context(), state({ workflow: 'txt2vid', model: 'h3', videoReferencePaths: ['/a.png', '/b.png'] }));
+    expect(full.reference).toEqual({ disabled: true, hint: 'all 2 in use' });
+
+    const imagesOnly = useAsState(context(), state({ workflow: 'txt2vid', model: 'h3', referenceImagePaths: ['/a.png', '/b.png', '/c.png'] }));
+    expect(imagesOnly.reference).toMatchObject({ disabled: false });
+  });
+
+  it('counts rows held as uploads, which have an empty path', () => {
+    const full = useAsState(context(), state({ workflow: 'img2vid', model: 'h3', videoReferencePaths: ['', ''] }));
+    expect(full.reference?.disabled).toBe(true);
+  });
+
+  it('is as on the Image tab when the video model takes none', () => {
+    const onLtx = useAsState(context(), state({ workflow: 'txt2vid', model: 'ltx-8', savedSettings: { image: { model: 'klein' } }, referenceImagePaths: ['/a.png'] }));
+    expect(onLtx.reference).toEqual({ disabled: false, hint: 'as image 2' });
+  });
+
+  it('is as today on the Image tab, whatever the video model takes', () => {
+    const onImage = useAsState(context(), state({ workflow: 'txt2img', model: 'klein', savedSettings: { video: { model: 'h3' } }, referenceImagePaths: ['/a.png', '/b.png'], videoReferencePaths: ['/v.png', '/w.png'] }));
+    expect(onImage.reference).toEqual({ disabled: false, hint: 'as image 3' });
+  });
+
+  it('the Reference entry on Extend follows the Extend model, not the one the Video tab saved', () => {
+    const extending = useAsState(context(), state({ workflow: 'extend', model: 'h3', savedSettings: { video: { model: 'ltx-8' } } }));
+    expect(extending.reference).toEqual({ disabled: false, hint: 'as <Picture 1>' });
+  });
+
+  it('the frame targets on Extend still follow the model the Video tab saved', () => {
+    const ctx = context();
+    ctx.video_model_defaults['ltx-8'] = makeVideoDefaults({ hidden_controls: ['end_image_path'] });
+    const h3OverLtx = useAsState(ctx, state({ workflow: 'extend', model: 'h3', savedSettings: { video: { model: 'ltx-8' } } }));
+    expect(h3OverLtx.last).toEqual({ disabled: true, hint: 'LTX 2.3 has no last frame' });
+
+    const ltxOverH3 = useAsState(ctx, state({ workflow: 'extend', model: 'ltx-8', savedSettings: { video: { model: 'h3' } } }));
+    expect(ltxOverH3.last).toEqual({ disabled: false });
+    expect(ltxOverH3.reference).toEqual({ disabled: false, hint: 'as image 1' });
+  });
+});
+
 describe('Use as for audio takes', () => {
   const state = (overrides: Partial<DraftState> = {}): DraftState => ({ ...draft.state, savedSettings: {}, referenceImagePaths: [], ...overrides });
   const context = (overrides: Partial<ReturnType<typeof makeContext>> = {}) => makeContext({

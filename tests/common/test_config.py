@@ -672,6 +672,27 @@ class TestVideoLoadOptionsGolden:
         assert video_load_options("ltx", packaged_config, name, platform_key="linux", upscale=upscale) == ltx_load_options(name, "linux", upscale=upscale)
 
 
+class TestVideoLoadOptionsReferences:
+    """``references`` adds ``{"references": True}`` for H3 only, and nothing changes without it."""
+
+    @pytest.mark.parametrize("platform", ["linux", "win32", "darwin"])
+    def test_h3_gets_the_flag_only_when_asked(self, packaged_config, platform):
+        without = video_load_options("h3", packaged_config, "h3", platform_key=platform, upscale=False)
+        with_references = video_load_options("h3", packaged_config, "h3", platform_key=platform, upscale=False, references=True)
+
+        assert "references" not in without
+        assert with_references == {**without, "references": True}
+
+    def test_h3_with_references_and_an_upscale_gets_both_flags(self, packaged_config):
+        options = video_load_options("h3", packaged_config, "h3", platform_key="linux", upscale=True, references=True)
+
+        assert (options["upscale"], options["references"]) == (True, True)
+
+    @pytest.mark.parametrize("name", ["ltx-4", "ltx25-4"])
+    def test_ltx_never_gets_the_flag(self, packaged_config, name):
+        assert video_load_options("ltx", packaged_config, name, platform_key="linux", upscale=False, references=True) == ltx_load_options(name, "linux", upscale=False)
+
+
 class TestVideoFamilyDispatch:
     """R5: load options and companions are asked of the family; default frames come from the family."""
 

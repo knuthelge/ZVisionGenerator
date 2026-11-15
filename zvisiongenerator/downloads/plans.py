@@ -91,10 +91,10 @@ def _moss_plan(model_ref: str, *, platform_key: str) -> tuple[DownloadTarget, ..
     return (sft, turbo) if is_turbo_dir(folder) else (sft,)
 
 
-def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_name: str | None, platform_key: str, upscale: bool) -> tuple[DownloadTarget, ...] | None:
+def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_name: str | None, platform_key: str, upscale: bool, references: bool = False) -> tuple[DownloadTarget, ...] | None:
     """Return the targets a video model needs with the configured companions, or ``None`` when the plan cannot be made now.
 
-    MiniMax H3 plans its repository, text encoder and turbo LoRA, plus the latent upscaler of the video upscale.
+    MiniMax H3 plans its repository, text encoder and turbo LoRA, plus the latent upscaler of the video upscale and, for a job with *references*, the Ref2VA transformer and its turbo LoRA.
 
     The files come from the model metadata for *platform_key* (``sys.platform``); *config* supplies the settings.
 
@@ -103,10 +103,10 @@ def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_nam
     """
     from zvisiongenerator import backends
 
-    options = video_load_options(family, config, model_name, platform_key=platform_key, upscale=upscale)
+    options = video_load_options(family, config, model_name, platform_key=platform_key, upscale=upscale, references=references)
     if family == "h3":
         lora = {"lora": options["lora"]} if "lora" in options else {}  # macOS lists the turbo LoRA from the load options
-        return _offline_as_none(lambda: backends.h3_download_plan(model_ref, options["preset"], upscale=upscale, **lora))
+        return _offline_as_none(lambda: backends.h3_download_plan(model_ref, options["preset"], upscale=upscale, references=references, **lora))
     return _offline_as_none(
         lambda: backends.video_download_plan(
             model_ref,

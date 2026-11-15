@@ -16,6 +16,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     NO_USABLE_MESSAGE,
     PRESERVATION_RULES,
     QUOTES_CHANGED_WARNING,
+    REFERENCES_DROPPED_WARNING,
     STYLE_AXIS,
     EnhanceContext,
     EnhanceSettings,
@@ -23,6 +24,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     action_rules,
     clean_output,
     context_rules,
+    drops_reference,
     detail_rules,
     direction_rules,
     duration_beats,
@@ -35,6 +37,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     perception_rule,
     plan_length,
     quote_rules,
+    references_rule,
     resolve_parts,
     strip_reasoning,
     system_message,
@@ -177,7 +180,9 @@ def build_pair_messages(scene: str, prompt: str, settings: EnhanceSettings, *, p
         *PRESERVATION_RULES,
         *quote_rules(_pair_quotes(scene, prompt, context)),
         perception_rule("video", context),
-        *context_rules("video", replace(context, reference_image=False, seconds=None if context.extends else context.seconds), pace=settings.pace),
+        *context_rules(
+            "video", replace(context, reference_image=False, references=0 if context.extends else context.references, seconds=None if context.extends else context.seconds), pace=settings.pace
+        ),
         "SCENE: who and where, their look, the style and the camera setup. No events, no camera moves, no quoted speech.",
         action_role,
         *(_extend_pair_rules(context, scene=scene, pace=settings.pace) if context.extends else [_pair_workflow_rule(context)]),
@@ -251,6 +256,8 @@ def _extend_rules(context: EnhanceContext, *, pace: str = "keep") -> list[str]:
         rules.append(f"Write the next action in time order, fitted to {max(1, round(context.new_seconds))} seconds{window}: {beats}.")
     else:
         rules.append("Write the next action in time order.")
+    if context.references > 0:
+        rules.append(references_rule(context.references, video=True))
     return rules
 
 
@@ -514,25 +521,36 @@ def enhance_video_prompt(
     previous = (context.previous or context.extract_from) if extends else None
     spans = _pair_quotes(scene, prompt, context)
     raw = ""
-    changed_quotes: tuple[str, tuple[str, str]] | None = None
+    flawed: tuple[str, tuple[str, str], str] | None = None
     for attempt in range(2):
         raw = generate_raw(enhancer, messages, seed=seed + attempt, max_tokens=max_tokens, temperature=temperature, on_text=on_text, cancelled=cancelled)
         pair = _accept_pair(raw, scene, echo, previous=previous)
-        if pair is not None and not missing_quotes(spans, f"{pair[0]}\n{pair[1]}"):
+        if pair is None:
+            continue
+        problem = _rewrite_problem(spans, f"{scene}\n{echo}", f"{pair[0]}\n{pair[1]}", context)
+        if problem is None:
             _report(on_text, clean_output(raw))
             return EnhancePairResult(scene=pair[0], prompt=pair[1], clamped=plan.total.clamped, warning=warning)
-        if pair is not None:
-            changed_quotes = (raw, pair)
-    if changed_quotes is not None:
-        _report(on_text, clean_output(changed_quotes[0]))
-        warnings.warn(QUOTES_CHANGED_WARNING, stacklevel=2)
-        scene_out, action_out = changed_quotes[1]
-        return EnhancePairResult(scene=scene_out, prompt=action_out, clamped=plan.total.clamped, warning=_join(warning, QUOTES_CHANGED_WARNING))
+        flawed = (raw, pair, problem)
+    if flawed is not None:
+        _report(on_text, clean_output(flawed[0]))
+        warnings.warn(flawed[2], stacklevel=2)
+        scene_out, action_out = flawed[1]
+        return EnhancePairResult(scene=scene_out, prompt=action_out, clamped=plan.total.clamped, warning=_join(warning, flawed[2]))
     _report(on_text, clean_output(raw))
     action = _fallback_action(raw)
     if is_unusable(action, echo) or _repeats(action, previous):
         raise RuntimeError(NO_USABLE_MESSAGE)
     return EnhancePairResult(scene="", prompt=action, clamped=plan.total.clamped, warning=_join(warning, PAIR_FALLBACK_WARNING), format_fallback=True)
+
+
+def _rewrite_problem(spans: tuple[str, ...], source: str, output: str, context: EnhanceContext) -> str | None:
+    """Return the warning for a usable *output* that changed a quoted text of *spans* or dropped a ``<Picture N>`` that *source* names, or ``None`` when it is sound."""
+    if missing_quotes(spans, output):
+        return QUOTES_CHANGED_WARNING
+    if drops_reference(source, output, context.references, video=True):
+        return REFERENCES_DROPPED_WARNING
+    return None
 
 
 def _join(*notices: str | None) -> str:
@@ -609,7 +627,7 @@ def _enhance_action_only(
     on_text: Callable[[str], None] | None,
     cancelled: Callable[[], bool] | None,
 ) -> EnhancePairResult:
-    """Write only the action (the one that follows an existing clip, when extending), keeping *scene* as is; retry once on an unusable or repeating output.
+    """Write only the action (the one that follows an existing clip, when extending), keeping *scene* as is; retry once on an unusable or repeating output, a changed quote or a dropped ``<Picture N>``.
 
     The result's ``scene`` is ``""``: the scene was not rewritten.
 
@@ -623,18 +641,19 @@ def _enhance_action_only(
     build = build_extend_messages if context.extends else build_action_messages
     messages = build(scene, prompt, settings, plan=plan, context=context)
     spans = _action_quotes(prompt, context)
-    changed_quotes: str | None = None
+    flawed: tuple[str, str] | None = None
     for attempt in range(2):
         raw = generate_raw(enhancer, messages, seed=seed + attempt, max_tokens=max_tokens, temperature=temperature, on_text=on_text, cancelled=cancelled)
         output = _action_only_output(raw)
         if is_unusable(output, prompt) or _repeats(output, context.previous):
             continue
-        if not missing_quotes(spans, output):
+        problem = _rewrite_problem(spans, _own_prompt(prompt, context), output, context)
+        if problem is None:
             _report(on_text, output)
             return EnhancePairResult(scene="", prompt=output, clamped=plan.clamped, warning=warning)
-        changed_quotes = output
-    if changed_quotes is None:
+        flawed = (output, problem)
+    if flawed is None:
         raise RuntimeError(NO_USABLE_MESSAGE)
-    _report(on_text, changed_quotes)
-    warnings.warn(QUOTES_CHANGED_WARNING, stacklevel=3)
-    return EnhancePairResult(scene="", prompt=changed_quotes, clamped=plan.clamped, warning=_join(warning, QUOTES_CHANGED_WARNING))
+    _report(on_text, flawed[0])
+    warnings.warn(flawed[1], stacklevel=3)
+    return EnhancePairResult(scene="", prompt=flawed[0], clamped=plan.clamped, warning=_join(warning, flawed[1]))

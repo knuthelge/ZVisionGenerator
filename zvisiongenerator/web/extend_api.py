@@ -140,7 +140,8 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading
     The optional ``steps`` are the steps the job would run; they set MiniMax H3's estimated time. The optional ``lora`` is the
     job's ``name:weight,...`` list, whose files H3 holds in memory; the estimate is ``None`` when it names a LoRA that is not there.
     An extension is never upscaled, so Review does not change its estimate and is not sent. *downloading_loras* maps the
-    LoRAs still downloading to the size they will have, so their files count before they exist.
+    LoRAs still downloading to the size they will have, so their files count before they exist. The optional ``references`` is how many
+    reference images the job holds, whose rows and vision tower H3's estimate counts.
 
     Raises:
         ValueError: If the body, path, length, model, steps or low-memory flag is invalid.
@@ -154,6 +155,7 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading
     low_memory = json_field(payload, "low_memory", bool, "a boolean")
     steps = json_field(payload, "steps", int, "a positive integer", minimum=1)
     lora = json_field(payload, "lora", str, "a string")
+    references = json_field(payload, "references", int, "a non-negative whole number", minimum=0)
 
     inspection = _inspect_source(path)
     probe = inspection.probe
@@ -168,7 +170,7 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading
     window = window_frames(extend_frames, family) if extend_frames is not None else None
     memory_fit = None
     if inspection.source is not None and extend_frames is not None:
-        memory_fit = _extend_memory_fit(resolved_model, memory_model, inspection.source, extend_frames, low_memory is not False, steps, lora, web_config, downloading_loras)
+        memory_fit = _extend_memory_fit(resolved_model, memory_model, inspection.source, extend_frames, low_memory is not False, steps, lora, web_config, downloading_loras, references=references or 0)
     frame_count = probe.frame_count if probe is not None else None
     track_path = inspection.recorded.audio_track_path if inspection.recorded is not None else None
     track_end = inspection.recorded.audio_track_end if inspection.recorded is not None else None
@@ -191,6 +193,7 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading
         "lora": (inspection.recorded.lora or "") if inspection.recorded is not None else None,
         "audio_track_path": track_path,
         "audio_track_end": track_end,
+        "reference_images": list(inspection.recorded.reference_images) if inspection.recorded is not None else [],
         "problems": [{"code": problem.code, "message": problem.message} for problem in inspection.problems],
         "extend_frames": extend_frames,
         "window_frames": window,
@@ -215,6 +218,8 @@ def _extend_memory_fit(
     lora: str | None,
     web_config: WebUiConfig,
     downloading_loras: Mapping[str, int] | None = None,
+    *,
+    references: int = 0,
 ) -> dict[str, Any] | None:
     """Return how an extension window fits this machine's memory (``status``, ``required_gb``, ``budget_gb``, and an estimated ``expected_seconds`` for H3), or ``None`` when unknown.
 
@@ -243,6 +248,7 @@ def _extend_memory_fit(
         mode="extend",
         forwards=settle_video_steps(steps, upscale=False, family=description, default_upscale_steps=UNDESCRIBED_UPSCALE_STEPS).steps or 8,
         loras_bytes=loras_bytes,
+        references=references,
     )
 
 
@@ -262,6 +268,7 @@ def extend_context_from_body(raw: dict[str, Any], prompt: str) -> EnhanceContext
     """Build the rewrite context of an extension from the source clip's own file and the request's length and audio.
 
     The optional ``context.model`` names the video model, whose family sets the step the length is a multiple of and the frames the window carries.
+    The optional ``context.references`` is the number of reference images the job carries.
 
     Raises:
         ValueError: If extending is unavailable, the source cannot be used or the length is invalid.
@@ -272,7 +279,10 @@ def extend_context_from_body(raw: dict[str, Any], prompt: str) -> EnhanceContext
     extend_frames = json_field(raw, "extend_frames", int, "an integer", name="context.extend_frames")
     seconds = json_field(raw, "extend_seconds", (int, float), "a number", name="context.extend_seconds")
     model = json_field(raw, "model", str, "a string", name="context.model")
+    references = json_field(raw, "references", int, "a non-negative whole number", name="context.references", minimum=0) or 0
     family = _model_family(model)
     require_extend_family(source, family)
     frames = requested_extend_frames(extend_frames, None if seconds is None else float(seconds), source.fps, step=extend_step(family))
-    return extend_enhance_context(source, frames, no_audio=not (raw.get("audio") is True and supports_video_audio()), prompt=prompt, family=family, track=raw.get("audio_track") is True)
+    return extend_enhance_context(
+        source, frames, no_audio=not (raw.get("audio") is True and supports_video_audio()), prompt=prompt, family=family, track=raw.get("audio_track") is True, references=references
+    )

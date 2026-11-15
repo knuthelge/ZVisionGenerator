@@ -3,6 +3,8 @@ import { inspectExtendSource } from '$lib/api/extend';
 import type { WorkspaceContext } from '$lib/types';
 import { draft } from './draft.svelte';
 import type { ExtendSourceStatus } from './extend';
+import { heldUploads } from './heldUploads.svelte';
+import { referenceRows, sentReferenceCount } from './references';
 
 // How the last inspection ended, and for which path; a status only describes the path it was made for.
 let _status = $state<ExtendSourceStatus>('idle');
@@ -15,14 +17,20 @@ let _sequence = 0;
 // The inspection in flight, so a caller can wait for its answer.
 let _pending: Promise<void> | null = null;
 
+// The references an extension would send: the Extend list's rows that hold a path or an upload.
+function _references(): number {
+  return sentReferenceCount(referenceRows(draft.state.extendReferencePaths, heldUploads.extendReferences));
+}
+
 function _keyFor(): string {
   const { extendSourcePath, extendFrames, model, lowMemory, steps, loraString } = draft.state;
-  return JSON.stringify([extendSourcePath, extendFrames, model, lowMemory, steps, loraString]);
+  return JSON.stringify([extendSourcePath, extendFrames, model, lowMemory, steps, loraString, _references()]);
 }
 
 async function _inspect(ctx: WorkspaceContext | null, options: { replaceText?: boolean }): Promise<void> {
   const state = draft.state;
   const path = state.extendSourcePath;
+  const references = _references();
   const request = ++_sequence;
   _requestedKey = _keyFor();
   _requestedPath = path;
@@ -37,7 +45,7 @@ async function _inspect(ctx: WorkspaceContext | null, options: { replaceText?: b
   _status = 'checking';
   _failure = null;
   try {
-    const info = await inspectExtendSource({ path, extend_frames: state.extendFrames, model: state.model || null, low_memory: state.lowMemory, steps: state.steps > 0 ? state.steps : null, lora: state.loraString.trim() || null });
+    const info = await inspectExtendSource({ path, extend_frames: state.extendFrames, model: state.model || null, low_memory: state.lowMemory, steps: state.steps > 0 ? state.steps : null, lora: state.loraString.trim() || null, ...(references > 0 ? { references } : {}) });
     if (request !== _sequence || draft.state.extendSourcePath !== path) return;
     // The answer is Extend's: with New open it must not write into New's boxes, so it is asked for again when Extend opens.
     if (draft.state.workflow !== 'extend') {
@@ -48,7 +56,7 @@ async function _inspect(ctx: WorkspaceContext | null, options: { replaceText?: b
     _status = 'ready';
     // The answer sized itself for the inputs it was asked about; filling the 2 s default length is not a change worth asking again.
     const after = draft.state;
-    if (after.extendSourcePath === path && after.model === state.model && after.lowMemory === state.lowMemory && after.steps === state.steps && after.loraString === state.loraString && (state.extendFrames === null || after.extendFrames === state.extendFrames)) {
+    if (after.extendSourcePath === path && after.model === state.model && after.lowMemory === state.lowMemory && after.steps === state.steps && after.loraString === state.loraString && _references() === references && (state.extendFrames === null || after.extendFrames === state.extendFrames)) {
       _requestedKey = _keyFor();
     }
   } catch (error) {
@@ -80,7 +88,7 @@ export const extendInspection = {
     return _requestedPath;
   },
 
-  /** Whether the draft's source, length, model, low-memory setting, steps and LoRAs are the ones last inspected. */
+  /** Whether the draft's source, length, model, low-memory setting, steps, LoRAs and reference count are the ones last inspected. */
   isCurrent(): boolean {
     return _requestedKey === _keyFor();
   },

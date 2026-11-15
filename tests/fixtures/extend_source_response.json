@@ -17,6 +17,7 @@
   "lora": "",
   "audio_track_path": null,
   "audio_track_end": null,
+  "reference_images": [],
   "problems": [],
   "extend_frames": 48,
   "window_frames": 73,

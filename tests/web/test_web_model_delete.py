@@ -360,7 +360,7 @@ class TestMacH3Delete:
 
         assert target is not None and target.kind == "huggingface"
         assert [path.name for path in target.stored_quants] == ["h3@mlx-te4"]
-        assert set(target.companion_repos) == {"water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "lightx2v/Minimax-h3-Turbo"}
+        assert set(target.companion_repos) == {"water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "lightx2v/Minimax-h3-Turbo", "Comfy-Org/MiniMax-H3"}
 
         delete_model(target)
 
@@ -370,6 +370,21 @@ class TestMacH3Delete:
         assert not (h3.hub / "models--lightx2v--Minimax-h3-Turbo").exists()
         assert (h3.hub / "models--org--other").is_dir()
         assert (h3.models_dir / "custom").is_dir()
+
+    def test_deleting_h3_removes_its_ref2va_copy_and_frees_the_ref2va_repository(self, h3):
+        _touch(h3.models_dir / "h3@ref2va-q4" / "model-00001-of-00001.safetensors")
+        _touch(h3.models_dir / "h3@ref2va-q4" / "ziv-quant.json")
+        _touch(h3.hub / "models--Comfy-Org--MiniMax-H3" / "snapshots" / "abc" / "part.json")
+        scope = delete_scope(h3.entry, (h3.entry,), models_dir=h3.models_dir, platform_key="darwin")
+        target = model_delete_target(h3.entry, h3.models_dir, **scope)
+
+        assert target is not None
+        assert sorted(path.name for path in target.stored_quants) == ["h3@mlx-te4", "h3@ref2va-q4"]
+
+        delete_model(target)
+
+        assert not (h3.models_dir / "h3@ref2va-q4").exists()
+        assert not (h3.hub / "models--Comfy-Org--MiniMax-H3").exists()
 
     def test_the_models_payload_names_the_copy_among_what_is_removed(self, h3):
         from zvisiongenerator.web.workspace_api import _delete_info_resolver

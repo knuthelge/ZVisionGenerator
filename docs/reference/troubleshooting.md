@@ -271,7 +271,7 @@ Windows and Linux. A warning, not a refusal: the job runs, but the model needs m
 
 ### "MiniMax H3 needs about … GB of system memory; this machine has … GB." { #h3-needs-more-system-memory }
 
-Windows and Linux. The job is refused before the model loads: the weights and your LoRAs need more system memory than the machine has. H3 needs about 18 GB before any LoRAs, so remove LoRAs first. A machine with less system memory than that can't run H3, and an LTX model needs more, not less: **LTX-2.3 4-bit** (`ltx-4`) needs about 20 GB. See [Models and licences](models.md#video-models).
+Windows and Linux. The job is refused before the model loads: the weights and your LoRAs need more system memory than the machine has. H3 needs about 18 GB before any LoRAs (and about 1.5 GB more when the job has reference images), so remove LoRAs first. A machine with less system memory than that can't run H3, and an LTX model needs more, not less: **LTX-2.3 4-bit** (`ltx-4`) needs about 20 GB. See [Models and licences](models.md#video-models).
 
 ### "MiniMax H3 needs about … GB of this machine's … GB of system memory, leaving little for other apps."
 

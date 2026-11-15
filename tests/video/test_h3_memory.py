@@ -15,6 +15,8 @@ from zvisiongenerator.utils.h3_memory import (
     h3_frames_of_latent_frames,
     h3_latent_frames,
     h3_mlx_clip_fit,
+    h3_nominal_references,
+    h3_reference_block_rows,
     h3_refine_windows,
     h3_sequence_rows,
     h3_video_rows,
@@ -68,6 +70,49 @@ def test_keyframes_add_one_latent_frame_of_rows_each():
 
 def test_tail_adds_no_rows():
     assert h3_sequence_rows(864, 480, 124, tail_frames=22) == h3_sequence_rows(864, 480, 124)
+
+
+SQUARE = (1024, 1024)
+WIDE = (1792, 1024)
+
+
+@pytest.mark.parametrize(("size", "rows"), [(SQUARE, 1024 + 1024 + 8), (WIDE, 1792 + 1792 + 8)])
+def test_a_reference_adds_its_latent_rows_and_its_vision_tokens(size, rows):
+    assert h3_reference_block_rows(*size) == rows
+
+
+def test_a_references_latent_rows_are_those_the_ref2va_layout_packs():
+    import torch
+
+    from zvisiongenerator.utils.h3_ref2va import ref2va_sequence
+
+    for width, height in (SQUARE, WIDE):
+        shape = (1, height // 16, width // 16)  # one latent frame at a sixteenth of the size
+        layout = ref2va_sequence([1] * 3, [shape], latent_frames=2, latent_height=4, latent_width=4, audio_latents=1, anchors=[], patch=(1, 2, 2), audio_channels=2, audio_tag=2, video_tag=0)
+        assert isinstance(layout.position_ids, torch.Tensor)
+        assert layout.keyframe_rows == h3_reference_block_rows(width, height) - (width // 32) * (height // 32) - 8
+
+
+def test_references_add_their_blocks_to_the_sequence():
+    base = h3_sequence_rows(864, 480, 124)
+
+    assert h3_sequence_rows(864, 480, 124, references=[SQUARE]) == base + 2056
+    assert h3_sequence_rows(864, 480, 124, references=[SQUARE, WIDE]) == base + 2056 + 3592
+    assert h3_sequence_rows(864, 480, 124, keyframes=1, references=[WIDE]) == h3_sequence_rows(864, 480, 124, keyframes=1) + 3592
+
+
+def test_a_tail_beside_references_is_shown_to_the_text_encoder_as_one_canvas_sized_block():
+    cell = (864 // 32) * (480 // 32)
+    without = h3_sequence_rows(864, 480, 124, references=[SQUARE])
+
+    assert h3_sequence_rows(864, 480, 124, tail_frames=22, references=[SQUARE]) == without + cell + 14
+    assert h3_sequence_rows(864, 480, 124, tail_frames=22) == h3_sequence_rows(864, 480, 124)
+
+
+def test_references_of_a_known_count_share_the_canvas_aspect():
+    assert h3_nominal_references(0, 1344, 768) == ()
+    assert h3_nominal_references(2, 1344, 768) == (WIDE, WIDE)
+    assert h3_nominal_references(1, 768, 1344) == ((1024, 1792),)
 
 
 @pytest.mark.parametrize(
@@ -227,6 +272,35 @@ class TestMacMemory:
         assert h3_mlx_clip_fit(576, 320, 73, budget, forwards=8)["status"] == "fits"
         assert h3_mlx_clip_fit(576, 320, 73, budget, forwards=8, mode="i2v")["status"] == "tight"
 
+    def test_text_to_video_with_references_runs_the_staged_path_so_the_conditioning_phase_sets_a_floor(self):
+        plain = estimate_h3_mlx_clip_memory(576, 320, 73)
+        with_reference = estimate_h3_mlx_clip_memory(576, 320, 73, references=[SQUARE])
+
+        assert plain < 14.2 * GIB
+        assert with_reference == pytest.approx(14.2 * GIB, abs=1)
+        assert estimate_h3_mlx_clip_memory(576, 320, 73, mode="i2v") == with_reference
+
+    def test_the_reference_rows_grow_the_denoise_phase_by_160_kib_each(self):
+        plain = estimate_h3_mlx_clip_memory(1280, 704, 243)
+        with_references = estimate_h3_mlx_clip_memory(1280, 704, 243, references=[SQUARE, WIDE])
+
+        assert with_references - plain == 160 * 1024 * (2056 + 3592)
+
+    def test_an_extension_has_no_tail_block_on_the_mac(self):
+        assert estimate_h3_mlx_clip_memory(1280, 704, 243, mode="extend", references=[SQUARE]) == estimate_h3_mlx_clip_memory(1280, 704, 243, mode="i2v", references=[SQUARE])
+
+    def test_references_take_longer(self):
+        assert estimate_h3_mlx_seconds(768, 448, 124, forwards=8, references=[SQUARE]) > estimate_h3_mlx_seconds(768, 448, 124, forwards=8)
+
+    def test_the_fit_counts_the_references_at_the_canvas_aspect(self):
+        budget = MemoryBudget(16 * GIB, unified_bytes=32 * GIB)
+        sizes = h3_nominal_references(2, 768, 448)
+        fit = h3_mlx_clip_fit(768, 448, 124, budget, forwards=8, references=2)
+
+        assert fit["required_gb"] == round(estimate_h3_mlx_clip_memory(768, 448, 124, references=sizes) / GIB, 1)
+        assert fit["required_gb"] > h3_mlx_clip_fit(768, 448, 124, budget, forwards=8)["required_gb"]
+        assert fit["expected_seconds"] == estimate_h3_mlx_seconds(768, 448, 124, forwards=8, references=sizes)
+
     @pytest.mark.parametrize("budget", [None, MemoryBudget(0), MemoryBudget(10 * GIB, system_bytes=30 * GIB)])
     def test_there_is_no_fit_without_a_unified_budget(self, budget):
         assert h3_mlx_clip_fit(768, 448, 124, budget, forwards=8) is None
@@ -329,6 +403,74 @@ class TestCudaEstimate:
 
         assert image.system_bytes - plain.system_bytes == int(1.5 * GIB)
         assert h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, mode="extend").system_bytes == plain.system_bytes
+
+    def test_references_add_their_rows_to_the_transformer_in_every_mode(self):
+        plain = h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124)
+        per_row = 151 * 1024
+
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124, references=[WIDE]).gpu_bytes - plain.gpu_bytes == per_row * 3592
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124, references=[SQUARE, WIDE]).gpu_bytes - plain.gpu_bytes == per_row * (2056 + 3592)
+        image = h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124, mode="i2v")
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124, mode="i2v", references=[WIDE]).gpu_bytes - image.gpu_bytes == per_row * 3592
+        # An extension with references also shows its tail to the text encoder: one block of the canvas's rows.
+        extension = h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124, mode="extend", references=[WIDE])
+        assert extension.gpu_bytes - plain.gpu_bytes == per_row * (3592 + 40 * 23 + 14)
+
+    @pytest.mark.parametrize("mode", ["t2v", "extend"])
+    def test_references_load_the_vision_tower_whatever_the_mode(self, mode):
+        plain = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, mode=mode)
+        referenced = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, mode=mode, references=[SQUARE])
+
+        assert referenced.system_bytes - plain.system_bytes == int(1.5 * GIB)
+
+    def test_the_vision_tower_is_counted_once_for_a_keyframe_and_references(self):
+        image = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, mode="i2v")
+
+        assert h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, mode="i2v", references=[SQUARE]).system_bytes == image.system_bytes
+
+    def test_references_add_time_in_their_rows_and_one_encode_to_text_to_video(self):
+        plain = h3_memory.h3_expected_seconds(864, 480, 124, forwards=8)
+        rows = h3_sequence_rows(864, 480, 124)
+        added = 8 * (h3_memory._cuda_forward_seconds(rows + 2056) - h3_memory._cuda_forward_seconds(rows)) + h3_memory._CUDA_IMAGE_ENCODE_SECONDS
+
+        assert h3_memory.h3_expected_seconds(864, 480, 124, forwards=8, references=[SQUARE]) == pytest.approx(plain + added, abs=1)
+
+    def test_an_image_mode_with_references_pays_the_encode_once_not_twice(self):
+        plain = h3_memory.h3_expected_seconds(864, 480, 124, forwards=8, mode="i2v")
+        rows = h3_sequence_rows(864, 480, 124, keyframes=1)
+        added = 8 * (h3_memory._cuda_forward_seconds(rows + 2056) - h3_memory._cuda_forward_seconds(rows))
+
+        assert h3_memory.h3_expected_seconds(864, 480, 124, forwards=8, mode="i2v", references=[SQUARE]) == pytest.approx(plain + added, abs=1)
+
+    def test_references_can_turn_an_upscale_that_keeps_the_transformer_into_one_that_loads_twice(self):
+        card = None
+        for gib in (x / 4 for x in range(24, 80)):
+            if h3_memory.h3_upscale_keeps_transformer(1344, 768, 124, int(gib * GIB)) and not h3_memory.h3_upscale_keeps_transformer(1344, 768, 124, int(gib * GIB), references=[WIDE, WIDE]):
+                card = int(gib * GIB)
+                break
+
+        assert card is not None
+        fit = h3_memory.h3_clip_fit(1344, 768, 124, MemoryBudget(card, system_bytes=30 * GIB), forwards=8, upscale=True, references=2)
+        plain = h3_memory.h3_clip_fit(1344, 768, 124, MemoryBudget(card, system_bytes=30 * GIB), forwards=8, upscale=True)
+        assert plain["expected_seconds"] == h3_memory.h3_expected_seconds(1344, 768, 124, forwards=8, upscale=True, keep_transformer=True)
+        assert fit["expected_seconds"] == h3_memory.h3_expected_seconds(1344, 768, 124, forwards=8, upscale=True, references=[WIDE, WIDE])
+
+    def test_the_fit_counts_the_references_at_the_canvas_aspect(self):
+        sizes = h3_nominal_references(2, 1344, 768)
+        fit = h3_memory.h3_clip_fit(1344, 768, 124, self.BUDGET, forwards=8, references=2)
+        estimate = h3_memory.estimate_h3_cuda_clip_memory(1344, 768, 124, references=sizes)
+
+        assert fit["required_gb"] == round(estimate.gpu_bytes / GIB, 1)
+        assert fit["expected_seconds"] == h3_memory.h3_expected_seconds(1344, 768, 124, forwards=8, references=sizes)
+
+    def test_an_extension_with_two_references_is_flagged_on_the_10_gb_card_where_it_fits_without(self):
+        card = MemoryBudget(10_350_886_912, system_bytes=30 * GIB)  # the RTX 3080's bytes
+        plain = h3_memory.h3_clip_fit(1344, 768, 90, card, forwards=8, mode="extend")
+        one = h3_memory.h3_clip_fit(1344, 768, 90, card, forwards=8, mode="extend", references=1)
+        two = h3_memory.h3_clip_fit(1344, 768, 90, card, forwards=8, mode="extend", references=2)
+
+        assert (plain["status"], one["status"], two["status"]) == ("fits", "fits", "tight")
+        assert h3_memory.h3_clip_fit(1344, 768, 124, card, forwards=8, mode="extend", references=2)["status"] == "too_large"
 
     def test_a_user_lora_adds_2_7_times_its_size_to_the_transformer_and_all_of_it_to_system_memory(self):
         lora = 310_000_000

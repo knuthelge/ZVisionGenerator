@@ -412,6 +412,17 @@ class TestBuildVideoConfigPayload:
         assert recorded_settings(both).end_image_path == "/tmp/end.png"
         assert recorded_settings(plain).end_image_path is None
 
+    def test_references_are_recorded_in_order_only_when_set_and_read_back(self):
+        plain = build_video_config_payload(_make_video_request(), VideoWorkingArtifacts())
+        for workflow, extra in (("txt2vid", {}), ("img2vid", {"image_path": "/tmp/first.png"})):
+            payload = build_video_config_payload(_make_video_request(reference_paths=("/tmp/b.png", "/tmp/a.png"), **extra), VideoWorkingArtifacts())
+
+            assert payload["workflow"] == workflow
+            assert payload["reference_images"] == ["/tmp/b.png", "/tmp/a.png"]
+            assert recorded_settings(payload).reference_images == ("/tmp/b.png", "/tmp/a.png")
+        assert "reference_images" not in plain
+        assert recorded_settings(plain).reference_images == ()
+
     def test_an_audio_track_is_recorded_with_where_its_sound_ends_and_read_back(self):
         request = _make_video_request(num_frames=81, fps=24.0, no_audio=True, audio_track=AudioTrack("/in/voice.mp3", 1.5))
 

@@ -196,6 +196,7 @@ def test_the_packaged_h3_family_is_described_literally():
         default_upscale_steps=8,
         extend_fps=24,
         platform_carry_frames={"darwin": 1},
+        max_reference_images=2,
     )
 
 
@@ -236,6 +237,10 @@ def test_the_family_takes_its_steps_frames_and_upscale_steps_from_the_settings()
 def test_a_malformed_setting_names_the_key_path(changes, path):
     with pytest.raises(ValueError, match=rf"^{re.escape('video_model_presets.h3.' + path)}(?=\s)"):
         video_family(_h3_settings(**changes), "h3")
+
+
+def test_the_packaged_ltx_family_takes_no_references():
+    assert video_family(load_config(), "ltx").max_reference_images == 0
 
 
 def test_detection_alignment_equals_the_rule_alignment():

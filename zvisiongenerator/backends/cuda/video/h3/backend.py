@@ -3,9 +3,9 @@
 The model handle holds file paths and settings, never weights. Every clip loads each model just before its stage and
 frees it right after, so the stages never overlap in memory:
 
-1. the prompt (and any keyframes) become one tokenized presentation;
-2. the text encoder, with its vision tower when there are keyframes, encodes it;
-3. the video VAE encoder turns the keyframes or the extension tail into latents, then the audio VAE encodes the tail audio;
+1. the prompt (and any references and keyframes) become one tokenized presentation;
+2. the text encoder, with its vision tower when there are references or keyframes, encodes it;
+3. the video VAE encoder turns the references, keyframes or extension tail into latents, then the audio VAE encodes the tail audio;
 4. the stored 4-bit transformer copy loads, with the AdaLN tables of the clip's forwards and the user LoRAs, and denoises;
 5. the video VAE decodes the video, then the audio VAE decodes the sound.
 
@@ -16,6 +16,10 @@ of the stitched latents gives the video, which is written with the stage-1 sound
 Extend pins the last 22 frames of a clip, and their sound, at the start of a window and keeps only what follows them.
 An audio track is held the same way for every audio row of the clip: the model then makes the picture only, and the
 track's own sound is what the clip is given afterwards.
+
+Reference images run the Ref2VA transformer, whichever H3 model was picked: the load uses the stored Ref2VA copy. Each
+reference is encoded once at its own size and held ahead of the keyframes in every pass, the upscale's refine windows
+included. The prompt gains the model's task tag in front, and an Extend presents its tail as ``<Video 1>``.
 """
 
 from __future__ import annotations
@@ -59,6 +63,7 @@ from zvisiongenerator.utils.h3_memory import (
 )
 from zvisiongenerator.utils.h3_converted import read_converted_h3
 from zvisiongenerator.utils.h3_preset import H3Files, H3Preset
+from zvisiongenerator.utils.h3_ref2va import load_h3_reference, task_tag
 from zvisiongenerator.utils.input_images import open_image_upright
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE as JOIN_SAMPLE_RATE
@@ -79,7 +84,7 @@ __all__ = ["H3VideoBackend"]
 _MODEL_INFO = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=H3_FPS, frame_alignment=H3_FRAMES_PER_CHUNK, resolution_alignment=H3_ROW_PIXELS)
 _MODES = ("t2v", "i2v", "extend")
 # What ``load_model`` takes. ``low_memory`` (H3 always streams its blocks) is accepted for the callers that pass it to every backend, and ignored.
-_LOAD_KEYS = frozenset({"mode", "low_memory", "loras", "upscale", "model_name", "preset", "end_image"})
+_LOAD_KEYS = frozenset({"mode", "low_memory", "loras", "upscale", "model_name", "preset", "end_image", "references"})
 _SYSTEM_MEMORY_TIGHT_RATIO = 0.8  # a load needing more than this share of system memory leaves little to the rest of the machine
 _RESOLUTION_FOR_UPSCALE = 2 * H3_ROW_PIXELS  # stage 1 runs at half size, which must stay a multiple of 32
 _PHASE = "video"
@@ -106,6 +111,7 @@ class _ClipSpec:
 
     Attributes:
         keyframes: The keyframe images as given (any size); each render fits them to its own canvas.
+        references: The reference images, already prepared; they keep their own size and are never fitted to the canvas.
         anchors: ``"first"`` or ``"last"`` per keyframe.
         tail: The extension tail, ``(22, height, width, 3)`` uint8 at the canvas size.
         tail_audio: The sound that is held, ``(2, samples)`` float32 at the audio VAE's rate: the sound under the tail, or,
@@ -121,6 +127,7 @@ class _ClipSpec:
     seed: int
     forwards: int
     keyframes: tuple[Image.Image, ...] = ()
+    references: tuple[Image.Image, ...] = ()
     anchors: tuple[str, ...] = ()
     tail: np.ndarray | None = None
     tail_audio: np.ndarray | None = None
@@ -140,7 +147,7 @@ class _ClipSpec:
         A clip that holds every audio row (a track) has no generated audio row, so it never uses the ``extend`` keys: it
         uses ``track_keyframe`` with a keyframe or a tail, and ``track`` with neither.
         """
-        has_video_rows = bool(self.keyframes) or self.tail is not None
+        has_video_rows = bool(self.keyframes) or bool(self.references) or self.tail is not None
         if self.track:
             return "track_keyframe" if has_video_rows else "track"
         if self.tail is not None and self.tail_audio is not None:
@@ -157,12 +164,14 @@ class _Denoised:
         audio: Audio latents ``(2, 32, audio_latents)``.
         embeds: The text conditioning ``(1, rows, hidden)``.
         token_tags: The modality tag of each row of *embeds*.
+        references: The reference latents the clip was made with, encoded once and held again by an upscale's refine windows.
     """
 
     video: torch.Tensor
     audio: torch.Tensor
     embeds: torch.Tensor
     token_tags: tuple[int, ...]
+    references: tuple[torch.Tensor, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -280,21 +289,33 @@ def _write_video(clip: _Rendered, output_path: Path) -> None:
 # ---- Stages: each loads its models, returns CPU results and lets go of the models on return -------------------------------
 
 
-def _encode_text(model: _H3Model, prompt: str, images: Sequence[Image.Image]) -> tuple[torch.Tensor, tuple[int, ...]]:
-    """Return the text conditioning ``(1, rows, hidden)`` of *prompt* with *images* in front of it, and the modality tag of each row."""
+def _encode_text(model: _H3Model, prompt: str, images: Sequence[Image.Image], references: Sequence[Image.Image], tail: np.ndarray | None, has_sound: bool) -> tuple[torch.Tensor, tuple[int, ...]]:
+    """Return the text conditioning ``(1, rows, hidden)`` of *prompt* with the pictures in front of it, and the modality tag of each row.
+
+    The pictures are the *references*, then the keyframe *images*. An Extend with references (*tail* given) presents the
+    tail as ``<Video 1>`` after them, with ``<Audio 1>`` first when *has_sound*.
+    """
     repo = model.files.repo_dir
-    presentation = text_encoder.tokenize_presentation(prompt, repo / "tokenizer", repo / "processor", images)
-    encoder = text_encoder.load_text_encoder(model.files.text_encoder_dir, model.files.text_encoder_shards, model.device, layers=model.preset.text_encoder_layers, vision=bool(images))
+    if references and tail is not None:
+        presentation = text_encoder.tokenize_continuation(prompt, repo / "tokenizer", repo / "processor", references, tail, has_sound)
+    else:
+        presentation = text_encoder.tokenize_presentation(prompt, repo / "tokenizer", repo / "processor", [*references, *images])
+    encoder = text_encoder.load_text_encoder(model.files.text_encoder_dir, model.files.text_encoder_shards, model.device, layers=model.preset.text_encoder_layers, vision=bool(images or references))
     embeds = text_encoder.encode(encoder, presentation, model.device).cpu()
     return embeds, presentation.token_tags
 
 
-def _encode_visuals(model: _H3Model, spec: _ClipSpec, images: Sequence[Image.Image]) -> tuple[tuple[torch.Tensor, ...], torch.Tensor | None]:
-    """Return the keyframe latents and the tail latents (``None`` without a tail), encoded by the video VAE's encoder."""
+def _encode_visuals(
+    model: _H3Model, spec: _ClipSpec, images: Sequence[Image.Image], references: Sequence[Image.Image] = ()
+) -> tuple[tuple[torch.Tensor, ...], torch.Tensor | None, tuple[torch.Tensor, ...]]:
+    """Return the keyframe latents, the tail latents (``None`` without a tail) and the *references*' latents, encoded by the video VAE's encoder.
+
+    A reference is encoded at its own size, a keyframe at the canvas.
+    """
     encoder = conditioning.load_vae_encoder(model.files.repo_dir / "vae", model.device)
     keyframes = tuple(conditioning.encode_keyframe(encoder, image, spec.width, spec.height) for image in images)
     tail = conditioning.encode_tail(encoder, spec.tail) if spec.tail is not None else None
-    return keyframes, tail
+    return keyframes, tail, tuple(conditioning.encode_reference(encoder, image) for image in references)
 
 
 def _encode_tail_audio(model: _H3Model, tail_audio: np.ndarray, latents: int) -> torch.Tensor:
@@ -405,12 +426,14 @@ def _generate(model: _H3Model, spec: _ClipSpec, shared: _SharedTransformer | Non
     geo = geometry(spec.width, spec.height, spec.num_frames)
     images = [fit_image(image, spec.width, spec.height) for image in spec.keyframes]
     schedulers = schedule.build_schedulers(model.preset.schedules[spec.forwards], model.files.repo_dir)
-    embeds, token_tags = _staged(_encode_text, model, spec.prompt, images)
-    keyframes, tail_latents = _staged(_encode_visuals, model, spec, images) if images or spec.tail is not None else ((), None)
+    prompt = f"{task_tag(model.mode, spec.track)} {spec.prompt}" if spec.references else spec.prompt
+    embeds, token_tags = _staged(_encode_text, model, prompt, images, spec.references, spec.tail, spec.tail_audio is not None)
+    visuals = bool(images or spec.references) or spec.tail is not None
+    keyframes, tail_latents, references = _staged(_encode_visuals, model, spec, images, spec.references) if visuals else ((), None, ())
     tail_audio = _staged(_encode_tail_audio, model, spec.tail_audio, spec.held_audio_latents) if spec.tail_audio is not None else None
-    held = sampler.Conditioning(keyframes=keyframes, anchors=spec.anchors, tail_latents=tail_latents, tail_audio=tail_audio)
+    held = sampler.Conditioning(keyframes=keyframes, anchors=spec.anchors, tail_latents=tail_latents, tail_audio=tail_audio, references=references)
     video_latents, audio_latents = _staged(_denoise, model, spec, geo, embeds, token_tags, schedulers, held, shared)
-    return _Denoised(video=video_latents, audio=audio_latents, embeds=embeds, token_tags=tuple(token_tags))
+    return _Denoised(video=video_latents, audio=audio_latents, embeds=embeds, token_tags=tuple(token_tags), references=references)
 
 
 def _render(model: _H3Model, spec: _ClipSpec) -> _Rendered:
@@ -468,7 +491,8 @@ def _refine(
 
     *spec* is the full-size clip. The transformer loads once, with the fold keys of every row set the windows use (a
     window that holds an image has the ``keyframe`` rows, the others the ``plain`` ones) and the user LoRAs, unless the
-    caller passes a *shared* one (loaded with those keys). One noise draw serves all windows. Window *i* reports progress after the
+    caller passes a *shared* one (loaded with those keys). With references, every window holds the stage-1 reference latents
+    (encoded once) ahead of its keyframe, so every window has the ``keyframe`` rows. One noise draw serves all windows. Window *i* reports progress after the
     *spec.forwards* stage-1 steps and the forwards of the windows before it.
     """
     from zvisiongenerator.backends.cuda.video.h3 import refine
@@ -476,8 +500,8 @@ def _refine(
     refine_schedule = model.preset.schedules[H3_REFINE_SCHEDULE]
     schedulers = schedule.build_schedulers(refine_schedule, model.files.repo_dir)
     forwards = refine_schedule.forwards - start
-    held = [refine.window_conditioning(keyframes, spec.anchors, index, len(windows)) for index in range(len(windows))]
-    transformer = shared.value if shared is not None else _load_transformer(model, _refine_fold_keys(schedulers, spec.anchors, len(windows), start))
+    held = [refine.window_conditioning(keyframes, spec.anchors, index, len(windows), references=stage1.references) for index in range(len(windows))]
+    transformer = shared.value if shared is not None else _load_transformer(model, _refine_fold_keys(schedulers, spec.anchors, len(windows), start, references=bool(stage1.references)))
     noise_video, noise_audio = refine.draw_refine_noise(latents.shape, stage1.audio.shape, spec.seed)
     latent_frames, audio_latents = latents.shape[2], stage1.audio.shape[2]
     parts = []
@@ -505,14 +529,15 @@ def _refine(
     return refine.stitch(parts, windows, latent_frames, H3_REFINE_OVERLAP_LATENT_FRAMES)
 
 
-def _refine_fold_keys(schedulers: tuple[Any, Any], anchors: Sequence[str], windows: int, start: int) -> list[Any]:
+def _refine_fold_keys(schedulers: tuple[Any, Any], anchors: Sequence[str], windows: int, start: int, *, references: bool = False) -> list[Any]:
     """Return the AdaLN fold keys of the refine's forwards from step *start*: those of every row set its windows use.
 
     A window that holds an image has the ``keyframe`` rows, the others the ``plain`` ones, which the clip's *anchors* settle.
+    With *references* every window holds them, so every window has the ``keyframe`` rows.
     """
     from zvisiongenerator.backends.cuda.video.h3 import refine
 
-    row_sets = dict.fromkeys("keyframe" if refine.window_conditioning(anchors, anchors, index, windows).keyframes else "plain" for index in range(windows))
+    row_sets = dict.fromkeys("keyframe" if references or refine.window_conditioning(anchors, anchors, index, windows).keyframes else "plain" for index in range(windows))
     return list(dict.fromkeys(key for row_set in row_sets for key in _fold_keys(schedulers, row_set, start)))
 
 
@@ -521,7 +546,15 @@ def _keeps_transformer(model: _H3Model, spec: _ClipSpec) -> bool:
 
     The estimate decides, as it does for the memory note and the time shown, so a card that would not hold it loads twice.
     """
-    return h3_upscale_keeps_transformer(spec.width, spec.height, spec.num_frames, _gpu_total_bytes(model.device), mode=model.mode, loras_bytes=h3_lora_bytes(path for path, _weight in model.loras))
+    return h3_upscale_keeps_transformer(
+        spec.width,
+        spec.height,
+        spec.num_frames,
+        _gpu_total_bytes(model.device),
+        mode=model.mode,
+        loras_bytes=h3_lora_bytes(path for path, _weight in model.loras),
+        references=tuple(image.size for image in spec.references),
+    )
 
 
 def _gpu_total_bytes(device: Any) -> int:
@@ -573,7 +606,7 @@ def _render_upscaled(
         release_memory()
         latents = _staged(_upscale_latents, model, small.video)
         images = [fit_image(image, spec.width, spec.height) for image in spec.keyframes]
-        keyframes = _staged(_encode_visuals, model, spec, images)[0] if images else ()
+        keyframes = _staged(_encode_visuals, model, spec, images)[0] if images else ()  # the references were encoded in stage 1
         refined = _staged(_refine, model, spec, latents, small, keyframes, windows, start, step_callback, total, shared)
     finally:
         if shared is not None and shared.drop():  # let go of the shared transformer, also when a stage fails or the job is cancelled
@@ -584,7 +617,7 @@ def _render_upscaled(
 
 def _shared_transformer(model: _H3Model, spec: _ClipSpec, windows: int, start: int) -> _SharedTransformer:
     """Return the transformer both passes of an upscale use, not yet loaded: its fold keys are those of the stage-1 forwards and of the refine's."""
-    refine_keys = _refine_fold_keys(schedule.build_schedulers(model.preset.schedules[H3_REFINE_SCHEDULE], model.files.repo_dir), spec.anchors, windows, start)
+    refine_keys = _refine_fold_keys(schedule.build_schedulers(model.preset.schedules[H3_REFINE_SCHEDULE], model.files.repo_dir), spec.anchors, windows, start, references=bool(spec.references))
     return _SharedTransformer(refine_keys)
 
 
@@ -644,6 +677,7 @@ def _extend(
     audio_output: bool,
     step_callback: Callable[[dict[str, Any]], None] | None,
     audio_track: AudioTrack | None = None,
+    references: Sequence[Image.Image] = (),
 ) -> ExtendSegment:
     """Read the source's tail, render the window that starts with it, and write the new part.
 
@@ -664,6 +698,7 @@ def _extend(
         seed=seed,
         forwards=forwards,
         tail=tail,
+        references=tuple(references),
         tail_audio=tail_audio,
         track=audio_track is not None,
         on_step=_progress(step_callback, _PHASE),
@@ -693,8 +728,8 @@ def _render_clip(
             _render_upscaled(model, spec, output_path, step_callback=step_callback, review=review)
 
 
-def _check_system_memory(loras: Sequence[tuple[Path, float]]) -> None:
-    """Refuse a load whose system memory (base and user LoRAs) exceeds the machine's, and warn above 80% of it.
+def _check_system_memory(loras: Sequence[tuple[Path, float]], *, references: bool = False) -> None:
+    """Refuse a load whose system memory (base, user LoRAs and, with *references*, the vision tower) exceeds the machine's, and warn above 80% of it.
 
     The decoded frames add to this per clip, so the figure is a floor.
 
@@ -704,7 +739,7 @@ def _check_system_memory(loras: Sequence[tuple[Path, float]]) -> None:
     import psutil
 
     total = int(psutil.virtual_memory().total)
-    need = h3_cuda_system_bytes(loras_bytes=h3_lora_bytes(path for path, _weight in loras))
+    need = h3_cuda_system_bytes(loras_bytes=h3_lora_bytes(path for path, _weight in loras), vision=references)
     if need > total:
         raise RuntimeError(f"MiniMax H3 needs about {need / 1024**3:.0f} GB of system memory; this machine has {total / 1024**3:.0f} GB.")
     if need > total * _SYSTEM_MEMORY_TIGHT_RATIO:
@@ -729,6 +764,8 @@ class H3VideoBackend:
                 loras: ``(path, weight)`` of each user LoRA.
                 upscale: Whether the clips are made with the latent upscale; the upscaler's file is then resolved (and downloaded on first use).
                 model_name: The name the model was picked by; the stored copy is named after it (see ``stored_copy.copy_name``).
+                references: Whether the clips take reference images. The Ref2VA transformer's stored copy is then loaded (and written on
+                    the first load) whichever model was picked; user LoRAs apply to it as to any other.
                 low_memory, end_image: Accepted and ignored (a clip method takes its last-frame image).
 
         Returns:
@@ -761,10 +798,14 @@ class H3VideoBackend:
 
         require_cuda(torch, "MiniMax H3 on Windows and Linux")
         configure_torch_runtime(torch)
-        _check_system_memory(loras)
+        references = bool(kwargs.get("references"))
+        _check_system_memory(loras, references=references)
         device = torch.device("cuda")
-        converted = read_converted_h3(Path(model_path).expanduser())
-        if converted is not None:
+        if references:
+            # The Ref2VA copy serves every model picked; it is a converted folder, so it takes the converted route.
+            ref2va_dir = converted_h3.ensure_ref2va_copy(_models_dir(), preset, device)
+            files, copy_dir = _converted_copy(ref2va_dir, read_converted_h3(ref2va_dir), preset, upscale)
+        elif (converted := read_converted_h3(Path(model_path).expanduser())) is not None:
             files, copy_dir = _converted_copy(Path(model_path).expanduser(), converted, preset, upscale)
         else:
             files = resolve_files(model_path, preset, upscale=upscale)
@@ -786,6 +827,7 @@ class H3VideoBackend:
         output_path: str,
         step_callback: Any | None = None,
         audio_track: AudioTrack | None = None,
+        references: Sequence[str] = (),
         **kwargs: Any,
     ) -> Path | None:
         """Generate a video, with sound, from a text prompt and write it to *output_path*.
@@ -803,6 +845,8 @@ class H3VideoBackend:
             audio_track: A track to follow: its window from ``start`` is held as the clip's whole sound, so the picture
                 follows it. The clip is written with the model's own decoding of that sound; a workflow stage replaces it
                 with the track. Not with the upscale.
+            references: Paths of reference images. The clip runs on the Ref2VA transformer with them held at their own size, the
+                prompt tagged; with the upscale the refine holds them too.
             **kwargs: ``stage1_steps`` (the forwards of the half-size render, with the upscale) and ``review`` (see
                 ``VideoBackend.text_to_video``).
 
@@ -818,7 +862,17 @@ class H3VideoBackend:
         _check_upscale_arguments(model, stage1_steps, review, width, height)
         forwards = _forwards(model.preset, steps if stage1_steps is None else stage1_steps)
         track_sound = read_track(audio_track, h3_audio.AUDIO_SAMPLE_RATE, num_frames / H3_FPS) if audio_track is not None else None
-        spec = _ClipSpec(prompt=prompt, width=width, height=height, num_frames=num_frames, seed=seed, forwards=forwards, tail_audio=track_sound, track=track_sound is not None)
+        spec = _ClipSpec(
+            prompt=prompt,
+            width=width,
+            height=height,
+            num_frames=num_frames,
+            seed=seed,
+            forwards=forwards,
+            references=tuple(load_h3_reference(path) for path in references),
+            tail_audio=track_sound,
+            track=track_sound is not None,
+        )
         try:
             _render_clip(model, spec, Path(output_path), stage1_steps=stage1_steps, step_callback=step_callback, review=review)
         finally:
@@ -838,6 +892,7 @@ class H3VideoBackend:
         output_path: str,
         step_callback: Any | None = None,
         audio_track: AudioTrack | None = None,
+        references: Sequence[str] = (),
         **kwargs: Any,
     ) -> Path | None:
         """Generate a video, with sound, from a first-frame image (and optionally a last-frame image) and a prompt.
@@ -856,6 +911,7 @@ class H3VideoBackend:
             output_path: Path to save the video.
             step_callback: Receives ``{"phase", "current_step", "total_steps"}`` after every forward.
             audio_track: As for ``text_to_video``.
+            references: As for ``text_to_video``; the first frame follows them as the next picture.
             **kwargs: ``end_image`` (the path of the last frame), ``stage1_steps`` and ``review`` (see ``text_to_video``).
 
         Returns:
@@ -880,6 +936,7 @@ class H3VideoBackend:
             seed=seed,
             forwards=forwards,
             keyframes=images,
+            references=tuple(load_h3_reference(path) for path in references),
             anchors=("first", "last") if end_image else ("first",),
             tail_audio=track_sound,
             track=track_sound is not None,
@@ -903,6 +960,7 @@ class H3VideoBackend:
         audio_output: bool,
         step_callback: Any | None = None,
         audio_track: AudioTrack | None = None,
+        references: Sequence[str] = (),
     ) -> ExtendSegment | None:
         """Generate the continuation of a clip: new frames, and their sound, that follow its last frame.
 
@@ -923,6 +981,8 @@ class H3VideoBackend:
             audio_track: A track to follow. The whole window's sound is held instead: the source's sound under the carried
                 tail (silence for a silent source), then the track from its start. No ``segment.wav`` is written; the
                 Extend sound stage writes it from the same window waveform.
+            references: Paths of reference images. The window is generated on the Ref2VA transformer with them held at their own
+                size, the prompt tagged, and the carried tail presented as ``<Video 1>``.
 
         Returns:
             The generated segment: its video and, with audio, a 48 kHz WAV that starts at the new part.
@@ -946,6 +1006,7 @@ class H3VideoBackend:
                 audio_output=audio_output,
                 step_callback=step_callback,
                 audio_track=audio_track,
+                references=tuple(load_h3_reference(path) for path in references),
             )
         finally:
             release_memory()

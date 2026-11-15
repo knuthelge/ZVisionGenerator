@@ -110,6 +110,12 @@ describe('clipMemoryRequest', () => {
     expect(clipMemoryRequest(draftState({ loraString: '' }), CONTROLS)).not.toHaveProperty('lora');
   });
 
+  it('sends how many references the job holds, and nothing when there are none', () => {
+    expect(clipMemoryRequest(draftState(), { ...CONTROLS, references: 2 })?.references).toBe(2);
+    expect(clipMemoryRequest(draftState(), { ...CONTROLS, references: 0 })).not.toHaveProperty('references');
+    expect(clipMemoryRequest(draftState(), CONTROLS)).not.toHaveProperty('references');
+  });
+
   it('sends Review only while an upscale is on and the model offers the toggle', () => {
     const reviewing = { videoUpscaleEnabled: true, videoUpscaleReview: true };
     const controls = { ...CONTROLS, review: true };

@@ -4,7 +4,7 @@
   import { splitImageFiles } from '$lib/state/references';
   import type { ImagesView } from './imagesView';
   import ImageSources from './ImageSources.svelte';
-  import { referenceEditor } from './referenceEditor';
+  import { referenceEditor, referenceWording } from './referenceEditor';
   import ReferenceThumbContent from './ReferenceThumbContent.svelte';
 
   interface Props {
@@ -13,11 +13,12 @@
   }
 
   let { references }: Props = $props();
-  const { rows, max, hasRoom } = $derived(references);
+  const { list, rows, max, hasRoom } = $derived(references);
+  const wording = $derived(referenceWording(list));
 
   // Each row has a small thumbnail, its number over its name and a remove button. A row whose image is gone also has Replace:
   // it points the add items below at that row, so the new image keeps its number.
-  const editor = referenceEditor(() => max);
+  const editor = referenceEditor(() => max, () => list);
   let replacing = $state<number | null>(null);
   // The row being replaced, as long as it is still there and still gone.
   const target = $derived(replacing !== null && rows[replacing]?.gone ? replacing : null);
@@ -53,7 +54,7 @@
       <div class="refrow" role="group" aria-label="Reference {number}">
         <span class="ref-thumb" class:missing={row.gone}>{#if row.gone}<Icon name="alert" size={16} />{:else}<ReferenceThumbContent file={row.file} path={row.path || null} alt="Reference {number} preview" />{/if}</span>
         <span class="ref-text">
-          <span class="ref-num">Reference {number}</span>
+          <span class="ref-num">{wording.label(number)}</span>
           <span class="ref-name" class:missing={row.gone} title={row.name}>{row.name}</span>
           {#if row.error}<span class="ref-error">{row.error}</span>{/if}
         </span>
@@ -71,7 +72,7 @@
 {:else}
   <p class="ui-help">That's all {max} this model takes. Remove one to add another.</p>
 {/if}
-<p class="ui-help">Refer to them in the prompt as image 1, image 2…</p>
+<p class="ui-help">{wording.hint}</p>
 
 <style>
   .refs { display: flex; flex-direction: column; }

@@ -1,6 +1,11 @@
 # References for MiniMax H3 video
 
-**Status:** Proposed (2026-11-13). The Windows/Linux spike is done (results below); step 0 checks more seeds on Windows/Linux and runs the macOS spike.
+**Status:** Done (2026-11-15; built on `feat/video-reference-image`). The text below is the design as proposed; it shipped differently:
+
+- **The user writes `<Picture N>`.** The app adds the task tag (`[reference generation …]`) and sends the rest of the prompt unchanged. On Windows/Linux, Extend also gets one sentence after the tag: "The target video continues `<Video 1>` as one continuous shot with no cut." macOS Extend runs as image to video and gets none. No empty-action block, no `--reference none`, no time hint and no step 0.
+- **An audio track, a 2x upscale and a last frame are allowed with references.** Nothing is refused. The cut to another shot seen in the first last-frame test came from that test, not the model: a proper run with references, first and last frame landed smoothly on the last frame.
+- **Extend carries the source's references in the Web UI.** The CLI needs `--reference` on each Extend.
+- **The Ref2VA copy is `h3@ref2va-q4` on Windows/Linux and `h3@ref2va-q8` on macOS,** built on first use.
 
 ## Problem
 
@@ -16,7 +21,7 @@ On the **Video** tab, when the model is **MiniMax H3**, the **References** secti
 
 - **Extend carries the references over**, as it carries the scene: extending a clip made with references fills the section with that clip's references. Removing or replacing them applies to this Extend only.
 - **An Extend with references needs an action.** Generate is blocked with "Type what happens next. An Extend with references needs an action." With an empty action the spike's clip cut to a different shot and the colours oversaturated.
-- **No references with a last frame.** On H3 a clip with a last frame and references is refused: "References can't be combined with a last frame on MiniMax H3." The reference model cut away in the middle of a first-and-last-frame clip, even without references. The section stays visible and says so when a last frame is set.
+- **References with a last frame are allowed (see the note at the top).** The proposal refused them: "References can't be combined with a last frame on MiniMax H3." The reference model cut away in the middle of a first-and-last-frame clip, even without references. The section stays visible and says so when a last frame is set.
 - **The first job with references downloads the H3 reference model.** It is a second H3 model of about 16 GB, plus its turbo LoRA. The usual download dialog lists it with its size and licence (the same MiniMax H3 licence). After the download it is converted once into a stored copy of about 12 GB, like the main H3 model. A job with references loads that model instead of the main one, so switching between clips with and without references reloads the model. Clips without references keep using the main H3 model.
 - **Cost:** on a 10 GB card at 768p, references add about 20% to an Extend (about 7 minutes instead of 6) and about 9% to image to video. The section says it takes a little longer.
 - **Any other model** hides the section and sends nothing, but keeps the list, as the Image tab does for models without references.
@@ -159,4 +164,4 @@ The setup was a 10 GB card with 32 GB of RAM, 1344×768 at 24 fps, turbo 8 steps
 - **LTX-2.5 Ingredients IC-LoRA.** Not run. It wants a reference sheet looped as a 121-frame video and was trained only at 768×448, with first-frame conditioning probability 0, so it doesn't fit Extend's carried frames.
 - **A face pass after generation** (crop the face and regenerate it with references). Not tested; it adds a second pass to every clip.
 - **The H3 face-swap LoRA.** Rejected: it would put general face swapping into the app.
-- **Ref2VA as tried on 2026-10-28.** It was dropped then: at 62 GB, text to video only, and about 480p on a 10 GB card ([References for FLUX.2 Klein](archive/references.md)). The pruned 16 GB file, the turbo LoRA and the layouts above change all three.
+- **Ref2VA as tried on 2026-10-28.** It was dropped then: at 62 GB, text to video only, and about 480p on a 10 GB card ([References for FLUX.2 Klein](references.md)). The pruned 16 GB file, the turbo LoRA and the layouts above change all three.

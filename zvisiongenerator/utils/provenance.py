@@ -93,7 +93,7 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
     """Build the config payload embedded in a saved video.
 
     The top-level keys are the reusable settings (schema, workflow, prompt, model, family, seed, steps,
-    dimensions, frame count, reference image, last frame (``end_image_path``, only when set), LoRAs); ``generation`` records time, upscale, audio and format.
+    dimensions, frame count, reference image, last frame (``end_image_path``, only when set), references (``reference_images``, only when set), LoRAs); ``generation`` records time, upscale, audio and format.
     An auto-enhanced prompt replaces the template prompt so the asset records what rendered. The prompt is the
     action alone; the scene is recorded apart as ``scene`` (omitted when there is none), and ``scene_input`` and
     ``prompt_input`` keep the user's own text when the scene or prompt was enhanced.
@@ -136,6 +136,8 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
     }
     if request.end_image_path:
         payload["end_image_path"] = _portable_path(request.end_image_path)
+    if request.reference_paths:
+        payload["reference_images"] = [_portable_path(path) for path in request.reference_paths]
     payload.update(_audio_track_fields(request))
     if extend is not None:
         payload["source_video"] = _portable_path(str(extend.original_path))

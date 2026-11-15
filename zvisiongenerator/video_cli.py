@@ -25,6 +25,7 @@ from zvisiongenerator.utils.config import load_config, resolve_video_defaults, s
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
+from zvisiongenerator.utils.references import check_reference_files, parse_reference_paths
 from zvisiongenerator.utils.h3_memory import h3_lora_bytes
 from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.downloads import describe_refusal
@@ -109,6 +110,14 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
     )
     parser.add_argument("--image", dest="image_path", type=str, default=None, help="First frame for image-to-video.")
     parser.add_argument("--end-image", dest="end_image_path", type=str, default=None, help="Last frame: the clip runs from --image to it. Needs --image.")
+    parser.add_argument(
+        "--reference",
+        dest="reference_paths",
+        type=parse_reference_paths,
+        default=[],
+        metavar="PATH[,PATH...]",
+        help="Comma-separated reference images (up to 2 on MiniMax H3). Name them in your prompt as <Picture 1>, <Picture 2>. Works with --image and --extend.",
+    )
     parser.add_argument("--ratio", type=str, default=None, help="Aspect ratio for generated video (e.g. 16:9, 9:16, 1:1).")
     parser.add_argument("-s", "--size", type=str, default=None, help="Resolution scale (e.g. s, m, l). Default from config.")
     parser.add_argument("-W", "--width", type=int, default=None, help="Override video width. LTX: must be divisible by 32.")
@@ -287,6 +296,7 @@ def _clip_fit(args: argparse.Namespace, *, upscale: bool) -> dict[str, Any] | No
         forwards=getattr(args, "steps", None) or 8,
         loras_bytes=h3_lora_bytes(getattr(args, "lora_paths", None) or ()),
         review=bool(getattr(args, "review", False)),
+        references=len(getattr(args, "reference_paths", None) or ()),
     )
 
 
@@ -476,6 +486,7 @@ def main(*, prog: str = "ziv-video") -> None:
             end_image=args.end_image_path is not None,
             upscale=bool(args.upscale),
             audio_track=args.audio_track is not None,
+            references=len(args.reference_paths),
         )
     except ValueError as e:
         parser.error(str(e))
@@ -500,6 +511,11 @@ def main(*, prog: str = "ziv-video") -> None:
             require_readable_track(args.audio_track)
         except ValueError as e:
             parser.error(str(e))
+
+    try:
+        check_reference_files(args.reference_paths)
+    except ValueError as e:
+        parser.error(str(e))
 
     # Validate T2V-only model with --image
     if args.image_path and not model_info.supports_i2v:
@@ -615,7 +631,12 @@ def main(*, prog: str = "ziv-video") -> None:
         enhance_by_set = inspection.enhance_by_set
     # The terms of a model that has them are named before anything downloads, the preflight's enhancer included.
     try:
-        print_licence_notice(model_name, lambda: video_plan(args.model, family=model_info.family, config=config, model_name=model_name, platform_key=sys.platform, upscale=bool(args.upscale)))
+        print_licence_notice(
+            model_name,
+            lambda: video_plan(
+                args.model, family=model_info.family, config=config, model_name=model_name, platform_key=sys.platform, upscale=bool(args.upscale), references=bool(args.reference_paths)
+            ),
+        )
     except ValueError as e:
         parser.error(str(e))
     # The key listener starts after ensure_ffmpeg, whose input() prompt it would compete with, and covers the preflight and
@@ -660,7 +681,7 @@ def main(*, prog: str = "ziv-video") -> None:
                     end_image=args.end_image_path is not None,
                     low_memory=args.low_memory,
                     loras=loras,
-                    **video_load_options(model_info.family, config, model_name, platform_key=sys.platform, upscale=bool(args.upscale)),
+                    **video_load_options(model_info.family, config, model_name, platform_key=sys.platform, upscale=bool(args.upscale), references=bool(args.reference_paths)),
                 )
             except (RuntimeError, ValueError, OSError, ImportError) as e:
                 logger.exception("Failed to load video model %s", args.model)

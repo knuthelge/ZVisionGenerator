@@ -1,4 +1,4 @@
-"""Helpers of the MiniMax H3 windowed refine: the noise drawn once, the audio and keyframes of each window, and the cross-fade.
+"""Helpers of the MiniMax H3 windowed refine: the noise drawn once, the audio, references and keyframes of each window, and the cross-fade.
 
 The upscale refines the enlarged latents in overlapping windows of latent frames (:func:`~zvisiongenerator.utils.h3_memory.h3_refine_windows`),
 each as a clip of its own geometry. These functions are the pieces around that loop; the loop itself, which loads the
@@ -55,13 +55,13 @@ def window_audio_rows(audio: torch.Tensor, offset: int, count: int) -> torch.Ten
     return audio[:, :, offset : offset + count].permute(0, 2, 1).reshape(-1, audio.shape[1])
 
 
-def window_conditioning(keyframes: Sequence[torch.Tensor], anchors: Sequence[str], index: int, count: int) -> Conditioning:
-    """Return the keyframes window *index* of *count* holds: a ``"first"`` one in window 0 only and a ``"last"`` one in the final window only.
+def window_conditioning(keyframes: Sequence[torch.Tensor], anchors: Sequence[str], index: int, count: int, *, references: Sequence[torch.Tensor] = ()) -> Conditioning:
+    """Return what window *index* of *count* holds: every reference, a ``"first"`` keyframe in window 0 only and a ``"last"`` one in the final window only.
 
-    A single window holds both. The windows in between hold none.
+    A single window holds both keyframes. The windows in between hold none, and only the references.
     """
     held = [(keyframe, anchor) for keyframe, anchor in zip(keyframes, anchors, strict=True) if (anchor == "first" and index == 0) or (anchor == "last" and index == count - 1)]
-    return Conditioning(keyframes=tuple(keyframe for keyframe, _ in held), anchors=tuple(anchor for _, anchor in held))
+    return Conditioning(keyframes=tuple(keyframe for keyframe, _ in held), anchors=tuple(anchor for _, anchor in held), references=tuple(references))
 
 
 def stitch(parts: Sequence[torch.Tensor], windows: Sequence[tuple[int, int]], latent_frames: int, overlap: int) -> torch.Tensor:

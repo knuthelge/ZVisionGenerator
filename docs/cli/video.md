@@ -78,6 +78,15 @@ MiniMax H3 is stronger on dynamic scenes and much larger and slower than LTX. It
 - **`--low-memory`** changes nothing: H3 always streams its blocks.
 - **`--lora`** takes MiniMax H3 LoRAs only.
 
+### Use references (--reference) { #use-references-reference }
+
+```bash
+ziv-video -m h3 --reference man.png --prompt "The man from <Picture 1> walks into the kitchen."
+ziv-video -m h3 --extend clip.mp4 --reference man.png --extend-seconds 4 --prompt "The man from <Picture 1> turns to the window."
+```
+
+`--reference` takes one or two images, comma-separated, named `<Picture 1>` and `<Picture 2>` in `--prompt` in the order you list them. Pass it again on every `--extend`. See [Keep a person or place in a clip](../guides/video.md#references).
+
 ## Upscale while generating
 
 ```bash

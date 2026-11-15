@@ -1,3 +1,24 @@
+import type { WorkspaceWorkflow } from '$lib/types';
+
+/** Which reference list a workflow edits: the Image tab's, the Video tab's New kind's, or the Extend kind's. Each is its own list. */
+export type ReferenceList = 'image' | 'video' | 'extend';
+
+/** The reference list a workflow edits: the Video list for text to video and image to video, the Extend list for Extend, the Image list for every other workflow. */
+export function referenceListOf(workflow: WorkspaceWorkflow): ReferenceList {
+  if (workflow === 'extend') return 'extend';
+  return workflow === 'txt2vid' || workflow === 'img2vid' ? 'video' : 'image';
+}
+
+/** The draft field that holds a list's paths. */
+export function referencePathsKey(list: ReferenceList): 'referenceImagePaths' | 'videoReferencePaths' | 'extendReferencePaths' {
+  if (list === 'image') return 'referenceImagePaths';
+  return list === 'video' ? 'videoReferencePaths' : 'extendReferencePaths';
+}
+
+/** Whether two lists of reference paths are the same, in the same order. */
+export function sameReferences(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((path, index) => path === b[index]);
+}
 
 /**
  * One reference image row of the Workspace. A row is either a path on the host or a file uploaded from this device;
@@ -11,6 +32,11 @@ export interface ReferenceRow {
 /** Pair the draft's paths with the pending uploads that stand in for them; a missing upload counts as none. */
 export function referenceRows(paths: readonly string[], files: readonly (File | null | undefined)[]): ReferenceRow[] {
   return paths.map((path, index) => ({ path, file: files[index] ?? null }));
+}
+
+/** How many of the rows a submit sends: the ones that hold a path or an uploaded file. */
+export function sentReferenceCount(rows: readonly ReferenceRow[]): number {
+  return rows.filter((row) => row.file !== null || row.path !== '').length;
 }
 
 // The input image types by extension. The server's list is IMAGE_EXTENSIONS in zvisiongenerator/utils/input_images.py.

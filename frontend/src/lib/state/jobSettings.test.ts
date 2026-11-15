@@ -91,7 +91,16 @@ describe('jobSettingsPrefill', () => {
     expect(params.reference_path).toEqual(['/in/a.png', '/out/.web_uploads/b.png']);
 
     expect(jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', model: 'klein', prompt: 'a', reference_path: '/in/only.png' }).params.reference_path).toEqual(['/in/only.png']);
-    expect(jobSettingsPrefill({ mode: 'video', workflow: 'txt2vid', model: 'ltx', prompt: 'a' }).params).not.toHaveProperty('reference_path');
+    expect(jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', model: 'klein', prompt: 'a' }).params.reference_path).toEqual([]);
+  });
+
+  it('keeps the references a video job ran with, in order, and none for a job without them', () => {
+    for (const workflow of ['txt2vid', 'img2vid', 'extend'] as const) {
+      const { params } = jobSettingsPrefill({ mode: 'video', workflow, model: 'h3', prompt: 'a', reference_path: ['/in/a.png', '/out/.web_uploads/b.png'] });
+      expect(params.reference_path, workflow).toEqual(['/in/a.png', '/out/.web_uploads/b.png']);
+    }
+    expect(jobSettingsPrefill({ mode: 'video', workflow: 'txt2vid', model: 'h3', prompt: 'a', reference_path: '/in/only.png' }).params.reference_path).toEqual(['/in/only.png']);
+    expect(jobSettingsPrefill({ mode: 'video', workflow: 'txt2vid', model: 'ltx', prompt: 'a' }).params.reference_path).toEqual([]);
   });
 
   it('carries a submitted last frame as a prefill param, like the first frame', () => {
@@ -286,7 +295,7 @@ describe('jobSettingsPrefill', () => {
       scene: 'A rainy street.', prompt: 'She waves.', steps: '8', seed: '7', audio: 'true', low_memory: 'true',
     });
 
-    expect(params).toEqual({ workflow: 'extend', model: 'ltx', steps: '8', seed: '7', source_video: '/clips/walk.mp4', extend_frames: '48' });
+    expect(params).toEqual({ workflow: 'extend', model: 'ltx', steps: '8', seed: '7', source_video: '/clips/walk.mp4', extend_frames: '48', reference_path: [] });
     expect(patch).toMatchObject({ scene: 'A rainy street.', prompt: 'She waves.', seed: 7, audio: true, lowMemory: true, videoUpscaleEnabled: false });
     // The text is the job's own, so inspecting its source must not replace it.
     expect(patch.extendPrefill).toEqual({ path: '/clips/walk.mp4', scene: '', prompt: '' });

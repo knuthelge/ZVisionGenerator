@@ -49,6 +49,11 @@ def _upscale_kwargs(request: VideoGenerationRequest, artifacts: VideoWorkingArti
     return kwargs
 
 
+def _reference_kwargs(request: VideoGenerationRequest) -> dict[str, object]:
+    """Return the backend keyword argument of the reference images: ``references`` with the paths, or nothing when the request has none."""
+    return {"references": request.reference_paths} if request.reference_paths else {}
+
+
 def _timed_review(review: Callable[[Path], None], artifacts: VideoWorkingArtifacts) -> Callable[[Path], None]:
     """Wrap *review* so the seconds it blocks, also when it raises, are added to ``artifacts.review_wait``."""
 
@@ -127,7 +132,7 @@ def text_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorking
     prompt_one_line = " ".join(prompt.split())
     print(f"  Prompt: {prompt_one_line[:100]}{'...' if len(prompt_one_line) > 100 else ''}")
     output_path = str(Path(request.output_dir) / artifacts.filename)
-    kwargs = _upscale_kwargs(request, artifacts)
+    kwargs = {**_upscale_kwargs(request, artifacts), **_reference_kwargs(request)}
     t0 = time.monotonic()
     result = request.backend.text_to_video(
         model=request.model,
@@ -159,7 +164,7 @@ def image_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
     prompt_one_line = " ".join(prompt.split())
     print(f"  Prompt: {prompt_one_line[:100]}{'...' if len(prompt_one_line) > 100 else ''}")
     output_path = str(Path(request.output_dir) / artifacts.filename)
-    kwargs = _upscale_kwargs(request, artifacts)
+    kwargs = {**_upscale_kwargs(request, artifacts), **_reference_kwargs(request)}
     if request.end_image_path is not None:
         kwargs["end_image"] = request.end_image_path
     t0 = time.monotonic()
@@ -220,6 +225,7 @@ def extend_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkingA
             audio_output=_extend_generates_sound(request),
             step_callback=request.step_callback,
             audio_track=request.audio_track,
+            **_reference_kwargs(request),
         )
     except BaseException:
         shutil.rmtree(segment_dir, ignore_errors=True)

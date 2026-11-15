@@ -288,8 +288,9 @@ def _job_context(args: argparse.Namespace, *, mode: str, family: VideoFamily | N
     # A track is the clip's sound, so the model generates none and the rewrite has no Sound rules.
     track = mode == "video" and getattr(args, "audio_track", None) is not None
     source = getattr(args, "extend_source", None) if mode == "video" else None
+    references = len(getattr(args, "reference_paths", None) or ())
     if source is not None:
-        return extend_enhance_context(source, args.extend_frames, no_audio=no_audio, family=family, track=track)
+        return extend_enhance_context(source, args.extend_frames, no_audio=no_audio, family=family, track=track, references=references)
     return enhance_context(
         mode=mode,
         width=getattr(args, "width", None),
@@ -299,7 +300,7 @@ def _job_context(args: argparse.Namespace, *, mode: str, family: VideoFamily | N
         fps=getattr(args, "fps", None),
         audio=not no_audio and not track,
         reference_image=bool(getattr(args, "image_path", None)),
-        references=len(getattr(args, "reference_paths", None) or ()),
+        references=references,
         end_image=bool(getattr(args, "end_image_path", None)),
     )
 

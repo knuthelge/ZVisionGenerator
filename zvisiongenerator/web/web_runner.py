@@ -1126,7 +1126,16 @@ class WebRunner:
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": len(plan.iterations)})
             return
         if not self._ensure_downloads(
-            model_part or video_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=sys.platform, upscale=bool(request.upscale)),
+            model_part
+            or video_model_part(
+                request.model_name or model_ref,
+                model_ref,
+                family=request.model_family,
+                config=config,
+                platform_key=sys.platform,
+                upscale=bool(request.upscale),
+                references=bool(request.reference_paths),
+            ),
             mode="video",
             total_iterations=len(plan.iterations),
             progress_callback=progress_callback,
@@ -1151,7 +1160,9 @@ class WebRunner:
                 end_image=getattr(args, "end_image_path", None) is not None,
                 low_memory=getattr(args, "low_memory", True),
                 loras=loras,
-                **video_load_options(request.model_family, config, request.model_name or model_ref, platform_key=sys.platform, upscale=bool(request.upscale), quiet=True),
+                **video_load_options(
+                    request.model_family, config, request.model_name or model_ref, platform_key=sys.platform, upscale=bool(request.upscale), references=bool(request.reference_paths), quiet=True
+                ),
             )
             run_video_batch(
                 backend=backend,

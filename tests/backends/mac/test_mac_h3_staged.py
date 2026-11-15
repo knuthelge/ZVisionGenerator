@@ -46,7 +46,8 @@ class _Component:
 
 class _VideoVae(_Component):
     def _encode_clip(self, pixels: Any) -> Any:
-        return mx.zeros((1, 1, SIZE // 8, SIZE // 8, 2 * LATENT_CHANNELS))
+        _, _, height, width, _ = pixels.shape
+        return mx.zeros((1, 1, height // 8, width // 8, 2 * LATENT_CHANNELS))
 
     def decode(self, latents: Any) -> Any:
         assert latents.shape == (1, LATENT_CHANNELS, LATENT_FRAMES, SIZE // 8, SIZE // 8)
@@ -105,6 +106,7 @@ class _TextEncoder(_Component):
 
     def build_request(self, prompt: str, images: list) -> tuple[Any, np.ndarray, tuple[None, np.ndarray]]:
         self.rig.request = (prompt, self._processor.image_processor)
+        self.rig.request_images = list(images)
         ids = [1, IMAGE_TOKEN, IMAGE_TOKEN, IMAGE_TOKEN, 2, 3]
         return mx.array(np.array([ids], dtype=np.int32)), np.array([1, 0, 0, 0, 1, 1]), (None, np.array([[1, 2, 6]]))
 
@@ -158,7 +160,10 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setattr(VisionConfig, "from_dict", classmethod(lambda cls, raw: raw))
     monkeypatch.setattr(language.LanguageModel, "get_rope_index", lambda encoder, ids, **kwargs: (mx.zeros((3, 1, ids.shape[1])), None))
 
-    processor = lambda images, return_tensors: {"pixel_values": np.zeros((12, 6), dtype=np.float32), "image_grid_thw": np.array([[1, 2, 6]])}  # noqa: E731
+    def processor(images: list, return_tensors: str) -> dict[str, np.ndarray]:
+        rig.processed_images = list(images)
+        return {"pixel_values": np.zeros((12, 6), dtype=np.float32), "image_grid_thw": np.array([[1, 2, 6]])}
+
     monkeypatch.setattr(h3_staged, "_image_processor", lambda folder: processor)
     rig.processor = processor
 
@@ -178,7 +183,9 @@ def _generate(
     images: int | None = None,
     seed: int = 7,
     track_audio: np.ndarray | None = None,
+    references: tuple[tuple[int, int], ...] = (),
 ) -> tuple[np.ndarray, np.ndarray, int]:
+    """Run a clip; *references* are the ``(width, height)`` of each reference image."""
     image = Image.new("RGB", (SIZE, SIZE), (200, 30, 30))
     return h3_staged.generate_conditioned(
         fl2va_dir=rig.dirs.fl2va,
@@ -198,6 +205,7 @@ def _generate(
         step_callback=callback,
         verbose=False,
         track_audio=track_audio,
+        references=[Image.new("RGB", size, (30, 30, 200)) for size in references],
     )
 
 
@@ -434,3 +442,148 @@ class TestAudioTrack:
         assert (audio.dtype, audio.shape, rate) == (np.float32, (2, round(FRAMES / 24 * SAMPLE_RATE)), SAMPLE_RATE)
         assert not audio.any()
         assert rig.events.count("load audio vae") == 1
+
+
+class TestReferences:
+    """Reference images (Ref2VA): encoded at their own size ahead of the keyframes, held like them, in a layout from ``ref2va_sequence``."""
+
+    WIDE = (64, 32)  # a 4 x 8 latent grid: 8 rows
+    TALL = (32, 64)  # an 8 x 4 latent grid: 8 rows
+    REFERENCE_ROWS = 8
+
+    @pytest.fixture
+    def seen(self, rig, monkeypatch):
+        """Record the encoder calls, the layout the sampler asked for and every transformer forward."""
+        from minimax_h3_mlx.pipeline import MiniMaxH3Pipeline
+        import zvisiongenerator.utils.h3_ref2va as ref2va
+
+        seen = SimpleNamespace(encoded=[], layouts=[], forwards=[])
+        real_encode = MiniMaxH3Pipeline._encode_keyframes
+
+        def encode(host: Any, images: list, height: int, width: int) -> Any:
+            seen.encoded.append(([image.size for image in images], height, width))
+            return real_encode(host, images, height, width)
+
+        def layout(*args: Any, **kwargs: Any) -> Any:
+            sequence = ref2va.ref2va_sequence(*args, **kwargs)
+            seen.layouts.append((args, kwargs, sequence))
+            return sequence
+
+        def forward(
+            dit: _Dit, video: Any, audio: Any, embeds: Any, table: Any, indices: Any, tags: Any, positions: Any, video_indices: Any, audio_indices: Any, text_indices: Any, **kwargs: Any
+        ) -> Any:
+            rows = np.array(table)[np.array(indices)]
+            seen.forwards.append(
+                {
+                    "video": np.array(video[0].astype(mx.float32)),
+                    "audio": np.array(audio[0].astype(mx.float32)),
+                    "row_timesteps": rows,
+                    "tags": np.array(tags),
+                    "positions": np.array(positions),
+                    "video_indices": np.array(video_indices),
+                    "audio_indices": np.array(audio_indices),
+                    "text_indices": np.array(text_indices),
+                }
+            )
+            return mx.ones_like(video), mx.ones_like(audio)
+
+        monkeypatch.setattr(MiniMaxH3Pipeline, "_encode_keyframes", encode)
+        monkeypatch.setattr(h3_staged, "ref2va_sequence", layout)
+        monkeypatch.setattr(_Dit, "__call__", forward)
+        return seen
+
+    def test_each_reference_is_encoded_alone_at_its_own_size_then_the_keyframe_on_the_canvas(self, rig, seen):
+        _generate(rig, references=(self.WIDE, self.TALL))
+
+        assert seen.encoded == [([self.WIDE], 32, 64), ([self.TALL], 64, 32), ([(SIZE, SIZE)], SIZE, SIZE)]
+
+    def test_the_vision_tower_and_the_request_get_the_references_then_the_keyframe(self, rig, seen):
+        _generate(rig, references=(self.WIDE, self.TALL))
+
+        expected = [self.WIDE, self.TALL, (SIZE, SIZE)]
+        assert [image.size for image in rig.processed_images] == expected
+        assert [image.size for image in rig.request_images] == expected
+
+    def test_the_layout_is_the_ref2va_one_with_the_references_latent_shapes_and_the_first_frame(self, rig, seen):
+        _generate(rig, references=(self.WIDE, self.TALL))
+
+        (text_tags, shapes), kwargs, sequence = seen.layouts[0]
+        assert text_tags.tolist() == [1, 0, 0, 0, 1, 1]
+        assert list(shapes) == [(1, 4, 8), (1, 8, 4)]
+        assert (kwargs["latent_frames"], kwargs["latent_height"], kwargs["latent_width"], kwargs["audio_latents"]) == (LATENT_FRAMES, 4, 4, AUDIO_LATENTS)
+        assert (tuple(kwargs["anchors"]), kwargs["patch"], kwargs["audio_channels"]) == (("first",), (1, 2, 2), 2)
+        assert sequence.keyframe_rows == 2 * self.REFERENCE_ROWS + ROWS_PER_FRAME
+        for forward in seen.forwards:
+            np.testing.assert_array_equal(forward["positions"], sequence.position_ids.numpy().astype(np.float32))
+            np.testing.assert_array_equal(forward["tags"], sequence.token_tags.numpy())
+            np.testing.assert_array_equal(forward["video_indices"], sequence.video_indices.numpy())
+            np.testing.assert_array_equal(forward["audio_indices"], sequence.audio_indices.numpy())
+
+    def test_the_transformer_input_holds_the_reference_rows_then_the_keyframe_rows_then_the_generated_rows(self, rig, seen):
+        _generate(rig, references=(self.WIDE, self.TALL))
+
+        held = 2 * self.REFERENCE_ROWS + ROWS_PER_FRAME
+        assert {forward["video"].shape for forward in seen.forwards} == {(held + LATENT_FRAMES * ROWS_PER_FRAME, 8)}
+        assert {forward["audio"].shape for forward in seen.forwards} == {(2 * AUDIO_LATENTS, AUDIO_CHANNELS_LATENT)}
+
+    def test_the_held_rows_never_change_and_sit_at_the_keyframe_timestep_while_the_generated_rows_are_stepped(self, rig, seen):
+        from minimax_h3_mlx.packing import KEYFRAME_NOISE_AUG
+        from minimax_h3_mlx.scheduler import MiniMaxH3Scheduler
+
+        _generate(rig, references=(self.WIDE,))
+
+        held = self.REFERENCE_ROWS + ROWS_PER_FRAME
+        scheduler = MiniMaxH3Scheduler(shift=SCHEDULE.video_shift)
+        scheduler.set_timesteps(SCHEDULE.num_inference_steps)
+        assert len(seen.forwards) == SCHEDULE.forwards
+        for forward, timestep in zip(seen.forwards, scheduler.timesteps.tolist(), strict=True):
+            np.testing.assert_array_equal(forward["video"][:held], seen.forwards[0]["video"][:held])
+            video_rows = forward["row_timesteps"][forward["video_indices"]]
+            assert set(video_rows[:held].tolist()) == {np.float32(max(timestep, KEYFRAME_NOISE_AUG))}
+            assert set(video_rows[held:].tolist()) == {np.float32(timestep)}
+        assert not np.array_equal(seen.forwards[-1]["video"][held:], seen.forwards[0]["video"][held:])
+
+    def test_a_last_frame_follows_the_first_after_the_references_in_the_layout_and_the_request(self, rig, seen):
+        _generate(rig, anchors=("first", "last"), references=(self.WIDE,))
+
+        expected = [self.WIDE, (SIZE, SIZE), (SIZE, SIZE)]
+        assert [image.size for image in rig.processed_images] == expected
+        assert [image.size for image in rig.request_images] == expected
+        assert seen.encoded == [([self.WIDE], 32, 64), ([(SIZE, SIZE), (SIZE, SIZE)], SIZE, SIZE)]
+        _, kwargs, sequence = seen.layouts[0]
+        assert tuple(kwargs["anchors"]) == ("first", "last")
+        held = self.REFERENCE_ROWS + 2 * ROWS_PER_FRAME
+        assert sequence.keyframe_rows == held
+        assert {forward["video"].shape for forward in seen.forwards} == {(held + LATENT_FRAMES * ROWS_PER_FRAME, 8)}
+
+    def test_text_to_video_holds_the_references_alone_and_has_no_first_frame(self, rig, seen):
+        _generate(rig, anchors=(), images=0, references=(self.WIDE,))
+
+        assert seen.encoded == [([self.WIDE], 32, 64)]
+        assert [image.size for image in rig.request_images] == [self.WIDE]
+        (_, shapes), kwargs, sequence = seen.layouts[0]
+        assert (list(shapes), tuple(kwargs["anchors"])) == ([(1, 4, 8)], ())
+        assert sequence.keyframe_rows == self.REFERENCE_ROWS
+        assert {forward["video"].shape for forward in seen.forwards} == {(self.REFERENCE_ROWS + LATENT_FRAMES * ROWS_PER_FRAME, 8)}
+
+    def test_the_draws_run_per_encode_under_seed_42_references_first_then_the_request_seed(self, rig, seen):
+        _generate(rig, references=(self.WIDE, self.TALL), seed=5)
+
+        assert rig.rng == [("seed", 42), ("draw",), ("seed", 42), ("draw",), ("seed", 42), ("draw",), ("seed", 5), ("draw",), ("draw",), ("draw",)]
+
+    def test_with_a_track_the_references_are_held_beside_the_held_audio(self, rig, seen):
+        _generate(rig, anchors=(), images=0, references=(self.WIDE,), track_audio=_waveform())
+
+        assert not hasattr(rig, "text_only_prompt")  # the references make it a picture request
+        assert len(seen.forwards) == SCHEDULE.forwards
+        expected = np.concatenate([np.tile((stereo * 50 + np.arange(AUDIO_LATENTS))[:, None], (1, AUDIO_CHANNELS_LATENT)) for stereo in range(2)]).astype(np.float32)
+        for forward in seen.forwards:
+            assert forward["video"].shape == (self.REFERENCE_ROWS + LATENT_FRAMES * ROWS_PER_FRAME, 8)
+            np.testing.assert_array_equal(forward["audio"], expected)
+            assert set(forward["row_timesteps"][forward["audio_indices"]].tolist()) == {np.float32(1.0)}
+        assert rig.events.count("load audio vae") == 1
+
+    def test_without_references_the_forks_layout_is_used(self, rig, seen):
+        _generate(rig)
+
+        assert seen.layouts == [] and seen.encoded == [([(SIZE, SIZE)], SIZE, SIZE)]

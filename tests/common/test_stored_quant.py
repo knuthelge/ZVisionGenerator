@@ -29,7 +29,7 @@ class TestNames:
         assert sq.parse_stored_quant_name("atlas@q8") == ("atlas", 8)
         assert sq.parse_stored_quant_name("my@model@q4") == ("my@model", 4)
 
-    @pytest.mark.parametrize("name", ["atlas", "atlas@q6", "atlas@q8x", "@q8", "atlas-q8", "atlas@mlx-te6", "atlas@mlx-te4x", "@mlx-te4", "atlas@mlx-q4", "atlas@te4"])
+    @pytest.mark.parametrize("name", ["atlas", "atlas@q6", "atlas@q8x", "@q8", "atlas-q8", "atlas@mlx-te6", "atlas@mlx-te4x", "@mlx-te4", "atlas@mlx-q4", "atlas@te4", "h3@ref2vaq4"])
     def test_other_names_are_not_stored_quants(self, name):
         assert sq.parse_stored_quant_name(name) is None
 
@@ -37,6 +37,13 @@ class TestNames:
         assert sq.text_encoder_copy_name("h3", 4) == "h3@mlx-te4"
         assert sq.parse_stored_quant_name("h3@mlx-te4") == ("h3", 4)
         assert sq.parse_stored_quant_name("my@model@mlx-te8") == ("my@model", 8)
+
+    def test_the_reference_copy_name_round_trips(self):
+        assert sq.reference_copy_name("h3", 4) == "h3@ref2va-q4"
+        assert sq.reference_copy_name("h3", 8) == "h3@ref2va-q8"
+        assert sq.parse_stored_quant_name("h3@ref2va-q4") == ("h3", 4)
+        assert sq.parse_stored_quant_name("h3@ref2va-q8") == ("h3", 8)
+        assert sq.parse_stored_quant_name("my@model@ref2va-q4") == ("my@model", 4)
 
     def test_stored_quant_dir_is_a_sibling(self, tmp_path):
         assert sq.stored_quant_dir(tmp_path / "models" / "atlas", 4) == tmp_path / "models" / "atlas@q4"
@@ -48,6 +55,17 @@ class TestStoredQuantDirsFor:
             (tmp_path / name).mkdir()
 
         assert {path.name for path in sq.stored_quant_dirs_for(tmp_path, "h3")} == {"h3@q4", "h3@q8", "h3@mlx-te4"}
+
+    def test_the_reference_copies_of_a_model_are_listed_with_it(self, tmp_path):
+        for name in ("h3@ref2va-q4", "h3@ref2va-q8", "other@ref2va-q4", "h3x@ref2va-q4"):
+            (tmp_path / name).mkdir()
+
+        assert {path.name for path in sq.stored_quant_dirs_for(tmp_path, "h3")} == {"h3@ref2va-q4", "h3@ref2va-q8"}
+
+    def test_a_reference_copy_has_no_copies_of_its_own(self, tmp_path):
+        (tmp_path / "h3@ref2va-q4@q4").mkdir()
+
+        assert sq.stored_quant_dirs_for(tmp_path, "h3@ref2va-q4") == ()
 
     def test_the_text_encoder_copy_alone_is_found(self, tmp_path):
         (tmp_path / "h3@mlx-te4").mkdir()

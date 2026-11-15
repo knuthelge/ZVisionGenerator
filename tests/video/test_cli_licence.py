@@ -82,3 +82,28 @@ class TestVideoCliLicenceNotice:
         run.plans.return_value = None
 
         assert NOTICE_HEADER in run(["-m", "ltx-4"], present=True)
+
+
+class TestVideoCliLicencePlanWithReferences:
+    @pytest.mark.filterwarnings("ignore:Video model requires frames")
+    def test_the_plan_is_built_for_the_references_of_the_job(self, monkeypatch, tmp_path):
+        from PIL import Image
+
+        from tests.video._helpers import make_ltx_info
+        from zvisiongenerator.utils.config import load_config
+
+        use_licences(monkeypatch, tmp_path, {"h3-licence": {**_LICENCES["ltx-2-community"], "models": ["h3"]}})
+        video_cli, _, _ = patch_video_cli_for_preflight(monkeypatch, [])
+        monkeypatch.setattr(video_cli, "load_config", lambda: {**load_config(), "prompt_enhancer": {"model": {"darwin": "a/b", "win32": "a/b", "linux": "a/b"}}})
+        monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: make_ltx_info(family="h3", backend="h3", frame_alignment=17))
+        plans = MagicMock(return_value=(_TARGET,))
+        monkeypatch.setattr(video_cli, "video_plan", plans)
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: False)
+        monkeypatch.setattr(video_cli, "run_preflight", lambda *_a, **_k: MagicMock(cancelled=True))
+        reference = tmp_path / "ref.png"
+        Image.new("RGB", (8, 8)).save(reference)
+        monkeypatch.setattr(sys, "argv", ["ziv-video", "-m", "h3", "--prompt", "a dog", "--reference", str(reference)])
+
+        video_cli.main()
+
+        assert plans.call_args.kwargs["references"] is True

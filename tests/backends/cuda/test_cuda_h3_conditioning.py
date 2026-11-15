@@ -28,6 +28,7 @@ from zvisiongenerator.backends.cuda.video.h3.conditioning import (  # noqa: E402
     TAIL_FRAMES,
     TAIL_LATENT_FRAMES,
     encode_keyframe,
+    encode_reference,
     encode_tail,
     encode_tail_audio,
     fit_keyframe,
@@ -122,6 +123,18 @@ class TestEncodeKeyframe:
     def test_it_refuses_a_canvas_that_is_not_a_multiple_of_the_compression(self, vae, canvas):
         with pytest.raises(ValueError, match="multiple of 16"):
             encode_keyframe(vae, _picture(64, 32), *canvas)
+
+
+class TestEncodeReference:
+    def test_it_keeps_the_images_own_size(self, vae):
+        latents = encode_reference(vae, _picture(96, 48))
+        assert latents.shape == (1, 4, 1, 3, 6)  # 48 x 96 pixels, not the keyframe canvas
+        assert latents.dtype == torch.float32 and latents.device.type == "cpu"
+        assert encode_reference(vae, _picture(128, 32)).shape[-2:] == (2, 8)  # a wide picture is not fitted to a canvas either
+
+    def test_it_equals_a_keyframe_encoded_at_the_same_size(self, vae):
+        image = _picture(*_CANVAS)
+        assert torch.equal(encode_reference(vae, image), encode_keyframe(vae, image, *_CANVAS))
 
 
 class TestFitKeyframe:

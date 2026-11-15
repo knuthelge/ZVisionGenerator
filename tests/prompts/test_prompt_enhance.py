@@ -19,6 +19,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     PALETTE_AXIS,
     PHOTO_REALISM,
     PRESERVATION_RULES,
+    REFERENCES_DROPPED_WARNING,
     SHOT_AXIS,
     SOUND_AXIS,
     STYLE_AXIS,
@@ -51,6 +52,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     perception_rule,
     plan_length,
     prompt_rule,
+    references_rule,
     resolve_enhance_ceiling,
     resolve_parts,
     settings_from_mapping,
@@ -67,6 +69,7 @@ from zvisiongenerator.utils.prompt_enhance_video import (
     _extend_pair_rules,
     _extend_rules,
     _pair_workflow_rule,
+    build_extend_messages,
     build_pair_messages,
     enhance_video_prompt,
     parse_scene_action,
@@ -1583,3 +1586,120 @@ class TestFramingAndPalette:
         assert options[0]["slug"] == KEEP and options[-1]["slug"] == CUSTOM_PALETTE
         assert [len(option["swatches"]) for option in options] == [0, *[5] * (len(options) - 2), 0]
         assert palette_rules(EnhanceSettings()) == [] and palette_colors(EnhanceSettings()) == ()
+
+
+# ── Video references: the "<Picture N>" names ───────────────────────────────
+
+_PICTURE_PROMPT = "The man from <Picture 1> hands the cup from <Picture 2> to her."
+_KEEPS_PICTURES = "The man from <Picture 1> hands the cup from <Picture 2> to her across a sunlit kitchen."
+_DROPS_PICTURE = "A man hands a cup from <Picture 2> to her across a sunlit kitchen."
+
+
+class TestVideoReferences:
+    def test_video_mode_names_the_pictures_and_image_mode_keeps_its_wording(self):
+        video = references_rule(2, video=True)
+        image = references_rule(2)
+
+        assert '"<Picture 1>" and "<Picture 2>"' in video and "image 1" not in video
+        assert '"image 1" and "image 2"' in image and "<Picture" not in image
+        assert references_rule(2) == references_rule(2, video=False)
+
+    def test_the_video_rule_is_the_one_a_video_job_sends(self):
+        assert context_rules("video", EnhanceContext(references=2)) == [references_rule(2, video=True)]
+        assert context_rules("image", EnhanceContext(references=2)) == [references_rule(2)]
+
+    def test_a_video_rewrite_that_drops_a_picture_is_retried_then_returned_with_the_warning(self):
+        enhancer = _FakeEnhancer([_DROPS_PICTURE, _DROPS_PICTURE])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = enhance_prompt(enhancer, _PICTURE_PROMPT, EnhanceSettings(), mode="video", seed=1, ceiling=300, context=EnhanceContext(references=2))
+
+        assert len(enhancer.calls) == 2
+        assert (result.prompt, result.warning) == (_DROPS_PICTURE, REFERENCES_DROPPED_WARNING)
+        assert any(str(item.message) == REFERENCES_DROPPED_WARNING for item in caught)
+
+    def test_a_video_rewrite_that_keeps_the_pictures_is_taken_at_once(self):
+        enhancer = _FakeEnhancer([_KEEPS_PICTURES])
+
+        result = enhance_prompt(enhancer, _PICTURE_PROMPT, EnhanceSettings(), mode="video", seed=1, ceiling=300, context=EnhanceContext(references=2))
+
+        assert len(enhancer.calls) == 1 and result.warning is None
+
+    def test_image_words_are_not_pictures_in_video_mode(self):
+        enhancer = _FakeEnhancer(["A man hands a cup to her across a sunlit kitchen."])
+
+        result = enhance_prompt(enhancer, "The man from image 1 hands a cup to her.", EnhanceSettings(), mode="video", seed=1, ceiling=300, context=EnhanceContext(references=2))
+
+        assert len(enhancer.calls) == 1 and result.warning is None
+
+    def test_a_picture_tag_is_free_in_image_mode(self):
+        enhancer = _FakeEnhancer(["A man hands a cup to her across a sunlit kitchen."])
+
+        result = enhance_prompt(enhancer, _PICTURE_PROMPT, EnhanceSettings(), mode="image", seed=1, ceiling=300, context=EnhanceContext(references=2))
+
+        assert len(enhancer.calls) == 1 and result.warning is None
+
+    def test_the_extend_messages_name_the_pictures(self):
+        messages = build_extend_messages("A kitchen.", "He waves at <Picture 1>.", EnhanceSettings(), plan=plan_length(5, "same", ceiling=300), context=_extend_context(references=1))
+
+        assert '"<Picture 1>"' in messages[0]["content"]
+
+    def test_the_extend_messages_have_no_picture_rule_without_references(self):
+        messages = build_extend_messages("A kitchen.", "He waves.", EnhanceSettings(), plan=plan_length(5, "same", ceiling=300), context=_extend_context())
+
+        assert "<Picture" not in messages[0]["content"]
+
+    def test_the_extend_pair_messages_name_the_pictures_once(self):
+        system = _pair_system(scene="A kitchen.", prompt="He waves at <Picture 1>.", context=_extend_context(references=1))
+
+        assert system.count('"<Picture 1>"') == 1
+
+    def test_a_pair_that_drops_a_picture_is_retried_once_then_returned_with_the_warning(self):
+        context = enhance_context(mode="video", frames=97, fps=24.0, references=2)
+        drops = "SCENE: A sunlit kitchen.\nACTION: A man hands a cup from <Picture 2> to her."
+        enhancer = _FakeEnhancer([drops, drops])
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            result = enhance_video_prompt(enhancer, "A kitchen.", _PICTURE_PROMPT, EnhanceSettings(parts="both"), seed=10, ceiling=300, context=context)
+
+        assert len(enhancer.calls) == 2
+        assert (result.scene, result.prompt, result.warning) == ("A sunlit kitchen.", "A man hands a cup from <Picture 2> to her.", REFERENCES_DROPPED_WARNING)
+
+    def test_a_pair_retry_can_restore_the_pictures(self):
+        context = enhance_context(mode="video", frames=97, fps=24.0, references=2)
+        drops = "SCENE: A sunlit kitchen.\nACTION: A man hands a cup to her."
+        keeps = "SCENE: A sunlit kitchen.\nACTION: The man from <Picture 1> slowly hands the steaming cup from <Picture 2> to her."
+        enhancer = _FakeEnhancer([drops, keeps])
+
+        result = enhance_video_prompt(enhancer, "A kitchen.", _PICTURE_PROMPT, EnhanceSettings(parts="both"), seed=10, ceiling=300, context=context)
+
+        assert len(enhancer.calls) == 2 and result.warning is None and "<Picture 1>" in result.prompt
+
+    def test_the_extend_action_only_path_retries_a_dropped_picture_once(self):
+        context = _extend_context(references=2)
+        enhancer = _FakeEnhancer(["She hands a cup from <Picture 2> to him.", "She hands the cup from <Picture 2> to him."])
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            result = enhance_video_prompt(enhancer, _EXT_SCENE, _PICTURE_PROMPT, EnhanceSettings(), seed=10, ceiling=300, context=context)
+
+        assert len(enhancer.calls) == 2
+        assert (result.scene, result.prompt, result.warning) == ("", "She hands the cup from <Picture 2> to him.", REFERENCES_DROPPED_WARNING)
+
+    def test_the_action_only_path_keeps_a_rewrite_with_its_pictures(self):
+        enhancer = _FakeEnhancer(["The man from <Picture 1> slowly hands the steaming cup from <Picture 2> to her."])
+
+        result = enhance_video_prompt(enhancer, _KEPT_SCENE, _PICTURE_PROMPT, _ACTION_ONLY, seed=10, ceiling=300, context=enhance_context(mode="video", frames=121, fps=24.0, references=2))
+
+        assert len(enhancer.calls) == 1 and result.warning is None
+        assert '"<Picture 1>"' in _sent_system(enhancer)
+
+    def test_a_quote_and_a_picture_share_the_one_retry(self):
+        context = _extend_context(references=1)
+        prompt = 'He says "hello" to <Picture 1>.'
+        enhancer = _FakeEnhancer(["He says hello to <Picture 1>.", 'He says "hello" to the man.'])
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            result = enhance_video_prompt(enhancer, _EXT_SCENE, prompt, EnhanceSettings(), seed=10, ceiling=300, context=context)
+
+        assert len(enhancer.calls) == 2
+        assert result.warning == REFERENCES_DROPPED_WARNING

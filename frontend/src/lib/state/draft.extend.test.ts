@@ -226,3 +226,161 @@ describe('Extend and Edit, each with a Batch and Seed of its own', () => {
     expect(draft.state).toMatchObject({ workflow: 'txt2img', runs: 2, seed: 5 });
   });
 });
+
+describe('Extend carries the source\'s references over', () => {
+  const SOURCE = '/clips/walk.mp4';
+  const OTHER = '/clips/other.mp4';
+  const file = (name: string): File => new File(['x'], name, { type: 'image/png' });
+
+  /** An Extend tab with a source chosen and described, as the viewer's Extend leaves it before the answer arrives. */
+  beforeEach(() => {
+    draft.hydrateFromContext(ctx, null);
+    draft.setTab('video');
+    openKind('video', 'extend', ctx);
+    draft.setExtendSourcePath(SOURCE);
+  });
+
+  it('fills an empty Extend list from the source and records it as the prefill', () => {
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/a.png', '/in/b.png'] }), ctx);
+
+    expect(draft.state.extendReferencePaths).toEqual(['/in/a.png', '/in/b.png']);
+    expect(draft.state.extendPrefill?.references).toEqual(['/in/a.png', '/in/b.png']);
+  });
+
+  it('leaves the Image tab\'s list alone', () => {
+    draft.patch({ referenceImagePaths: ['/in/image.png'] });
+
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/a.png'] }), ctx);
+
+    expect(draft.state.referenceImagePaths).toEqual(['/in/image.png']);
+  });
+
+  it('leaves New\'s list and its held uploads alone, whether the source has references or not', () => {
+    draft.patch({ videoReferencePaths: ['/in/new.png'] });
+    heldUploads.setReferencesOf('video', [file('new.png')]);
+
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/a.png'] }), ctx);
+    expect(draft.state.videoReferencePaths).toEqual(['/in/new.png']);
+
+    draft.setExtendSourcePath(OTHER);
+    draft.applyExtendSource(sceneSource({ path: OTHER, reference_images: [] }), ctx);
+    expect(draft.state.extendReferencePaths).toEqual([]);
+    expect(draft.state.videoReferencePaths).toEqual(['/in/new.png']);
+    expect(heldUploads.videoReferences.map((held) => held?.name)).toEqual(['new.png']);
+  });
+
+  it('replaces the previous source\'s own references when another source is chosen, and empties them for one without', () => {
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/a.png'] }), ctx);
+
+    draft.setExtendSourcePath(OTHER);
+    draft.applyExtendSource(sceneSource({ path: OTHER, reference_images: ['/in/c.png', '/in/d.png'] }), ctx);
+    expect(draft.state.extendReferencePaths).toEqual(['/in/c.png', '/in/d.png']);
+
+    draft.setExtendSourcePath(SOURCE);
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: [] }), ctx);
+    expect(draft.state.extendReferencePaths).toEqual([]);
+    expect(draft.state.extendPrefill?.references).toEqual([]);
+  });
+
+  it('keeps a list the user chose, and keeps recording the previous source\'s', () => {
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/a.png'] }), ctx);
+    draft.update('extendReferencePaths', ['/in/mine.png']);
+
+    draft.setExtendSourcePath(OTHER);
+    draft.applyExtendSource(sceneSource({ path: OTHER, reference_images: ['/in/c.png'] }), ctx);
+
+    expect(draft.state.extendReferencePaths).toEqual(['/in/mine.png']);
+    expect(draft.state.extendPrefill?.references).toEqual(['/in/a.png']);
+  });
+
+  it('keeps references chosen before any source was described', () => {
+    draft.update('extendReferencePaths', ['/in/mine.png']);
+
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/a.png'] }), ctx);
+
+    expect(draft.state.extendReferencePaths).toEqual(['/in/mine.png']);
+  });
+
+  it('refills a list the user emptied, like an empty one', () => {
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/a.png'] }), ctx);
+    draft.update('extendReferencePaths', []);
+
+    draft.setExtendSourcePath(OTHER);
+    draft.applyExtendSource(sceneSource({ path: OTHER, reference_images: ['/in/c.png'] }), ctx);
+
+    expect(draft.state.extendReferencePaths).toEqual(['/in/c.png']);
+  });
+
+  it('forgets the held uploads of the rows it replaces, and keeps those of a list it keeps', () => {
+    heldUploads.setReferencesOf('extend', [file('old.png')]);
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/a.png'] }), ctx);
+    expect(heldUploads.extendReferences).toEqual([]);
+
+    draft.update('extendReferencePaths', ['']);
+    heldUploads.setReferencesOf('extend', [file('mine.png')]);
+    draft.setExtendSourcePath(OTHER);
+    draft.applyExtendSource(sceneSource({ path: OTHER, reference_images: ['/in/c.png'] }), ctx);
+    expect(draft.state.extendReferencePaths).toEqual(['']);
+    expect(heldUploads.extendReferences.map((held) => held?.name)).toEqual(['mine.png']);
+  });
+
+  it('a later answer for the same source refreshes the facts and leaves the list alone', () => {
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/a.png'] }), ctx);
+    draft.update('extendReferencePaths', ['/in/a.png', '/in/b.png']);
+
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/a.png'] }), ctx);
+
+    expect(draft.state.extendReferencePaths).toEqual(['/in/a.png', '/in/b.png']);
+  });
+
+  it('the viewer\'s Extend empties the list before the source is described, and the answer then fills it', () => {
+    draft.update('extendReferencePaths', ['/in/mine.png']);
+    heldUploads.setReferencesOf('extend', [file('mine.png')]);
+
+    draft.loadFromUrl({ workflow: 'extend', source_video: OTHER, extend_frames: '48' }, ctx, { replaceSlots: true });
+    expect(draft.state.extendReferencePaths).toEqual([]);
+
+    draft.applyExtendSource(sceneSource({ path: OTHER, reference_images: ['/in/c.png'] }), ctx);
+    expect(draft.state.extendReferencePaths).toEqual(['/in/c.png']);
+  });
+
+  it('the viewer\'s Extend on a clip without references leaves New\'s list and its held uploads alone', () => {
+    draft.patch({ videoReferencePaths: ['/in/new.png'] });
+    heldUploads.setReferencesOf('video', [file('new.png')]);
+
+    draft.loadFromUrl({ workflow: 'extend', source_video: OTHER, extend_frames: '48' }, ctx, { replaceSlots: true });
+    draft.applyExtendSource(sceneSource({ path: OTHER, reference_images: [] }), ctx);
+
+    expect(draft.state.videoReferencePaths).toEqual(['/in/new.png']);
+    expect(heldUploads.videoReferences.map((held) => held?.name)).toEqual(['new.png']);
+  });
+
+  it('an Extend link that does not replace the slots leaves the list', () => {
+    draft.update('extendReferencePaths', ['/in/mine.png']);
+
+    draft.loadFromUrl({ workflow: 'extend', source_video: OTHER }, ctx);
+
+    expect(draft.state.extendReferencePaths).toEqual(['/in/mine.png']);
+  });
+
+  it('a Reuse of an extension that ran with references brings them, and the inspection that follows keeps them', () => {
+    draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_frames: '48', scene: 'A street.', reference_path: ['/in/a.png', '/in/b.png'] }, ctx, { replaceSlots: true });
+    expect(draft.state.extendReferencePaths).toEqual(['/in/a.png', '/in/b.png']);
+
+    draft.applyExtendSource(sceneSource({ path: SOURCE, reference_images: ['/in/other.png'] }), ctx);
+
+    expect(draft.state.extendReferencePaths).toEqual(['/in/a.png', '/in/b.png']);
+    expect(draft.state.videoReferencePaths).toEqual([]);
+  });
+
+  it('a Reuse of a New clip with references sets New\'s list and leaves the Extend list alone', () => {
+    draft.patch({ extendReferencePaths: ['/in/ext.png'] });
+    heldUploads.setReferencesOf('extend', [file('ext.png')]);
+
+    draft.loadFromUrl({ workflow: 'txt2vid', scene: 'A street.', reference_path: ['/in/a.png'] }, ctx, { replaceSlots: true });
+
+    expect(draft.state.videoReferencePaths).toEqual(['/in/a.png']);
+    expect(draft.state.extendReferencePaths).toEqual(['/in/ext.png']);
+    expect(heldUploads.extendReferences.map((held) => held?.name)).toEqual(['ext.png']);
+  });
+});

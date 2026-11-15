@@ -50,6 +50,9 @@ class H3Preset:
     lora_scale: float
     latent_upsampler: HubFiles
     schedules: dict[int, H3Schedule]
+    # The Ref2VA transformer and its turbo LoRA, used by a job with reference images.
+    reference_transformer: HubFiles
+    reference_lora: HubFiles
     ffn_chunk_tokens: int | None = None
 
 
@@ -67,6 +70,9 @@ class H3MlxPreset:
     text_encoder_layers: int
     frame_rule: FrameRule
     schedules: dict[int, H3Schedule]
+    # The Ref2VA transformer and its turbo LoRA, used by a job with reference images.
+    reference_transformer: HubFiles
+    reference_lora: HubFiles
 
 
 @dataclass(frozen=True)
@@ -113,6 +119,8 @@ def h3_preset(config: dict[str, Any], platform_key: str) -> H3Preset:
         latent_upsampler=_hub_files(_only(pairs, "latent_upsampler", platform_key)),
         schedules=_schedules(block),
         ffn_chunk_tokens=_ffn_chunk_tokens(config),
+        reference_transformer=_hub_files(_only(pairs, "ref2va", platform_key)),
+        reference_lora=_hub_files(_only(pairs, "ref2va_lora", platform_key)),
     )
 
 
@@ -129,6 +137,8 @@ def h3_mlx_preset() -> H3MlxPreset:
         text_encoder_layers=encoder["layers"],
         frame_rule=FrameRule(**block["frame_rule"]),
         schedules=_schedules(block),
+        reference_transformer=_hub_files(_only(pairs, "ref2va", "darwin")),
+        reference_lora=_hub_files(_only(pairs, "ref2va_lora", "darwin")),
     )
 
 

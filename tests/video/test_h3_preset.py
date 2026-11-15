@@ -33,6 +33,8 @@ def _preset(**overrides) -> H3Preset:
         lora_scale=0.0625,
         latent_upsampler=_hub("up/sampler"),
         schedules={8: H3Schedule(8, 6.0, 3.0), 4: H3Schedule(4, 6.0, 3.0)},
+        reference_transformer=_hub("ref/transformer"),
+        reference_lora=_hub("ref/lora"),
     )
     fields.update(overrides)
     return H3Preset(**fields)
@@ -62,13 +64,26 @@ class TestShippedPreset:
         assert len(preset.latent_upsampler.files) == 1
         assert preset.schedules == {8: H3Schedule(8, 6.0, 3.0), 4: H3Schedule(4, 6.0, 3.0)}
         assert preset.ffn_chunk_tokens == 4096
+        assert (preset.reference_transformer.repo_id, preset.reference_transformer.files) == ("Comfy-Org/MiniMax-H3", ("diffusion_models/minimax_h3_ref2va_pruned_w6a8.safetensors",))
+        assert (preset.reference_lora.repo_id, preset.reference_lora.files) == ("lightx2v/Minimax-h3-Turbo", ("minimax_h3_ref2v_turbo_8step_v1.1_768p_bf16.safetensors",))
         assert "text_encoder/*" in preset.repo_ignore
         assert "transformer/*" in preset.repo_allow
 
     def test_every_pinned_revision_is_a_full_commit_hash(self, config):
         preset = parse_h3_preset(config, "linux")
         mlx = h3_mlx_preset()
-        revisions = [preset.revision, preset.text_encoder.revision, preset.lora.revision, preset.latent_upsampler.revision, mlx.transformer.revision, mlx.components.revision]
+        revisions = [
+            preset.revision,
+            preset.text_encoder.revision,
+            preset.lora.revision,
+            preset.latent_upsampler.revision,
+            preset.reference_transformer.revision,
+            preset.reference_lora.revision,
+            mlx.transformer.revision,
+            mlx.components.revision,
+            mlx.reference_transformer.revision,
+            mlx.reference_lora.revision,
+        ]
 
         assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for revision in revisions), revisions
 
@@ -140,17 +155,17 @@ class TestLoadOptionsAndCompanions:
 
     @pytest.mark.parametrize("platform", ["linux", "win32"])
     def test_only_the_keys_the_h3_backend_takes_are_given(self, config, platform):
-        assert set(video_load_options("h3", config, "h3", platform_key=platform, upscale=True)) <= {"model_name", "preset", "upscale"}
+        assert set(video_load_options("h3", config, "h3", platform_key=platform, upscale=True, references=True)) <= {"model_name", "preset", "upscale", "references"}
 
     @staticmethod
     def _entry(resolved_path: str, name: str = "h3"):
         return SimpleNamespace(name=name, family="h3", resolved_path=resolved_path)
 
     @pytest.mark.parametrize("platform", ["linux", "win32"])
-    def test_the_companions_are_the_text_encoder_the_lora_and_the_latent_upsampler_repos(self, platform, tmp_path):
+    def test_the_companions_are_the_text_encoder_the_lora_the_latent_upsampler_and_the_reference_repos(self, platform, tmp_path):
         companions = freed_repo_ids(self._entry(builtin_aliases()["h3"]), (), models_dir=tmp_path, platform_key=platform)
 
-        assert companions == ("unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "lightx2v/Minimax-h3-Turbo", "LBH-123-AI/Minimax_h3_latent_Upscaler")
+        assert companions == ("unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "lightx2v/Minimax-h3-Turbo", "LBH-123-AI/Minimax_h3_latent_Upscaler", "Comfy-Org/MiniMax-H3")
 
     def test_seedvr2_repos_are_not_companions(self, tmp_path):
         assert not any("seedvr2" in repo.lower() for repo in freed_repo_ids(self._entry(builtin_aliases()["h3"]), (), models_dir=tmp_path, platform_key="linux"))
@@ -160,6 +175,12 @@ class TestLoadOptionsAndCompanions:
 
 
 class TestMlxPreset:
+    def test_the_reference_files_are_filled_from_the_ref2va_roles(self):
+        preset = h3_mlx_preset()
+
+        assert (preset.reference_transformer.repo_id, preset.reference_transformer.files) == ("Comfy-Org/MiniMax-H3", ("diffusion_models/minimax_h3_ref2va_pruned_w6a8.safetensors",))
+        assert (preset.reference_lora.repo_id, preset.reference_lora.files) == ("lightx2v/Minimax-h3-Turbo", ("minimax_h3_ref2v_turbo_8step_v1.1_768p_bf16.safetensors",))
+
     def test_the_shipped_entry_parses_into_the_int8_transformer_and_the_fl2va_components(self, config):
         preset = h3_mlx_preset()
 
@@ -228,7 +249,7 @@ class TestMlxLoadOptions:
         assert "verbose" not in video_load_options("h3", config, "h3", platform_key="darwin", upscale=False)
         assert "verbose" not in video_load_options("h3", config, "h3", platform_key="linux", upscale=False, quiet=True)
 
-    def test_the_companions_on_macos_are_the_int8_transformer_and_the_lora_repos(self, tmp_path):
+    def test_the_companions_on_macos_are_the_int8_transformer_the_lora_and_the_reference_repos(self, tmp_path):
         entry = SimpleNamespace(name="h3", family="h3", resolved_path=builtin_aliases()["h3"])
 
-        assert freed_repo_ids(entry, (), models_dir=tmp_path, platform_key="darwin") == ("water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "lightx2v/Minimax-h3-Turbo")
+        assert freed_repo_ids(entry, (), models_dir=tmp_path, platform_key="darwin") == ("water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "lightx2v/Minimax-h3-Turbo", "Comfy-Org/MiniMax-H3")

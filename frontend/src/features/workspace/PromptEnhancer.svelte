@@ -64,7 +64,7 @@
     onfail?: () => void;
     /** The clip also ends on a last-frame image, so the rewrite must not invent a different ending. */
     endImage?: boolean;
-    /** How many reference images are set (uploads included); the rewrite keeps the prompt's "image 1", "image 2". */
+    /** How many reference images are set (uploads included); the rewrite keeps the prompt's "image 1", "image 2" (`<Picture 1>`, `<Picture 2>` in Video). */
     references?: number;
     /** An audio track is in effect: it is the clip's sound, so the rewrite has no Sound options. */
     track?: boolean;

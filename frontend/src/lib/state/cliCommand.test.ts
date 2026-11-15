@@ -139,11 +139,13 @@ describe('cliCommand', () => {
     expect(caveats).toEqual(['uploaded_image']);
   });
 
-  it('lists the references in prompt order after the start image, and only for an image', () => {
+  it('lists the references in prompt order after the start image', () => {
     const settings = { mode: 'image', prompt: 'a', image_path: '/in/start.png', image_strength: '0.6', reference: ['/in/a.png', '/in/b c.png'] };
 
     expect(cliCommand(settings)).toEqual({ command: "ziv image --prompt a --image /in/start.png --image-strength 0.6 --reference '/in/a.png,/in/b c.png'", caveats: [] });
-    expect(cliCommand({ mode: 'video', prompt: 'a', reference: ['/in/a.png'] }).command).not.toContain('--reference');
+    expect(cliCommand({ mode: 'video', prompt: 'a', reference: ['/in/a.png', '/in/b.png'] }).command).toBe('ziv video --prompt a --reference /in/a.png,/in/b.png');
+    expect(cliCommand({ mode: 'video', prompt: 'a', reference: ['/in/a.png'] }).command).toContain('--reference /in/a.png');
+    expect(cliCommand({ mode: 'video', prompt: 'a' }).command).not.toContain('--reference');
     expect(cliCommand({ mode: 'image', prompt: 'a', reference: ' ' }).command).not.toContain('--reference');
   });
 

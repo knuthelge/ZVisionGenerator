@@ -58,6 +58,7 @@
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
   import { clipMemoryRequest } from '$lib/state/memoryFit';
+  import { referenceListOf, referencePathsKey, sentReferenceCount } from '$lib/state/references';
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames, type LoraChip } from '$lib/state/loras';
   import { chipDownload, failureText, waitText } from '$lib/state/loraDownloads';
   import { waitForListing } from '$lib/state/loraListing';
@@ -830,6 +831,9 @@
       if (replacesVoice(firstValues(params), draft.state.workflow as AudioWorkflow)) heldUploads.setVoice(null);
       return;
     }
+    // The Video tab's New kind and the Extend kind each have their own references: a prefill that is not a Use as replaces the list
+    // of the kind it opens (the draft's paths and what loadFromUrl did to them), so the uploads held for the old rows must not pair with the new ones.
+    if ((tab === 'video' || tab === 'extend') && params.use_as === undefined) heldUploads.setReferencesOf(referenceListOf(draft.state.workflow), []);
     // The Extend kind holds only an audio track, which a prefill replaces; it leaves the other tabs' uploads alone.
     if (tab === 'extend') {
       if (params.use_as === undefined) heldUploads.setTrack('extend', null);
@@ -932,15 +936,22 @@
   // What the Use as menus show: each target's hint, or why it can't be used, from the model its tab opens on.
   const useAs = $derived(useAsState(context, draft.state));
 
-  // Reference rows are added to the Image tab's list whichever tab is open.
-  const useAsEditor = referenceEditor(() => images?.references?.max ?? 0);
+  // Reference rows go to the open tab's list: the Video tab's on the Video tab with a model that takes references, else the Image tab's.
+  const useAsEditor = referenceEditor(() => images?.references?.max ?? 0, () => images?.references?.list ?? 'image');
 
-  /** Add an image as the next reference on the Image tab, keeping the prompt; a model that can't take one says why. */
+  /** Add an image as the next reference, keeping the prompt: on the Video tab to its own list, elsewhere to the Image tab's; a model that can't take one says why. */
   function addReference(path: string): void {
     const state = useAs.reference;
     if (!context || !state) return;
     if (state.disabled) {
       if (state.hint) addToast(state.hint, 'info');
+      return;
+    }
+    // The Video tab keeps its lists (New's and Extend's) and stays open: the rows are numbered `<Picture N>` there.
+    const list = images?.references?.list;
+    if (list === 'video' || list === 'extend') {
+      useAsEditor.append([{ path, file: null }]);
+      addToast(`Added as <Picture ${draft.state[referencePathsKey(list)].length}>`, 'success');
       return;
     }
     if (workspaceTab(draft.state.workflow) !== 'image') {
@@ -1213,7 +1224,8 @@
     }
     const caps = workspaceCapabilities(context, state);
     const { frameRule } = videoTimingFor(context, state.model);
-    clipMemory.watch(clipMemoryRequest(state, { frameRule, lowMemory: caps.showLowMemory, upscale: caps.showVideoUpscale, steps: stepOptionsFor(context, state.model) !== null, review: caps.showVideoUpscaleReview }));
+    const references = sentReferenceCount(currentImagesView(context).references?.rows ?? []);
+    clipMemory.watch(clipMemoryRequest(state, { frameRule, lowMemory: caps.showLowMemory, upscale: caps.showVideoUpscale, steps: stepOptionsFor(context, state.model) !== null, review: caps.showVideoUpscaleReview, references }));
   });
 
   /**

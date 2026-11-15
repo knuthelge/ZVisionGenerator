@@ -9,7 +9,7 @@
   import type { WorkspaceContext } from '$lib/types';
   import { imagesSummary } from './imagesSummary';
   import type { ImagesView } from './imagesView';
-  import { referenceEditor } from './referenceEditor';
+  import { referenceEditor, referenceWording } from './referenceEditor';
   import ReferenceSlot from './ReferenceSlot.svelte';
   import { rangeFill, SPEC } from './settingsSpec';
 
@@ -31,7 +31,8 @@
   const last = $derived(view.last);
   const references = $derived(view.references);
   const refRows = $derived(references?.rows ?? []);
-  const editor = referenceEditor(() => references?.max ?? 0);
+  const editor = referenceEditor(() => references?.max ?? 0, () => references?.list ?? 'image');
+  const wording = $derived(referenceWording(references?.list ?? 'image'));
 
   const startNoun = $derived(video ? 'a first frame' : 'a start image');
 
@@ -96,7 +97,7 @@
           {@const number = index + 1}
           <ReferenceSlot
             idBase="ws-ref-{number}"
-            label="Reference {number}"
+            label={wording.label(number)}
             names={{ browse: `Browse for reference ${number}`, upload: `Upload reference ${number} from this device`, clear: `Remove reference ${number}`, preview: `Reference ${number} preview` }}
             emptyText=""
             path={row.path || null}
@@ -112,7 +113,7 @@
         {#if references.hasRoom}
           <ReferenceSlot
             idBase="ws-ref-add"
-            label="Reference {refRows.length + 1}"
+            label={wording.label(refRows.length + 1)}
             names={{ browse: `Browse for reference ${refRows.length + 1}`, upload: `Upload reference ${refRows.length + 1} from this device`, clear: '', preview: '' }}
             emptyText="Add reference"
             emptyMuted
@@ -125,7 +126,7 @@
             onpathchange={(path) => { if (path) editor.append([{ path, file: null }]); }}
           />
         {/if}
-        {#if refRows.length > 0}<p class="row-hint">Refer to them in the prompt as image 1, image 2…</p>{/if}
+        {#if refRows.length > 0}<p class="row-hint">{wording.hint}</p>{/if}
       </div>
     {/if}
 

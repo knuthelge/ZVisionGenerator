@@ -9,11 +9,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
+from starlette.datastructures import FormData
 
 from tests._factories import load_packaged_config
 from tests._factories import make_extend_source, metadata_copy, use_model_metadata
 
 import zvisiongenerator.backends as backends_module
+import zvisiongenerator.utils.audio_track as audio_track_module
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.web import config as web_config_module
@@ -56,6 +58,116 @@ def _image(tmp_path: Path, name: str) -> str:
 
 def _submit(tmp_path: Path, config: SimpleNamespace | None = None, **form: str) -> dict[str, Any]:
     return web_server._submit_video_job({"model": "h3", "prompt": "a lake", **form}, config or _web_config(tmp_path))
+
+
+class TestReferences:
+    """References on a MiniMax H3 form: the repeated ``reference`` field, the cap, and what they combine with."""
+
+    @staticmethod
+    def _post(tmp_path: Path, *references: str, config: SimpleNamespace | None = None, **form: str) -> dict[str, Any]:
+        entries = [("model", "h3"), ("prompt", "<Picture 1> walks in"), *form.items(), *(("reference", path) for path in references)]
+        return web_server._submit_video_job(FormData(entries), config or _web_config(tmp_path))
+
+    def test_the_paths_reach_the_args_the_request_and_the_context(self, tmp_path, submitted):
+        first, second = _image(tmp_path, "a.png"), _image(tmp_path, "b.png")
+
+        response = self._post(tmp_path, first, second)
+
+        (job,) = submitted
+        expected = [str(Path(first).resolve()), str(Path(second).resolve())]
+        assert job["args"].reference_paths == expected
+        assert job["request"].reference_paths == tuple(expected)
+        assert response["context"]["settings"]["reference_path"] == expected
+        assert "reference" not in response["context"]["settings"]
+        assert response["context"]["workflow"] == "txt2vid"
+
+    def test_no_reference_leaves_the_request_unchanged(self, tmp_path, submitted):
+        response = self._post(tmp_path)
+
+        (job,) = submitted
+        assert (job["args"].reference_paths, job["request"].reference_paths) == ([], ())
+        assert "reference_path" not in response["context"]["settings"]
+
+    def test_references_leave_the_workflow_to_the_first_frame(self, tmp_path, submitted):
+        response = self._post(tmp_path, _image(tmp_path, "a.png"), image_path=_image(tmp_path, "first.png"))
+
+        assert response["context"]["workflow"] == "img2vid"
+        assert submitted[0]["request"].image_path is not None
+
+    def test_references_go_with_a_first_and_a_last_frame(self, tmp_path, submitted):
+        ref, first, last = _image(tmp_path, "a.png"), _image(tmp_path, "first.png"), _image(tmp_path, "last.png")
+
+        self._post(tmp_path, ref, image_path=first, end_image_path=last)
+
+        (job,) = submitted
+        assert (job["request"].reference_paths, job["request"].end_image_path is not None) == ((str(Path(ref).resolve()),), True)
+
+    def test_an_extension_keeps_its_references(self, tmp_path, submitted, monkeypatch):
+        monkeypatch.setattr(web_server, "load_source_video", lambda *_a, **_kw: make_extend_source(fps=24.0, frame_count=97))
+        monkeypatch.setattr(web_server, "supports_video_extend", lambda: True)
+        ref = _image(tmp_path, "a.png")
+
+        response = self._post(tmp_path, ref, workflow="extend", source_video="clip.mp4")
+
+        (job,) = submitted
+        assert response["context"]["workflow"] == "extend"
+        assert job["request"].reference_paths == (str(Path(ref).resolve()),)
+
+    def test_an_upload_is_saved_and_recorded_in_row_order(self, tmp_path, submitted):
+        import io
+
+        from starlette.datastructures import UploadFile
+
+        first = _image(tmp_path, "a.png")
+        upload = UploadFile(file=io.BytesIO(Path(_image(tmp_path, "up.png")).read_bytes()), filename="b.png")
+        entries = [("model", "h3"), ("prompt", "x"), ("reference", upload), ("reference", first)]
+
+        response = web_server._submit_video_job(FormData(entries), _web_config(tmp_path))
+
+        saved, typed = submitted[0]["request"].reference_paths
+        assert Path(saved).parent == tmp_path / ".web_uploads"
+        assert typed == str(Path(first).resolve())
+        assert response["context"]["settings"]["reference_path"] == [saved, typed]
+
+    def test_three_references_are_refused(self, tmp_path, submitted):
+        refs = [_image(tmp_path, f"r{index}.png") for index in range(3)]
+
+        with pytest.raises(ValueError):
+            self._post(tmp_path, *refs)
+
+        assert submitted == []
+
+    def test_a_model_without_references_refuses_them(self, tmp_path, submitted):
+        with pytest.raises(ValueError):
+            web_server._submit_video_job(FormData([("model", "ltx-8"), ("prompt", "x"), ("reference", _image(tmp_path, "a.png"))]), _web_config(tmp_path))
+
+        assert submitted == []
+
+    @pytest.mark.parametrize("bad", ["gone.png", "notes.txt"])
+    def test_a_reference_that_is_missing_or_not_an_image_is_refused(self, tmp_path, submitted, bad):
+        (tmp_path / "notes.txt").write_text("x")
+
+        with pytest.raises(ValueError):
+            self._post(tmp_path, str(tmp_path / bad))
+
+        assert submitted == []
+
+    def test_an_upscale_is_accepted_with_references(self, tmp_path, submitted):
+        self._post(tmp_path, _image(tmp_path, "a.png"), upscale="2")
+
+        assert submitted[0]["request"].upscale == 2
+        assert len(submitted[0]["request"].reference_paths) == 1
+
+    def test_an_audio_track_is_accepted_with_references(self, tmp_path, submitted, monkeypatch):
+        track = tmp_path / "voice.wav"
+        track.write_bytes(b"x")
+        monkeypatch.setattr(audio_track_module, "probe_track_seconds", lambda _path: 30.0)
+        monkeypatch.setattr(web_server, "require_readable_track", lambda _track: None)
+
+        self._post(tmp_path, _image(tmp_path, "a.png"), audio_track_path=str(track))
+
+        assert submitted[0]["request"].audio_track is not None
+        assert len(submitted[0]["request"].reference_paths) == 1
 
 
 class TestEndImage:
@@ -232,6 +344,20 @@ class TestExtendMemoryFit:
         extend_api_module._extend_memory_fit(("/models/ltx", "ltx"), "ltx-8", make_extend_source(), 48, True, None, lora, _web_config(tmp_path))
 
         assert [call["loras_bytes"] for call in calls] == [4_000, 0, 0]
+
+    def test_the_source_request_carries_the_reference_count_into_the_estimate(self, tmp_path, monkeypatch):
+        calls: list[dict[str, Any]] = []
+        monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
+        monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+        monkeypatch.setattr(extend_api_module, "_resolve_video_model", lambda model, _config: ("/models/h3", "h3"))
+        self._stub_an_inspected_source(tmp_path, monkeypatch)
+
+        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3", "references": 2}, _web_config(tmp_path))
+        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3"}, _web_config(tmp_path))
+        with pytest.raises(ValueError, match="references must be a non-negative whole number"):
+            extend_api_module.extend_source_response({"path": "clip.mp4", "references": -1}, _web_config(tmp_path))
+
+        assert [call["references"] for call in calls] == [2, 0]
 
     def test_a_lora_that_is_not_there_leaves_the_estimate_unknown_without_failing(self, tmp_path, monkeypatch):
         monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
@@ -423,6 +549,17 @@ class TestMemoryFitHints:
         self._fit(tmp_path, lora="pending_style:0.8")
 
         assert asked[0]["loras_bytes"] == 255_000_000
+
+    def test_the_reference_count_reaches_the_estimate(self, tmp_path, asked):
+        self._fit(tmp_path, references=2)
+        self._fit(tmp_path)
+
+        assert [call["references"] for call in asked] == [2, 0]
+
+    @pytest.mark.parametrize("value", [-1, "2", True])
+    def test_a_bad_reference_count_is_refused(self, tmp_path, asked, value):
+        with pytest.raises(ValueError, match="references must be a non-negative whole number"):
+            self._fit(tmp_path, references=value)
 
     def test_review_counts_only_with_an_upscale(self, tmp_path, asked):
         self._fit(tmp_path, upscale=2, review=True)

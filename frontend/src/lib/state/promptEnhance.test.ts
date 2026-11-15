@@ -367,9 +367,14 @@ describe('extend', () => {
 
   it('describes the job by its source and new frames, with no frame shape or reference image', () => {
     expect(enhanceContext(extending())).toEqual({
-      ratio: null, width: null, height: null, frames: null, fps: null, audio: true, reference_image: false,
+      ratio: null, width: null, height: null, frames: null, fps: null, audio: true, reference_image: false, references: 0,
       source_video: '/clips/walk.mp4', extend_frames: 48, model: 'ltx-2.3',
     });
+  });
+
+  it('carries the number of reference rows, as any video job does', () => {
+    expect(enhanceContext(extending(), true, null, false, 2).references).toBe(2);
+    expect(enhanceContext(state({ workflow: 'txt2vid' }), true, null, false, 2).references).toBe(2);
   });
 
   it('names the selected video model so the server applies its extend step', () => {

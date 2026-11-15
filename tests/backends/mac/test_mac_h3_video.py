@@ -62,6 +62,8 @@ PRESET = H3MlxPreset(
     text_encoder_layers=50,
     frame_rule=FrameRule(17, 5, "up"),
     schedules={4: H3Schedule(4, 6.0, 3.0), 8: H3Schedule(8, 6.0, 3.0)},
+    reference_transformer=HubFiles("ref/repo", "rev-ref", ("transformer.safetensors",)),
+    reference_lora=HubFiles("ref-lora/repo", "rev-ref-lora", ("turbo.safetensors",)),
 )
 TURBO_SCALE = 0.0625
 LORA = HubFiles("lora/repo", "rev-lora", ("turbo.safetensors",))
@@ -720,7 +722,7 @@ class TestImageToVideo:
 # ---- Extend ----------------------------------------------------------------------------------------------------------
 
 
-def _extend(env, tmp_path, written, monkeypatch, *, extend_frames=51, audio_output=None, source=None, mode="extend", callback=None, audio_track=None):
+def _extend(env, tmp_path, written, monkeypatch, *, extend_frames=51, audio_output=None, source=None, mode="extend", callback=None, audio_track=None, **extra):
     source = source or make_extend_source(path=tmp_path / "clip.mp4", width=64, height=32, frame_count=49)
     tail = np.zeros((25, 32, 64, 3), dtype=np.uint8)
     tail[-1] = (10, 120, 230)
@@ -739,6 +741,7 @@ def _extend(env, tmp_path, written, monkeypatch, *, extend_frames=51, audio_outp
         audio_output=audio_track is None if audio_output is None else audio_output,
         step_callback=callback,
         audio_track=audio_track,
+        **extra,
     )
     return segment, segment_dir, tail
 
@@ -884,6 +887,139 @@ class TestAudioTrack:
 
         assert env.staged[0]["track_audio"] is None
         assert segment.audio_path == segment_dir / "segment.wav"
+
+
+class TestReferences:
+    """Reference images: the load picks the Ref2VA copy, every clip with them runs staged with the task tag and the references first."""
+
+    TRACK = AudioTrack("voice.wav", 0.0)
+
+    @pytest.fixture
+    def copy(self, env, tmp_path, monkeypatch):
+        """Replace the Ref2VA writer with a converted folder; record the arguments it gets and what the loader resolves."""
+        from zvisiongenerator.backends.mac import h3_converted
+        from zvisiongenerator.utils.h3_converted import write_converted_h3
+
+        folder = tmp_path / "models" / "h3@ref2va-q8"
+        folder.mkdir(parents=True)
+        write_converted_h3(folder, {"storage": "mlx-int8", "turbo": "merged"})
+        stock = _make_files(tmp_path / "stock")
+        record = SimpleNamespace(folder=folder, builds=[], resolved=[])
+        monkeypatch.setattr(h3_converted, "ensure_ref2va_copy", lambda models_dir, preset, scale: record.builds.append((models_dir, preset, scale)) or folder)
+        monkeypatch.setattr(h3_video, "resolve_mlx_files", lambda model_ref, preset, *, lora: record.resolved.append((model_ref, lora)) or env.files)
+        monkeypatch.setattr(h3_video, "snapshot_with", lambda files, download: stock.fl2va_dir.parent)
+        return record
+
+    @staticmethod
+    def _references(tmp_path: Path) -> list[str]:
+        return [_image(tmp_path / "man.png", (100, 50)), _image(tmp_path / "bag.png", (50, 100), (0, 0, 255))]
+
+    def test_the_load_builds_the_ref2va_copy_and_takes_the_converted_route(self, env, copy, tmp_path):
+        model = _load(env, references=True)
+
+        assert copy.builds == [(env.tmp / "models", PRESET, TURBO_SCALE)]
+        assert copy.resolved == [(str(copy.folder), None)]  # a converted folder gets no turbo LoRA
+        assert (model.turbo_lora_path, model.turbo_lora_alpha, model.turbo_lora_scale) == (None, None, 1.0)
+        assert model.text_encoder_dir.name == "h3@mlx-te4"
+
+    def test_a_converted_model_loads_the_same_copy_rather_than_its_own_folder(self, env, copy, tmp_path):
+        from zvisiongenerator.utils.h3_converted import write_converted_h3
+
+        own = tmp_path / "myh3"
+        own.mkdir()
+        write_converted_h3(own, {"storage": "mlx-int8", "turbo": "merged"})
+        model, _ = H3MlxVideoBackend().load_model(str(own), preset=PRESET, lora=LORA, lora_scale=TURBO_SCALE, models_dir=env.tmp / "models", model_name="myh3", references=True)
+
+        assert copy.resolved == [(str(copy.folder), None)]
+
+    def test_without_references_nothing_is_built_and_the_model_is_the_one_asked_for(self, env, copy):
+        _load(env)
+
+        assert copy.builds == [] and copy.resolved == [(MODEL_REF, LORA)]
+
+    def test_text_to_video_with_references_runs_staged_with_the_text_to_video_tag(self, env, copy, written, tmp_path):
+        H3MlxVideoBackend().text_to_video(_load(env, references=True), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"), references=self._references(tmp_path))
+
+        assert env.loads == [] and env.calls == []
+        call = env.staged[0]
+        assert call["prompt"] == "[reference generation] a fox"
+        assert (list(call["images"]), list(call["anchors"])) == ([], [])
+
+    def test_the_references_are_prepared_at_their_own_size_in_order(self, env, copy, written, tmp_path):
+        H3MlxVideoBackend().text_to_video(_load(env, references=True), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"), references=self._references(tmp_path))
+
+        # Short edge 1024, in the references' own proportions; the clip's canvas is not theirs.
+        assert [reference.size for reference in env.staged[0]["references"]] == [(2048, 1024), (1024, 2048)]
+
+    def test_image_to_video_puts_the_first_frame_after_the_references_with_the_keyframe_tag(self, env, copy, written, tmp_path):
+        H3MlxVideoBackend().image_to_video(
+            _load(env, mode="i2v", references=True), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"), references=self._references(tmp_path)
+        )
+
+        call = env.staged[0]
+        assert call["prompt"] == "[reference generation + keyframe completion] a fox"
+        assert ([image.size for image in call["images"]], list(call["anchors"])) == ([(64, 32)], ["first"])
+        assert len(call["references"]) == 2
+
+    def test_a_last_frame_follows_the_first_after_the_references_as_the_last_anchor(self, env, copy, written, tmp_path):
+        H3MlxVideoBackend().image_to_video(
+            _load(env, mode="i2v", references=True),
+            _image(tmp_path / "a.png", (64, 32)),
+            "a fox",
+            64,
+            32,
+            22,
+            7,
+            8,
+            str(tmp_path / "out.mp4"),
+            references=self._references(tmp_path),
+            end_image=_image(tmp_path / "b.png", (64, 32)),
+        )
+
+        call = env.staged[0]
+        assert call["prompt"] == "[reference generation + keyframe completion] a fox"
+        assert ([image.size for image in call["images"]], list(call["anchors"])) == ([(64, 32), (64, 32)], ["first", "last"])
+        assert len(call["references"]) == 2
+
+    def test_a_track_adds_the_audio_reuse_clause_to_the_tag(self, env, copy, written, tmp_path, monkeypatch):
+        monkeypatch.setattr(h3_video, "read_track", lambda track, rate, seconds: np.zeros((2, round(seconds * rate)), dtype=np.float32))
+        H3MlxVideoBackend().text_to_video(_load(env, references=True), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"), audio_track=self.TRACK, references=self._references(tmp_path))
+        H3MlxVideoBackend().image_to_video(
+            _load(env, mode="i2v", references=True),
+            _image(tmp_path / "a.png", (64, 32)),
+            "a fox",
+            64,
+            32,
+            22,
+            7,
+            8,
+            str(tmp_path / "out.mp4"),
+            audio_track=self.TRACK,
+            references=self._references(tmp_path),
+        )
+
+        assert [call["prompt"] for call in env.staged] == ["[reference generation + audio reuse] a fox", "[reference generation + keyframe completion + audio reuse] a fox"]
+        assert all(call["track_audio"] is not None for call in env.staged)
+
+    def test_extend_passes_the_references_with_the_last_frame_and_gets_the_image_to_video_tag(self, env, copy, written, tmp_path, monkeypatch):
+        _, _, tail = _extend(env, tmp_path, written, monkeypatch, references=self._references(tmp_path))
+
+        call = env.staged[0]
+        assert call["prompt"] == "[reference generation + keyframe completion] the fox stops"
+        assert np.array_equal(np.asarray(call["images"][0]), tail[-1]) and list(call["anchors"]) == ["first"]
+        assert [reference.size for reference in call["references"]] == [(2048, 1024), (1024, 2048)]
+        assert written.frames.shape == (51, 32, 64, 3)
+
+    def test_extend_with_a_track_adds_the_audio_reuse_clause(self, env, copy, written, tmp_path, monkeypatch):
+        monkeypatch.setattr(h3_video, "window_waveform", lambda source, track, *, carry_frames, extend_frames, rate: np.zeros((2, round((carry_frames + extend_frames) / 24 * rate)), dtype=np.float32))
+        _extend(env, tmp_path, written, monkeypatch, audio_track=self.TRACK, references=self._references(tmp_path))
+
+        assert env.staged[0]["prompt"] == "[reference generation + keyframe completion + audio reuse] the fox stops"
+
+    def test_without_references_the_prompt_is_the_users_text_and_none_are_passed(self, env, written, tmp_path):
+        H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
+
+        assert (env.staged[0]["prompt"], list(env.staged[0]["references"])) == ("a fox", [])
 
 
 # ---- LoRAs -----------------------------------------------------------------------------------------------------------

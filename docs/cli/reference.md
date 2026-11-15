@@ -90,6 +90,7 @@ With `--upscale`, a preset size that doesn't divide evenly by the factor drifts 
 | `-r`, `--runs` | `1` | How many times to run every prompt; at least 1 |
 | `--image` | none | First frame, for image-to-video; the file must exist |
 | `--end-image` | none | Last frame: the clip runs from `--image` to it. Every video model takes one. Needs `--image` |
+| `--reference PATH[,PATH]` | none | Up to 2 reference images, comma-separated (`h3` only), named `<Picture 1>` and `<Picture 2>` in the prompt. Works with `--image` (and `--end-image`) and `--extend`; pass it again on each `--extend`. See [Keep a person or place in a clip](../guides/video.md#references) |
 | `-s`, `--size` | `s` | Size preset: `xs`, `s`, `m`, `l`, `xl`. The default is [`video_generation.default_size`](../reference/configuration.md#video_generation-and-video_sizes) |
 | `--ratio` | `16:9` | Aspect ratio: `16:9`, `9:16`, `1:1`, or any ratio of your [`video_sizes`](../reference/configuration.md#video_generation-and-video_sizes) |
 | `-W`, `--width` | from preset | Width; aligned to 32 px (64 with `--upscale`). At least 64×64 after alignment |

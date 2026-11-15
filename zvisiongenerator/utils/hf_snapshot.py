@@ -10,7 +10,7 @@ from zvisiongenerator.downloads.target import HubFiles
 from zvisiongenerator.utils.model_files import cached_snapshot_dirs
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
-__all__ = ["cached_snapshot", "pack_for_reference", "snapshot_download", "snapshot_with"]
+__all__ = ["cached_snapshot", "pack_for_reference", "snapshot_download", "snapshot_file", "snapshot_with"]
 
 
 def snapshot_download(**kwargs: Any) -> str:
@@ -31,6 +31,11 @@ def snapshot_with(files: HubFiles, download: Callable[..., str]) -> Path:
     if cached is not None:
         return cached
     return Path(download(repo_id=files.repo_id, revision=files.revision, allow_patterns=list(files.files)))
+
+
+def snapshot_file(files: HubFiles, download: Callable[..., str]) -> Path:
+    """Return the path of the first of *files* in its snapshot folder (see :func:`snapshot_with`), for a file set of one file."""
+    return snapshot_with(files, download) / files.files[0]
 
 
 def pack_for_reference(packs: Mapping[str, HubFiles], model_ref: str) -> HubFiles | None:

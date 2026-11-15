@@ -31,6 +31,7 @@ __all__ = [
     "TAIL_FRAMES",
     "TAIL_LATENT_FRAMES",
     "encode_keyframe",
+    "encode_reference",
     "encode_tail",
     "encode_tail_audio",
     "fit_keyframe",
@@ -124,13 +125,25 @@ def encode_keyframe(encoder: Any, image: Image.Image, width: int, height: int) -
     Raises:
         ValueError: If the canvas is not a positive multiple of the compression ratio.
     """
+    _check_canvas(encoder, width, height)
+    return encode_reference(encoder, fit_keyframe(image, width, height))
+
+
+def encode_reference(encoder: Any, image: Image.Image) -> torch.Tensor:
+    """Encode the RGB *image* at its own size as one conditioning latent frame.
+
+    Args:
+        encoder: The video VAE from :func:`load_vae_encoder`.
+        image: An RGB image, both sides a positive multiple of the VAE's spatial compression (16); it is not fitted to any canvas.
+
+    Returns:
+        Normalised float32 CPU latents ``(1, channels, 1, height / 16, width / 16)``.
+    """
     import numpy as np
     import torch
 
-    _check_canvas(encoder, width, height)
     device = next(encoder.encoder.parameters()).device
-    array = np.asarray(fit_keyframe(image, width, height))
-    pixels = torch.from_numpy(array.copy()).to(device).permute(2, 0, 1)[None, :, None]
+    pixels = torch.from_numpy(np.asarray(image).copy()).to(device).permute(2, 0, 1)[None, :, None]
     return _encode_condition(encoder, pixels)
 
 

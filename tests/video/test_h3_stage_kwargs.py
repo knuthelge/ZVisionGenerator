@@ -7,6 +7,7 @@ Mac or a GPU.
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from unittest.mock import create_autospec
 
@@ -56,3 +57,22 @@ def test_the_extend_stage_sends_keywords_the_backend_takes(backend_class, tmp_pa
     video_stages.extend_video_stage(_request(backend, tmp_path, extend=ExtendSpec(source, 17)), _artifacts())
 
     assert set(backend.extend_video.call_args.kwargs) == {"model", "source", "prompt", "extend_frames", "seed", "steps", "segment_dir", "audio_output", "step_callback", "audio_track"}
+
+
+@pytest.mark.parametrize("backend_class", _BACKENDS)
+def test_the_backend_binds_references_as_a_named_argument_in_every_mode(backend_class, tmp_path):
+    paths = ("man.png", "bag.png")
+    backend = create_autospec(backend_class, instance=True)
+    backend.text_to_video.return_value = backend.image_to_video.return_value = tmp_path / "clip.mp4"
+    backend.extend_video.return_value = None
+    source = ExtendSource(path=tmp_path / "source.mp4", width=64, height=64, fps=24.0, fps_text="24/1", frame_count=22, has_audio=True, video_start=0.0)
+
+    video_stages.text_to_video_stage(_request(backend, tmp_path, reference_paths=paths), _artifacts())
+    video_stages.image_to_video_stage(_request(backend, tmp_path, image_path="first.png", reference_paths=paths), _artifacts())
+    video_stages.extend_video_stage(_request(backend, tmp_path, extend=ExtendSpec(source, 17), reference_paths=paths), _artifacts())
+
+    for method in (backend.text_to_video, backend.image_to_video, backend.extend_video):
+        assert method.call_args.kwargs["references"] == paths
+    # text_to_video and image_to_video also take **kwargs, which would swallow a misspelt keyword.
+    for name in ("text_to_video", "image_to_video", "extend_video"):
+        assert "references" in inspect.signature(getattr(backend_class, name)).parameters

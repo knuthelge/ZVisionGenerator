@@ -21,26 +21,30 @@ export function isOriginalLegacyPrompt(state: Pick<DraftState, 'prompt'>, info: 
   return original !== '' && normalizePromptText(state.prompt) === original;
 }
 
-/** What a source pre-fills: the Scene and Prompt, and the audio track it followed (null for a source with none). */
+/** What a source pre-fills: the Scene and Prompt, the audio track it followed (null for a source with none) and the references it was made with. */
 export interface ExtendPrefill {
   scene: string;
   prompt: string;
   /** The track the source followed and where in it the source's sound ended, which is where the extension carries on. */
   audioTrack: { path: string; start: number } | null;
+  /** The reference images the source was made with, in prompt order; empty for a source without any. */
+  references: string[];
 }
 
 /**
- * The Scene, Prompt and audio track a source pre-fills.
+ * The Scene, Prompt, audio track and references a source pre-fills.
  *
  * A recorded scene fills Scene and leaves Prompt empty (what happens next); a legacy source fills Prompt with its
  * old prompt and leaves Scene empty; a source with no recorded text leaves both empty. A source made from a track fills
  * the track with Start at at the second its sound ended; a source without one has no track, which clears the section.
+ * A source made with references brings them in the same order; one made without has none.
  */
 export function extendPrefillFor(info: ExtendSourceInfo): ExtendPrefill {
   const audioTrack = info.audio_track_path ? { path: info.audio_track_path, start: info.audio_track_end ?? 0 } : null;
-  if (info.scene) return { scene: info.scene, prompt: '', audioTrack };
-  if (info.legacy && info.prompt) return { scene: '', prompt: info.prompt, audioTrack };
-  return { scene: '', prompt: '', audioTrack };
+  const references = [...info.reference_images];
+  if (info.scene) return { scene: info.scene, prompt: '', audioTrack, references };
+  if (info.legacy && info.prompt) return { scene: '', prompt: info.prompt, audioTrack, references };
+  return { scene: '', prompt: '', audioTrack, references };
 }
 
 /** Whether a source can be extended: it was read and reports no problems. */

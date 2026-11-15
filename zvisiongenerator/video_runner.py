@@ -285,6 +285,7 @@ def run_video_batch(
                         ),
                         image_path=getattr(args, "image_path", None),
                         end_image_path=getattr(args, "end_image_path", None),
+                        reference_paths=tuple(getattr(args, "reference_paths", None) or ()),
                         upscale=getattr(args, "upscale", None),
                         upscale_steps=getattr(args, "upscale_steps", None),
                         review=(

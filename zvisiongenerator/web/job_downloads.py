@@ -84,14 +84,14 @@ def image_model_part(name: str, model_ref: str, *, family: str, platform_key: st
     return JobDownloadPart(label, name, ROLE_MODEL, image_plan(model_ref, family=family, platform_key=platform_key))
 
 
-def video_model_part(name: str, model_ref: str, *, family: str, config: dict[str, Any], platform_key: str, upscale: bool) -> JobDownloadPart:
-    """Return the part for the video model *name* that loads from *model_ref* on *platform_key* (with the upscale's files when it *upscale*s).
+def video_model_part(name: str, model_ref: str, *, family: str, config: dict[str, Any], platform_key: str, upscale: bool, references: bool = False) -> JobDownloadPart:
+    """Return the part for the video model *name* that loads from *model_ref* on *platform_key* (with the upscale's files when it *upscale*s, and the reference model's when it takes *references*).
 
     Raises:
         ValueError: If a video setting of the family in *config* is malformed.
     """
     label = model_display_name(name)
-    return JobDownloadPart(label, name, ROLE_MODEL, video_plan(model_ref, family=family, config=config, model_name=name, platform_key=platform_key, upscale=upscale))
+    return JobDownloadPart(label, name, ROLE_MODEL, video_plan(model_ref, family=family, config=config, model_name=name, platform_key=platform_key, upscale=upscale, references=references))
 
 
 def ltx_video_upscale_part(request: LtxVideoUpscaleRequest, config: dict[str, Any], *, platform_key: str) -> JobDownloadPart:
@@ -175,7 +175,15 @@ def job_download_parts(
     if isinstance(request, VideoGenerationRequest):
         return (
             *_enhancer_parts(args, enhance_by_set, config, platform_key),
-            video_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=platform_key, upscale=bool(request.upscale)),
+            video_model_part(
+                request.model_name or model_ref,
+                model_ref,
+                family=request.model_family,
+                config=config,
+                platform_key=platform_key,
+                upscale=bool(request.upscale),
+                references=bool(request.reference_paths),
+            ),
         )
     matte = (matte_part(),) if request.transparent else ()
     if request.upscale_source is not None:

@@ -20,7 +20,7 @@ import WorkspacePage from './WorkspacePage.svelte';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { lastEventSource } from '../../test-utils/eventSource';
 import { makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
-import { EMPTY_AUDIO_MATRIX, makeAsset, makeContext, makeGalleryPage, makeImageDefaults } from '../../test-utils/workspace';
+import { EMPTY_AUDIO_MATRIX, makeAsset, makeContext, makeGalleryPage, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, fakeDebounceTimers, field, holdInspection, mockClipboard, mountWorkspacePage, openEnhanceRun, resetWorkspaceTest, runEnhance, settle, type, waitDebounce } from '../../test-utils/workspaceHarness';
 import { browseApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, presetApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
@@ -690,6 +690,90 @@ describe('WorkspacePage asset actions and settings', () => {
       expect(draft.state.referenceImagePaths).toEqual(['/in/a.png', '/in/b.png', '/in/c.png']);
       // A tap on a greyed item says why, as a toast.
       expect(toastMessages()).toEqual(['all 3 in use']);
+    });
+
+    describe('on the Video tab with a model that takes references', () => {
+      /** "h3" takes 2 references and lists the controls on every video workflow, Extend included. */
+      function h3Context(): WorkspaceContext {
+        const context = referencesContext();
+        context.video_models = [{ id: 'h3', label: 'H3', type: 'video' }];
+        context.video_model_defaults = { h3: makeVideoDefaults({ max_reference_images: 2 }) };
+        context.current_video_model = 'h3';
+        context.workflow_contract.values = [...context.workflow_contract.values, 'extend'];
+        for (const workflow of ['txt2vid', 'img2vid', 'extend'] as const) context.workflow_contract.definitions[workflow].visible_controls.push('references', 'references_clear');
+        return context;
+      }
+
+      const useAsReference = async (): Promise<HTMLButtonElement> => {
+        openTileMenu(asset);
+        return document.querySelector('[role="menu"] [data-action="reference-reference"]') as HTMLButtonElement;
+      };
+
+      it.each([['txt2vid', 'videoReferencePaths', 'extendReferencePaths'], ['extend', 'extendReferencePaths', 'videoReferencePaths']] as const)('adds to the list of %s only, stays on the tab and toasts the tag', async (workflow, own, other) => {
+        draft.update('workflow', workflow);
+        await mountReferences(h3Context());
+        draft.patch({ scene: 'my scene', prompt: 'my action', referenceImagePaths: ['/in/image.png'] });
+        await settle();
+
+        const item = await useAsReference();
+        expect(item.hasAttribute('aria-disabled')).toBe(false);
+        item.click();
+        await settle();
+
+        expect(draft.state).toMatchObject({ workflow, model: 'h3', scene: 'my scene', prompt: 'my action', [own]: ['/outputs/out/first.png'], [other]: [], referenceImagePaths: ['/in/image.png'] });
+        expect(toasts).toMatchObject([{ message: 'Added as <Picture 1>', type: 'success' }]);
+      });
+
+      it('numbers the next row from the Video list and shows it in the section', async () => {
+        draft.update('workflow', 'txt2vid');
+        await mountReferences(h3Context());
+        draft.patch({ videoReferencePaths: ['/in/v1.png'] });
+        await settle();
+
+        (await useAsReference()).click();
+        await settle();
+
+        expect(draft.state.videoReferencePaths).toEqual(['/in/v1.png', '/outputs/out/first.png']);
+        expect(toastMessages()).toEqual(['Added as <Picture 2>']);
+        expect(target.querySelector('[data-section="images"]')?.textContent).toContain('<Picture 2>');
+      });
+
+      it('is disabled once the Video list holds the 2 the model takes, and says why', async () => {
+        draft.update('workflow', 'txt2vid');
+        await mountReferences(h3Context());
+        draft.patch({ videoReferencePaths: ['/in/v1.png', '/in/v2.png'] });
+        await settle();
+
+        const full = await useAsReference();
+        expect(full.getAttribute('aria-disabled')).toBe('true');
+        full.click();
+        await settle();
+
+        expect(draft.state.videoReferencePaths).toEqual(['/in/v1.png', '/in/v2.png']);
+        expect(toastMessages()).toEqual(['all 2 in use']);
+      });
+
+      it('leaves the Image tab as it is today, and counts its own list', async () => {
+        await mountReferences(h3Context());
+        draft.patch({ referenceImagePaths: ['/in/a.png'], videoReferencePaths: ['/in/v1.png', '/in/v2.png'] });
+        await settle();
+
+        (await useAsReference()).click();
+        await settle();
+
+        expect(draft.state).toMatchObject({ workflow: 'txt2img', referenceImagePaths: ['/in/a.png', '/outputs/out/first.png'], videoReferencePaths: ['/in/v1.png', '/in/v2.png'] });
+        expect(toastMessages()).toEqual(['Added as image 2']);
+      });
+
+      it('adds a reference the Gallery asked for to the Video list once the draft is back', async () => {
+        draft.update('workflow', 'txt2vid');
+        requestReference('/outputs/out/first.png');
+
+        await mountReferences(h3Context());
+
+        expect(draft.state).toMatchObject({ workflow: 'txt2vid', videoReferencePaths: ['/outputs/out/first.png'], referenceImagePaths: [] });
+        expect(toastMessages()).toEqual(['Added as <Picture 1>']);
+      });
     });
 
     it('adds a reference the Gallery asked for once the restore has settled', async () => {
@@ -1827,7 +1911,7 @@ describe('WorkspacePage extend', () => {
     it('leaves the uploads of the Image and Video tabs alone, as Extend holds no image of its own', async () => {
       const png = (name: string) => new File(['img'], name, { type: 'image/png' });
       heldUploads.setStart('image', png('start.png'));
-      heldUploads.setReferences([png('ref.png')]);
+      heldUploads.setReferencesOf('image', [png('ref.png')]);
       heldUploads.setStart('video', png('first.png'));
       heldUploads.setLastFrame(png('last.png'));
 
@@ -1838,6 +1922,97 @@ describe('WorkspacePage extend', () => {
       expect(heldUploads.references).toHaveLength(1);
       expect(heldUploads.start('video')?.name).toBe('first.png');
       expect(heldUploads.lastFrame?.name).toBe('last.png');
+    });
+  });
+
+  describe('with references', () => {
+    const png = (name: string) => new File(['img'], name, { type: 'image/png' });
+    const OTHER = '/clips/other.mp4';
+    const sectionText = () => text('[data-section="images"]');
+
+    /** An H3 that takes 2 references, with the controls on Extend as the server lists them. */
+    function referencesExtendContext(): WorkspaceContext {
+      const context = makeExtendContext();
+      context.video_models = [{ id: 'h3', label: 'H3', type: 'video' }];
+      context.video_model_defaults = { h3: makeVideoDefaults({ max_reference_images: 2 }) };
+      context.current_video_model = 'h3';
+      context.workflow_contract.definitions.extend.visible_controls.push('references', 'references_clear');
+      return context;
+    }
+
+    const mountReferencesExtend = (params?: Record<string, string>) => mountExtend({ context: referencesExtendContext(), params });
+
+    it('fills the Extend list from a source made with references, and shows the rows as pictures', async () => {
+      await mountReferencesExtend();
+      draft.patch({ referenceImagePaths: ['/in/image-tab.png'] });
+
+      await chooseSource(sceneSource({ reference_images: ['/in/a.png', '/in/b.png'] }));
+
+      expect(draft.state).toMatchObject({ extendReferencePaths: ['/in/a.png', '/in/b.png'], referenceImagePaths: ['/in/image-tab.png'], videoReferencePaths: [] });
+      expect(text('[data-section="images"] .inspector-summary')).toContain('2 references');
+      expect(sectionText()).toContain('<Picture 1>');
+      expect(sectionText()).toContain('<Picture 2>');
+      expect(sectionText()).not.toContain('Reference 1');
+    });
+
+    it('sends the Extend rows as `reference`, in order, and never the Image tab\'s or New\'s', async () => {
+      await mountReferencesExtend();
+      draft.patch({ referenceImagePaths: ['/in/image-tab.png'], videoReferencePaths: ['/in/new.png'] });
+      await chooseSource(sceneSource({ reference_images: ['/in/a.png', '/in/b.png'] }));
+
+      const form = await submit();
+
+      expect(form?.getAll('reference')).toEqual(['/in/a.png', '/in/b.png']);
+    });
+
+    it('shows no section on a model without references, and keeps the list', async () => {
+      await mountExtend();
+      draft.patch({ extendReferencePaths: ['/in/a.png'] });
+      await chooseSource(sceneSource());
+      await settle();
+
+      expect(target.querySelector('[data-section="images"]')).toBeNull();
+      expect(draft.state.extendReferencePaths).toEqual(['/in/a.png']);
+      expect((await submit())?.has('reference')).toBe(false);
+    });
+
+    it('keeps references the user added, an upload included, when another source is chosen', async () => {
+      await mountReferencesExtend();
+      await chooseSource(sceneSource({ reference_images: ['/in/a.png'] }));
+      draft.update('extendReferencePaths', ['']);
+      heldUploads.setReferencesOf('extend', [png('mine.png')]);
+      await settle();
+
+      await chooseSource(sceneSource({ path: OTHER, reference_images: ['/in/c.png'] }), OTHER);
+
+      expect(draft.state.extendReferencePaths).toEqual(['']);
+      expect((await submit())?.getAll('reference').map((value) => (value as File).name)).toEqual(['mine.png']);
+    });
+
+    it('a prefill that opens Extend leaves New\'s list and its held uploads, and sends none of them', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ videoReferencePaths: ['', '/in/old.png'] });
+      heldUploads.setReferencesOf('video', [png('old.png'), null]);
+
+      await mountReferencesExtend({ workflow: 'extend', source_video: SOURCE });
+      expect(draft.state.extendReferencePaths).toEqual([]);
+      expect(heldUploads.extendReferences).toEqual([]);
+      expect(draft.state.videoReferencePaths).toEqual(['', '/in/old.png']);
+      expect(heldUploads.videoReferences.map((held) => held?.name ?? null)).toEqual(['old.png', null]);
+
+      await chooseSource(sceneSource());
+      expect((await submit())?.has('reference')).toBe(false);
+    });
+
+    it('a prefill that opens Extend drops the uploads held for Extend\'s old rows', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ extendReferencePaths: ['', '/in/old.png'] });
+      heldUploads.setReferencesOf('extend', [png('old.png'), null]);
+
+      await mountReferencesExtend({ workflow: 'extend', source_video: SOURCE });
+
+      expect(draft.state.extendReferencePaths).toEqual([]);
+      expect(heldUploads.extendReferences).toEqual([]);
     });
   });
 

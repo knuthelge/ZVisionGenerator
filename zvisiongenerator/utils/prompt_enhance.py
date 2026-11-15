@@ -44,6 +44,7 @@ PRESERVATION_RULES = (
 QUOTES_CHANGED_WARNING = "A quoted text was changed in the rewrite."
 REFERENCES_DROPPED_WARNING = "A reference image named in the prompt was dropped from the rewrite."
 _REFERENCE_MENTION_RE = re.compile(r"\bimage\s+(\d+)\b", re.I)
+_PICTURE_MENTION_RE = re.compile(r"<Picture\s*(\d+)>")
 NO_USABLE_MESSAGE = "The enhancer returned no usable rewrite (empty, unchanged, or a refusal). Try different settings."
 
 
@@ -480,7 +481,7 @@ class EnhanceContext:
     """Facts about the job that shape a rewrite: audio track, clip length, frame shape, start image, references and last frame.
 
     ``reference_image`` is the start image (img2img's image, or a video's first frame); ``references`` counts the
-    reference images the prompt names as "image 1", "image 2".
+    reference images the prompt names as "image 1", "image 2" (a video's as "<Picture 1>", "<Picture 2>").
 
     The last five fields describe extending an existing clip. ``seconds`` is then the whole window (the carried
     frames plus the new ones) and ``new_seconds`` the part the new action fills. ``previous`` is the source's
@@ -597,7 +598,7 @@ def enhance_context(
     Args:
         frames: The clip's frame count; when *extends*, the whole window (carried plus new frames).
         reference_image: Whether a start image (img2img's image, or a video's first frame) is supplied.
-        references: How many reference images are supplied; the prompt names them "image 1", "image 2".
+        references: How many reference images are supplied; the prompt names them "image 1", "image 2" ("<Picture 1>", "<Picture 2>" for a video).
         end_image: Whether the clip also ends on a supplied image (video only; the rewrite then knows both frames are fixed).
         extends: Whether the job extends an existing video (video only); the fields below apply only then.
         previous: The source video's recorded prompt, "what just happened".
@@ -1055,9 +1056,9 @@ def quote_rules(spans: tuple[str, ...]) -> list[str]:
     return [f"Text in quotes is lettering or speech: copy it exactly, with its case, punctuation and quote marks: {listed}."]
 
 
-def references_rule(count: int) -> str:
-    """Return the rule for *count* reference images: keep the prompt's "image N" phrases and describe the new scene, not the references."""
-    names = [f'"image {number}"' for number in range(1, count + 1)]
+def references_rule(count: int, *, video: bool = False) -> str:
+    """Return the rule for *count* reference images: keep the prompt's reference phrases ("image N", or "<Picture N>" for a video) and describe the new scene, not the references."""
+    names = [f'"<Picture {number}>"' if video else f'"image {number}"' for number in range(1, count + 1)]
     listed = names[0] if count == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
     return (
         f"{count} reference image{'s are' if count > 1 else ' is'} supplied, which the prompt names {listed}. "
@@ -1066,11 +1067,12 @@ def references_rule(count: int) -> str:
     )
 
 
-def _drops_reference(prompt: str, output: str, count: int) -> bool:
-    """Return whether *prompt* names a reference from 1 to *count* as "image N" that *output* does not."""
+def drops_reference(prompt: str, output: str, count: int, *, video: bool = False) -> bool:
+    """Return whether *prompt* names a reference from 1 to *count* (as "image N", or "<Picture N>" for a video) that *output* does not."""
+    pattern = _PICTURE_MENTION_RE if video else _REFERENCE_MENTION_RE
 
     def named(text: str) -> set[int]:
-        return {number for number in map(int, _REFERENCE_MENTION_RE.findall(text)) if 1 <= number <= count}
+        return {number for number in map(int, pattern.findall(text)) if 1 <= number <= count}
 
     return not named(prompt) <= named(output)
 
@@ -1097,7 +1099,7 @@ def context_rules(mode: str, context: EnhanceContext, *, pace: str = KEEP) -> li
         else:
             rules.append("A start image supplies the layout and colours. Refer to what it shows briefly; apply the style and mood without re-describing its appearance.")
     if context.references:
-        rules.append(references_rule(context.references))
+        rules.append(references_rule(context.references, video=mode == "video"))
     if context.orientation is not None:
         rules.append(frame_rule(context.orientation))
     if mode == "video" and context.seconds is not None:
@@ -1300,7 +1302,7 @@ def enhance_prompt(
             continue
         if missing_quotes(spans, output):
             problem = QUOTES_CHANGED_WARNING
-        elif _drops_reference(prompt, output, references):
+        elif drops_reference(prompt, output, references, video=mode == "video"):
             problem = REFERENCES_DROPPED_WARNING
         else:
             return _final(EnhanceResult(prompt=output, clamped=plan.clamped), on_text)

@@ -691,3 +691,104 @@ def test_a_refine_refuses_inputs_that_do_not_fit_the_window():
 def test_a_refine_refuses_an_extend_tail():
     with pytest.raises(ValueError, match="tail"):
         _refine(geo=_WINDOW, conditioning=_extend())
+
+
+# --- references ------------------------------------------------------------------------------------------------------
+
+_REFERENCE_CELLS = (6, 1)  # video rows of the two reference latents below: (4 x 6) and (2 x 2) latent cells under the 2 x 2 patch
+
+
+def _references() -> tuple[torch.Tensor, ...]:
+    """Return two clean reference latents of their own sizes, neither the canvas's."""
+    return (
+        torch.randn(1, 24, 1, 4, 6, generator=torch.Generator().manual_seed(41)),
+        torch.randn(1, 24, 1, 2, 2, generator=torch.Generator().manual_seed(42)),
+    )
+
+
+def _with_references(**fields) -> Conditioning:
+    return Conditioning(references=_references(), **fields)
+
+
+def test_a_reference_layout_holds_the_reference_rows_first_and_generates_the_whole_clip():
+    layout = build_layout(_TEXT_TAGS, _PLAIN, _CPU, _with_references())
+    held = sum(_REFERENCE_CELLS)
+    assert (layout.keyframe_rows, layout.tail_rows, layout.condition_video_rows) == (held, 0, held)
+    assert layout.kwargs["video_indices"].numel() == held + _PLAIN.video_rows
+    assert layout.video_generated.sum() == _PLAIN.video_rows and not layout.video_generated[:held].any()
+    assert layout.condition_audio_rows == 0 and layout.audio_generated.all()
+    # The reference rows come right after the text, ahead of the audio and the target video.
+    assert layout.kwargs["video_indices"][:held].tolist() == list(range(4, 4 + held))
+    assert layout.kwargs["audio_indices"][0] == 4 + held
+
+
+def test_a_first_frame_is_spliced_in_after_the_references_at_the_first_target_frames_positions():
+    layout = build_layout(_TEXT_TAGS, _PLAIN, _CPU, _with_references(keyframes=(_latents(1, 10),), anchors=("first",)))
+    refs = sum(_REFERENCE_CELLS)
+    assert (layout.keyframe_rows, layout.condition_video_rows) == (refs + _CELLS, refs + _CELLS)
+    assert layout.video_generated.sum() == _PLAIN.video_rows
+
+
+def test_a_last_frame_follows_the_first_after_the_references_at_the_last_anchor_positions():
+    layout = build_layout(_TEXT_TAGS, _PLAIN, _CPU, _with_references(keyframes=(_latents(1, 10), _latents(1, 11)), anchors=("first", "last")))
+    refs = sum(_REFERENCE_CELLS)
+    assert (layout.keyframe_rows, layout.condition_video_rows) == (refs + 2 * _CELLS, refs + 2 * _CELLS)
+    assert layout.video_generated.sum() == _PLAIN.video_rows
+
+
+def test_an_extend_with_references_pins_the_tail_at_the_start_of_the_target_after_them():
+    conditioning = _with_references(tail_latents=_latents(TAIL_LATENT_FRAMES, 3, _WINDOW), tail_audio=_tail_audio())
+    layout = build_layout(_TEXT_TAGS, _WINDOW, _CPU, conditioning)
+    refs = sum(_REFERENCE_CELLS)
+    assert (layout.keyframe_rows, layout.tail_rows, layout.condition_video_rows) == (refs, TAIL_LATENT_FRAMES * _CELLS, refs + TAIL_LATENT_FRAMES * _CELLS)
+    assert layout.video_generated.sum() == (_WINDOW.latent_frames - TAIL_LATENT_FRAMES) * _CELLS
+    assert layout.condition_audio_rows == 2 * TAIL_AUDIO_LATENTS and not layout.audio_generated[layout.held_audio].any()
+
+
+def test_the_references_are_held_at_the_keyframe_level_and_drawn_before_everything_else():
+    keyframe = _latents(1, 10)
+    conditioning = _with_references(keyframes=(keyframe,), anchors=("first",), tail_latents=_latents(TAIL_LATENT_FRAMES, 3, _WINDOW), tail_audio=_tail_audio())
+    transformer, (video, audio) = _run(_WINDOW, conditioning=conditioning, seed=23)
+    layout = build_layout(_TEXT_TAGS, _WINDOW, _CPU, conditioning)
+    scheduler = _schedulers()[0]
+    generator = torch.Generator().manual_seed(23)
+    # Draw order: references, keyframes, tail video, tail audio, then the window's video noise and audio noise.
+    held = [patchify_video_latents(prenoise(scheduler, latents, KEYFRAME_T, generator), (1, 2, 2)) for latents in (*conditioning.references, keyframe)]
+    tail_video = patchify_video_latents(prenoise(scheduler, conditioning.tail_latents, KEYFRAME_T, generator), (1, 2, 2))
+    tail_audio = prenoise(scheduler, conditioning.tail_audio, AUDIO_COND_T, generator)
+    window_video, window_audio = draw_noise(_WINDOW, generator, _CPU)
+    window_video[: layout.tail_rows] = tail_video
+    window_audio[layout.held_audio] = tail_audio
+    expected = torch.cat([*held, window_video])
+    for call in transformer.calls:
+        assert torch.equal(call["video"][0, : layout.keyframe_rows], expected[: layout.keyframe_rows])
+        assert torch.equal(call["video"][0, layout.keyframe_rows : layout.condition_video_rows], tail_video)
+        assert torch.equal(call["audio"][0, layout.held_audio], tail_audio)
+        levels = call["timestep"][call["timestep_indices"][call["video_indices"]]]
+        assert torch.all(levels[: layout.keyframe_rows] == torch.tensor(KEYFRAME_T, dtype=torch.float32))
+    first = transformer.calls[0]
+    assert torch.equal(first["video"][0], expected)  # nothing was drawn between the held rows and the noise
+    assert torch.equal(first["audio"][0], window_audio)
+    assert video.shape == (1, 24, 12, 4, 4) and audio.shape == (2, 32, 65)  # the reference and keyframe rows are not in the result
+
+
+@pytest.mark.parametrize(("keyframes", "anchors"), [((10,), ("first",)), ((10, 11), ("first", "last"))], ids=["first_frame", "first_and_last_frame"])
+def test_an_image_to_video_run_with_references_returns_only_the_clip_rows(keyframes, anchors):
+    conditioning = _with_references(keyframes=tuple(_latents(1, seed) for seed in keyframes), anchors=anchors)
+    transformer, (video, _audio) = _run(conditioning=conditioning, seed=3)
+    assert transformer.calls[0]["video"].shape == (1, sum(_REFERENCE_CELLS) + len(keyframes) * _CELLS + _PLAIN.video_rows, 96)
+    assert video.shape == (1, 24, 7, 4, 4)
+
+
+def test_a_refine_holds_the_references_ahead_of_the_keyframes_and_returns_only_the_clip_rows():
+    conditioning = _with_references(keyframes=(_latents(1, 10),), anchors=("first",))
+    transformer, result, _ = _refine(start=6, conditioning=conditioning, keyframe_seed=77)
+    scheduler = _schedulers()[0]
+    generator = torch.Generator().manual_seed(77)
+    expected = torch.cat([patchify_video_latents(prenoise(scheduler, latents, KEYFRAME_T, generator), (1, 2, 2)) for latents in (*conditioning.references, *conditioning.keyframes)])
+    held = sum(_REFERENCE_CELLS) + _CELLS
+    assert len(transformer.calls) == 2
+    for call in transformer.calls:
+        assert call["video"].shape == (1, held + _PLAIN.video_rows, 96)
+        assert torch.equal(call["video"][0, :held], expected)
+    assert result.shape == (1, 24, 7, 4, 4)

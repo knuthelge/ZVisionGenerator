@@ -4,7 +4,7 @@ import type { DraftState, WorkspaceTab } from '$lib/types';
  * Who owns a field of the draft. Every transition that touches part of the draft (a Reset, a Reuse) is a list of these scopes,
  * so a field never sits in a hand-kept list of its own.
  *
- * - `slotsImage`, `slotsEdit`, `slotsVideo`, `slotsExtend`: the images, upload markers and audio track of one tab or kind (Image's also holds Strength; Edit's is the image to edit with its paint and extension).
+ * - `slotsImage`, `slotsEdit`, `slotsVideo`, `slotsExtend`: the images, upload markers and audio track of one tab or kind, the reference images of the Video and Extend kinds included (Image's also holds Strength; Edit's is the image to edit with its paint and extension).
  * - `settings`: the open mode's (image or video) values for the Settings pane; the Audio tab keeps none of these.
  * - `extendSettings`: the Extend kind's length.
  * - `shared`: Batch and Seed of the open tab.
@@ -43,6 +43,7 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   editExtendAmount: 'slotsEdit',
   editRepaint: 'slotsEdit',
 
+  videoReferencePaths: 'slotsVideo',
   firstFramePath: 'slotsVideo',
   firstFrameUpload: 'slotsVideo',
   endImagePath: 'slotsVideo',
@@ -51,6 +52,7 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   audioTrackUpload: 'slotsVideo',
   audioTrackStart: 'slotsVideo',
 
+  extendReferencePaths: 'slotsExtend',
   extendAudioTrackPath: 'slotsExtend',
   extendAudioTrackUpload: 'slotsExtend',
   extendAudioTrackStart: 'slotsExtend',

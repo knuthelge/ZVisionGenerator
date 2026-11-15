@@ -30,7 +30,7 @@ _GIB = 1024**3
 def _use_fake_planners(monkeypatch, env) -> None:
     """Plan one target per model and (when ``env.enhance``) the enhancer, without the Hub."""
     monkeypatch.setattr(job_downloads_module, "image_plan", lambda model_ref, *, family, platform_key: (DownloadTarget(_KLEIN if model_ref == "klein9b" else f"owner/{model_ref}"),))
-    monkeypatch.setattr(job_downloads_module, "video_plan", lambda model_ref, *, family, config, model_name, platform_key, upscale: (DownloadTarget(f"owner/{model_ref}"),))
+    monkeypatch.setattr(job_downloads_module, "video_plan", lambda model_ref, *, family, config, model_name, platform_key, upscale, references=False: (DownloadTarget(f"owner/{model_ref}"),))
     monkeypatch.setattr(job_downloads_module, "matte_plan", lambda: (DownloadTarget("owner/matte"),))
     monkeypatch.setattr(job_downloads_module, "enhancer_plan", lambda repo, revision: (DownloadTarget(repo, revision),))
     monkeypatch.setattr(job_downloads_module.prompt_enhancer_session, "plan_job_enhancer", lambda *_a, **_kw: (_ENHANCER, None) if env.enhance else None)

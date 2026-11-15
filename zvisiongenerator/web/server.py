@@ -1950,12 +1950,13 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         raise ValueError(EXTEND_UNAVAILABLE_MESSAGE)
     model_name = _video_model_name(form, web_config)
 
-    # An extension takes its size, frame rate and length from the source clip, so the size and reference-image fields are ignored.
+    # An extension takes its size, frame rate and length from the source clip, so the size and start-image fields are ignored; its references are not.
     ratio, size = (None, None) if extend else _video_ratio_and_size(form, web_config)
     output_dir = _resolve_output_dir(web_config.output_dir)
     save_dir = _project_save_dir(form, output_dir)
     image_path = None if extend else _resolve_reference_image(form, output_dir)
     end_image_path = None if extend else _resolve_reference_image(form, output_dir, path_key="end_image_path")
+    reference_paths = _resolve_reference_images(form, output_dir)
     # The source is checked again here: the file may have changed since the Workspace inspected it.
     source = load_source_video(_optional_text(form, "source_video"), key="source_video") if extend else None
     if source is not None:
@@ -1982,6 +1983,7 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         prompts_file=None,
         image_path=image_path,
         end_image_path=end_image_path,
+        reference_paths=reference_paths,
         ratio=ratio,
         size=size,
         width=None if extend else _optional_int(form, "width"),
@@ -2025,6 +2027,7 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         end_image=end_image_path is not None,
         upscale=bool(args.upscale),
         audio_track=audio_track is not None,
+        references=len(reference_paths),
     )
     if refusal is not None:
         raise ValueError(refusal)
@@ -2063,6 +2066,7 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         steps=args.steps,
         image_path=image_path,
         end_image_path=end_image_path,
+        reference_paths=tuple(reference_paths),
         upscale=args.upscale,
         upscale_steps=args.upscale_steps,
         no_audio=args.no_audio,
@@ -2092,10 +2096,11 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         height=args.height,
         output_dir=output_dir,
         save_dir=save_dir,
-        uploads={"image_path": image_path, "end_image_path": end_image_path, "audio_track_path": audio_track.path if audio_track is not None else None},
+        uploads={"image_path": image_path, "end_image_path": end_image_path, "reference_path": reference_paths, "audio_track_path": audio_track.path if audio_track is not None else None},
         inputs=[
             *_path_inputs(form, "start", "image_path", image_path),
             *_path_inputs(form, "end", "end_image_path", end_image_path),
+            *_reference_inputs(form, reference_paths),
             # The next clip continues from the source's last frame.
             *([job_input("source", source.path, "video")] if source is not None else []),
         ],
@@ -2492,8 +2497,9 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
 
     The size and length resolve exactly as in a Text to Video or Image to Video job. ``image`` (an Image to Video clip,
     which holds a keyframe), ``steps`` (settled by the model's step rules), ``lora`` (the job's ``name:weight,...`` list,
-    whose files H3 holds in memory) and ``review`` (the upscale pauses to review, so H3 loads its transformer twice)
-    refine MiniMax H3's estimate; LTX ignores all four. ``memory_fit`` is ``None`` when this machine has no memory budget or the model has no estimate: an LTX model
+    whose files H3 holds in memory), ``review`` (the upscale pauses to review, so H3 loads its transformer twice) and
+    ``references`` (how many reference images the job holds, whose rows and vision tower H3 counts)
+    refine MiniMax H3's estimate; LTX ignores all five. ``memory_fit`` is ``None`` when this machine has no memory budget or the model has no estimate: an LTX model
     that is not a downloaded MLX model with its text encoder, or a MiniMax H3 clip size it cannot take. MiniMax H3
     adds ``expected_seconds``, an estimate of the generation time.
 
@@ -2509,6 +2515,7 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
     image = json_field(payload, "image", bool, "a boolean")
     lora = json_field(payload, "lora", str, "a string")
     review = json_field(payload, "review", bool, "a boolean")
+    references = json_field(payload, "references", int, "a non-negative whole number", minimum=0)
 
     app_config = web_config.app_config
     model_name = _video_model_name(payload, web_config)
@@ -2531,6 +2538,7 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
         forwards=forwards or 8,
         loras_bytes=lora_bytes_for_fit(lora, family=model_info.family, downloading=lora_installer.pending_sizes()),
         review=bool(upscale) and review is True,
+        references=references or 0,
     )
     return {"memory_fit": memory_fit, "width": clip.width, "height": clip.height, "frames": clip.num_frames}
 

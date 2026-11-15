@@ -10,6 +10,7 @@ import { imageSupport, lastSlotPatch, startSlotPatch, type SlotValue, type Image
 import { keepInstalledLoras, modelLoraFamily, withoutLora } from './loras';
 import { outputSettingsPatch } from './jobSettings';
 import { presetDraftKeys, presetPrefill } from './presets';
+import { referenceListOf, referencePathsKey, sameReferences } from './references';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
 import { imageKindOf, isAudioWorkflow, navTab, videoKindOf, workflowFor, workspaceTab, type MediaTab } from './workspaceTab';
@@ -59,6 +60,8 @@ const DEFAULT_DRAFT: DraftState = {
   firstFramePath: null,
   firstFrameUpload: null,
   referenceImagePaths: [],
+  videoReferencePaths: [],
+  extendReferencePaths: [],
   missingReferencePaths: [],
   endImagePath: null,
   endImageUpload: null,
@@ -286,7 +289,7 @@ function _withModeOf(state: DraftState, workflow: WorkspaceWorkflow): DraftState
 }
 
 /** The draft fields that hold an image path: one per slot, the reference rows and the image to edit. */
-const SLOT_KEYS = ['referenceImagePath', 'firstFramePath', 'endImagePath', 'referenceImagePaths', 'editSourcePath'] as const satisfies readonly (keyof DraftState)[];
+const SLOT_KEYS = ['referenceImagePath', 'firstFramePath', 'endImagePath', 'referenceImagePaths', 'videoReferencePaths', 'extendReferencePaths', 'editSourcePath'] as const satisfies readonly (keyof DraftState)[];
 
 /** The paths the state's image slots hold (the start image, the frames, the reference rows and the image to edit); a slot can hold the empty path of an upload. */
 export function slotPaths(state: Pick<DraftState, (typeof SLOT_KEYS)[number]>, keys: readonly (typeof SLOT_KEYS)[number][] = SLOT_KEYS): string[] {
@@ -908,9 +911,11 @@ export const draft = {
     }
     // A named list, even an empty one, replaces the references: a reused image has exactly its source's. The list is kept
     // whole, whatever the model takes; the Workspace shows and sends the first few.
-    if (slotTab === 'image') {
-      if (lists.reference_path !== undefined && canApply('reference_path')) prefill.referenceImagePaths = lists.reference_path.filter((path) => path !== '');
-      else if (replacing) prefill.referenceImagePaths = [];
+    // The Image tab, the Video tab's New kind and the Extend kind each have their own list, so a prefill of one leaves the others' alone.
+    if (slotTab === 'image' || slotTab === 'video' || slotTab === 'extend') {
+      const key = referencePathsKey(referenceListOf(workflow));
+      if (lists.reference_path !== undefined && canApply('reference_path')) prefill[key] = lists.reference_path.filter((path) => path !== '');
+      else if (replacing) prefill[key] = [];
     }
     // The image to edit belongs to the Edit slot: a full prefill empties it and its paint, and one that names an image (a blank one
     // names none) sets it with no paint. What the edit did comes with it: whether the paint must be painted again (a mask is never
@@ -1236,7 +1241,7 @@ export const draft = {
   /**
    * Reset the open tab to its defaults: the fields of the scopes `RESET_SCOPE` lists for the tab take the values `defaultsFor`
    * resolves, and everything else stays. The tab's images and audio track (Image: the start image and references; Video: the
-   * first and last frame and the track; Extend: its source video, the point to continue from and its track) clear with their
+   * first and last frame, the references and the track; Extend: its source video, the point to continue from and its track) clear with their
    * upload markers and held files, so its workflow falls back to text. The Audio tab puts back its length and voice (the held recording
    * and the tick with it). The batch and the seed of the open tab reset with it. The applied preset clears.
    * Nothing of another tab, kind or mode changes, and the model, LoRAs, quantization, text, prompt file and layout stay.
@@ -1356,7 +1361,7 @@ export const draft = {
     const before = _draft;
     const held = [
       ...slotPaths(before), before.audioTrackPath, before.extendAudioTrackPath, before.voicePath, before.extendSourcePath,
-      before.extendPrefill?.path, before.extendPrefill?.audioTrack?.path, before.enhancedFrom?.sourceVideoPath,
+      before.extendPrefill?.path, before.extendPrefill?.audioTrack?.path, ...(before.extendPrefill?.references ?? []), before.enhancedFrom?.sourceVideoPath,
     ];
     if (!held.some((path) => path && moved.has(path))) return false;
     const to = (path: string | null): string | null => (path === null ? null : (moved.get(path) ?? path));
@@ -1369,6 +1374,8 @@ export const draft = {
       firstFramePath: to(before.firstFramePath),
       endImagePath: to(before.endImagePath),
       referenceImagePaths: before.referenceImagePaths.map(toPath),
+      videoReferencePaths: before.videoReferencePaths.map(toPath),
+      extendReferencePaths: before.extendReferencePaths.map(toPath),
       editSourcePath: to(before.editSourcePath),
       missingReferencePaths: before.missingReferencePaths.filter((path) => !moved.has(path)),
       audioTrackPath: to(before.audioTrackPath),
@@ -1379,6 +1386,7 @@ export const draft = {
         ...prefill,
         path: toPath(prefill.path),
         audioTrack: prefill.audioTrack ? { ...prefill.audioTrack, path: toPath(prefill.audioTrack.path) } : prefill.audioTrack,
+        ...(prefill.references ? { references: prefill.references.map(toPath) } : {}),
       },
       enhancedFrom: before.enhancedFrom?.sourceVideoPath ? { ...before.enhancedFrom, sourceVideoPath: toPath(before.enhancedFrom.sourceVideoPath) } : before.enhancedFrom,
     };
@@ -1430,11 +1438,21 @@ export const draft = {
         Object.assign(updates, trackPatch('extend', track === null ? null : { path: track.path }, track?.start ?? 0));
         heldUploads.setTrack('extend', null);
       }
+      // The references follow the same rule: the source's replace the list only while it is empty or still the previous source's
+      // own, so a list the user chose stays. A source without references empties a prefilled list.
+      const references = fill.references;
+      const previousReferences = previous?.references ?? [];
+      const referencesFree = _draft.extendReferencePaths.length === 0 || sameReferences(_draft.extendReferencePaths, previousReferences);
+      if (referencesFree) {
+        updates.extendReferencePaths = references;
+        heldUploads.setReferencesOf('extend', []);
+      }
       updates.extendPrefill = {
         path: sourceKey,
         scene: updates.scene ?? previous?.scene ?? '',
         prompt: updates.prompt ?? previous?.prompt ?? '',
         audioTrack: trackFree ? track : (previous?.audioTrack ?? null),
+        references: referencesFree ? references : previousReferences,
       };
     }
     _draft = { ..._draft, ...updates };

@@ -24,7 +24,7 @@ _PIN = re.compile(r"[0-9a-f]{40}")
 # The two SeedVR2 weight repos stay unpinned: their files are chosen by name, not by revision.
 _SEEDVR2_REPOS = {"numz/SeedVR2_comfyUI", "AInVFX/SeedVR2_comfyUI"}
 _LTX_IDS = [model_id for model_id in model_ids("video") if model_entry(model_id)["family"] == "ltx"]
-_ROLES = {"model", "transformer", "latent_upsampler", "text_encoder", "lora", "components", "sft", "turbo_lora", "voice", "design", "birefnet", "vitmatte"}
+_ROLES = {"model", "transformer", "latent_upsampler", "text_encoder", "lora", "components", "sft", "turbo_lora", "voice", "design", "birefnet", "vitmatte", "ref2va", "ref2va_lora"}
 
 
 @pytest.mark.parametrize("platform_key", _PLATFORMS)
@@ -165,6 +165,17 @@ def test_the_h3_presets_build_on_every_platform_that_declares_their_files() -> N
     for platform_key in ("win32", "linux"):
         assert h3_preset(video_config(), platform_key).schedules.keys() == {4, 8}
     assert h3_mlx_preset().schedules.keys() == {4, 8}
+
+
+@pytest.mark.parametrize("platform_key", _PLATFORMS)
+def test_h3_declares_the_reference_files_once_each_on_every_platform(platform_key: str) -> None:
+    pairs = model_targets("h3", platform_key)
+
+    for role, name in (("ref2va", "diffusion_models/minimax_h3_ref2va_pruned_w6a8.safetensors"), ("ref2va_lora", "minimax_h3_ref2v_turbo_8step_v1.1_768p_bf16.safetensors")):
+        (target,) = role_targets(pairs, role)
+        assert target.allow_patterns == (name,)
+        assert _PIN.fullmatch(target.revision)
+        assert target == role_targets(model_targets("h3", "linux"), role)[0]  # the same file and pin on every platform
 
 
 @pytest.mark.parametrize("platform_key", _PLATFORMS)

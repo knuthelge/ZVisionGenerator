@@ -155,34 +155,39 @@ def _gemma_target(text_encoder: str | None) -> DownloadTarget:
     return DownloadTarget(reference.repo_id, reference.revision, MLX_LM_ALLOW_PATTERNS)
 
 
-def h3_mlx_download_plan(model_ref: str, preset: "H3MlxPreset", lora: "HubFiles") -> tuple[DownloadTarget, ...]:
-    """Return the downloads of the MiniMax H3 model on macOS: the INT8 transformer, the ``FL2VA`` components and the turbo LoRA.
+def h3_mlx_download_plan(model_ref: str, preset: "H3MlxPreset", lora: "HubFiles", *, references: bool = False) -> tuple[DownloadTarget, ...]:
+    """Return the downloads of the MiniMax H3 model on macOS: the INT8 transformer, the ``FL2VA`` components and the turbo LoRA; with *references*, the components and the Ref2VA files instead of the model's own.
 
     Every target lists its files literally and is the ``(repo_id, revision, allow_patterns)`` the backend's own file
     resolution downloads with, so a target reads as present exactly when the backend finds its files without the
     network. A local H3 folder carries its own components, so it needs no component target, except a converted one,
     which reads its text encoder from the stock download; one that carries a
     transformer needs no transformer target either, because the backend loads that one (or refuses it) and never
-    falls back to the preset's.
+    falls back to the preset's. A run with *references* loads only the Ref2VA copy, a converted folder whatever the model
+    picked, so its plan is the converted folder's (the stock components, no transformer and no turbo LoRA) plus the two
+    Ref2VA files, and *model_ref* adds nothing.
 
     Args:
         model_ref: A local H3 folder or a Hugging Face ``owner/repo[@revision]`` reference; a reference takes the
             preset's component files, whatever its revision.
         preset: The macOS preset.
         lora: The turbo LoRA's repository and file.
+        references: Whether the run has reference images, which replaces the model's own files with the converted folder's plan and adds the Ref2VA transformer and its turbo LoRA.
     """
     from zvisiongenerator.backends.mac.h3_video import local_transformer_dirs
     from zvisiongenerator.utils.h3_converted import read_converted_h3
 
     local = Path(model_ref).expanduser()
-    is_hub = not local.is_dir() and parse_huggingface_repo_reference(model_ref) is not None
-    targets = [] if not is_hub and local_transformer_dirs(local) else [DownloadTarget(preset.transformer.repo_id, preset.transformer.revision, preset.transformer.files)]
+    is_hub = not references and not local.is_dir() and parse_huggingface_repo_reference(model_ref) is not None
+    targets = [] if references or (not is_hub and local_transformer_dirs(local)) else [DownloadTarget(preset.transformer.repo_id, preset.transformer.revision, preset.transformer.files)]
     # A converted folder reads its text encoder from the stock download, and holds its turbo merge.
-    converted = not is_hub and read_converted_h3(local) is not None
+    converted = references or (not is_hub and read_converted_h3(local) is not None)
     if is_hub or converted:
         targets.append(DownloadTarget(preset.components.repo_id, preset.components.revision, preset.components.files))
     if not converted:
         targets.append(DownloadTarget(lora.repo_id, lora.revision, lora.files))
+    if references:
+        targets.extend(DownloadTarget(files.repo_id, files.revision, files.files) for files in (preset.reference_transformer, preset.reference_lora))
     return tuple(targets)
 
 

@@ -66,7 +66,7 @@ With audio off, and for images, no sounds are described. In a silent video, quot
 
 ### What it knows about the job { #what-the-enhancer-knows-about-the-job }
 
-The enhancer knows the frame's shape, the clip length, whether there is a start or last image, and any [references](../guides/images.md#references), though it never sees the images. It keeps phrases such as "image 1" as you wrote them; if a rewrite drops one, it tries once more, then uses the rewrite and warns you.
+The enhancer knows the frame's shape, the clip length, whether there is a start or last image, and any [references](../guides/images.md#references), though it never sees the images. It keeps phrases such as "image 1" (`<Picture 1>` in a video prompt) as you wrote them; if a rewrite drops one, it tries once more, then uses the rewrite and warns you.
 
 ## Video: scene and action { #video-scene-and-action }
 

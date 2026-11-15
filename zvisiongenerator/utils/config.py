@@ -199,6 +199,7 @@ def video_family(config: dict[str, Any], family: str) -> VideoFamily | None:
         default_upscale_steps=_default_upscale_steps(settings.get("upscale"), default_steps, f"{base}.upscale"),
         extend_fps=facts.get("extend_fps"),
         platform_carry_frames=facts.get("platform_carry_frames", {}),
+        max_reference_images=facts.get("max_reference_images", 0),
     )
 
 
@@ -458,10 +459,10 @@ def resolve_upscale_steps(defaults: dict[str, Any], steps: int) -> int:
     return preset_steps if preset_steps is not None else max(1, steps // 2)
 
 
-def video_load_options(family: str, config: dict[str, Any], model_name: str | None, *, platform_key: str, upscale: bool, quiet: bool = False) -> dict[str, Any]:
+def video_load_options(family: str, config: dict[str, Any], model_name: str | None, *, platform_key: str, upscale: bool, references: bool = False, quiet: bool = False) -> dict[str, Any]:
     """Return the keyword arguments the video backend of *family* takes in ``load_model`` for the model picked as *model_name* on *platform_key*.
 
-    *config* supplies the settings (H3's ``ffn_chunk_tokens``). *quiet* marks a run with no terminal (the web runner): a backend that prints its own progress turns it off.
+    *config* supplies the settings (H3's ``ffn_chunk_tokens``). *references* marks a job with reference images; H3 then loads for them. *quiet* marks a run with no terminal (the web runner): a backend that prints its own progress turns it off.
 
     Raises:
         ValueError: If *family* has no load options, or a setting is malformed.
@@ -471,7 +472,7 @@ def video_load_options(family: str, config: dict[str, Any], model_name: str | No
     if family == "h3":
         from zvisiongenerator.backends import h3_load_options
 
-        return {**h3_load_options(config, model_name, platform_key, quiet=quiet), **({"upscale": True} if upscale else {})}
+        return {**h3_load_options(config, model_name, platform_key, quiet=quiet), **({"upscale": True} if upscale else {}), **({"references": True} if references else {})}
     raise ValueError(f"No video load options for model family '{family}'.")
 
 

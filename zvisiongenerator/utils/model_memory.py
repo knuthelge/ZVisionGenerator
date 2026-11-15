@@ -413,6 +413,7 @@ def clip_memory_fit(
     forwards: int = 8,
     loras_bytes: int = 0,
     review: bool = False,
+    references: int = 0,
 ) -> dict[str, Any] | None:
     """Check a clip against the memory budget; callers warn on ``tight`` or ``too_large`` and never block.
 
@@ -432,6 +433,8 @@ def clip_memory_fit(
         forwards: H3 only: the transformer forwards of the run, which set the estimated time.
         loras_bytes: H3 on a discrete GPU only: the total size of the user LoRA files.
         review: H3 on a discrete GPU only: whether the upscale pauses to review the half-size render, which makes it load the transformer twice.
+        references: H3 only: how many reference images the clip holds. Each adds its rows to the sequence and loads the vision tower; their
+            size is assumed to share the canvas's aspect ratio (see ``h3_nominal_references``).
 
     Returns:
         ``{"status", "required_gb", "budget_gb"}`` (H3 adds ``"expected_seconds"``, an estimate in seconds), or ``None`` when no memory budget is known, the family has no estimate or the model is not a
@@ -441,7 +444,7 @@ def clip_memory_fit(
     if budget is None or not budget.gpu_bytes:
         return None
     if family == "h3":
-        return _h3_clip_fit(width, height, frames, budget, mode=mode, forwards=forwards, upscale=upscale, loras_bytes=loras_bytes, review=review)
+        return _h3_clip_fit(width, height, frames, budget, mode=mode, forwards=forwards, upscale=upscale, loras_bytes=loras_bytes, review=review, references=references)
     if family != "ltx":
         return None
     if budget.system_bytes is not None:
@@ -472,14 +475,14 @@ def clip_memory_fit(
     return {"status": classify_memory_fit(required, budget.gpu_bytes), "required_gb": round(required / GIB, 1), "budget_gb": round(budget.gpu_bytes / GIB, 1)}
 
 
-def _h3_clip_fit(width: int, height: int, frames: int, budget: MemoryBudget, *, mode: str, forwards: int, upscale: bool, loras_bytes: int, review: bool) -> dict[str, Any] | None:
+def _h3_clip_fit(width: int, height: int, frames: int, budget: MemoryBudget, *, mode: str, forwards: int, upscale: bool, loras_bytes: int, review: bool, references: int) -> dict[str, Any] | None:
     """Check an H3 clip against the budget, or return ``None`` when it has no estimate (a canvas or length H3 cannot take)."""
     from zvisiongenerator.utils.h3_memory import h3_clip_fit, h3_mlx_clip_fit
 
     try:
         if budget.system_bytes is None:
-            return h3_mlx_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode)
-        return h3_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode, loras_bytes=loras_bytes, upscale=upscale, review=review)
+            return h3_mlx_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode, references=references)
+        return h3_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode, loras_bytes=loras_bytes, upscale=upscale, review=review, references=references)
     except ValueError:
         return None
 

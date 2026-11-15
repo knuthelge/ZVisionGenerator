@@ -2,11 +2,12 @@ import { fileName } from '$lib/components/molecules/assetDetails';
 import { draft } from '$lib/state/draft.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { hasPath, slotSet, type ImageTab, type SlotState } from '$lib/state/imageSlots';
-import { referenceRows, type ReferenceRow } from '$lib/state/references';
+import { referenceListOf, referencePathsKey, referenceRows, type ReferenceList, type ReferenceRow } from '$lib/state/references';
 import { workspaceTab } from '$lib/state/workspaceTab';
 import type { WorkspaceContext } from '$lib/types';
 import { workspaceCapabilities, type WorkspaceCapabilities } from './capabilities';
 import { currentEditReason } from './edit/currentEdit';
+import { referenceWording } from './referenceEditor';
 
 /** What one image slot (the start image, the first frame or the last frame) holds and what the run does with it. */
 export interface SlotView {
@@ -50,8 +51,10 @@ export interface ImagesView {
   last: SlotView | null;
   /** The Strength row: the start image is set and an image-to-image run uses it. */
   strength: boolean;
-  /** The reference list (Image, on a model that takes references); null otherwise. */
+  /** The reference list of the open tab (Image, Video on text to video and image to video, or Extend), on a model that takes references; null otherwise. */
   references: {
+    /** Which list the rows belong to: the Image tab's, the Video tab's New kind's or the Extend kind's. */
+    list: ReferenceList;
     /** The rows Generate sends and the list shows: the first `max` of the list. */
     rows: ReferenceView[];
     max: number;
@@ -65,10 +68,10 @@ export interface ImagesView {
 
 /** What `imagesView` reads from the draft and the screen. */
 export interface ImagesViewInput {
-  state: SlotState & { referenceImagePaths: readonly string[] };
+  state: SlotState & Record<ReturnType<typeof referencePathsKey>, readonly string[]>;
   caps: Pick<WorkspaceCapabilities, 'showRefImage' | 'takesLastFrame' | 'maxReferences' | 'showI2IStrength'>;
-  /** The held uploads (`heldUploads`): the start image of Image, the first frame and the last frame of Video, and one entry per reference row. */
-  files: { startImage: File | null; firstFrame: File | null; lastFrame: File | null; references: readonly (File | null)[] };
+  /** The held uploads (`heldUploads`): the start image of Image, the first frame and the last frame of Video, and one entry per reference row of each list. */
+  files: { startImage: File | null; firstFrame: File | null; lastFrame: File | null; references: readonly (File | null)[]; videoReferences: readonly (File | null)[]; extendReferences: readonly (File | null)[] };
   /** The held uploads have been read back, so an upload without a file is known to be lost. */
   restored: boolean;
   /** Edit, where the image to edit stands in for the images: its reason (no image, a lost upload, paint to add) is Generate's. Absent outside Edit. */
@@ -111,7 +114,7 @@ function _block(view: Pick<ImagesView, 'tab' | 'start' | 'last' | 'references'>,
   if (view.last?.gone) return 'The last frame is missing.';
   if (view.last?.set && view.start !== null && !view.start.set) return LAST_NEEDS_FIRST;
   const first = view.references?.rows.findIndex((row) => row.gone) ?? -1;
-  return first === -1 ? null : `Reference ${first + 1} is missing.`;
+  return first === -1 || !view.references ? null : `${referenceWording(view.references.list).label(first + 1)} is missing.`;
 }
 
 function _sent(view: Pick<ImagesView, 'tab' | 'start' | 'last'>, strength: number): ImagesView['sent'] {
@@ -136,8 +139,11 @@ export function imagesView({ state, caps, files, restored, edit }: ImagesViewInp
     ? _slot(state.endImagePath, state.endImageUpload, files.lastFrame, start?.set === true, state, restored)
     : null;
   const max = caps.maxReferences;
-  const all = referenceRows(state.referenceImagePaths, files.references).map((row) => _reference(row, state, restored));
-  const references = max > 0 ? { rows: all.slice(0, max), max, hasRoom: all.length < max } : null;
+  // New (text to video and image to video), Extend and the Image tab's modes each read their own list; `tab` is not the test: it reads Extend as Image.
+  const list = referenceListOf(state.workflow);
+  const heldFiles = { image: files.references, video: files.videoReferences, extend: files.extendReferences }[list];
+  const all = referenceRows(state[referencePathsKey(list)], heldFiles).map((row) => _reference(row, state, restored));
+  const references = max > 0 ? { list, rows: all.slice(0, max), max, hasRoom: all.length < max } : null;
   const partial = { tab, start, last, references };
   return {
     ...partial,

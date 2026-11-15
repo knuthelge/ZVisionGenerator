@@ -755,7 +755,7 @@ class TestWebRunner:
             runner.shutdown()
 
         assert (snapshot["job_type"], snapshot["supported_controls"], snapshot["media_type"], snapshot["upscale_method"]) == ("upscale", ["quit"], "video", "ltx")
-        assert plans == [("dgrauet/ltx-2.3-mlx-q4@a", {"family": "ltx", "config": config, "model_name": "ltx-4", "platform_key": sys.platform, "upscale": True})]
+        assert plans == [("dgrauet/ltx-2.3-mlx-q4@a", {"family": "ltx", "config": config, "model_name": "ltx-4", "platform_key": sys.platform, "upscale": True, "references": False})]
         assert downloads == [(("targets",), "video", "model", "LTX-2.3 4-bit")]
         backend.load_model.assert_called_once_with("dgrauet/ltx-2.3-mlx-q4@a", low_memory=True, loras=None, upscale=True, mlx_packs={})
         assert [(event["mode"], event["model"]) for event in loading] == [("video", "ltx-4")]

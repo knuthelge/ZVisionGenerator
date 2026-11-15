@@ -78,6 +78,7 @@ export function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): 
     supports_extend: true,
     supports_audio_track_upscale: true,
     extend_frame_step: 8,
+    max_reference_images: 0,
     upscale: {
       enabled: false,
       factor: 2,
@@ -223,6 +224,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
             'workflow', 'model', 'preset', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
+            'references', 'references_clear',
             'end_image', 'end_image_path', 'end_image_clear',
             'audio_track', 'audio_track_path', 'audio_track_start',
             'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
@@ -239,6 +241,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
             'workflow', 'model', 'preset', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
+            'references', 'references_clear',
             'end_image', 'end_image_path', 'end_image_clear',
             'audio_track', 'audio_track_path', 'audio_track_start',
             'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
@@ -251,7 +254,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
         extend: {
           mode: 'video',
           model_kind: 'video',
-          visible_controls: ['workflow', 'model', 'preset', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'audio_track', 'audio_track_path', 'audio_track_start', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
+          visible_controls: ['workflow', 'model', 'preset', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'references', 'references_clear', 'audio_track', 'audio_track_path', 'audio_track_start', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
           requires_reference_image: false,
           requires_source_video: true,
           clear_fields: ['negative_prompt', 'guidance', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor', 'transparent'],
@@ -403,7 +406,7 @@ export function makeExtendModelsContext(): WorkspaceContext {
     video_model_defaults: {
       wan: makeVideoDefaults({ supports_extend: false, steps: 20, max_steps: 20 }),
       'ltx-8': makeVideoDefaults(),
-      h3: makeVideoDefaults({ steps: 12, max_steps: 12 }),
+      h3: makeVideoDefaults({ steps: 12, max_steps: 12, max_reference_images: 2 }),
     },
     current_video_model: 'wan',
     workflow_contract: { ...base.workflow_contract, values: [...base.workflow_contract.values, 'extend'] },

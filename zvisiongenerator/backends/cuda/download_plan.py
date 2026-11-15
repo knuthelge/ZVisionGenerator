@@ -161,30 +161,34 @@ def h3_download_plan(
     preset: H3Preset,
     *,
     upscale: bool = False,
+    references: bool = False,
 ) -> tuple[DownloadTarget, ...]:
-    """Return the downloads of the MiniMax H3 model *model_ref*: the repository, the text encoder and the turbo LoRA, plus the latent upscaler with *upscale*.
+    """Return the downloads of the MiniMax H3 model *model_ref*: the repository, the text encoder and the turbo LoRA, plus the latent upscaler with *upscale*; with *references*, the Ref2VA files instead of the model's own.
 
     Each target is the ``(repo_id, revision, allow, ignore)`` the backend's own file resolution downloads with, so a
     target reads as present exactly when the backend finds its files without the network. A reference without a
     revision to the preset's repository takes the preset's revision; a local folder needs no repository download, except a
-    converted one, which takes the stock repository's components (without its transformer) and no turbo LoRA.
+    converted one, which takes the stock repository's components (without its transformer) and no turbo LoRA. A run with
+    *references* loads only the Ref2VA copy, a converted folder whatever the model picked, so its plan is the converted
+    folder's plus the two Ref2VA files, and *model_ref* adds nothing.
 
     Args:
         model_ref: A local H3 folder or a Hugging Face ``owner/repo[@revision]`` reference.
         preset: The CUDA H3 preset.
         upscale: Whether the run upscales, which adds the latent upscaler's file.
+        references: Whether the run has reference images, which replaces the model's own files with the converted folder's plan and adds the Ref2VA transformer and its turbo LoRA.
     """
     from zvisiongenerator.backends.cuda.video.h3.sources import base_repo_allow
     from zvisiongenerator.utils.h3_converted import read_converted_h3
 
     targets: list[DownloadTarget] = []
     local = Path(model_ref).expanduser()
-    if not local.is_dir() and parse_huggingface_repo_reference(model_ref) is not None:
+    if not references and not local.is_dir() and parse_huggingface_repo_reference(model_ref) is not None:
         repo_id, revision = split_huggingface_revision(model_ref)
         if revision is None and repo_id == preset.repo:
             revision = preset.revision
         targets.append(DownloadTarget(repo_id, revision, preset.repo_allow, preset.repo_ignore))
-    converted = local.is_dir() and read_converted_h3(local) is not None
+    converted = references or (local.is_dir() and read_converted_h3(local) is not None)
     if converted:
         targets.append(DownloadTarget(preset.repo, preset.revision, base_repo_allow(preset), preset.repo_ignore))
     # A converted folder holds its turbo merge (or needs none), so it never needs the LoRA.
@@ -192,6 +196,8 @@ def h3_download_plan(
     if upscale:
         upsampler = preset.latent_upsampler
         targets.append(DownloadTarget(upsampler.repo_id, upsampler.revision, upsampler.files))
+    if references:
+        targets.extend(DownloadTarget(files.repo_id, files.revision, files.files) for files in (preset.reference_transformer, preset.reference_lora))
     return tuple(targets)
 
 

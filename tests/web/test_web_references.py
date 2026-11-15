@@ -149,11 +149,12 @@ def test_a_model_that_cannot_be_detected_offers_no_references(monkeypatch):
     assert workspace_api_module._build_image_bootstrap_defaults("zit", make_web_config())["max_reference_images"] == 0
 
 
-def test_only_the_image_workflows_offer_references_and_no_workflow_clears_them():
+def test_the_image_and_video_workflows_offer_references_and_no_workflow_clears_them():
     offering = [name for name in CANONICAL_WORKFLOW_VALUES if "references" in WORKFLOW_DEFINITIONS[name]["visible_controls"]]
     clearing = [name for name in CANONICAL_WORKFLOW_VALUES if "reference_path" in WORKFLOW_DEFINITIONS[name]["clear_fields"]]
 
-    assert offering == ["txt2img", "img2img"]
+    assert offering == ["txt2img", "img2img", "txt2vid", "img2vid", "extend"]
+    assert [name for name in offering if "references_clear" not in WORKFLOW_DEFINITIONS[name]["visible_controls"]] == []
     assert clearing == []
 
 

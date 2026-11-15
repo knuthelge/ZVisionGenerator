@@ -119,6 +119,8 @@ def test_extend_definition_lists_its_controls_and_cleared_fields() -> None:
         "source_video_path",
         "source_video_clear",
         "extend_length",
+        "references",
+        "references_clear",
         "audio_track",
         "audio_track_path",
         "audio_track_start",

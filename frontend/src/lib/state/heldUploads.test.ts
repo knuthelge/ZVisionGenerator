@@ -22,7 +22,7 @@ describe('heldUploads', () => {
 
   it('clearTab forgets the start image and references of Image, or the frames of Video', () => {
     heldUploads.setStart('image', file('start.png'));
-    heldUploads.setReferences([file('ref.png')]);
+    heldUploads.setReferencesOf('image', [file('ref.png')]);
     heldUploads.setStart('video', file('first.png'));
     heldUploads.setLastFrame(file('last.png'));
 
@@ -40,7 +40,7 @@ describe('heldUploads', () => {
     heldUploads.setStart('image', file('start.png'));
     heldUploads.setStart('video', file('first.png'));
     heldUploads.setLastFrame(file('last.png'));
-    heldUploads.setReferences([file('ref.png')]);
+    heldUploads.setReferencesOf('image', [file('ref.png')]);
 
     heldUploads.clear();
 
@@ -54,7 +54,7 @@ describe('heldUploads', () => {
     const last = file('last.png');
 
     heldUploads.setStart('image', start);
-    heldUploads.setReferences([ref, null]);
+    heldUploads.setReferencesOf('image', [ref, null]);
     heldUploads.setStart('video', first);
     heldUploads.setLastFrame(last);
     await heldUploads.persisted();
@@ -63,7 +63,7 @@ describe('heldUploads', () => {
     expect(await store.get('video')).toEqual({ start: first, end: last, references: [], track: null });
 
     heldUploads.setStart('image', null);
-    heldUploads.setReferences([]);
+    heldUploads.setReferencesOf('image', []);
     await heldUploads.persisted();
     expect(await store.get('image')).toBeNull();
     expect(await store.get('video')).not.toBeNull();
@@ -75,7 +75,7 @@ describe('heldUploads', () => {
     const first = file('first.png');
     const last = file('last.png');
     heldUploads.setStart('image', start);
-    heldUploads.setReferences([null, ref]);
+    heldUploads.setReferencesOf('image', [null, ref]);
     heldUploads.setStart('video', first);
     heldUploads.setLastFrame(last);
     await heldUploads.persisted();
@@ -324,6 +324,118 @@ describe('heldUploads', () => {
       heldUploads.setEditMask(file('mask.png'));
       heldUploads.clearTab('video');
       expect(heldUploads.editMask).not.toBeNull();
+    });
+  });
+
+  describe('the Video tab\'s references', () => {
+    it('are held apart from the Image tab\'s', () => {
+      const image = file('image.png');
+      const video = file('video.png');
+      heldUploads.setReferencesOf('image', [image]);
+      heldUploads.setReferencesOf('video', [null, video]);
+
+      expect(heldUploads.references).toEqual([image]);
+      expect(heldUploads.videoReferences).toEqual([null, video]);
+      expect(heldUploads.referencesOf('image')).toEqual([image]);
+      expect(heldUploads.referencesOf('video')).toEqual([null, video]);
+
+      heldUploads.setReferencesOf('video', [video]);
+      expect(heldUploads.videoReferences).toEqual([video]);
+      expect(heldUploads.references).toEqual([image]);
+    });
+
+    it('persist in the video record beside the frames and the track, and restore after a reload', async () => {
+      const first = file('first.png');
+      const ref = file('ref.png');
+      heldUploads.setStart('video', first);
+      heldUploads.setReferencesOf('video', [ref, null]);
+      await heldUploads.persisted();
+
+      expect(await store.get('video')).toEqual({ start: first, end: null, references: [ref, null], track: null });
+      expect(await store.get('image')).toBeNull();
+
+      heldUploads.useStore(store);
+      await heldUploads.restore();
+
+      expect(heldUploads.videoReferences).toEqual([ref, null]);
+      expect(heldUploads.references).toEqual([]);
+      expect(heldUploads.firstFrame).toEqual(first);
+    });
+
+    it('make the video record on their own, and clearing them removes it', async () => {
+      heldUploads.setReferencesOf('video', [file('ref.png')]);
+      await heldUploads.persisted();
+      expect(await store.get('video')).not.toBeNull();
+
+      heldUploads.setReferencesOf('video', []);
+      await heldUploads.persisted();
+      expect(heldUploads.videoReferences).toEqual([]);
+      expect(await store.get('video')).toBeNull();
+    });
+
+    it('go with the Video tab\'s uploads on clearTab and clear', () => {
+      heldUploads.setReferencesOf('video', [file('ref.png')]);
+      heldUploads.clearTab('video');
+      expect(heldUploads.videoReferences).toEqual([]);
+
+      heldUploads.setReferencesOf('video', [file('ref.png')]);
+      heldUploads.clear();
+      expect(heldUploads.videoReferences).toEqual([]);
+    });
+
+    it('a write before the restore finishes wins over the stored list', async () => {
+      await store.put('video', { start: null, end: null, references: [file('stored.png')], track: null });
+      heldUploads.useStore(store);
+
+      const restoring = heldUploads.restore();
+      const written = file('written.png');
+      heldUploads.setReferencesOf('video', [written]);
+      await restoring;
+
+      expect(heldUploads.videoReferences).toEqual([written]);
+    });
+  });
+
+  describe('the Extend kind\'s references', () => {
+    it('are held apart from the Image tab\'s and the Video tab\'s', () => {
+      const video = file('video.png');
+      const extend = file('extend.png');
+      heldUploads.setReferencesOf('video', [video]);
+      heldUploads.setReferencesOf('extend', [null, extend]);
+
+      expect(heldUploads.extendReferences).toEqual([null, extend]);
+      expect(heldUploads.referencesOf('extend')).toEqual([null, extend]);
+      expect(heldUploads.videoReferences).toEqual([video]);
+      expect(heldUploads.references).toEqual([]);
+    });
+
+    it('persist in the extend record beside its track, and restore after a reload', async () => {
+      const ref = file('ref.png');
+      const track = file('song.mp3');
+      heldUploads.setTrack('extend', track);
+      heldUploads.setReferencesOf('extend', [ref, null]);
+      await heldUploads.persisted();
+
+      expect(await store.get('extend')).toEqual({ start: null, end: null, references: [ref, null], track });
+      expect(await store.get('video')).toBeNull();
+
+      heldUploads.useStore(store);
+      await heldUploads.restore();
+
+      expect(heldUploads.extendReferences).toEqual([ref, null]);
+      expect(heldUploads.videoReferences).toEqual([]);
+      expect(heldUploads.extendAudioTrack).toEqual(track);
+    });
+
+    it('go with the Extend kind\'s uploads on clearTab, and clearing the Video tab leaves them', () => {
+      heldUploads.setReferencesOf('extend', [file('ref.png')]);
+      heldUploads.setReferencesOf('video', [file('video.png')]);
+
+      heldUploads.clearTab('video');
+      expect(heldUploads.extendReferences).toHaveLength(1);
+
+      heldUploads.clearTab('extend');
+      expect(heldUploads.extendReferences).toEqual([]);
     });
   });
 });

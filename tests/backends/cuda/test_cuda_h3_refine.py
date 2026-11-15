@@ -102,6 +102,19 @@ def test_a_window_without_keyframes_holds_nothing() -> None:
     assert held.anchors == ()
 
 
+_REFERENCES = (torch.full((1, 24, 1, 4, 6), 3.0), torch.full((1, 24, 1, 2, 2), 4.0))
+
+
+@pytest.mark.parametrize(("index", "count", "expected"), [(0, 1, ("first", "last")), (0, 3, ("first",)), (1, 3, ()), (2, 3, ("last",))], ids=["single", "first", "middle", "last"])
+def test_every_window_holds_the_references_and_the_keyframes_as_without_them(index: int, count: int, expected: tuple[str, ...]) -> None:
+    held = window_conditioning((_FIRST, _LAST), ("first", "last"), index, count, references=_REFERENCES)
+    plain = window_conditioning((_FIRST, _LAST), ("first", "last"), index, count)
+    assert held.references == _REFERENCES
+    assert held.anchors == plain.anchors == expected
+    assert all(torch.equal(a, b) for a, b in zip(held.keyframes, plain.keyframes, strict=True))
+    assert plain.references == ()
+
+
 def _parts(windows, value=None):
     return [torch.full((1, 24, end - start, 2, 2), float(i if value is None else value)) for i, (start, end) in enumerate(windows)]
 

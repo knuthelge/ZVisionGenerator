@@ -165,6 +165,7 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 - **Length:** clips are 17n+5 frames long (22, 39 … 124, 141 …), and a count in between moves up to the next. The default is 5 s (124 frames at 24 fps). The model was trained on 4 to 15 s clips; outside that range quality isn't guaranteed.
 - **Sizes:** the same presets as LTX, in multiples of 32 (64 with upscaling). `xl` is above the size the model was trained on.
 - **Extend** works from 24 fps clips whose size is a multiple of 32. See [Extending a video](../guides/video.md#extend-a-clip).
+- **References:** up to 2 reference images; see [Keep a person or place in a clip](../guides/video.md#references). The first use downloads about 17 GB more, under the same licence. Deleting H3 removes the copy below.
 - **LoRAs** must be MiniMax H3 LoRAs. See [LoRAs](../concepts/loras.md).
 - **Some H3 checkpoints don't follow the start image.** A few community checkpoints ignore the start image in image to video, first and last frame and Extend. If a converted model does, use stock `h3` for those modes.
 
@@ -175,6 +176,7 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
     - **Download and first use:** about 107 GB. The first run converts the text encoder once into a 4-bit copy of about 15 GB (`h3@mlx-te4`).
     - **Memory and time:** a 5 s clip at `s` is estimated at about 15 GiB and 23 minutes with 8 steps, 14 minutes with 4. At `l` it is about 18 GiB and 77 minutes. The image modes need about the same as text to video: a 3 s image-to-video clip at `s` with 8 steps took about 10 minutes and peaked at about 14 GiB with no swapping, and is estimated at about 14 minutes. First and last frame and Extend peak at about the same, and a LoRA adds about 1.5 GiB. A Mac with 32 GB is the target.
     - **Extend** continues from the source's last frame alone, so the seam is weaker than on Windows and Linux.
+    - **References:** the first job with references builds a copy of the model as `h3@ref2va-q8`. A clip with references always uses H3's own reference model, so a fine-tune's look doesn't carry over; its LoRAs do.
     - **No upscale or review.** Image to video, first and last frame and Extend show a step counter and stop at a step boundary; text to video shows its phases but no step counter, and **Skip** and **Quit** take effect when the clip finishes ([While a job runs](../web-ui/workspace.md#while-a-job-runs)).
     - **A local folder** given to `-m` can carry its own INT8 transformer in the MLX port's layout. A folder with a bf16 transformer is refused; [convert](../guides/models.md#minimax-h3-video-fine-tunes) a fine-tune instead.
 
@@ -182,6 +184,7 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 
     - **Download and first use:** about 98 GB. The first run builds a 4-bit copy of the transformer, about 12 GB, as `h3@q4`; it took about 4 minutes, and later runs reuse it. A fine-tune gets a copy of its own, named after it.
     - **Memory:** a 5 s clip at 864×480 uses about 6.3 GiB of GPU memory and about 17 GiB of system memory; plan for about 18 GB free. 1280×736 clips and 14 s clips at 864×480 fit a 10 GB GPU.
+    - **References:** the first job with references builds a copy of the transformer, about 12 GB, as `h3@ref2va-q4`; later runs reuse it. A clip with references always uses H3's own reference model, so a fine-tune's look doesn't carry over; its LoRAs do.
     - **Upscale:** a 2× upscale renders at half size, enlarges the result in latent space with H3's own upscaler (0.69 GB, downloaded on first use) and refines it at full size in 2 more steps. The clip keeps the sound of the half-size render and looks like a native full-size render.
     - **Time:** the CLI prints an estimate when a job starts, and the Workspace shows one under **Duration (s)**, such as *About 5 min (estimated)*. On a 10 GB NVIDIA card, a 5 s clip with sound:
 
@@ -197,6 +200,7 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 
     - **Download and first use:** about 98 GB. The first run builds a 4-bit copy of the transformer, about 12 GB, as `h3@q4`; it took about 4 minutes, and later runs reuse it. A fine-tune gets a copy of its own, named after it.
     - **Memory:** a 5 s clip at 864×480 uses about 6.3 GiB of GPU memory and about 17 GiB of system memory; plan for about 18 GB free. 1280×736 clips and 14 s clips at 864×480 fit a 10 GB GPU.
+    - **References:** the first job with references builds a copy of the transformer, about 12 GB, as `h3@ref2va-q4`; later runs reuse it. A clip with references always uses H3's own reference model, so a fine-tune's look doesn't carry over; its LoRAs do.
     - **Upscale:** a 2× upscale renders at half size, enlarges the result in latent space with H3's own upscaler (0.69 GB, downloaded on first use) and refines it at full size in 2 more steps. The clip keeps the sound of the half-size render and looks like a native full-size render.
     - **Time:** the CLI prints an estimate when a job starts, and the Workspace shows one under **Duration (s)**, such as *About 5 min (estimated)*. On a 10 GB NVIDIA card, a 5 s clip with sound:
 

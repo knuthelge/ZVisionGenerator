@@ -13,6 +13,10 @@ with the transformer streamed from disk.
 A user's audio track is held, not generated: its window is encoded by the audio VAE into clean audio rows that replace the
 audio noise, and every audio row of the clip is a conditioning row. The model then makes the picture only, and the clip's
 own sound is silence that a later stage replaces with the track. A track without images is text to video on this path.
+
+Reference images (Ref2VA) go in ahead of the keyframes: each is encoded at its own size, held like a keyframe, and shown to
+the text encoder as a ``<Picture i>`` block, references first. The packed layout then comes from
+:func:`~zvisiongenerator.utils.h3_ref2va.ref2va_sequence` instead of the fork's, which has no reference blocks.
 """
 
 from __future__ import annotations
@@ -28,10 +32,13 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.mac.memory import release_memory
 from zvisiongenerator.utils.h3_memory import H3_FPS
+from zvisiongenerator.utils.h3_ref2va import ref2va_sequence
 
 if TYPE_CHECKING:
     import numpy as np
     from PIL import Image
+
+    from minimax_h3_mlx.packing import PackedSequence
 
     from zvisiongenerator.utils.h3_preset import H3Schedule
 
@@ -80,8 +87,9 @@ def generate_conditioned(
     step_callback: Callable[[int, int], None] | None,
     verbose: bool,
     track_audio: np.ndarray | None = None,
+    references: Sequence[Image.Image] = (),
 ) -> tuple[np.ndarray, np.ndarray, int]:
-    """Generate a clip conditioned on keyframe images and, optionally, an audio track, one component in memory at a time.
+    """Generate a clip conditioned on keyframe images, reference images and, optionally, an audio track, one component in memory at a time.
 
     Args:
         fl2va_dir: The release's ``FL2VA`` folder (VAEs, tokenizer, processor).
@@ -102,21 +110,23 @@ def generate_conditioned(
         verbose: Print each phase's MLX peak and the denoise steps.
         track_audio: The sound of the whole clip to hold, stereo float32 ``(2, samples)`` at :data:`TRACK_SAMPLE_RATE`; it
             is encoded to clean audio rows and the model generates no sound.
+        references: Reference images, each at its own size (a multiple of 32). They go before the keyframes in the
+            conditioning rows and in the request, whose *prompt* the caller has already given the Ref2VA task tag.
 
     Returns:
         ``(video, audio, sample_rate)``: RGB uint8 frames ``(frames, height, width, 3)`` and float32 stereo audio ``(2, samples)``.
         With a *track_audio* the audio is silence as long as the video (the caller replaces it with the track).
 
     Raises:
-        ValueError: If there are neither images nor a track, the images and anchors differ in count, or the size is not a multiple of 32.
+        ValueError: If there are no images, references or track, the images and anchors differ in count, or the size is not a multiple of 32.
     """
     import numpy as np
     from minimax_h3_mlx.config import DiTConfig
     from minimax_h3_mlx.load import read_audio_vae_config, read_video_vae_config
     from minimax_h3_mlx.packing import align_num_frames, audio_latent_num_frames, video_latent_num_frames
 
-    if not images and track_audio is None:
-        raise ValueError("Staged MiniMax H3 generation needs at least one keyframe image or an audio track.")
+    if not images and not references and track_audio is None:
+        raise ValueError("Staged MiniMax H3 generation needs at least one keyframe image, reference image or an audio track.")
     if len(images) != len(anchors):
         raise ValueError(f"Each keyframe needs an anchor: {len(images)} image(s), {len(anchors)} anchor(s).")
     if height % 32 or width % 32:
@@ -137,12 +147,13 @@ def generate_conditioned(
         audio_config=audio_config,
         dit_config=DiTConfig.from_json(transformer_dir / "config.json"),
     )
-    images = list(images)
+    images, references = list(images), list(references)
+    pictures = [*references, *images]
 
-    if images:
-        condition_rows = _phase("keyframes", verbose, _keyframe_rows, fl2va_dir, canvas, images)
-        vision_rows, deepstack_rows = _phase("vision", verbose, _vision_rows, text_encoder_dir, fl2va_dir / "processor", images)
-        prompt_rows, text_tags = _phase("prompt", verbose, _prompt_rows, text_encoder_dir, fl2va_dir, prompt, images, vision_rows, deepstack_rows)
+    if pictures:
+        condition_rows = _phase("keyframes", verbose, _keyframe_rows, fl2va_dir, canvas, references, images)
+        vision_rows, deepstack_rows = _phase("vision", verbose, _vision_rows, text_encoder_dir, fl2va_dir / "processor", pictures)
+        prompt_rows, text_tags = _phase("prompt", verbose, _prompt_rows, text_encoder_dir, fl2va_dir, prompt, pictures, vision_rows, deepstack_rows)
     else:
         condition_rows = np.zeros((0, video_config.latent_channels * math.prod(canvas.dit_config.patch_size)), dtype=np.float32)
         prompt_rows, text_tags = _phase("prompt", verbose, _text_rows, text_encoder_dir, fl2va_dir, prompt)
@@ -159,6 +170,7 @@ def generate_conditioned(
         text_tags=text_tags,
         condition_rows=condition_rows,
         anchors=tuple(anchors),
+        reference_shapes=tuple((1, reference.height // ratio, reference.width // ratio) for reference in references),
         track_rows=track_rows,
         seed=seed,
         step_callback=step_callback,
@@ -188,14 +200,17 @@ def _phase(name: str, verbose: bool, function: Callable[..., Any], /, *args: Any
     return result
 
 
-def _keyframe_rows(fl2va_dir: Path, canvas: _Canvas, images: list[Image.Image]) -> np.ndarray:
-    """Return the packed conditioning rows of the keyframes (float32), encoded by the video VAE."""
+def _keyframe_rows(fl2va_dir: Path, canvas: _Canvas, references: list[Image.Image], images: list[Image.Image]) -> np.ndarray:
+    """Return the packed conditioning rows (float32), encoded by the video VAE: each reference at its own size, then the keyframes on the canvas."""
     import numpy as np
     from minimax_h3_mlx.load import load_video_vae
     from minimax_h3_mlx.pipeline import MiniMaxH3Pipeline
 
     host = SimpleNamespace(video_vae=load_video_vae(fl2va_dir / "video_vae"), _video_config=canvas.video_config, _dit_config=canvas.dit_config)
-    return np.array(MiniMaxH3Pipeline._encode_keyframes(host, images, canvas.height, canvas.width))
+    groups = [([reference], reference.height, reference.width) for reference in references]
+    if images:
+        groups.append((images, canvas.height, canvas.width))
+    return np.concatenate([np.array(MiniMaxH3Pipeline._encode_keyframes(host, group, height, width)) for group, height, width in groups])
 
 
 def _image_processor(processor_dir: Path) -> Any:
@@ -332,6 +347,7 @@ def _denoise(
     text_tags: np.ndarray,
     condition_rows: np.ndarray,
     anchors: tuple[str, ...],
+    reference_shapes: tuple[tuple[int, int, int], ...],
     track_rows: np.ndarray | None,
     seed: int,
     step_callback: Callable[[int, int], None] | None,
@@ -342,7 +358,8 @@ def _denoise(
     Mirrors ``MiniMaxH3Pipeline.__call__``: noise is drawn conditioning, video, audio from the request seed; conditioning
     rows are noised to the keyframe level, held there, and never written back. With no condition rows (text to video) nothing
     is drawn for them. With *track_rows* every audio row is a clean conditioning row at timestep 1.0, no audio noise is
-    drawn, the audio is never stepped, and the returned audio is empty.
+    drawn, the audio is never stepped, and the returned audio is empty. With *reference_shapes* (the latent
+    ``(frames, height, width)`` of each reference) the layout is the Ref2VA one and the references' rows lead the conditioning rows.
     """
     import mlx.core as mx
     import numpy as np
@@ -353,7 +370,10 @@ def _denoise(
     from minimax_h3_mlx.streaming import load_streaming_dit
 
     patch_size = canvas.dit_config.patch_size
-    layout = build_packed_sequence(text_tags, canvas.latent_frames, canvas.latent_height, canvas.latent_width, canvas.audio_latents, patch_size, anchors)
+    if reference_shapes:
+        layout = _ref2va_layout(text_tags, reference_shapes, canvas, anchors)
+    else:
+        layout = build_packed_sequence(text_tags, canvas.latent_frames, canvas.latent_height, canvas.latent_width, canvas.audio_latents, patch_size, anchors)
     if track_rows is not None:
         layout = replace(layout, num_condition_audio_rows=AUDIO_CHANNELS * canvas.audio_latents)
 
@@ -411,6 +431,38 @@ def _denoise(
             step_callback(i + 1, total)
     generated_audio = np.array(audio_rows[n_cond_a:]) if n_cond_a < audio_rows.shape[0] else np.zeros((0, audio_rows.shape[1]), dtype=np.float32)
     return np.array(video_rows[n_cond_v:]), generated_audio
+
+
+def _ref2va_layout(text_tags: np.ndarray, reference_shapes: tuple[tuple[int, int, int], ...], canvas: _Canvas, anchors: Sequence[str]) -> PackedSequence:
+    """Return the Ref2VA packed layout as the fork's ``PackedSequence``, with the reference and keyframe rows as its conditioning rows."""
+    import mlx.core as mx
+    import numpy as np
+    from minimax_h3_mlx.config import TAG_AUDIO, TAG_VIDEO
+    from minimax_h3_mlx.packing import AUDIO_CHANNELS, PackedSequence
+
+    sequence = ref2va_sequence(
+        text_tags,
+        reference_shapes,
+        latent_frames=canvas.latent_frames,
+        latent_height=canvas.latent_height,
+        latent_width=canvas.latent_width,
+        audio_latents=canvas.audio_latents,
+        anchors=anchors,
+        patch=canvas.dit_config.patch_size,
+        audio_channels=AUDIO_CHANNELS,
+        audio_tag=TAG_AUDIO,
+        video_tag=TAG_VIDEO,
+    )
+    return PackedSequence(
+        sequence_length=len(sequence.token_tags),
+        position_ids=mx.array(sequence.position_ids.numpy().astype(np.float32)),
+        token_tags=mx.array(sequence.token_tags.numpy().astype(np.int32)),
+        video_indices=mx.array(sequence.video_indices.numpy().astype(np.int32)),
+        audio_indices=mx.array(sequence.audio_indices.numpy().astype(np.int32)),
+        text_indices=mx.array(sequence.text_indices.numpy().astype(np.int32)),
+        num_condition_video_rows=sequence.keyframe_rows,
+        num_condition_audio_rows=0,
+    )
 
 
 def _decode_video(fl2va_dir: Path, canvas: _Canvas, rows: np.ndarray) -> np.ndarray:

@@ -6,6 +6,9 @@ the last hidden state the raw layer-50 output, which is the conditioning the rel
 
 The presentation is what diffusers' H3 text-encoder steps build: the prompt verbatim with no chat template and no
 special tokens, preceded for each keyframe by a ``"<Picture i>: "`` label and a vision block whose rows count as video.
+An Extend with reference images presents the references and the carried tail as diffusers' Ref2VA text encoder does:
+the ``<Picture i>`` blocks, an ``<Audio 1>`` label when sound is held, then the tail as ``<Video 1>`` with one
+timestamped vision block per merged frame pair.
 """
 
 from __future__ import annotations
@@ -21,9 +24,10 @@ from zvisiongenerator.backends.cuda.block_streaming import move_outside, stream_
 from zvisiongenerator.utils.safetensors_stream import iter_tensors, read_header
 
 if TYPE_CHECKING:
+    import numpy as np
     import torch
 
-__all__ = ["TEXT_ENCODER_LAYERS", "TEXT_TAG", "VIDEO_TAG", "Presentation", "empty_text_encoder", "encode", "load_text_encoder", "tokenize_presentation", "wanted_tensor"]
+__all__ = ["TEXT_ENCODER_LAYERS", "TEXT_TAG", "VIDEO_TAG", "Presentation", "empty_text_encoder", "encode", "load_text_encoder", "tokenize_continuation", "tokenize_presentation", "wanted_tensor"]
 
 TEXT_ENCODER_LAYERS = 50  # decoder layers kept: the conditioning is the output of the 50th
 TEXT_TAG = 1  # modality tag of a text row of the packed sequence
@@ -91,6 +95,39 @@ def tokenize_presentation(prompt: str, tokenizer_dir: Path, processor_dir: Path,
     token_tags += [TEXT_TAG] * len(prompt_ids)
     mm_token_type_ids = processor.create_mm_token_type_ids([token_ids])[0]
     return Presentation(tuple(token_ids), tuple(token_tags), tuple(mm_token_type_ids), {"pixel_values": vision["pixel_values"], "image_grid_thw": grids})
+
+
+def tokenize_continuation(prompt: str, tokenizer_dir: Path, processor_dir: Path, images: Sequence[Any], tail: np.ndarray, has_sound: bool) -> Presentation:
+    """Return the presentation of *prompt* for an Extend with reference *images*: the pictures, the held sound's label, the carried *tail*, then the prompt.
+
+    The order is diffusers' Ref2VA one: a ``"<Picture i>: "`` label and vision block per image, then ``"<Audio 1>: "`` when
+    *has_sound* is true, then ``"<Video 1>: "`` followed by the tail's frames sampled at 2 fps, each merged pair a
+    timestamped vision block; the prompt follows verbatim.
+
+    Args:
+        prompt: The text prompt, task tag included.
+        tokenizer_dir: The directory of the Qwen2 tokenizer.
+        processor_dir: The directory of the Qwen3-VL processor (image and video processors, tokenizer).
+        images: The reference images, in packed order, at their own size.
+        tail: The carried tail ``(22, height, width, 3)`` uint8 at 24 fps.
+        has_sound: Whether sound is held under the tail, which adds the ``<Audio 1>`` label; a silent source has none.
+    """
+    import torch
+    from diffusers.modular_pipelines.minimax_h3 import MiniMaxH3ImageReference, MiniMaxH3VideoReference
+    from diffusers.modular_pipelines.minimax_h3.encoders import MiniMaxH3Ref2VATextEncoderStep
+    from transformers import Qwen2TokenizerFast, Qwen3VLProcessor
+
+    from zvisiongenerator.utils.h3_memory import H3_FPS
+
+    tokenizer = Qwen2TokenizerFast.from_pretrained(str(tokenizer_dir))
+    processor = Qwen3VLProcessor.from_pretrained(str(processor_dir))
+    sound = torch.empty(0) if has_sound else None  # the conditioner reads only whether a soundtrack is present, never its samples
+    references = [*(MiniMaxH3ImageReference(image=image) for image in images), MiniMaxH3VideoReference(frames=tail, fps=float(H3_FPS), audio=sound)]
+    step = MiniMaxH3Ref2VATextEncoderStep()
+    vision, image_counts, video_counts, video_stamps = step._gather_vision_features(processor, references, float(H3_FPS))
+    token_ids, token_tags = step._build_presentation(tokenizer, prompt, references, image_counts, video_counts, video_stamps, text_tag=TEXT_TAG, video_tag=VIDEO_TAG)
+    mm_token_type_ids = processor.create_mm_token_type_ids([token_ids])[0]
+    return Presentation(tuple(token_ids), tuple(token_tags), tuple(mm_token_type_ids), dict(vision))
 
 
 def empty_text_encoder(config: Any, *, layers: int = TEXT_ENCODER_LAYERS, vision: bool = True, dtype: torch.dtype | None = None) -> Any:

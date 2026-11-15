@@ -11,21 +11,33 @@ import { memoryFitNote } from './memoryFit';
 
 describe('extendPrefillFor', () => {
   it('copies a recorded scene and leaves the prompt for what happens next', () => {
-    expect(extendPrefillFor(sceneSource())).toEqual({ scene: 'A woman on a rainy street.', prompt: '', audioTrack: null });
+    expect(extendPrefillFor(sceneSource())).toEqual({ scene: 'A woman on a rainy street.', prompt: '', audioTrack: null, references: [] });
   });
 
   it('puts the single prompt of a legacy source into the prompt and leaves the scene empty', () => {
-    expect(extendPrefillFor(legacySource())).toEqual({ scene: '', prompt: 'A woman stands in the rain and says "Hello".', audioTrack: null });
+    expect(extendPrefillFor(legacySource())).toEqual({ scene: '', prompt: 'A woman stands in the rain and says "Hello".', audioTrack: null, references: [] });
   });
 
   it('leaves both empty when nothing is recorded', () => {
-    expect(extendPrefillFor(sourceInfo())).toEqual({ scene: '', prompt: '', audioTrack: null });
+    expect(extendPrefillFor(sourceInfo())).toEqual({ scene: '', prompt: '', audioTrack: null, references: [] });
   });
 
   it('fills the audio track the source followed, starting where its sound ended', () => {
     const source = sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 });
 
     expect(extendPrefillFor(source).audioTrack).toEqual({ path: '/audio/song.mp3', start: 6.65 });
+  });
+
+  it('brings the references the source was made with, in order, as a copy', () => {
+    const recorded = ['/in/a.png', '/in/b.png'];
+    const { references } = extendPrefillFor(sceneSource({ reference_images: recorded }));
+
+    expect(references).toEqual(['/in/a.png', '/in/b.png']);
+    expect(references).not.toBe(recorded);
+  });
+
+  it('has no references for a source made without any', () => {
+    expect(extendPrefillFor(sceneSource({ reference_images: [] })).references).toEqual([]);
   });
 
   it('has no track for a source made from generated sound', () => {
@@ -203,7 +215,7 @@ describe('the inspect route response', () => {
 
   it('is read by the helpers that consume it', () => {
     expect(extendSourceUsable(info)).toBe(true);
-    expect(extendPrefillFor(info)).toEqual({ scene: 'A woman in a red raincoat on a rainy street at night.', prompt: '', audioTrack: null });
+    expect(extendPrefillFor(info)).toEqual({ scene: 'A woman in a red raincoat on a rainy street at night.', prompt: '', audioTrack: null, references: [] });
     expect(extendSourceFacts(info).map((fact) => fact.text)).toEqual(['512 × 256', '24 fps', '4.04 s', '97 frames', 'Audio']);
     expect(memoryFitNote(info.memory_fit, 'extension')).toBeNull();
     expect(isOriginalLegacyPrompt({ prompt: info.prompt ?? '' }, info)).toBe(false);

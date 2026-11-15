@@ -18,7 +18,7 @@ import { emptySlotsHolding } from './assetRemoval';
 
 const context = {} as WorkspaceContext;
 
-const emptyState = { referenceImagePath: null, firstFramePath: null, endImagePath: null, referenceImagePaths: [] as string[], audioTrackPath: null, extendAudioTrackPath: null, extendSourcePath: null, voicePath: null, editSourcePath: null };
+const emptyState = { referenceImagePath: null, firstFramePath: null, endImagePath: null, referenceImagePaths: [] as string[], videoReferencePaths: [] as string[], extendReferencePaths: [] as string[], audioTrackPath: null, extendAudioTrackPath: null, extendSourcePath: null, voicePath: null, editSourcePath: null };
 
 beforeEach(() => {
   draftMock.state = { ...emptyState };
@@ -78,6 +78,15 @@ describe('emptySlotsHolding', () => {
   it('reports a reference row that holds a gone path and leaves the row', () => {
     draftMock.state = { ...emptyState, referenceImagePaths: ['/o/x.png', '/o/y.png'] };
     expect(emptySlotsHolding(['/o/y.png'], context)).toBe(true);
+    expect(draftMock.setStartImage).not.toHaveBeenCalled();
+  });
+
+  it('reports a Video or Extend reference row that holds a gone path, and leaves the row', () => {
+    draftMock.state = { ...emptyState, referenceImagePaths: ['/o/x.png'], videoReferencePaths: ['/o/v.png', '/o/w.png'], extendReferencePaths: ['/o/e.png'] };
+    expect(emptySlotsHolding(['/o/w.png'], context)).toBe(true);
+    expect(emptySlotsHolding(['/o/e.png'], context)).toBe(true);
+    expect(emptySlotsHolding(['/o/x.png'], context)).toBe(true);
+    expect(emptySlotsHolding(['/o/other.png'], context)).toBe(false);
     expect(draftMock.setStartImage).not.toHaveBeenCalled();
   });
 

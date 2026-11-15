@@ -98,6 +98,22 @@ describe('imageSupport', () => {
   it('takes a last frame only with a start image, and a last frame or references only in their own tab', () => {
     expect(imageSupport(withVideo('ltx-8', { supports_i2v: false }), 'ltx-8', 'video')).toMatchObject({ start: false, last: false });
     expect(imageSupport(makeContext(), 'zit', 'image').last).toBe(false);
+  });
+
+  it('a video model takes the references it declares, and none when it declares none', () => {
+    expect(imageSupport(withVideo('h3', { max_reference_images: 2 }), 'h3', 'video').references).toBe(2);
     expect(imageSupport(makeContext(), 'ltx-8', 'video').references).toBe(0);
+  });
+
+  it('keeps the two lists apart: an image model\'s cap is Image\'s and a video model\'s is Video\'s', () => {
+    const ctx = withVideo('ltx-8', { max_reference_images: 2 });
+    ctx.image_model_defaults['flux-lite'] = { ...ctx.image_model_defaults['flux-lite'], max_reference_images: 4 };
+    expect([imageSupport(ctx, 'flux-lite', 'image').references, imageSupport(ctx, 'ltx-8', 'video').references]).toEqual([4, 2]);
+  });
+
+  it('a model the context lists no defaults for follows the default video model for references too', () => {
+    const ctx = makeContext();
+    ctx.video_defaults = { ...ctx.video_defaults, max_reference_images: 2 } as VideoModelDefaults;
+    expect(imageSupport(ctx, 'unlisted', 'video').references).toBe(2);
   });
 });

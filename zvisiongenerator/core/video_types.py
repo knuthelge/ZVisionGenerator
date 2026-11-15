@@ -178,6 +178,8 @@ class VideoGenerationRequest:
     # I2V params: the first-frame image, and for a family with last-frame support the image the clip ends on
     image_path: str | None = None
     end_image_path: str | None = None
+    # Reference images the clip draws its subjects from, in the order the prompt names them; for a family that takes them.
+    reference_paths: tuple[str, ...] = ()
 
     # Upscale params
     upscale: int | None = None

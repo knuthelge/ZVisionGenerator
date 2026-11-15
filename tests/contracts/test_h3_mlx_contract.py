@@ -279,6 +279,38 @@ def test_the_packed_sequence_is_a_plain_dataclass_with_a_condition_audio_row_cou
     assert fields["num_condition_video_rows"] == "int"
 
 
+# ---- Reference images ------------------------------------------------------------------------------------------------
+# ``h3_staged`` builds the fork's ``PackedSequence`` itself for a clip with references, and relies on the encoder
+# labelling each picture, references first, ``<Picture i>``.
+
+
+def test_the_packed_sequence_fields_the_reference_layout_fills() -> None:
+    sequence = _class(_tree("packing.py"), "PackedSequence")
+    fields = [node.target.id for node in sequence.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)]
+    assert fields == [
+        "sequence_length",
+        "position_ids",
+        "token_tags",
+        "video_indices",
+        "audio_indices",
+        "text_indices",
+        "num_condition_video_rows",
+        "num_condition_audio_rows",
+    ]
+
+
+def test_the_modality_tags_the_reference_layout_passes() -> None:
+    config = _tree("config.py")
+    assert (ast.literal_eval(_assigned(config, "TAG_VIDEO")), ast.literal_eval(_assigned(config, "TAG_AUDIO"))) == (0, 2)
+
+
+def test_the_request_labels_every_picture_in_order_and_tags_its_block_as_video() -> None:
+    build = ast.unparse(_function(_class(_tree("text_encoder.py"), "MiniMaxH3TextEncoder"), "build_request"))
+    assert "for index in range(len(images))" in build
+    assert "f'<Picture {index + 1}>: '" in build
+    assert "token_tags += [TAG_TEXT] * len(label_ids) + [TAG_VIDEO] * len(vision_ids)" in build
+
+
 def test_condition_audio_rows_run_at_timestep_one_and_are_not_stepped() -> None:
     plan = _function(_pipeline_class(), "_row_timestep_plan")
     (call,) = [node for node in ast.walk(plan) if isinstance(node, ast.Call) and ast.unparse(node.func) == "build_row_timesteps"]

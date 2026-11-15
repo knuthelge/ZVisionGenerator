@@ -188,7 +188,7 @@ export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode, a
 /**
  * The job facts an on-demand enhancement needs: frame shape, clip length, audio, reference image, references and last frame.
  *
- * An extension names its source, new frames and video model instead; the server reads the source's size, frame rate and recorded text,
+ * An extension names its source, new frames and video model instead, and carries the reference count like any video job; the server reads the source's size, frame rate and recorded text,
  * and the model's family sets the step the new frames are a multiple of.
  *
  * @param sourceHasAudio Extend only: whether the source has audio, when known.
@@ -214,6 +214,7 @@ export function enhanceContext(
       audio: hasAudio(state, audioSupported, sourceHasAudio, track),
       ...(track ? { audio_track: true } : {}),
       reference_image: false,
+      references,
       source_video: state.extendSourcePath,
       extend_frames: state.extendFrames,
       model: state.model || null,

@@ -1,11 +1,16 @@
 import type { TrackTab } from './audioTrack';
 import type { ImageTab } from './imageSlots';
+import type { ReferenceList } from './references';
 import { defaultUploadStore, type TabUploads, type UploadStore, type UploadTab } from './uploadStore';
 
+type ReferenceField = 'references' | 'videoReferences' | 'extendReferences';
 type FileField = 'startImage' | 'firstFrame' | 'lastFrame' | 'audioTrack' | 'extendAudioTrack' | 'voice' | 'editSource' | 'editMask';
 
+// The held field of each reference list.
+const REFERENCE_FIELDS = { image: 'references', video: 'videoReferences', extend: 'extendReferences' } as const satisfies Record<ReferenceList, ReferenceField>;
+
 // The files picked from this device that wait for Generate: per tab the start image (the first frame in Video), the
-// last frame, and one entry per reference row (null for a row that holds a path), the audio track of Video and Extend
+// last frame, and one entry per reference row (null for a row that holds a path; the Video tab and the Extend kind keep their own lists in their records), the audio track of Video and Extend
 // Video, the recording of the Audio tab's voice, and in the Edit kind the image to edit with the PNG of its painted
 // mask. The Workspace is unmounted on another page, so they live here to survive a visit to the Gallery or the Prompts
 // page. Every write is mirrored into an upload store (IndexedDB), and `restore` reads it back after a reload. The draft
@@ -27,15 +32,19 @@ class HeldUploads {
   editSource = $state.raw<File | null>(null);
   /** The painted mask of the image to edit, a PNG, or null when nothing is painted. */
   editMask = $state.raw<File | null>(null);
-  /** The pending reference uploads by row. */
+  /** The pending reference uploads of the Image tab by row. */
   references = $state.raw<(File | null)[]>([]);
+  /** The pending reference uploads of the Video tab's New kind by row. */
+  videoReferences = $state.raw<(File | null)[]>([]);
+  /** The pending reference uploads of the Extend kind by row. */
+  extendReferences = $state.raw<(File | null)[]>([]);
   /** Whether the stored uploads have been read back. True once `restore` settles, also when the store failed. */
   restored = $state(false);
 
   #store: UploadStore | null = null;
   #restoring: Promise<void> | null = null;
   // The fields written since the store was set, so a restore that finishes later does not overwrite them.
-  #written = new Set<FileField | 'references'>();
+  #written = new Set<FileField | ReferenceField>();
   // The writes to the store run one after the other, in the order they were made.
   #queue: Promise<void> = Promise.resolve();
   // Bumped by useStore so work queued for the previous store is dropped.
@@ -62,6 +71,8 @@ class HeldUploads {
     this.editSource = null;
     this.editMask = null;
     this.references = [];
+    this.videoReferences = [];
+    this.extendReferences = [];
     this.restored = false;
   }
 
@@ -106,13 +117,18 @@ class HeldUploads {
     this.#persist('edit');
   }
 
-  /** Replace the pending reference uploads. */
-  setReferences(files: (File | null)[]): void {
-    this.#setReferences(files);
-    this.#persist('image');
+  /** The pending reference uploads of a list's tab, by row. */
+  referencesOf(list: ReferenceList): readonly (File | null)[] {
+    return this[REFERENCE_FIELDS[list]];
   }
 
-  /** Forget every pending upload of a tab: the start image and references in Image, the image to edit with its mask in Edit, the first and last frame and the audio track in Video, the audio track in the Extend kind, the voice recording in Audio. */
+  /** Replace the pending reference uploads of a list's tab. */
+  setReferencesOf(list: ReferenceList, files: (File | null)[]): void {
+    this.#setReferences(REFERENCE_FIELDS[list], files);
+    this.#persist(list);
+  }
+
+  /** Forget every pending upload of a tab: the start image and references in Image, the image to edit with its mask in Edit, the first and last frame, the references and the audio track in Video, the references and the audio track in the Extend kind, the voice recording in Audio. */
   clearTab(tab: UploadTab): void {
     this.#forget(tab);
     this.#persist(tab);
@@ -145,15 +161,15 @@ class HeldUploads {
     this[field] = file;
   }
 
-  #setReferences(files: (File | null)[]): void {
-    this.#written.add('references');
-    this.references = files;
+  #setReferences(field: ReferenceField, files: (File | null)[]): void {
+    this.#written.add(field);
+    this[field] = files;
   }
 
   #forget(tab: UploadTab): void {
     if (tab === 'image') {
       this.#setFile('startImage', null);
-      this.#setReferences([]);
+      this.#setReferences('references', []);
     } else if (tab === 'edit') {
       this.#setFile('editSource', null);
       this.#setFile('editMask', null);
@@ -161,8 +177,10 @@ class HeldUploads {
       this.#setFile('firstFrame', null);
       this.#setFile('lastFrame', null);
       this.#setFile('audioTrack', null);
+      this.#setReferences('videoReferences', []);
     } else if (tab === 'extend') {
       this.#setFile('extendAudioTrack', null);
+      this.#setReferences('extendReferences', []);
     } else {
       this.#setFile('voice', null);
     }
@@ -176,9 +194,9 @@ class HeldUploads {
         : tab === 'edit'
           ? { start: this.editSource, end: this.editMask, references: [], track: null }
           : tab === 'video'
-            ? { start: this.firstFrame, end: this.lastFrame, references: [], track: this.audioTrack }
+            ? { start: this.firstFrame, end: this.lastFrame, references: this.videoReferences, track: this.audioTrack }
             : tab === 'extend'
-              ? { start: null, end: null, references: [], track: this.extendAudioTrack }
+              ? { start: null, end: null, references: this.extendReferences, track: this.extendAudioTrack }
               : { start: null, end: null, references: [], track: this.voice };
     const empty = record.start === null && record.end === null && record.track === null && record.references.every((file) => file === null);
     return empty ? null : record;
@@ -212,6 +230,8 @@ class HeldUploads {
       if (!this.#written.has('editSource')) this.editSource = edit?.start ?? null;
       if (!this.#written.has('editMask')) this.editMask = edit?.end ?? null;
       if (!this.#written.has('references')) this.references = image?.references ?? [];
+      if (!this.#written.has('videoReferences')) this.videoReferences = video?.references ?? [];
+      if (!this.#written.has('extendReferences')) this.extendReferences = extend?.references ?? [];
       if (!this.#written.has('firstFrame')) this.firstFrame = video?.start ?? null;
       if (!this.#written.has('lastFrame')) this.lastFrame = video?.end ?? null;
       if (!this.#written.has('audioTrack')) this.audioTrack = video?.track ?? null;

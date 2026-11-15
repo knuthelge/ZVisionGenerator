@@ -546,6 +546,17 @@ class TestVideoExtend:
         assert (references.reference_image, references.references) == (False, 2)
         assert (start_only.reference_image, start_only.references) == (True, 0)
 
+    def test_an_extension_counts_its_references(self):
+        with_references = _job_context(self._extend_args(reference_paths=["a.png", "b.png"]), mode="video")
+
+        assert with_references.extends is True and with_references.references == 2
+        assert _job_context(self._extend_args(), mode="video").references == 0
+
+    def test_a_video_counts_its_references_apart_from_the_first_frame(self):
+        context = _job_context(_args(width=704, height=448, num_frames=97, fps=24, no_audio=False, image_path="first.png", reference_paths=["a.png"]), mode="video")
+
+        assert (context.reference_image, context.references) == (True, 1)
+
     def test_a_track_means_the_model_generates_no_sound(self):
         track = AudioTrack("voice.mp3", 0.0)
 

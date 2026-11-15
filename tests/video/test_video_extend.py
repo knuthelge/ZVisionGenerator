@@ -431,6 +431,10 @@ class TestResolveExtendFrames:
 
 
 class TestExtendEnhanceContext:
+    def test_carries_the_reference_count(self):
+        assert extend_enhance_context(_source(), 48, no_audio=False, references=2).references == 2
+        assert extend_enhance_context(_source(), 48, no_audio=False).references == 0
+
     def test_describes_the_window_the_source_and_the_new_frames(self):
         context = extend_enhance_context(_source(scene="A street.", prompt="She waves."), 48, no_audio=False)
         assert context.extends is True

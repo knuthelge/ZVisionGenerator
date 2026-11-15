@@ -95,6 +95,7 @@ _LTX_PAYLOAD = {
     "audio": True,
     "low_memory": True,
     "supports_i2v": True,
+    "max_reference_images": 0,
     "supports_quantize": False,
     "quantize": None,
     "max_steps": 8,

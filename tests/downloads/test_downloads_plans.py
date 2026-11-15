@@ -187,8 +187,18 @@ class TestVideoPlan:
         plan = video_plan("MiniMaxAI/MiniMax-H3@rev", family="h3", config=config, model_name="h3", platform_key="linux", upscale=upscale)
 
         assert plan == (target,)
-        h3_backend.assert_called_once_with("MiniMaxAI/MiniMax-H3@rev", h3_preset(config, "linux"), upscale=upscale)
+        h3_backend.assert_called_once_with("MiniMaxAI/MiniMax-H3@rev", h3_preset(config, "linux"), upscale=upscale, references=False)
         ltx_backend.assert_not_called()
+
+    def test_references_reach_the_h3_planner_and_the_load_options(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "linux")
+        h3_backend = _patch_backend(monkeypatch, "h3_download_plan", ())
+
+        video_plan("MiniMaxAI/MiniMax-H3@rev", family="h3", config=load_packaged_config(), model_name="h3", platform_key="linux", upscale=False, references=True)
+
+        assert h3_backend.call_args.kwargs["references"] is True
 
     def test_h3_on_macos_is_planned_from_the_mlx_preset_and_the_turbo_lora(self, monkeypatch):
         import zvisiongenerator.backends as backends
@@ -202,6 +212,13 @@ class TestVideoPlan:
         assert [target.repo_id for target in plan] == ["water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "MiniMaxAI/MiniMax-H3", "lightx2v/Minimax-h3-Turbo"]
         assert plan[0].allow_patterns == h3_mlx_preset().transformer.files
         assert plan[2].allow_patterns == h3_turbo_lora("darwin")[0].files
+
+    def test_references_leave_an_ltx_plan_unchanged(self, monkeypatch):
+        backend = _patch_backend(monkeypatch, "video_download_plan", ())
+
+        video_plan("owner/ltx", family="ltx", config=_CONFIG, model_name="ltx", platform_key="linux", upscale=False, references=True)
+
+        assert "references" not in backend.call_args.kwargs
 
     def test_network_errors_cannot_be_planned(self, monkeypatch):
         _patch_backend(monkeypatch, "video_download_plan", side_effect=httpx.ConnectError("down"))

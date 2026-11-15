@@ -238,6 +238,30 @@ def test_h3_plan_is_the_int8_transformer_the_fl2va_components_and_the_lora(h3_pl
     assert turbo == DownloadTarget(lora.repo_id, lora.revision, lora.files)
 
 
+def _mac_converted_folder(path: Path) -> Path:
+    from zvisiongenerator.utils.h3_converted import write_converted_h3
+
+    (path / "FL2VA" / "transformer").mkdir(parents=True)
+    (path / "FL2VA" / "transformer" / "model.safetensors.index.json").write_text("{}", encoding="utf-8")
+    write_converted_h3(path, {"storage": "mlx-int8", "turbo": "merged"})
+    return path
+
+
+def test_h3_plan_with_references_is_the_converted_plan_plus_the_ref2va_files(tmp_path: Path, h3_plan_inputs) -> None:
+    """The reference load reads only the Ref2VA copy and stock's components: no INT8 transformer and no turbo LoRA, whatever the model picked."""
+    preset, _lora = h3_plan_inputs
+    converted_plan = h3_mlx_download_plan(str(_mac_converted_folder(tmp_path / "converted")), *h3_plan_inputs)
+    (tmp_path / "plain").mkdir()
+    transformer, lora = preset.reference_transformer, preset.reference_lora
+    ref2va = (DownloadTarget(transformer.repo_id, transformer.revision, transformer.files), DownloadTarget(lora.repo_id, lora.revision, lora.files))
+    expected = (DownloadTarget(preset.components.repo_id, preset.components.revision, preset.components.files), *ref2va)
+
+    assert converted_plan == expected[:1]
+    assert h3_mlx_download_plan(str(tmp_path / "converted"), *h3_plan_inputs, references=True) == expected
+    for model_ref in (H3_REF, "MiniMaxAI/MiniMax-H3", "someone/custom-h3@abc", str(tmp_path / "plain")):
+        assert h3_mlx_download_plan(model_ref, *h3_plan_inputs, references=True) == expected
+
+
 def test_h3_plan_lists_every_file_literally(h3_plan_inputs) -> None:
     from zvisiongenerator.downloads.target import is_literal
 

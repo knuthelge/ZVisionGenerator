@@ -1125,6 +1125,21 @@ def test_references_are_carried_whatever_the_workflow(tmp_path, monkeypatch):
     assert query["reference_path"] == ["/in/a.png"]
 
 
+@pytest.mark.parametrize(("workflow", "extra"), [("txt2vid", {}), ("img2vid", {"image_path": "/in/first.png"})])
+def test_a_video_with_references_lists_them_and_reuses_them_as_a_repeated_param(tmp_path, workflow, extra):
+    payload, _params = _video_reuse(tmp_path, {"workflow": workflow, "reference_images": ["/in/a.png", "/in/b.png"], **extra})
+
+    assert payload["reference_images"] == ["/in/a.png", "/in/b.png"]
+    assert _reuse_query(payload)["reference_path"] == ["/in/a.png", "/in/b.png"]
+
+
+def test_a_video_without_references_names_none(tmp_path):
+    payload, params = _video_reuse(tmp_path, {})
+
+    assert payload["reference_images"] == []
+    assert "reference_path" not in params
+
+
 def test_an_image_without_references_names_none(tmp_path, monkeypatch):
     monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
     payload, params = _image_reuse(tmp_path, {})

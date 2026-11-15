@@ -6,7 +6,7 @@ manifest recording what it was made from, so a changed source or backend format 
 
 The macOS MiniMax H3 backend keeps a 4-bit text-encoder copy next to its model as ``<name>@mlx-te<bits>``. It is
 not an image quant, but it follows the same rules: it belongs to its model, is never listed as a model of its own
-and is removed with it.
+and is removed with it. The same holds for the MiniMax H3 Ref2VA copy, ``<name>@ref2va-q<bits>``.
 
 It also holds the write-once routine the video backend's prepared copies use (:func:`ensure_stored_copy`): a copy is
 written into a hidden partial folder, marked complete by its manifest, and renamed into place.
@@ -42,6 +42,7 @@ __all__ = [
     "parse_stored_quant_name",
     "partial_dir",
     "promote_partial",
+    "reference_copy_name",
     "source_fingerprint",
     "stored_quant_dir",
     "stored_quant_dirs_for",
@@ -55,8 +56,8 @@ __all__ = [
 MANIFEST_NAME = "ziv-quant.json"
 STORED_QUANT_BITS = (4, 8)
 _MANIFEST_VERSION = 1
-_NAME_PATTERN = re.compile(r"^(?P<base>.+)@(?:q|mlx-te)(?P<bits>4|8)$")
-_COPY_PREFIXES = ("q", "mlx-te")
+_NAME_PATTERN = re.compile(r"^(?P<base>.+)@(?:q|mlx-te|ref2va-q)(?P<bits>4|8)$")
+_COPY_PREFIXES = ("q", "mlx-te", "ref2va-q")
 # Files detect_image_model needs (family, distillation, Klein size) that backends may not save with the weights.
 # The source's model_index.json always wins; a component config a backend wrote (e.g. with its quantization
 # settings) is kept.
@@ -73,6 +74,11 @@ _CONTENT_HASH_NAME = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 def text_encoder_copy_name(name: str, bits: int) -> str:
     """Return the folder name of *name*'s macOS text-encoder copy at *bits*, e.g. ``h3@mlx-te4``."""
     return f"{name}@mlx-te{bits}"
+
+
+def reference_copy_name(name: str, bits: int) -> str:
+    """Return the folder name of *name*'s Ref2VA copy at *bits*, e.g. ``h3@ref2va-q4``."""
+    return f"{name}@ref2va-q{bits}"
 
 
 def stored_quant_name(name: str, bits: int) -> str:

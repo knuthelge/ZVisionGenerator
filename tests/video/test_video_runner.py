@@ -744,6 +744,25 @@ class TestEndImageBatch:
         assert (request.image_path, request.end_image_path) == ("/tmp/first.png", expected)
 
 
+class TestReferenceBatch:
+    """The reference paths in the arguments reach each run's request."""
+
+    @pytest.mark.parametrize(("paths", "expected"), [(["/tmp/a.png", "/tmp/b.png"], ("/tmp/a.png", "/tmp/b.png")), ([], ()), (None, ())])
+    def test_request_carries_the_reference_paths(self, paths, expected):
+        requests = []
+        workflow = MagicMock()
+        workflow.run.side_effect = lambda request, artifacts: requests.append(request) or StageOutcome.success
+        args = _make_video_args(reference_paths=paths)
+        prompts = {"default": [("a dog", None)]}
+        config: dict = {"generation": {"seed_min": 4, "seed_max": 10**9}}
+
+        run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
+
+        (request,) = requests
+        assert request.reference_paths == expected
+        assert request.prompt == "a dog"
+
+
 class TestAudioTrackBatch:
     """A track in the arguments reaches every run's request."""
 

@@ -5,6 +5,10 @@ the first latent frames of the video block and the first latents of *each* audio
 so the held audio rows are two separate runs). With a user's track every audio row is held. Held rows are mixed with noise once, up front, and then never written:
 each step applies the schedulers to the *generated* rows only, selected by a boolean mask.
 
+With reference images the layout is the Ref2VA one, ``[text | reference rows | first-frame rows | audio | video]``
+(:func:`~zvisiongenerator.utils.h3_ref2va.ref2va_sequence`): the reference latents, each at its own size, come first and
+are held like keyframes.
+
 One forward serves every row, each at its own timestep: generated video and audio rows step down their schedules, the
 conditioning rows stay at :data:`~zvisiongenerator.backends.cuda.video.h3.schedule.KEYFRAME_T` (video) and
 :data:`~zvisiongenerator.backends.cuda.video.h3.schedule.AUDIO_COND_T` (audio). The loop mirrors diffusers'
@@ -29,6 +33,7 @@ from zvisiongenerator.backends.cuda.video.h3.conditioning import (
 from zvisiongenerator.backends.cuda.video.h3.schedule import AUDIO_COND_T, KEYFRAME_T, row_timesteps
 from zvisiongenerator.backends.cuda.video.h3.text_encoder import TEXT_TAG, VIDEO_TAG
 from zvisiongenerator.utils.h3_memory import H3_AUDIO_CHANNELS
+from zvisiongenerator.utils.h3_ref2va import Ref2vaSequence, ref2va_sequence
 
 if TYPE_CHECKING:
     import torch
@@ -55,12 +60,15 @@ class Conditioning:
             latent frames of the window.
         tail_audio: Clean held audio rows ``(2 * N, 32)``, channel-major: channel 0's *N* latents, then channel 1's. *N* is
             37 for an Extend tail, and the clip's audio latents when a track holds every row.
+        references: Clean reference latents, each ``(1, 24, 1, height, width)`` at the reference's own size, in packed
+            order. They are held ahead of the keyframes and are not part of the result.
     """
 
     keyframes: tuple[torch.Tensor, ...] = ()
     anchors: tuple[str, ...] = ()
     tail_latents: torch.Tensor | None = None
     tail_audio: torch.Tensor | None = None
+    references: tuple[torch.Tensor, ...] = ()
 
     def __post_init__(self) -> None:
         if len(self.keyframes) != len(self.anchors):
@@ -86,7 +94,7 @@ class Layout:
         timestep_audio_idx: Sequence positions of the audio rows, held rows first: channel 0's tail, channel 1's tail,
             then the rest (CPU). Equal to ``audio_indices`` when nothing is held.
         text_rows: Number of text rows.
-        keyframe_rows: Number of leading video rows that hold keyframes.
+        keyframe_rows: Number of leading video rows that hold references and keyframes (the reference rows first).
         tail_rows: Number of video rows, right after the keyframes, that hold the Extend tail.
         condition_video_rows: ``keyframe_rows + tail_rows``: the leading video rows that stay pinned.
         condition_audio_rows: Number of held audio rows (two runs, one per channel, or 0); all of them with a track.
@@ -130,7 +138,8 @@ def build_layout(text_token_tags: Sequence[int] | torch.Tensor, geo: Geometry, d
     The structure comes from diffusers' ``build_packed_sequence`` called with the keyframe anchors. An Extend tail needs
     no extra rows: it is the leading part of the video block, so with the keyframes in front it makes the leading
     video rows the conditioning ones. The held audio is two runs of the channel-major block (all of it with a track), so the
-    timestep order puts them first explicitly.
+    timestep order puts them first explicitly. With references the structure comes from ``ref2va_sequence`` instead, which
+    also places a first-frame keyframe after the reference rows.
 
     Args:
         text_token_tags: The modality tag of every text row (``TEXT_TAG``, or ``VIDEO_TAG`` inside a keyframe's vision block).
@@ -147,42 +156,59 @@ def build_layout(text_token_tags: Sequence[int] | torch.Tensor, geo: Geometry, d
     conditioning = conditioning or Conditioning()
     tail_frames = _check_conditioning(geo, conditioning)
     tags = torch.as_tensor(list(text_token_tags) if not isinstance(text_token_tags, torch.Tensor) else text_token_tags, dtype=torch.long)
-    position_ids, token_tags, video_idx, audio_idx, text_idx, keyframe_rows, _ = MiniMaxH3PrepareLayoutStep.build_packed_sequence(
-        tags,
-        geo.latent_frames,
-        geo.latent_height,
-        geo.latent_width,
-        geo.audio_latents,
-        _PATCH,
-        H3_AUDIO_CHANNELS,
-        _AUDIO_TAG,
-        VIDEO_TAG,
-        tuple(conditioning.anchors),
-    )
+    if conditioning.references:
+        packed = ref2va_sequence(
+            tags,
+            [tuple(latents.shape[2:]) for latents in conditioning.references],
+            latent_frames=geo.latent_frames,
+            latent_height=geo.latent_height,
+            latent_width=geo.latent_width,
+            audio_latents=geo.audio_latents,
+            anchors=conditioning.anchors,
+            patch=_PATCH,
+            audio_channels=H3_AUDIO_CHANNELS,
+            audio_tag=_AUDIO_TAG,
+            video_tag=VIDEO_TAG,
+        )
+    else:
+        packed = Ref2vaSequence(
+            *MiniMaxH3PrepareLayoutStep.build_packed_sequence(
+                tags,
+                geo.latent_frames,
+                geo.latent_height,
+                geo.latent_width,
+                geo.audio_latents,
+                _PATCH,
+                H3_AUDIO_CHANNELS,
+                _AUDIO_TAG,
+                VIDEO_TAG,
+                tuple(conditioning.anchors),
+            )[:6]
+        )
     tail_rows = tail_frames * (geo.latent_height // _PATCH[1]) * (geo.latent_width // _PATCH[2])
     condition_audio_rows = 0
     held_audio = torch.empty(0, dtype=torch.long)
-    timestep_audio_idx = audio_idx
+    timestep_audio_idx = packed.audio_indices
     if conditioning.tail_audio is not None:
         held_audio = tail_audio_rows(geo.audio_latents, conditioning.held_audio_latents)
-        timestep_audio_idx = audio_idx[tail_first_audio_order(geo.audio_latents, conditioning.held_audio_latents)]
+        timestep_audio_idx = packed.audio_indices[tail_first_audio_order(geo.audio_latents, conditioning.held_audio_latents)]
         condition_audio_rows = int(held_audio.numel())
-    condition_video_rows = keyframe_rows + tail_rows
-    video_generated = torch.arange(video_idx.numel()) >= condition_video_rows
-    audio_generated = torch.ones(audio_idx.numel(), dtype=torch.bool)
+    condition_video_rows = packed.keyframe_rows + tail_rows
+    video_generated = torch.arange(packed.video_indices.numel()) >= condition_video_rows
+    audio_generated = torch.ones(packed.audio_indices.numel(), dtype=torch.bool)
     audio_generated[held_audio] = False
     return Layout(
         kwargs={
-            "position_ids": position_ids.to(device),
-            "token_tags": token_tags.to(device),
-            "video_indices": video_idx.to(device),
-            "audio_indices": audio_idx.to(device),
-            "text_indices": text_idx.to(device),
+            "position_ids": packed.position_ids.to(device),
+            "token_tags": packed.token_tags.to(device),
+            "video_indices": packed.video_indices.to(device),
+            "audio_indices": packed.audio_indices.to(device),
+            "text_indices": packed.text_indices.to(device),
         },
-        timestep_video_idx=video_idx,
+        timestep_video_idx=packed.video_indices,
         timestep_audio_idx=timestep_audio_idx,
-        text_rows=int(text_idx.numel()),
-        keyframe_rows=keyframe_rows,
+        text_rows=int(packed.text_indices.numel()),
+        keyframe_rows=packed.keyframe_rows,
         tail_rows=tail_rows,
         condition_video_rows=condition_video_rows,
         condition_audio_rows=condition_audio_rows,
@@ -220,15 +246,20 @@ def draw_noise(geo: Geometry, generator: torch.Generator | None, device: Any) ->
     return _patchify(video), audio
 
 
+def _held_rows(scheduler: MiniMaxH3Scheduler, conditioning: Conditioning, generator: torch.Generator | None) -> list[torch.Tensor]:
+    """Return the packed rows of the references, then the keyframes, each pre-noised to ``KEYFRAME_T`` with one draw from *generator*."""
+    return [_patchify(prenoise(scheduler, latents.float(), KEYFRAME_T, generator)) for latents in (*conditioning.references, *conditioning.keyframes)]
+
+
 def _initial_rows(geo: Geometry, layout: Layout, conditioning: Conditioning, scheduler: MiniMaxH3Scheduler, generator: torch.Generator | None, device: Any) -> tuple[torch.Tensor, torch.Tensor]:
     """Return the packed ``(video, audio)`` rows at step 0: held rows pre-noised once, generated rows pure noise.
 
-    Draw order, as the reference: one conditioning draw per keyframe, then the tail video, then the tail audio, then
-    the window noise (video, audio). Audio is drawn even at level 1.0, so a draw never depends on the level.
+    Draw order, as the reference: one conditioning draw per reference, then per keyframe, then the tail video, then the
+    tail audio, then the window noise (video, audio). Audio is drawn even at level 1.0, so a draw never depends on the level.
     """
     import torch
 
-    keyframes = [_patchify(prenoise(scheduler, latents.float(), KEYFRAME_T, generator)) for latents in conditioning.keyframes]
+    keyframes = _held_rows(scheduler, conditioning, generator)
     tail_video = _patchify(prenoise(scheduler, conditioning.tail_latents.float(), KEYFRAME_T, generator)) if conditioning.tail_latents is not None else None
     tail_audio = prenoise(scheduler, conditioning.tail_audio.float(), AUDIO_COND_T, generator) if conditioning.tail_audio is not None else None
     video, audio = draw_noise(geo, generator, device)
@@ -333,7 +364,7 @@ def denoise(
         schedulers: The ``(video, audio)`` schedulers from ``build_schedulers``.
         seed: Seed of the noise (a CPU generator), or ``None`` for unseeded.
         device: Where the sequence lives.
-        conditioning: The encoded keyframes and Extend tail to hold, or ``None``.
+        conditioning: The encoded references, keyframes and Extend tail to hold, or ``None``.
         step_callback: Called after every step with ``{"phase", "current_step", "total_steps"}``.
         phase: The ``phase`` the callback reports.
         text_token_tags: The modality tag of every row of *embeds* (``Presentation.token_tags``); all text when ``None``.
@@ -394,14 +425,14 @@ def refine(
         noise: ``(video noise shaped like latents, audio noise shaped like audio_rows)``.
         start: The schedule step to re-noise to; the loop runs ``start`` to the end.
         device: Where the sequence lives.
-        conditioning: The keyframes to hold, or ``None``. An Extend tail is refused.
-        keyframe_seed: Seed of the keyframes' pre-noise, or ``None`` for the global generator.
+        conditioning: The references and keyframes to hold, or ``None``. An Extend tail is refused.
+        keyframe_seed: Seed of the references' and keyframes' pre-noise, or ``None`` for the global generator.
         step_callback: Called after every step with ``{"phase", "current_step", "total_steps"}``, counted from *start*.
         phase: The ``phase`` the callback reports.
         text_token_tags: The modality tag of every row of *embeds*; all text when ``None``.
 
     Returns:
-        The refined video latents ``(1, 24, geo.latent_frames, latent_height, latent_width)``, float32 (keyframes excluded).
+        The refined video latents ``(1, 24, geo.latent_frames, latent_height, latent_width)``, float32 (references and keyframes excluded).
 
     Raises:
         ValueError: If *start* is outside the schedule, the latents, audio rows or noise have the wrong shape, the
@@ -429,7 +460,7 @@ def refine(
         text_token_tags = [TEXT_TAG] * embeds.shape[1]
     layout = build_layout(text_token_tags, geo, device, conditioning)
     generator = torch.Generator(device="cpu").manual_seed(keyframe_seed) if keyframe_seed is not None else None
-    keyframes = [_patchify(prenoise(video_scheduler, latent.float(), KEYFRAME_T, generator)) for latent in conditioning.keyframes]
+    keyframes = _held_rows(video_scheduler, conditioning, generator)
     renoised_video = video_scheduler.scale_noise(latents.float(), float(video_scheduler.timesteps[start]), noise_video.float())
     renoised_audio = audio_scheduler.scale_noise(audio_rows.float(), float(audio_scheduler.timesteps[start]), noise_audio.float())
     video = torch.cat([*(rows.to(device) for rows in keyframes), _patchify(renoised_video).to(device)])

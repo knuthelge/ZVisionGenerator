@@ -14,14 +14,14 @@ const IMAGE_CAPS = { showRefImage: true, takesLastFrame: false, maxReferences: 3
 const VIDEO_CAPS = { showRefImage: true, takesLastFrame: true, maxReferences: 0, showI2IStrength: false } as WorkspaceCapabilities;
 
 type Held = ImagesViewInput['files'];
-const NO_FILES: Held = { startImage: null, firstFrame: null, lastFrame: null, references: [] };
-type Overrides = Partial<SlotState> & { referenceImagePaths?: string[] };
+const NO_FILES: Held = { startImage: null, firstFrame: null, lastFrame: null, references: [], videoReferences: [], extendReferences: [] };
+type Overrides = Partial<SlotState> & { referenceImagePaths?: string[]; videoReferencePaths?: string[]; extendReferencePaths?: string[] };
 
 function state(workflow: Workflow, overrides: Overrides = {}): ImagesViewInput['state'] {
   return {
     workflow,
     referenceImagePath: null, referenceImageUpload: null, firstFramePath: null, firstFrameUpload: null, endImagePath: null, endImageUpload: null,
-    referenceImageStrength: 0.65, missingReferencePaths: [], referenceImagePaths: [],
+    referenceImageStrength: 0.65, missingReferencePaths: [], referenceImagePaths: [], videoReferencePaths: [], extendReferencePaths: [],
     ...overrides,
   };
 }
@@ -276,5 +276,67 @@ describe('imagesView sent', () => {
       const v = view('img2vid', { firstFramePath: '/in/first.png', endImagePath: '/in/last.png' }, { caps: { takesLastFrame } });
       expect(v.last?.used === true && v.last.set).toBe(v.sent.end !== null);
     }
+  });
+});
+
+describe('imagesView reference lists', () => {
+  const H3: Partial<WorkspaceCapabilities> = { maxReferences: 2 };
+  const own = (workflow: Workflow, overrides: Overrides, held: Partial<Held> = {}) =>
+    view(workflow, { referenceImagePaths: ['/in/image.png'], ...overrides }, { caps: H3, files: { references: [file('image-up.png')], ...held } }).references;
+
+  it.each(['txt2vid', 'img2vid'] as const)('reads the Video list on %s, and its held uploads', (workflow) => {
+    const references = own(workflow, { videoReferencePaths: ['/in/v1.png', ''] }, { videoReferences: [null, file('v2.png')] });
+
+    expect(references?.list).toBe('video');
+    expect(references?.rows.map((row) => [row.path, row.file?.name ?? null])).toEqual([['/in/v1.png', null], ['', 'v2.png']]);
+    expect(references?.max).toBe(2);
+    expect(references?.hasRoom).toBe(false);
+  });
+
+  it('reads the Extend list on extend, and its held uploads, and leaves the Video list out', () => {
+    const references = own('extend', { extendReferencePaths: ['/in/e1.png', ''], videoReferencePaths: ['/in/v1.png'] }, { extendReferences: [null, file('e2.png')], videoReferences: [file('v.png')] });
+
+    expect(references?.list).toBe('extend');
+    expect(references?.rows.map((row) => [row.path, row.file?.name ?? null])).toEqual([['/in/e1.png', null], ['', 'e2.png']]);
+    expect(references?.max).toBe(2);
+    expect(references?.hasRoom).toBe(false);
+  });
+
+  it.each(['txt2img', 'img2img'] as const)('reads the Image list on %s and leaves the Video list out', (workflow) => {
+    const references = own(workflow, { videoReferencePaths: ['/in/v1.png'] });
+
+    expect(references?.list).toBe('image');
+    expect(references?.rows.map((row) => row.path)).toEqual(['/in/image.png']);
+    expect(references?.rows[0]!.file?.name).toBe('image-up.png');
+  });
+
+  it('shows the first `max` of the Video list and keeps the rest out of sight', () => {
+    const references = own('txt2vid', { videoReferencePaths: ['/in/1.png', '/in/2.png', '/in/3.png'] });
+
+    expect(references?.rows.map((row) => row.path)).toEqual(['/in/1.png', '/in/2.png']);
+  });
+
+  it('hides the list on a model without references, in Extend too', () => {
+    const none = { maxReferences: 0, showRefImage: false, takesLastFrame: false };
+
+    expect(view('txt2vid', { videoReferencePaths: ['/in/1.png'] }, { caps: { maxReferences: 0 } }).references).toBeNull();
+    expect(view('extend', { extendReferencePaths: ['/in/1.png'] }, { caps: none }).references).toBeNull();
+    expect(view('extend', { extendReferencePaths: ['/in/1.png'] }, { caps: none }).visible).toBe(false);
+  });
+
+  it('shows the Images section in Extend when the model takes references, with no start image or last frame', () => {
+    const v = view('extend', { extendReferencePaths: ['/in/1.png'] }, { caps: { ...H3, showRefImage: false, takesLastFrame: false } });
+
+    expect(v.visible).toBe(true);
+    expect([v.start, v.last]).toEqual([null, null]);
+    expect(v.references?.list).toBe('extend');
+  });
+
+  it('blocks Generate on a gone Video reference by its tag, and an Image one by its number', () => {
+    const gone = (workflow: Workflow) => view(workflow, { referenceImagePaths: ['/in/a.png'], videoReferencePaths: ['/in/a.png'], extendReferencePaths: ['/in/a.png'], missingReferencePaths: ['/in/a.png'] }, { caps: H3 }).block;
+
+    expect(gone('txt2vid')).toBe('<Picture 1> is missing.');
+    expect(gone('extend')).toBe('<Picture 1> is missing.');
+    expect(gone('txt2img')).toBe('Reference 1 is missing.');
   });
 });

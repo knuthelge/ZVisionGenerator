@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { splitImageFiles } from './references';
+import { sentReferenceCount, splitImageFiles } from './references';
 
 const file = (name: string, type = 'image/png'): File => new File(['x'], name, { type });
+
+describe('sentReferenceCount', () => {
+  it('counts the rows that hold a path or an uploaded file, and not an empty one', () => {
+    expect(sentReferenceCount([])).toBe(0);
+    expect(sentReferenceCount([{ path: '/a.png', file: null }, { path: '', file: file('b.png') }, { path: '', file: null }])).toBe(2);
+  });
+});
 
 describe('splitImageFiles', () => {
   it('keeps PNG, JPEG and WebP files by extension, whatever the case, and counts the rest', () => {

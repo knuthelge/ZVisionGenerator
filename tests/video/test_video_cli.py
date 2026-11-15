@@ -1158,6 +1158,99 @@ class TestVideoCliH3:
         assert load.kwargs["preset"].repo == "MiniMaxAI/MiniMax-H3"
         assert "upscale" not in load.kwargs
 
+    def _references(self, tmp_path, count=2):
+        from PIL import Image
+
+        paths = []
+        for index in range(count):
+            path = tmp_path / f"ref{index}.png"
+            Image.new("RGB", (8, 8)).save(path)
+            paths.append(str(path))
+        return paths
+
+    def test_parser_reference_option_is_a_comma_separated_list(self):
+        assert _build_video_parser().parse_args(["-m", "h3", "--reference", "a.png,b.png"]).reference_paths == ["a.png", "b.png"]
+        assert _build_video_parser().parse_args(["-m", "h3"]).reference_paths == []
+
+    def test_h3_loads_and_runs_with_references(self, monkeypatch, tmp_path):
+        refs = self._references(tmp_path)
+
+        captured = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--reference", ",".join(refs)])
+
+        assert captured["args"].reference_paths == refs
+        assert captured["backend"].load_model.call_args.kwargs["references"] is True
+
+    def test_the_memory_check_counts_the_references(self, monkeypatch, tmp_path):
+        refs = self._references(tmp_path)
+
+        with_references = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--reference", ",".join(refs)])
+        without = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake"])
+
+        assert with_references["memory"].call_args.kwargs["references"] == len(refs)
+        assert without["memory"].call_args.kwargs["references"] == 0
+
+    @pytest.mark.parametrize("mode", ["text", "upscale", "extend", "image", "first_and_last", "audio"])
+    def test_references_work_in_every_mode(self, monkeypatch, tmp_path, mode):
+        first, last = self._images(tmp_path)
+        refs = self._references(tmp_path, 1)
+        track = tmp_path / "voice.wav"
+        track.write_bytes(b"x")
+        monkeypatch.setattr(video_cli, "require_readable_track", lambda _track: None)
+        extra, frames = {
+            "text": ([], (None, None)),
+            "upscale": (["--upscale", "2"], (None, None)),
+            "extend": (["--extend", "clip.mp4"], (None, None)),
+            "image": (["--image", first], (first, None)),
+            "first_and_last": (["--image", first, "--end-image", last], (first, last)),
+            "audio": (["--audio-file", str(track)], (None, None)),
+        }[mode]
+
+        captured = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--reference", refs[0], *extra])
+
+        assert captured["args"].reference_paths == refs
+        assert (captured["args"].image_path, captured["args"].end_image_path) == frames
+
+    def test_an_extension_takes_no_references_from_its_source_and_gives_no_warning(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "h3", "--extend", "clip.mp4", "--prompt", "a lake"], source=_cli_source())
+
+        assert captured["args"].reference_paths == []
+        assert "references" not in captured["backend"].load_model.call_args.kwargs
+        assert not any("reference" in message.lower() for message in captured["warnings"])
+
+    def test_more_references_than_the_model_takes_are_refused_before_the_model_loads(self, monkeypatch, tmp_path):
+        refs = self._references(tmp_path, 3)
+        backend = MagicMock()
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--reference", ",".join(refs)], backend=backend)
+
+        backend.load_model.assert_not_called()
+
+    def test_a_missing_reference_file_is_refused_before_the_model_loads(self, monkeypatch, tmp_path):
+        backend = MagicMock()
+        gone = str(tmp_path / "gone.png")
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--reference", gone], backend=backend)
+
+        backend.load_model.assert_not_called()
+
+    def test_a_reference_that_is_not_an_image_is_refused(self, monkeypatch, tmp_path):
+        text = tmp_path / "notes.txt"
+        text.write_text("x")
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--reference", str(text)])
+
+    def test_a_model_that_takes_no_references_refuses_them(self, monkeypatch, tmp_path):
+        refs = self._references(tmp_path, 1)
+        backend = MagicMock()
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--reference", refs[0]], family="ltx", backend=backend)
+
+        backend.load_model.assert_not_called()
+
     def test_h3_without_an_end_image_leaves_it_unset(self, monkeypatch, tmp_path):
         first, _last = self._images(tmp_path)
 

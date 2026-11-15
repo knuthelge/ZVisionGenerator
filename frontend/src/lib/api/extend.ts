@@ -13,6 +13,8 @@ export interface ExtendSourceRequest {
   steps?: number | null;
   /** The selected LoRAs as the job form submits them (`name:weight,...`), whose files take memory on MiniMax H3; none when absent. */
   lora?: string | null;
+  /** How many reference images the job sends, which take rows and the vision tower on MiniMax H3; none when absent. */
+  references?: number;
 }
 
 /** Read a video chosen for extending: its facts, recorded text, problems that stop it, and the memory the extension needs. */

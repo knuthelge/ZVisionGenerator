@@ -12,26 +12,36 @@ function _referencesLabel(count: number): string {
   return `${count} ${count === 1 ? 'reference' : 'references'}`;
 }
 
-function _imageSummary(view: ImagesView): ImagesSummary {
-  const start = view.start?.set ? view.start : null;
-  const references = view.references?.rows ?? [];
-  const parts = [start?.name ?? null, references.length > 0 ? _referencesLabel(references.length) : null].filter((part): part is string => part !== null && part !== '');
-  if (parts.length === 0) return { text: 'None', tone: 'muted' };
-  const gone = start?.gone === true || references.some((row) => row.gone);
-  return { text: parts.join(' · '), tone: gone ? 'error' : 'active' };
+// The references the run uses, as a label for the summary and whether one is gone.
+function _references(view: ImagesView): { label: string | null; gone: boolean } {
+  const rows = view.references?.rows ?? [];
+  return { label: rows.length > 0 ? _referencesLabel(rows.length) : null, gone: rows.some((row) => row.gone) };
 }
 
-function _videoSummary({ start, last }: ImagesView): ImagesSummary {
+function _imageSummary(view: ImagesView): ImagesSummary {
+  const start = view.start?.set ? view.start : null;
+  const references = _references(view);
+  const parts = [start?.name ?? null, references.label].filter((part): part is string => part !== null && part !== '');
+  if (parts.length === 0) return { text: 'None', tone: 'muted' };
+  return { text: parts.join(' · '), tone: start?.gone === true || references.gone ? 'error' : 'active' };
+}
+
+function _videoSummary(view: ImagesView): ImagesSummary {
+  const { start, last } = view;
+  const references = _references(view);
   // The first frame is what makes the clip start from an image; a last frame kept without one is not used.
-  if (start === null || !start.set) return { text: 'None', tone: 'muted' };
   const lastUsed = last?.used === true && last.set;
-  return { text: lastUsed ? `${start.name} → ${last.name}` : start.name, tone: start.gone || (lastUsed && last.gone) ? 'error' : 'active' };
+  const frames = start === null || !start.set ? null : lastUsed ? `${start.name} → ${last.name}` : start.name;
+  const parts = [frames, references.label].filter((part): part is string => part !== null && part !== '');
+  if (parts.length === 0) return { text: 'None', tone: 'muted' };
+  const gone = start?.gone === true || (lastUsed && last.gone) || references.gone;
+  return { text: parts.join(' · '), tone: gone ? 'error' : 'active' };
 }
 
 /**
  * Say what Generate will use from the Images section: the start image and the references in Image ("pond.png",
- * "pond.png · 2 references", "2 references"), the first and last frame in Video ("dawn.png", "dawn.png → dusk.png"), or
- * *None*. A used image that is gone turns the summary to an error, so a folded section still shows why Generate is off.
+ * "pond.png · 2 references", "2 references"), the first and last frame and the references in Video ("dawn.png", "dawn.png → dusk.png",
+ * "dawn.png · 1 reference", "2 references"), or *None*. A used image that is gone turns the summary to an error, so a folded section still shows why Generate is off.
  * A last frame without a first frame is not used, so it reads as *None*.
  */
 export function imagesSummary(view: ImagesView): ImagesSummary {

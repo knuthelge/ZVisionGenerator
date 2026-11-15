@@ -116,7 +116,7 @@ The **Seed** field reads *Random each run* until you type a number. **Lock seed*
 
 ### Images
 
-The **Images** section holds every image the run uses: in **Image**, the start image and, on FLUX.2 Klein, [references](#references); in **Video**, a first frame and an optional last frame. With none, **Generate** works from the prompt alone. What each is for is in [Start from an image](../guides/images.md#start-from-an-image) and [First and last frame](../guides/video.md#first-and-last-frame).
+The **Images** section holds every image the run uses: in **Image**, the start image and, on FLUX.2 Klein, [references](#references); in **Video**, a first frame, an optional last frame and, on MiniMax H3, [references](#references). With none, **Generate** works from the prompt alone. What each is for is in [Start from an image](../guides/images.md#start-from-an-image) and [First and last frame](../guides/video.md#first-and-last-frame).
 
 - An image stays until you press its **×** or **Reset**, also after a reload. **Image** and **Video** each keep their own, and switching tabs, kinds or models clears none of them.
 - An image the model can't use is hidden: not shown, not sent, not counted. It stays in the draft and comes back on a model that can use it.
@@ -127,6 +127,8 @@ The **Images** section holds every image the run uses: in **Image**, the start i
 #### References
 
 Models that take [references](../guides/images.md#references) offer up to four. A row's position is its number in the prompt: *Reference 1* is "image 1". Removing a row renumbers the rest. **Use as** → **Reference** in the [Gallery or viewer](gallery.md#use-as) adds an image as the next number and keeps the prompt.
+
+On **Video**, MiniMax H3 offers up to two, in a list of its own, labelled `<Picture 1>` and `<Picture 2>`. A hint under the list shows how to name them in the prompt. **Use as** → **Reference** adds to that list and shows *Added as `<Picture N>`*. The **Images** chip shows *N references*. See [Keep a person or place in a clip](../guides/video.md#references).
 
 ### Source video
 

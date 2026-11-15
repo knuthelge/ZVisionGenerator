@@ -10,29 +10,29 @@ import { imagesView, type ImagesViewInput } from './imagesView';
 const file = (name: string): File => new File(['x'], name, { type: 'image/png' });
 
 type Held = ImagesViewInput['files'];
-const NO_FILES: Held = { startImage: null, firstFrame: null, lastFrame: null, references: [] };
+const NO_FILES: Held = { startImage: null, firstFrame: null, lastFrame: null, references: [], videoReferences: [], extendReferences: [] };
 
-function state(workflow: Workflow, overrides: Partial<SlotState> & { referenceImagePaths?: string[] } = {}): ImagesViewInput['state'] {
+function state(workflow: Workflow, overrides: Partial<SlotState> & { referenceImagePaths?: string[]; videoReferencePaths?: string[]; extendReferencePaths?: string[] } = {}): ImagesViewInput['state'] {
   return {
     workflow,
     referenceImagePath: null, referenceImageUpload: null, firstFramePath: null, firstFrameUpload: null, endImagePath: null, endImageUpload: null,
-    referenceImageStrength: 0.65, missingReferencePaths: [], referenceImagePaths: [],
+    referenceImageStrength: 0.65, missingReferencePaths: [], referenceImagePaths: [], videoReferencePaths: [], extendReferencePaths: [],
     ...overrides,
   };
 }
 
-function summarize(workflow: Workflow, overrides: Partial<SlotState> & { referenceImagePaths?: string[] } = {}, options: { files?: Partial<Held>; takesLast?: boolean; restored?: boolean } = {}) {
+function summarize(workflow: Workflow, overrides: Partial<SlotState> & { referenceImagePaths?: string[]; videoReferencePaths?: string[]; extendReferencePaths?: string[] } = {}, options: { files?: Partial<Held>; takesLast?: boolean; restored?: boolean; videoMax?: number } = {}) {
   const inVideo = workspaceTab(workflow) === 'video';
-  const caps = { showRefImage: true, takesLastFrame: inVideo && (options.takesLast ?? true), maxReferences: inVideo ? 0 : 3, showI2IStrength: !inVideo } as WorkspaceCapabilities;
+  const caps = { showRefImage: true, takesLastFrame: inVideo && (options.takesLast ?? true), maxReferences: inVideo || workflow === 'extend' ? (options.videoMax ?? 0) : 3, showI2IStrength: !inVideo } as WorkspaceCapabilities;
   return imagesSummary(imagesView({ state: state(workflow, overrides), caps, files: { ...NO_FILES, ...options.files }, restored: options.restored ?? true }));
 }
 
-function image(overrides: Partial<SlotState> & { referenceImagePaths?: string[] } = {}, options: { files?: Partial<Held>; restored?: boolean } = {}) {
+function image(overrides: Partial<SlotState> & { referenceImagePaths?: string[]; videoReferencePaths?: string[]; extendReferencePaths?: string[] } = {}, options: { files?: Partial<Held>; restored?: boolean } = {}) {
   const workflow: Workflow = overrides.referenceImagePath || overrides.referenceImageUpload ? 'img2img' : 'txt2img';
   return summarize(workflow, overrides, options);
 }
 
-function video(overrides: Partial<SlotState> = {}, options: { files?: Partial<Held>; takesLast?: boolean; restored?: boolean } = {}) {
+function video(overrides: Partial<SlotState> & { referenceImagePaths?: string[]; videoReferencePaths?: string[]; extendReferencePaths?: string[] } = {}, options: { files?: Partial<Held>; takesLast?: boolean; restored?: boolean; videoMax?: number } = {}) {
   const workflow: Workflow = overrides.firstFramePath || overrides.firstFrameUpload ? 'img2vid' : 'txt2vid';
   return summarize(workflow, overrides, options);
 }
@@ -92,5 +92,29 @@ describe('imagesSummary in Video', () => {
   it('turns to an error when a frame the run uses is gone', () => {
     expect(video({ firstFramePath: '/in/dawn.png', missingReferencePaths: ['/in/dawn.png'] })).toEqual({ text: 'dawn.png', tone: 'error' });
     expect(video({ firstFramePath: '/in/dawn.png', endImagePath: '/in/dusk.png', missingReferencePaths: ['/in/dusk.png'] })).toEqual({ text: 'dawn.png → dusk.png', tone: 'error' });
+  });
+});
+
+describe('imagesSummary with Video references', () => {
+  const two = { videoMax: 2 };
+
+  it('reads the reference count alone for text to video', () => {
+    expect(video({ videoReferencePaths: ['/in/r1.png', '/in/r2.png'] }, two)).toEqual({ text: '2 references', tone: 'active' });
+  });
+
+  it('puts the count after the first frame for image to video, and after the arrow with a last frame', () => {
+    expect(video({ firstFramePath: '/in/dawn.png', videoReferencePaths: ['/in/r1.png'] }, two)).toEqual({ text: 'dawn.png · 1 reference', tone: 'active' });
+    expect(video({ firstFramePath: '/in/dawn.png', endImagePath: '/in/dusk.png', videoReferencePaths: ['/in/r1.png'] }, two).text).toBe('dawn.png → dusk.png · 1 reference');
+  });
+
+  it('reads the references of Extend from its own list, and not those of New', () => {
+    expect(summarize('extend', { extendReferencePaths: ['/in/r1.png', '/in/r2.png'] }, two)).toEqual({ text: '2 references', tone: 'active' });
+    expect(summarize('extend', { videoReferencePaths: ['/in/r1.png', '/in/r2.png'] }, two)).toEqual({ text: 'None', tone: 'muted' });
+    expect(video({ extendReferencePaths: ['/in/r1.png'] }, two)).toEqual({ text: 'None', tone: 'muted' });
+  });
+
+  it('turns to an error when a reference row is gone, and keeps the text', () => {
+    expect(video({ videoReferencePaths: ['/in/r1.png', '/in/gone.png'], missingReferencePaths: ['/in/gone.png'] }, two)).toEqual({ text: '2 references', tone: 'error' });
+    expect(video({ firstFramePath: '/in/dawn.png', videoReferencePaths: ['/in/gone.png'], missingReferencePaths: ['/in/gone.png'] }, two)).toEqual({ text: 'dawn.png · 1 reference', tone: 'error' });
   });
 });

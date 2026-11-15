@@ -352,6 +352,45 @@ def test_h3_plan_adds_exactly_the_latent_upsampler_with_upscale() -> None:
     assert len(plan) == len(base) + 1
 
 
+def _cuda_converted_folder(path: Path) -> Path:
+    from zvisiongenerator.utils.h3_converted import write_converted_h3
+
+    path.mkdir()
+    write_converted_h3(path, {"storage": "nf4-folded", "turbo": "merged"})
+    return path
+
+
+def _ref2va_pair() -> tuple[DownloadTarget, DownloadTarget]:
+    transformer, lora = H3_PRESET.reference_transformer, H3_PRESET.reference_lora
+    return DownloadTarget(transformer.repo_id, transformer.revision, transformer.files), DownloadTarget(lora.repo_id, lora.revision, lora.files)
+
+
+def test_h3_plan_with_references_is_the_converted_plan_plus_the_ref2va_files(tmp_path: Path) -> None:
+    """The reference load reads only the Ref2VA copy: stock without its transformer, the text encoder, no turbo LoRA, whatever the model picked."""
+    from zvisiongenerator.backends.cuda.video.h3.sources import base_repo_allow
+
+    text_encoder = H3_PRESET.text_encoder
+    expected = (
+        DownloadTarget(H3_PRESET.repo, H3_PRESET.revision, base_repo_allow(H3_PRESET), H3_PRESET.repo_ignore),
+        DownloadTarget(text_encoder.repo_id, text_encoder.revision, text_encoder.files),
+        *_ref2va_pair(),
+    )
+    converted_plan = h3_download_plan(str(_cuda_converted_folder(tmp_path / "converted")), H3_PRESET)
+    (tmp_path / "plain").mkdir()
+
+    assert h3_download_plan(str(tmp_path / "converted"), H3_PRESET, references=True) == (*converted_plan, *_ref2va_pair())
+    for model_ref in (H3_REF, "MiniMaxAI/MiniMax-H3", "someone/custom-h3@abc", str(tmp_path / "plain")):
+        assert h3_download_plan(model_ref, H3_PRESET, references=True) == expected
+
+
+def test_h3_plan_puts_the_ref2va_files_after_the_latent_upsampler() -> None:
+    plan = h3_download_plan(H3_REF, H3_PRESET, upscale=True, references=True)
+
+    assert plan[-3].repo_id == H3_PRESET.latent_upsampler.repo_id
+    assert plan[-2:] == _ref2va_pair()
+    assert plan[:-3] == h3_download_plan(H3_REF, H3_PRESET, references=True)[:-2]
+
+
 def test_h3_plan_downloads_what_the_backend_resolves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Each plan target is the (repo, revision, allow, ignore) the runtime snapshot call uses, or the two diverge."""
     monkeypatch.setattr(hf_snapshot, "cached_snapshot_dirs", lambda repo_id, revision: [])

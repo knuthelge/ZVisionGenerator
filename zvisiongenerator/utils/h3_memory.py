@@ -7,10 +7,11 @@ geometry of a canvas, the memory estimate and the sampler all share these pure f
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.utils.h3_ref2va import h3_reference_size
 from zvisiongenerator.utils.model_memory import GIB, CudaMemoryEstimate, MemoryBudget, classify_cuda_memory_fit, classify_memory_fit, discrete_clip_fit
 
 __all__ = [
@@ -28,6 +29,8 @@ __all__ = [
     "H3_SPATIAL_RATIO",
     "H3_TAIL_FRAMES",
     "H3_TEXT_TOKENS",
+    "H3_VISION_MERGE",
+    "H3_VISION_PATCH",
     "estimate_h3_cuda_clip_memory",
     "estimate_h3_mlx_clip_memory",
     "estimate_h3_mlx_seconds",
@@ -40,6 +43,8 @@ __all__ = [
     "h3_latent_frames",
     "h3_lora_bytes",
     "h3_mlx_clip_fit",
+    "h3_nominal_references",
+    "h3_reference_block_rows",
     "h3_refine_windows",
     "h3_sequence_rows",
     "h3_upscale_keeps_transformer",
@@ -55,6 +60,15 @@ H3_PATCH = 2  # latent cells per row, along each spatial axis
 H3_ROW_PIXELS = H3_SPATIAL_RATIO * H3_PATCH  # 32 pixels per row, along each spatial axis
 H3_AUDIO_CHANNELS = 2  # the mono audio VAE codes each of the two channels on its own
 H3_TEXT_TOKENS = 100  # approximation of the prompt length in rows
+# Qwen3-VL's image processor (the H3 processor's ``preprocessor_config.json``) cuts an image into 16-pixel patches and merges 2x2 of
+# them into one token, after resizing both sides to a multiple of 16 * 2.
+H3_VISION_PATCH = 16
+H3_VISION_MERGE = 2
+_REFERENCE_FRAMING_TOKENS = 8  # a reference's text rows besides its image tokens: the 6-token "<Picture i>: " label and the vision start and end
+# An Extend with references shows the encoder its tail as one video block: the tail's 22 frames at 24 fps are read at 2 fps (two frames),
+# which merge into one block of one token per 32x32 pixels of the canvas, framed by the 6-token "<Video 1>: " label, a 6-token
+# "<0.2 seconds>" stamp and the vision start and end.
+_TAIL_FRAMING_TOKENS = 14
 H3_TAIL_FRAMES = 22  # an extension carries 17 * 1 + 5 frames of its source, the smallest valid clip
 # The upscale refines the enlarged latents with the last forwards of the 8-step schedule, in overlapping windows of latent frames.
 # They are code constants, not config: there is no user control, and they are tied to the stored copy's fold tables.
@@ -187,15 +201,48 @@ def h3_video_rows(width: int, height: int, num_frames: int) -> int:
     return h3_latent_frames(num_frames) * _cell_rows(width, height)
 
 
-def h3_sequence_rows(width: int, height: int, num_frames: int, *, keyframes: int = 0, tail_frames: int = 0) -> int:
-    """Return the length of the packed sequence: text, audio and video rows, plus the rows of conditioning keyframes.
+def h3_reference_block_rows(width: int, height: int) -> int:
+    """Return the sequence rows one reference of ``width x height`` pixels adds, as prepared (see :func:`~zvisiongenerator.utils.h3_ref2va.h3_reference_size`).
 
-    Each keyframe adds one latent frame of rows. An extend tail adds none: its frames and audio are the first frames
-    of the *num_frames* window, so *tail_frames* is only checked, not counted.
+    Its latent is one frame at 1/16 of the size, packed like the clip's own video rows: one row per 32x32 pixels. Its
+    picture also enters the text block, as one token per merged 2x2 of the processor's 16-pixel patches (a prepared
+    reference already has sides of a multiple of the processor's 32, so it keeps its size), plus its label and the vision
+    start and end tokens.
 
     Raises:
-        ValueError: If the canvas or frame count is invalid, *keyframes* is negative, or *tail_frames* is neither 0 nor
-            a valid clip length within *num_frames*.
+        ValueError: If a side is not a positive multiple of 32.
+    """
+    latent_rows = _cell_rows(width, height)
+    factor = H3_VISION_PATCH * H3_VISION_MERGE
+    return latent_rows + (width // factor) * (height // factor) + _REFERENCE_FRAMING_TOKENS
+
+
+def h3_nominal_references(count: int, width: int, height: int) -> tuple[tuple[int, int], ...]:
+    """Return the prepared sizes of *count* references that share the aspect ratio of a ``width x height`` canvas.
+
+    A caller that knows only how many references a job holds, not their pictures, estimates with these.
+
+    Raises:
+        ValueError: If *count* is negative, or the canvas is not positive and there is a reference.
+    """
+    if count < 0:
+        raise ValueError(f"references must not be negative, got {count}.")
+    if count and (width < 1 or height < 1):
+        raise ValueError(f"Canvas {width}x{height} must be positive.")
+    return (h3_reference_size(width, height),) * count if count else ()
+
+
+def h3_sequence_rows(width: int, height: int, num_frames: int, *, keyframes: int = 0, tail_frames: int = 0, references: Sequence[tuple[int, int]] = ()) -> int:
+    """Return the length of the packed sequence: text, audio and video rows, plus the rows of conditioning keyframes and references.
+
+    Each keyframe adds one latent frame of rows. An extend tail adds none to the video: its frames and audio are the first frames
+    of the *num_frames* window, so *tail_frames* is only checked, not counted, except that a tail beside *references* is also shown
+    to the text encoder, as one vision block of the canvas's size. Each of the *references*, given as its prepared
+    ``(width, height)``, adds its latent rows and its tokens of the text block (:func:`h3_reference_block_rows`).
+
+    Raises:
+        ValueError: If the canvas or frame count is invalid, *keyframes* is negative, a reference side is not a multiple of 32,
+            or *tail_frames* is neither 0 nor a valid clip length within *num_frames*.
     """
     if keyframes < 0:
         raise ValueError(f"keyframes must not be negative, got {keyframes}.")
@@ -205,53 +252,58 @@ def h3_sequence_rows(width: int, height: int, num_frames: int, *, keyframes: int
             raise ValueError(f"tail_frames ({tail_frames}) must not exceed num_frames ({num_frames}).")
     audio_rows = h3_audio_latents(num_frames) * H3_AUDIO_CHANNELS
     keyframe_rows = keyframes * _cell_rows(width, height)
-    return H3_TEXT_TOKENS + audio_rows + h3_video_rows(width, height, num_frames) + keyframe_rows
+    reference_rows = sum(h3_reference_block_rows(*size) for size in references)
+    tail_rows = _cell_rows(width, height) + _TAIL_FRAMING_TOKENS if tail_frames and references else 0
+    return H3_TEXT_TOKENS + audio_rows + h3_video_rows(width, height, num_frames) + keyframe_rows + reference_rows + tail_rows
 
 
-def _mlx_rows(width: int, height: int, frames: int, mode: str) -> int:
-    """Return the sequence rows of a macOS clip; the image modes carry one keyframe (an extend continues from the last frame).
+def _mlx_rows(width: int, height: int, frames: int, mode: str, references: Sequence[tuple[int, int]] = ()) -> int:
+    """Return the sequence rows of a macOS clip; the image modes carry one keyframe (an extend continues from the last frame), and each reference its block.
 
     Raises:
         ValueError: If *mode* is unknown, or the canvas or frame count is invalid.
     """
     if mode != "t2v" and mode not in _MLX_IMAGE_MODES:
         raise ValueError(f"mode must be one of t2v, {', '.join(_MLX_IMAGE_MODES)}, got {mode!r}.")
-    return h3_sequence_rows(width, height, frames, keyframes=1 if mode in _MLX_IMAGE_MODES else 0)
+    return h3_sequence_rows(width, height, frames, keyframes=1 if mode in _MLX_IMAGE_MODES else 0, references=references)
 
 
-def estimate_h3_mlx_clip_memory(width: int, height: int, frames: int, *, mode: str = "t2v") -> int:
+def estimate_h3_mlx_clip_memory(width: int, height: int, frames: int, *, mode: str = "t2v", references: Sequence[tuple[int, int]] = ()) -> int:
     """Estimate the peak unified memory, in bytes, of an H3 clip on macOS.
 
     The denoise phase peaks at 15.0 GiB for the reference clip (12,946 rows) and grows by 160 KiB per further row.
-    Text-to-video streams the text encoder, so that is its peak. The image modes run in stages, each holding one
+    Text-to-video streams the text encoder, so that is its peak. The image modes, and any clip with *references* (the
+    prepared ``(width, height)`` of each; their rows count, see :func:`h3_sequence_rows`), run in stages, each holding one
     component: the conditioning phase (keyframe encode, vision tower and prompt encode) peaks at 14.2 GiB, and the
-    denoise phase also holds the keyframe rows. The peak is the larger of the two.
+    denoise phase also holds the keyframe and reference rows. The peak is the larger of the two.
 
     Raises:
         ValueError: If *mode* is unknown, or the canvas or frame count is invalid.
     """
-    rows = _mlx_rows(width, height, frames, mode)
+    rows = _mlx_rows(width, height, frames, mode, references)
     denoise = _MLX_REFERENCE_BYTES + _MLX_BYTES_PER_ROW * (rows - _MLX_REFERENCE_ROWS)
-    return int(max(denoise, _MLX_LOAD_PHASE_BYTES) if mode in _MLX_IMAGE_MODES else denoise)
+    return int(max(denoise, _MLX_LOAD_PHASE_BYTES) if mode in _MLX_IMAGE_MODES or references else denoise)
 
 
-def estimate_h3_mlx_seconds(width: int, height: int, frames: int, *, forwards: int, mode: str = "t2v") -> int:
+def estimate_h3_mlx_seconds(width: int, height: int, frames: int, *, forwards: int, mode: str = "t2v", references: Sequence[tuple[int, int]] = ()) -> int:
     """Estimate the generation time, in seconds, of an H3 clip on macOS (an estimate from an M4 Pro, not a measurement of this machine).
 
     A fixed 240 s plus, per forward, a term linear and a term quadratic in the sequence rows, calibrated to the
-    fork's 23 minutes for 768x448 at 124 frames and 8 forwards. It excludes the one-time weight preparation.
+    fork's 23 minutes for 768x448 at 124 frames and 8 forwards, at the rows of the clip including its *references*. It excludes the one-time weight preparation.
 
     Raises:
         ValueError: If *forwards* is below 1, *mode* is unknown, or the canvas or frame count is invalid.
     """
     if forwards < 1:
         raise ValueError(f"forwards must be at least 1, got {forwards}.")
-    rows = _mlx_rows(width, height, frames, mode)
+    rows = _mlx_rows(width, height, frames, mode, references)
     return round(_MLX_FIXED_SECONDS + forwards * (_MLX_LINEAR_SECONDS_PER_ROW * rows + _MLX_QUADRATIC_SECONDS_PER_ROW2 * rows**2))
 
 
-def h3_mlx_clip_fit(width: int, height: int, frames: int, budget: MemoryBudget | None, *, forwards: int, mode: str = "t2v") -> dict[str, Any] | None:
+def h3_mlx_clip_fit(width: int, height: int, frames: int, budget: MemoryBudget | None, *, forwards: int, mode: str = "t2v", references: int = 0) -> dict[str, Any] | None:
     """Check an H3 clip against a Mac's unified-memory budget; callers warn on ``tight`` or ``too_large`` and never block.
+
+    The *references* are counted, and sized as :func:`h3_nominal_references` does.
 
     Returns:
         ``{"status", "required_gb", "budget_gb", "expected_seconds"}`` (the time is an estimate), or ``None`` without a
@@ -262,12 +314,13 @@ def h3_mlx_clip_fit(width: int, height: int, frames: int, budget: MemoryBudget |
     """
     if budget is None or not budget.gpu_bytes or budget.system_bytes is not None:
         return None
-    required = estimate_h3_mlx_clip_memory(width, height, frames, mode=mode)
+    sizes = h3_nominal_references(references, width, height)
+    required = estimate_h3_mlx_clip_memory(width, height, frames, mode=mode, references=sizes)
     return {
         "status": classify_memory_fit(required, budget.gpu_bytes),
         "required_gb": round(required / GIB, 1),
         "budget_gb": round(budget.gpu_bytes / GIB, 1),
-        "expected_seconds": estimate_h3_mlx_seconds(width, height, frames, forwards=forwards, mode=mode),
+        "expected_seconds": estimate_h3_mlx_seconds(width, height, frames, forwards=forwards, mode=mode, references=sizes),
     }
 
 
@@ -287,15 +340,20 @@ def h3_lora_bytes(paths: Iterable[str | Path]) -> int:
     return total
 
 
-def _cuda_rows(width: int, height: int, frames: int, mode: str) -> int:
-    """Return the sequence rows of a CUDA clip; only an image-to-video clip carries a keyframe (an extension's tail adds no rows).
+def _cuda_rows(width: int, height: int, frames: int, mode: str, references: Sequence[tuple[int, int]] = ()) -> int:
+    """Return the sequence rows of a CUDA clip; only an image-to-video clip carries a keyframe (an extension's tail adds no rows, but with references it enters the text block), and each reference its block.
 
     Raises:
         ValueError: If *mode* is unknown, or the canvas or frame count is invalid.
     """
     if mode not in _CUDA_MODES:
         raise ValueError(f"mode must be one of {', '.join(_CUDA_MODES)}, got {mode!r}.")
-    return h3_sequence_rows(width, height, frames, keyframes=1 if mode == "i2v" else 0)
+    return h3_sequence_rows(width, height, frames, keyframes=1 if mode == "i2v" else 0, tail_frames=H3_TAIL_FRAMES if mode == "extend" else 0, references=references)
+
+
+def _cuda_vision(mode: str, references: Sequence[tuple[int, int]]) -> bool:
+    """Return whether the text encoder runs with its vision tower: an image-to-video clip has a keyframe, and any clip with references shows them."""
+    return mode == "i2v" or bool(references)
 
 
 def _stage_one_size(width: int, height: int, *, upscale: bool) -> tuple[int, int]:
@@ -304,12 +362,12 @@ def _stage_one_size(width: int, height: int, *, upscale: bool) -> tuple[int, int
 
 
 def h3_cuda_system_bytes(*, loras_bytes: int = 0, frame_bytes: int = 0, vision: bool = False) -> int:
-    """Return the peak system memory of an H3 clip on CUDA: the base, the keyframe vision tower, the user LoRAs and the decoded frames.
+    """Return the peak system memory of an H3 clip on CUDA: the base, the vision tower (keyframes or references), the user LoRAs and the decoded frames.
 
     Args:
         loras_bytes: Total size of the user LoRA files.
         frame_bytes: The decoded frames of the clip.
-        vision: Whether keyframes are encoded, which keeps the text encoder's vision tower resident.
+        vision: Whether keyframes or references are encoded, which keeps the text encoder's vision tower resident.
     """
     return _CUDA_SYSTEM_BASE_BYTES + (_CUDA_VISION_SYSTEM_BYTES if vision else 0) + loras_bytes + frame_bytes
 
@@ -339,6 +397,7 @@ def estimate_h3_cuda_clip_memory(
     loras_bytes: int = 0,
     upscale: bool = False,
     keep_transformer: bool = False,
+    references: Sequence[tuple[int, int]] = (),
 ) -> CudaMemoryEstimate:
     """Estimate the peak GPU and system memory of an H3 clip on a CUDA machine.
 
@@ -346,7 +405,8 @@ def estimate_h3_cuda_clip_memory(
     keyframe), the streamed transformer at the sequence's rows (user LoRAs add 2.7 times their size), the video
     decode at the output size, and, when upscaling, the latent upscaler and the transformer again for the refine,
     plus 1 GiB the desktop takes. An upscaled clip renders stage 1 at half size; the refine works in windows of at most
-    73 frames at the full size, so its rows are those of the largest window. The latent upscaler grows linearly with
+    73 frames at the full size, so its rows are those of the largest window. References keep their own size and are held
+    in every pass, so their rows (:func:`h3_reference_block_rows`) are in each, and they load the vision tower in any mode. The latent upscaler grows linearly with
     the full-size latent volume. The full-size keyframe encode of an image mode stays below the decode, so it is not a
     stage of its own. System memory is the base, the vision tower, the LoRAs and the decoded output frames.
 
@@ -363,21 +423,23 @@ def estimate_h3_cuda_clip_memory(
         upscale: Whether the clip is enlarged 2x with the latent upscaler.
         keep_transformer: Whether the upscale keeps the transformer loaded between its two passes (no review; see
             :func:`h3_upscale_keeps_transformer`). Ignored without *upscale*.
+        references: The prepared ``(width, height)`` of each reference image.
 
     Raises:
-        ValueError: If *mode* is unknown, or the canvas or frame count is invalid.
+        ValueError: If *mode* is unknown, or the canvas, frame count or a reference size is invalid.
     """
     work_width, work_height = _stage_one_size(width, height, upscale=upscale)
-    rows = _cuda_rows(work_width, work_height, frames, mode)
+    rows = _cuda_rows(work_width, work_height, frames, mode, references)
     lora = _CUDA_DIT_LORA_BYTES_PER_BYTE * loras_bytes
-    text_encoder = _CUDA_TEXT_ENCODER_BYTES + (_CUDA_VISION_BYTES if mode == "i2v" else 0)
+    vision = _cuda_vision(mode, references)
+    text_encoder = _CUDA_TEXT_ENCODER_BYTES + (_CUDA_VISION_BYTES if vision else 0)
     transformer = _CUDA_DIT_REFERENCE_BYTES + _CUDA_DIT_BYTES_PER_ROW * (rows - _CUDA_REFERENCE_ROWS) + lora
     decode = _CUDA_DECODE_BASE_BYTES + _CUDA_DECODE_BYTES_PER_PIXEL * width * height
     stages = [text_encoder, transformer, decode]
     if upscale:
         stages.append(_cuda_upsampler_bytes(width, height, frames))
         window_frames, _windows = _refine_windows_of(frames)
-        refine_rows = _cuda_rows(width, height, window_frames, mode)
+        refine_rows = _cuda_rows(width, height, window_frames, mode, references)
         stages.append(_CUDA_DIT_REFERENCE_BYTES + _CUDA_DIT_BYTES_PER_ROW * (refine_rows - _CUDA_REFERENCE_ROWS) + lora)
         if keep_transformer:
             resident = _CUDA_RESIDENT_TRANSFORMER_BYTES  # user LoRAs sit in the streamed blocks (CPU) and the token refiner, which the figure covers
@@ -387,7 +449,7 @@ def estimate_h3_cuda_clip_memory(
                 stages.append(_CUDA_ENCODE_BASE_BYTES + _CUDA_ENCODE_BYTES_PER_PIXEL * width * height + resident)
     return CudaMemoryEstimate(
         gpu_bytes=int(max(stages) + _CUDA_GPU_HEADROOM_BYTES),
-        system_bytes=h3_cuda_system_bytes(loras_bytes=loras_bytes, frame_bytes=frames * width * height * 3, vision=mode == "i2v"),
+        system_bytes=h3_cuda_system_bytes(loras_bytes=loras_bytes, frame_bytes=frames * width * height * 3, vision=vision),
     )
 
 
@@ -407,6 +469,7 @@ def h3_expected_seconds(
     upscale: bool = False,
     platform: str = "cuda",
     keep_transformer: bool = False,
+    references: Sequence[tuple[int, int]] = (),
 ) -> int:
     """Estimate the generation time, in seconds, of an H3 clip; it excludes the one-time weight preparation.
 
@@ -414,7 +477,8 @@ def h3_expected_seconds(
     term per forward (8% more with a user LoRA) and 30 s to encode a keyframe or an extension tail. When upscaling, the
     *forwards* run at half size, and the latent upscale, the transformer's second load and the refine's forwards (two per
     window, at the rows of the largest window) are added, with a second keyframe encode at the full size for an image mode.
-    An upscale that keeps the transformer loaded between its passes (*keep_transformer*) has no second load.
+    An upscale that keeps the transformer loaded between its passes (*keep_transformer*) has no second load. The rows of the
+    *references* are in every forward, and a text-to-video clip with references also pays the encode once (they are encoded in stage 1 only).
     On ``"mlx"`` it is :func:`estimate_h3_mlx_seconds`.
 
     Args:
@@ -427,35 +491,38 @@ def h3_expected_seconds(
         upscale: Whether the clip is enlarged 2x with the latent upscaler (CUDA only).
         platform: ``"cuda"`` or ``"mlx"``.
         keep_transformer: Whether the upscale loads the transformer once for both passes (see :func:`h3_upscale_keeps_transformer`).
+        references: The prepared ``(width, height)`` of each reference image.
 
     Raises:
-        ValueError: If *forwards* is below 1, *platform* or *mode* is unknown, or the canvas or frame count is invalid.
+        ValueError: If *forwards* is below 1, *platform* or *mode* is unknown, or the canvas, frame count or a reference size is invalid.
     """
     if forwards < 1:
         raise ValueError(f"forwards must be at least 1, got {forwards}.")
     if platform == "mlx":
-        return estimate_h3_mlx_seconds(width, height, frames, forwards=forwards, mode=mode)
+        return estimate_h3_mlx_seconds(width, height, frames, forwards=forwards, mode=mode, references=references)
     if platform != "cuda":
         raise ValueError(f"platform must be cuda or mlx, got {platform!r}.")
     work_width, work_height = _stage_one_size(width, height, upscale=upscale)
-    rows = _cuda_rows(work_width, work_height, frames, mode)
+    rows = _cuda_rows(work_width, work_height, frames, mode, references)
     lora_factor = _CUDA_LORA_FORWARD_FACTOR if loras else 1
     seconds = _CUDA_FIXED_SECONDS + _CUDA_DECODE_BASE_SECONDS + _CUDA_DECODE_SECONDS_PER_PIXEL_FRAME * width * height * frames + _CUDA_EXPORT_SECONDS * frames / _CUDA_REFERENCE_FRAMES
     seconds += forwards * _cuda_forward_seconds(rows) * lora_factor
     if mode != "t2v":
         seconds += _CUDA_IMAGE_ENCODE_SECONDS * (2 if upscale else 1)  # an upscale encodes the images again at the full size
+    elif references:
+        seconds += _CUDA_IMAGE_ENCODE_SECONDS  # the references are encoded once, in stage 1
     if upscale:
         window_frames, windows = _refine_windows_of(frames)
         refine_forwards = H3_REFINE_FORWARDS * windows
         seconds += (
             _CUDA_LATENT_UPSCALE_SECONDS
             + (0 if keep_transformer else _CUDA_REFINE_LOAD_SECONDS)
-            + refine_forwards * _cuda_forward_seconds(_cuda_rows(width, height, window_frames, mode)) * lora_factor
+            + refine_forwards * _cuda_forward_seconds(_cuda_rows(width, height, window_frames, mode, references)) * lora_factor
         )
     return round(seconds)
 
 
-def h3_upscale_keeps_transformer(width: int, height: int, frames: int, gpu_bytes: int, *, mode: str = "t2v", loras_bytes: int = 0) -> bool:
+def h3_upscale_keeps_transformer(width: int, height: int, frames: int, gpu_bytes: int, *, mode: str = "t2v", loras_bytes: int = 0, references: Sequence[tuple[int, int]] = ()) -> bool:
     """Return whether an upscale without review can keep the transformer loaded between its two passes on a card of *gpu_bytes*.
 
     The single load skips the second load of the stored copy, but the transformer's resident part then sits beside the audio
@@ -470,11 +537,12 @@ def h3_upscale_keeps_transformer(width: int, height: int, frames: int, gpu_bytes
         gpu_bytes: The card's memory.
         mode: ``"t2v"`` or ``"i2v"``.
         loras_bytes: Total size of the user LoRA files.
+        references: The prepared ``(width, height)`` of each reference image.
 
     Raises:
-        ValueError: If *mode* is unknown, or the canvas or frame count is invalid.
+        ValueError: If *mode* is unknown, or the canvas, frame count or a reference size is invalid.
     """
-    estimate = estimate_h3_cuda_clip_memory(width, height, frames, mode=mode, loras_bytes=loras_bytes, upscale=True, keep_transformer=True)
+    estimate = estimate_h3_cuda_clip_memory(width, height, frames, mode=mode, loras_bytes=loras_bytes, upscale=True, keep_transformer=True, references=references)
     # Only the GPU decides here. System memory does not differ between the flows: the kept transformer loads where the first
     # load did (after the encoders have let go), and the stages it stays through hold less than the denoise, which the base
     # system figure already covers.
@@ -492,11 +560,13 @@ def h3_clip_fit(
     loras_bytes: int = 0,
     upscale: bool = False,
     review: bool = False,
+    references: int = 0,
 ) -> dict[str, Any] | None:
     """Check an H3 clip against a discrete GPU's budget; callers warn on ``tight`` or ``too_large`` and the backend refuses only what cannot fit system memory.
 
     An upscale without *review* keeps the transformer loaded between its passes where the card holds that
     (:func:`h3_upscale_keeps_transformer`), which skips the second load; with review it loads twice, as the half-size decode needs the memory.
+    The *references* are counted, and sized as :func:`h3_nominal_references` does.
 
     Returns:
         ``{"status", "required_gb", "budget_gb", "kind": "discrete", "resource", "family": "h3", "expected_seconds"}`` (the time is an
@@ -507,7 +577,8 @@ def h3_clip_fit(
     """
     if budget is None or not budget.gpu_bytes or budget.system_bytes is None:
         return None
-    keep = upscale and not review and h3_upscale_keeps_transformer(width, height, frames, budget.gpu_bytes, mode=mode, loras_bytes=loras_bytes)
-    estimate = estimate_h3_cuda_clip_memory(width, height, frames, mode=mode, loras_bytes=loras_bytes, upscale=upscale, keep_transformer=keep)
-    seconds = h3_expected_seconds(width, height, frames, forwards=forwards, mode=mode, loras=loras_bytes > 0, upscale=upscale, keep_transformer=keep)
+    sizes = h3_nominal_references(references, width, height)
+    keep = upscale and not review and h3_upscale_keeps_transformer(width, height, frames, budget.gpu_bytes, mode=mode, loras_bytes=loras_bytes, references=sizes)
+    estimate = estimate_h3_cuda_clip_memory(width, height, frames, mode=mode, loras_bytes=loras_bytes, upscale=upscale, keep_transformer=keep, references=sizes)
+    seconds = h3_expected_seconds(width, height, frames, forwards=forwards, mode=mode, loras=loras_bytes > 0, upscale=upscale, keep_transformer=keep, references=sizes)
     return {**discrete_clip_fit(estimate, budget), "family": "h3", "expected_seconds": seconds}

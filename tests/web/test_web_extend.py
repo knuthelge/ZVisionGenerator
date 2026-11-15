@@ -232,6 +232,30 @@ def test_inspect_route_reports_no_track_for_a_source_with_generated_sound(clip):
     assert [(payload["audio_track_path"], payload["audio_track_end"]) for payload in (with_settings, without_settings)] == [(None, None), (None, None)]
 
 
+def test_inspect_route_reports_the_references_the_source_was_made_with_in_order(clip):
+    clip.config = {**clip.config, "reference_images": ["/in/a.png", "/in/b.png"]}
+
+    assert _inspect({"path": str(clip.path)}).json()["reference_images"] == ["/in/a.png", "/in/b.png"]
+
+
+@pytest.mark.parametrize("config", [{"scene": _EXTEND_SCENE, "prompt": _EXTEND_PROMPT, "model": "ltx-8"}, None])
+def test_inspect_route_reports_no_references_for_a_source_without_them(clip, config):
+    clip.config = config
+
+    assert _inspect({"path": str(clip.path)}).json()["reference_images"] == []
+
+
+def _enhance_body(clip, **context) -> dict:
+    return {"mode": "video", "scene": _EXTEND_SCENE, "prompt": "She walks.", "settings": {"style": "cinematic"}, "context": {"source_video": str(clip.path), "extend_frames": 48, **context}}
+
+
+def test_the_extend_enhance_context_carries_the_reference_count(clip):
+    with_references = web_server._validate_enhance_body(_enhance_body(clip, references=2))["context"]
+    without = web_server._validate_enhance_body(_enhance_body(clip))["context"]
+
+    assert (with_references.references, without.references) == (2, 0)
+
+
 def test_inspect_route_resolves_the_recorded_model_against_the_video_models(clip):
     clip.config = {**clip.config, "model": "some-removed-model", "lora": "/loras/style.safetensors:0.8"}
 
@@ -302,6 +326,7 @@ def test_inspect_route_adds_the_memory_fit_of_the_window(clip, monkeypatch):
         "mode": "extend",
         "forwards": 8,
         "loras_bytes": 0,
+        "references": 0,
     }
 
 

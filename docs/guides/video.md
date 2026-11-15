@@ -87,13 +87,19 @@ A moment in a video you already have can be the first or last frame of a new cli
 - **First frame** also puts the clip's scene in **Scene** and empties **Action**. A clip with no recorded scene leaves your text alone.
 - **Last frame** touches no text, and a frame already in the other slot stays, even one from another video.
 
-## Keep a person or place in a clip
+## Keep a person or place in a clip { #references }
 
-Video models don't take [references](images.md#references), but image models do. To put a particular person, object or place in a clip:
+MiniMax H3 takes up to two [references](images.md#references) in **Images** on **Video**: a person, an object or a place the clip keeps. LTX takes none; with an LTX model, make the first frame with FLUX.2 Klein and references, then use it as the **First frame** (in the viewer, **Use as** → **First frame**). For a longer or bigger change, make a second image the same way and use it as the **Last frame**. On H3 too, the best start is a Klein still as the **First frame** plus the portrait as a reference.
 
-1. Make the first frame with FLUX.2 Klein and references.
-2. Use it as the **First frame**: in the viewer, **Use as** → **First frame** takes an image straight there.
-3. For a longer or bigger change, make a second image the same way and use it as the **Last frame**.
+1. Choose **MiniMax H3** and add the pictures as **References**. They are labelled `<Picture 1>` and `<Picture 2>`.
+2. Name them in **Action** as the labels show, for example: *The man from `<Picture 1>` walks into the kitchen.*
+3. Press **Generate**.
+
+- **They work** in text to video, image to video (with or without a last frame) and Extend, with an audio track and with upscale. In Extend a reference keeps the face from drifting from one extension to the next.
+- **Extend** in the Web UI keeps its own references, apart from **New**'s, and fills them with the clip's own; remove one you don't want. On the command line, pass `--reference` again on each Extend.
+- **A big camera move in the default 2 s Extend can cut to a new shot,** so give it a longer Extend, for example 4 s.
+- **A clip with references always uses MiniMax H3's own reference model,** so a fine-tune's look doesn't carry over, but its LoRAs do.
+- **The first job with references downloads about 17 GB on top of MiniMax H3** and builds a copy of the model; later jobs reuse it. See [MiniMax H3](../reference/models.md#minimax-h3).
 
 ## Add sound or an audio track { #sound }
 
@@ -169,6 +175,7 @@ If an extension is refused, see [A video can't be extended](../reference/trouble
 A note under **Duration (s)** warns when a clip may not fit; it never blocks **Generate**. If the clip is slow or fails:
 
 - **Make it shorter or smaller:** lower **Duration (s)** or **Resolution**. An extension needs only the memory of about the last second of the source plus the new frames, not of the whole result.
+- **Use fewer references.** On MiniMax H3 each one adds memory and time.
 - **Keep Low memory on.** It is on by default for LTX and frees each part of the model once it has run; MiniMax H3 always streams its blocks. On Macs with 24 GB or less it also streams the transformer from disk, which is slower. Turn it off to keep every part loaded.
 - **Switch to the smaller model.** On Windows and Linux, a model that needs more system memory than the machine has stops with an error before it loads. See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
 

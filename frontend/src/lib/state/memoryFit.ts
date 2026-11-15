@@ -89,6 +89,8 @@ export interface ClipMemoryRequest {
   lora?: string;
   /** Present (true) when the upscale pauses to review the small render first, which makes MiniMax H3 load its transformer twice. */
   review?: boolean;
+  /** How many reference images the job sends; absent for none. Each takes rows and the vision tower on MiniMax H3. */
+  references?: number;
 }
 
 /** Which video controls the model offers, as they decide what the job form submits. */
@@ -102,6 +104,8 @@ export interface ClipMemoryControls {
   steps?: boolean;
   /** The Review toggle is shown; without it no review is submitted. */
   review?: boolean;
+  /** How many reference images the job would send. */
+  references?: number;
 }
 
 /**
@@ -133,5 +137,6 @@ export function clipMemoryRequest(state: DraftState, controls: ClipMemoryControl
     ...(controls.steps && state.steps > 0 ? { steps: state.steps } : {}),
     ...(lora ? { lora } : {}),
     ...(upscale !== null && controls.review && state.videoUpscaleReview ? { review: true } : {}),
+    ...(controls.references ? { references: controls.references } : {}),
   };
 }

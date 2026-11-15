@@ -204,12 +204,10 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
   }
   if (!isVideo && imagePath !== undefined) flag('--image-strength', text(settings, 'image_strength'));
   // References go as one comma-separated list in prompt order; an uploaded one is named by its file name, with the same caveat.
-  if (!isVideo) {
-    const references = values(settings, 'reference').map((value) => value.trim()).filter(Boolean);
-    if (references.length > 0) {
-      args.push('--reference', references.join(','));
-      if (settings.reference_upload !== undefined && !caveats.includes('uploaded_image')) caveats.push('uploaded_image');
-    }
+  const references = values(settings, 'reference').map((value) => value.trim()).filter(Boolean);
+  if (references.length > 0) {
+    args.push('--reference', references.join(','));
+    if (settings.reference_upload !== undefined && !caveats.includes('uploaded_image')) caveats.push('uploaded_image');
   }
 
   // The audio track follows the same rule: an upload wins over a typed path and has no host path, so the command names it.

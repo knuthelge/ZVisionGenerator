@@ -274,6 +274,8 @@ export interface ExtendSourceInfo {
   audio_track_path: string | null;
   /** Seconds into that file where the source's sound ended (where an extension carries on); null with no track. */
   audio_track_end: number | null;
+  /** The reference images the source was made with, in prompt order; empty when it had none. */
+  reference_images: string[];
   problems: ExtendProblem[];
   /** The new frames, snapped to a multiple of 8 (a 2 s default when none was requested); null when the frame rate is unknown. */
   extend_frames: number | null;
@@ -590,7 +592,7 @@ export interface EnhanceContext {
   audio_track?: boolean;
   /** A start image is supplied (img2img's image, or a video's first frame). */
   reference_image: boolean;
-  /** How many reference images are supplied; the prompt names them "image 1", "image 2". */
+  /** How many reference images are supplied; an image prompt names them "image 1", "image 2", a video prompt `<Picture 1>`, `<Picture 2>`. */
   references?: number;
   /** The clip also ends on a supplied last-frame image. */
   end_image?: boolean;
@@ -1163,6 +1165,8 @@ export interface VideoModelDefaults {
   /** An extension adds frames in multiples of this. */
   extend_frame_step: number;
   upscale: UpscaleDefaults;
+  /** How many reference images the model takes; 0 means none. */
+  max_reference_images: number;
   enhance_max_words?: number;
   /** The detected model family; null when it could not be detected. */
   family?: string | null;
@@ -1286,8 +1290,12 @@ export interface DraftState {
   firstFramePath: string | null;
   /** Video tab: the file name of a first frame uploaded from this device; null when none. */
   firstFrameUpload: string | null;
-  /** The reference images, in prompt order ("image 1" is the first). An image uploaded from this device has an empty path here and its file in the Workspace. */
+  /** Image tab: the reference images, in prompt order ("image 1" is the first). An image uploaded from this device has an empty path here and its file in the Workspace. */
   referenceImagePaths: string[];
+  /** Video tab, New kind: the reference images, in prompt order (`<Picture 1>` is the first). An image uploaded from this device has an empty path here and its file in the Workspace. */
+  videoReferencePaths: string[];
+  /** Extend kind: its own reference images, in prompt order (`<Picture 1>` is the first), kept apart from New's. An image uploaded from this device has an empty path here and its file in the Workspace. */
+  extendReferencePaths: string[];
   /** Image paths (start image, first frame, last frame, references) found gone; the slot stays and blocks Generate while it is used. */
   missingReferencePaths: string[];
   /** Video tab: the path of the image the clip ends on; null when none is chosen or it was uploaded (`endImageUpload`). It is kept while the first frame or the model's last frame is absent, and sent only while used. */
@@ -1381,7 +1389,7 @@ export interface DraftState {
   /** Extend: the source could not be found where Reuse recorded it, so it must be chosen again. */
   missingSourceVideo: boolean;
   /** Extend: the source whose Scene and Prompt were settled, and the text its prefill put there (to tell edits from prefill). */
-  extendPrefill: { path: string; scene: string; prompt: string; audioTrack?: { path: string; start: number } | null } | null;
+  extendPrefill: { path: string; scene: string; prompt: string; audioTrack?: { path: string; start: number } | null; references?: string[] } | null;
   /** Video tab: the kind last open (New or Extend); coming back to the tab restores it. */
   videoKind: VideoKind;
   /** Image tab: the kind last open (New or Edit); coming back to the tab restores it. */

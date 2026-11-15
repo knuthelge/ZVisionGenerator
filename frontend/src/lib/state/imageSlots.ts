@@ -52,7 +52,7 @@ export interface ImageSupport {
   start: boolean;
   /** The last frame: a video model that takes a start image and does not hide the last-frame control. */
   last: boolean;
-  /** How many references the model takes; always 0 in Video. */
+  /** How many references the model takes for the tab's list: the image model's in Image, the video model's in Video (0 for a model without them). */
   references: number;
 }
 
@@ -69,5 +69,5 @@ export function imageSupport(ctx: WorkspaceContext | null, model: string, tab: I
   }
   const defaults = ctx.video_model_defaults?.[model] ?? ctx.video_defaults;
   const start = defaults?.supports_i2v !== false;
-  return { start, last: start && !(defaults?.hidden_controls ?? []).includes('end_image_path'), references: 0 };
+  return { start, last: start && !(defaults?.hidden_controls ?? []).includes('end_image_path'), references: Math.max(0, defaults?.max_reference_images ?? 0) };
 }

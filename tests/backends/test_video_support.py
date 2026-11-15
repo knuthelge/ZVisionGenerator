@@ -94,3 +94,16 @@ def test_an_upscale_with_a_track_is_refused_when_the_family_cannot_upscale_one(m
     assert "can't upscale a clip made from your track" in unsupported_video_request(config, "ltx", **_h3_request(upscale=True, audio_track=True))
     assert unsupported_video_request(config, "ltx", **_h3_request(upscale=True)) is None
     assert unsupported_video_request(config, "ltx", **_h3_request(audio_track=True)) is None
+
+
+def test_references_within_the_family_cap_are_not_refused():
+    assert unsupported_video_request(load_config(), "h3", **_h3_request(references=2)) is None
+    assert unsupported_video_request(load_config(), "h3", **_h3_request(references=0)) is None
+
+
+def test_more_references_than_the_family_takes_are_refused():
+    assert unsupported_video_request(load_config(), "h3", **_h3_request(references=3)) == "The h3 model takes at most 2 reference images, got 3."
+
+
+def test_references_on_a_family_that_takes_none_are_refused():
+    assert unsupported_video_request(load_config(), "ltx", **_h3_request(references=1)) == "The ltx model does not support reference images."

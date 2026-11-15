@@ -888,6 +888,17 @@ class TestH3ClipMemoryFit:
         assert text is not None and image is not None
         assert (text["status"], image["status"], image["required_gb"]) == ("fits", "tight", 14.2)
 
+    def test_references_raise_the_estimate_and_text_to_video_with_them_is_staged(self):
+        clip = {**self._CLIP, "width": 576, "height": 320, "frames": 73}
+        budget = MemoryBudget(int(12.8 * _GIB), unified_bytes=24 * _GIB)
+
+        plain = clip_memory_fit("example/h3", budget=budget, family="h3", **clip)
+        referenced = clip_memory_fit("example/h3", budget=budget, family="h3", references=1, **clip)
+
+        assert plain is not None and referenced is not None
+        assert (plain["status"], referenced["status"], referenced["required_gb"]) == ("fits", "tight", 14.2)
+        assert referenced["expected_seconds"] > plain["expected_seconds"]
+
     def test_a_length_h3_cannot_take_has_no_estimate(self):
         assert clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", **{**self._CLIP, "frames": 121}) is None
 

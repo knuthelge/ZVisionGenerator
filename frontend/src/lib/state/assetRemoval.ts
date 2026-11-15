@@ -6,18 +6,18 @@ import type { WorkspaceContext } from '$lib/types';
  * Empty the draft's single-file slots (start image, first frame, last frame, the Video and Extend audio tracks, the extend
  * source, the voice recording and the image to edit with its paint) that hold one of these files, because the files were deleted. A slot pointing at a
  * missing file would fail the next run; the workflow follows from what is left. Clearing the extend source also forgets its
- * inspection. Reference rows stay, so the prompt's "image 2" keeps meaning the same row. A moved file is not gone: the
+ * inspection. Reference rows (of the Image tab and of the Video tab) stay, so the prompt's "image 2" or `<Picture 2>` keeps meaning the same row. A moved file is not gone: the
  * slots follow it (`draft.retargetPaths`).
  *
  * @param paths Absolute paths of the files that are gone.
  * @param context Tells whether the model takes a start image; without it one is assumed.
- * @returns Whether a reference row holds one of the paths, so the caller can re-check its images and flag the row missing.
+ * @returns Whether a reference row of any list holds one of the paths, so the caller can re-check its images and flag the row missing.
  */
 export function emptySlotsHolding(paths: Iterable<string | null | undefined>, context: WorkspaceContext | null): boolean {
   const gone = new Set<string>();
   for (const path of paths) if (path) gone.add(path);
   if (gone.size === 0) return false;
-  const { referenceImagePath, firstFramePath, endImagePath, referenceImagePaths, audioTrackPath, extendAudioTrackPath, extendSourcePath, voicePath, editSourcePath } = draft.state;
+  const { referenceImagePath, firstFramePath, endImagePath, referenceImagePaths, videoReferencePaths, extendReferencePaths, audioTrackPath, extendAudioTrackPath, extendSourcePath, voicePath, editSourcePath } = draft.state;
   if (referenceImagePath && gone.has(referenceImagePath)) draft.setStartImage('image', null, context);
   if (firstFramePath && gone.has(firstFramePath)) draft.setStartImage('video', null, context);
   if (endImagePath && gone.has(endImagePath)) draft.setLastFrame(null);
@@ -29,5 +29,5 @@ export function emptySlotsHolding(paths: Iterable<string | null | undefined>, co
     draft.setExtendSourcePath(null);
     void extendInspection.inspect(context);
   }
-  return referenceImagePaths.some((path) => gone.has(path));
+  return [...referenceImagePaths, ...videoReferencePaths, ...extendReferencePaths].some((path) => gone.has(path));
 }

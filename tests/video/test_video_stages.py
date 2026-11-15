@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import tempfile
 import warnings
@@ -299,6 +300,49 @@ class TestTextToVideoStage:
         text_to_video_stage(make_video_request(backend=backend, audio_track=track), arts)
 
         assert backend.text_to_video.call_args.kwargs["audio_track"] is track
+
+
+class TestReferenceKwargs:
+    """Verify the reference images reach the backend only when the request has any."""
+
+    def test_text_to_video_passes_them_only_when_set(self):
+        backend = MagicMock()
+        backend.text_to_video.return_value = Path("/tmp/x.mp4")
+        arts = VideoWorkingArtifacts(resolved_prompt="p")
+        arts.filename = "f.mp4"
+
+        text_to_video_stage(make_video_request(backend=backend, reference_paths=("/a.png",)), arts)
+        text_to_video_stage(make_video_request(backend=backend), arts)
+
+        with_references, without = backend.text_to_video.call_args_list
+        assert with_references.kwargs["references"] == ("/a.png",)
+        assert "references" not in without.kwargs
+
+    def test_image_to_video_passes_them_only_when_set(self):
+        backend = MagicMock()
+        backend.image_to_video.return_value = Path("/tmp/i2v.mp4")
+        arts = VideoWorkingArtifacts(resolved_prompt="p")
+        arts.filename = "f.mp4"
+
+        image_to_video_stage(make_video_request(backend=backend, image_path="/tmp/first.png", reference_paths=("/a.png", "/b.png")), arts)
+        image_to_video_stage(make_video_request(backend=backend, image_path="/tmp/first.png"), arts)
+
+        with_references, without = backend.image_to_video.call_args_list
+        assert with_references.kwargs["references"] == ("/a.png", "/b.png")
+        assert "references" not in without.kwargs
+
+    @pytest.mark.parametrize("references", [("/a.png",), ()])
+    def test_extend_passes_them_only_when_set(self, tmp_path, references):
+        backend = MagicMock()
+        backend.extend_video.return_value = ExtendSegment(tmp_path / "seg.mp4", tmp_path / "seg.wav")
+        req = _extend_req(_source(tmp_path), backend=backend, output_dir=str(tmp_path), reference_paths=references)
+
+        extend_video_stage(req, VideoWorkingArtifacts(resolved_prompt="p"))
+        shutil.rmtree(backend.extend_video.call_args.kwargs["segment_dir"], ignore_errors=True)
+
+        kwargs = backend.extend_video.call_args.kwargs
+        assert ("references" in kwargs) is bool(references)
+        assert kwargs.get("references", ()) == references
 
 
 # ---------------------------------------------------------------------------

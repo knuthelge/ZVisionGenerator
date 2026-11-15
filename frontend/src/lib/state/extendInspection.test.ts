@@ -52,6 +52,23 @@ describe('extendInspection', () => {
     expect(extendInspection.isCurrent()).toBe(false);
   });
 
+  it('sends the references the extension holds, and counts a change of them as a change to inspect again', async () => {
+    apiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
+    await extendInspection.inspect(null);
+    expect(apiMocks.inspectExtendSource.mock.calls[0]?.[0]).not.toHaveProperty('references');
+
+    // New's references are not the extension's.
+    draft.patch({ videoReferencePaths: ['/refs/v.png'] });
+    expect(extendInspection.isCurrent()).toBe(true);
+
+    draft.patch({ extendReferencePaths: ['/refs/a.png', '/refs/b.png'] });
+    expect(extendInspection.isCurrent()).toBe(false);
+    await extendInspection.inspect(null);
+
+    expect(apiMocks.inspectExtendSource).toHaveBeenLastCalledWith(expect.objectContaining({ references: 2 }));
+    expect(extendInspection.isCurrent()).toBe(true);
+  });
+
   it('is checking while the server thinks, and reports the status only for the path it was made for', async () => {
     const answer = deferred<ExtendSourceInfo>();
     apiMocks.inspectExtendSource.mockReturnValue(answer.promise);

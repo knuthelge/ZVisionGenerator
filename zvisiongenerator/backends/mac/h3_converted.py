@@ -13,6 +13,9 @@ A converted folder is a local H3 folder in the layout the MLX port loads:
 The turbo LoRA is merged before quantizing unless the checkpoint is already step-distilled, so a converted model never
 gets it at run time. Quantization is plain round-to-nearest: the shipped transformer's calibration needs recorded
 activations and a CUDA device.
+
+The same writer builds the Ref2VA copy (:func:`ensure_ref2va_copy`): stock's Ref2VA transformer with its own turbo LoRA
+merged, kept as ``h3@ref2va-q8`` and used by every job with reference images.
 """
 
 from __future__ import annotations
@@ -23,21 +26,24 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.converters.h3_checkpoint import STOCK_CONFIG, diffusers_tensors, native_name, stock_time_embedder
+from zvisiongenerator.converters.convert_target import Progress
+from zvisiongenerator.converters.h3_checkpoint import STOCK_CONFIG, diffusers_tensors, inspect_h3, native_name, stock_time_embedder
 from zvisiongenerator.utils.file_links import link_tree
 from zvisiongenerator.utils.h3_converted import write_converted_h3
 from zvisiongenerator.utils.h3_lora import LoraMerger, load_pairs
 from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_turbo_lora
 from zvisiongenerator.utils.hf_snapshot import snapshot_download as hub_snapshot_download
-from zvisiongenerator.utils.hf_snapshot import snapshot_with
+from zvisiongenerator.utils.hf_snapshot import snapshot_file, snapshot_with
 from zvisiongenerator.utils.safetensors_stream import ShardWriter
+from zvisiongenerator.utils.stored_quant import ensure_stored_copy, file_identities, reference_copy_name
 
 if TYPE_CHECKING:
     import torch
 
     from zvisiongenerator.converters.h3_checkpoint import H3Checkpoint
+    from zvisiongenerator.utils.h3_preset import H3MlxPreset
 
-__all__ = ["STORAGE", "convert", "native_config", "native_tensors", "write_converted"]
+__all__ = ["STORAGE", "convert", "ensure_ref2va_copy", "native_config", "native_tensors", "write_converted"]
 
 STORAGE = "mlx-int8"
 _BITS = 8
@@ -64,20 +70,51 @@ def convert(checkpoint: H3Checkpoint, target: Path, *, turbo: bool, report: Repo
     Raises:
         RuntimeError: When a stock file can't be downloaded.
     """
-    from zvisiongenerator.backends.mac.memory import mlx_cache_limit
-
-    preset = h3_mlx_preset()
-    report("download", 0, 1)
-    components = snapshot_with(preset.components, hub_snapshot_download) / _COMPONENTS_DIR
     lora_file, scale = None, 0.0
     if not turbo:
         lora, scale = h3_turbo_lora("darwin")
-        lora_file = snapshot_with(lora, hub_snapshot_download) / lora.files[0]
+        lora_file = snapshot_file(lora, hub_snapshot_download)
+    _write(checkpoint, target, h3_mlx_preset(), lora_file, scale, report)
+
+
+def ensure_ref2va_copy(models_dir: Path, preset: H3MlxPreset, lora_scale: float) -> Path:
+    """Return the Ref2VA copy ``<models_dir>/h3@ref2va-q8``, writing it first when it is missing or not current.
+
+    The copy is stock's Ref2VA transformer with its turbo LoRA merged at *lora_scale*, in the layout of a converted folder, so
+    the backend loads it as one. It is written once and flushed to disk; a changed checkpoint, LoRA or turbo strength
+    writes it again.
+
+    Args:
+        models_dir: The models folder.
+        preset: The MLX preset; its ``reference_transformer`` and ``reference_lora`` are the sources.
+        lora_scale: The turbo merge factor, which replaces the LoRA's ``alpha / rank``.
+
+    Raises:
+        RuntimeError: If a source file can't be downloaded, or the write fails.
+    """
+    transformer_file = snapshot_file(preset.reference_transformer, hub_snapshot_download)
+    lora_file = snapshot_file(preset.reference_lora, hub_snapshot_download)
+    manifest = {"source": file_identities([transformer_file]), "lora": file_identities([lora_file]), "turbo_scale": float(lora_scale)}
+
+    def write(target: Path) -> None:
+        print("Preparing the MiniMax H3 reference model, once (a few minutes).", flush=True)
+        _write(inspect_h3(transformer_file), target, preset, lora_file, lora_scale, Progress())
+        print("The MiniMax H3 reference model is ready.", flush=True)
+
+    return ensure_stored_copy(models_dir / reference_copy_name("h3", 8), manifest, write, flush=True)
+
+
+def _write(checkpoint: H3Checkpoint, target: Path, preset: H3MlxPreset, lora_file: Path | None, lora_scale: float, report: Report) -> None:
+    """Write the MLX folder of *checkpoint* into *target*: the stock components and time embedder from *preset*, the LoRA *lora_file* merged at *lora_scale* (``None`` for none)."""
+    from zvisiongenerator.backends.mac.memory import mlx_cache_limit
+
+    report("download", 0, 1)
+    components = snapshot_with(preset.components, hub_snapshot_download) / _COMPONENTS_DIR
     # Stock's time embedder is unquantized in the shipped INT8 transformer: its index is fetched, then only its tensors are read by range from the shard holding it.
     time_embedder = stock_time_embedder(preset.transformer.repo_id, preset.transformer.revision, index=_INDEX_NAME, native=True) if checkpoint.curve_rank is not None else None
     # No MLX buffer cache: each tensor is quantized once, and cached buffers would add up to the whole transformer.
     with mlx_cache_limit(0):
-        write_converted(checkpoint, target, components=components, lora_file=lora_file, lora_scale=scale, time_embedder=time_embedder, quantize=_mlx_quantize, report=report)
+        write_converted(checkpoint, target, components=components, lora_file=lora_file, lora_scale=lora_scale, time_embedder=time_embedder, quantize=_mlx_quantize, report=report)
 
 
 def write_converted(

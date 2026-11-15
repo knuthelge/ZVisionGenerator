@@ -582,11 +582,12 @@ def video_download_plan(
     )
 
 
-def h3_download_plan(model_ref: str, preset: "H3Preset | H3MlxPreset", *, upscale: bool = False, lora: "HubFiles | None" = None) -> "tuple[DownloadTarget, ...]":
+def h3_download_plan(model_ref: str, preset: "H3Preset | H3MlxPreset", *, upscale: bool = False, lora: "HubFiles | None" = None, references: bool = False) -> "tuple[DownloadTarget, ...]":
     """Return the downloads this platform's MiniMax H3 backend needs for *model_ref*.
 
     Windows and Linux list the repository, the text encoder and the turbo LoRA, plus the latent upscaler with *upscale*. macOS lists
-    the INT8 transformer, the ``FL2VA`` components and the turbo LoRA *lora*; it has no upscale.
+    the INT8 transformer, the ``FL2VA`` components and the turbo LoRA *lora*; it has no upscale. Both add the Ref2VA transformer
+    and its turbo LoRA for a job with *references*.
 
     Raises:
         RuntimeError: On a platform without an H3 backend.
@@ -597,11 +598,11 @@ def h3_download_plan(model_ref: str, preset: "H3Preset | H3MlxPreset", *, upscal
 
         if lora is None:
             raise ValueError("The MiniMax H3 download plan on macOS needs the turbo LoRA (lora=).")
-        return h3_mlx_download_plan(model_ref, cast("H3MlxPreset", preset), lora)
+        return h3_mlx_download_plan(model_ref, cast("H3MlxPreset", preset), lora, references=references)
     if sys.platform in ("win32", "linux"):
         from zvisiongenerator.backends.cuda.download_plan import h3_download_plan as plan
 
-        return plan(model_ref, cast("H3Preset", preset), upscale=upscale)
+        return plan(model_ref, cast("H3Preset", preset), upscale=upscale, references=references)
     raise RuntimeError(f"MiniMax H3 is not available on this platform ({sys.platform}).")
 
 

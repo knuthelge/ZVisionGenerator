@@ -7,6 +7,7 @@ import { sourceInfo } from './extend.fixtures';
 import { downloadStore } from './downloads.svelte';
 import { generateBlock } from './generateBlock.svelte';
 import { heldUploads } from './heldUploads.svelte';
+import { referencePathsKey } from './references';
 import { FIELD_SCOPE, keysOf, RESET_SCOPE } from './resetScope';
 import { voiceConsent } from './voiceConsent.svelte';
 import { isAudioWorkflow, navTab, videoKindOf } from './workspaceTab';
@@ -45,7 +46,7 @@ const MARKED: DraftState = {
   model: 'zit', ratio: '16:9', dimensionMode: 'custom', size: 'l', steps: 17, guidance: 2.5, width: 1000, height: 600, runs: 4, seed: 42,
   loraString: 'detail:0.8', lorasByFamily: { 'model:ltx-8': 'detail:0.5' }, 
   referenceImagePath: '/refs/ref.png', referenceImageUpload: 'start.png', firstFramePath: '/refs/first.png', firstFrameUpload: 'first.png',
-  referenceImagePaths: ['/refs/a.png', '/refs/b.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', endImageUpload: 'end.png',
+  referenceImagePaths: ['/refs/a.png', '/refs/b.png'], videoReferencePaths: ['/refs/v1.png', '/refs/v2.png'], extendReferencePaths: ['/refs/e1.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', endImageUpload: 'end.png',
   editSourcePath: '/out/edit.png', editSourceUpload: 'edit.png', editMode: 'extend', editMaskUpload: 'mask.png', editPaintedShare: 0.2, editExtendSide: 'top', editExtendAmount: 320, editRepaint: true,
   audioTrackPath: '/audio/song.mp3', audioTrackUpload: 'memo.m4a', audioTrackStart: 90,
   extendAudioTrackPath: '/audio/other.mp3', extendAudioTrackUpload: 'extend.m4a', extendAudioTrackStart: 12,
@@ -150,6 +151,37 @@ describe('Reset on each tab', () => {
     const owner: Record<WorkspaceTab, string | null> = { image: 'image', edit: 'edit', video: 'video', extend: 'extend', audio: 'audio' };
     for (const [name, value] of Object.entries(held())) expect(value === null, `${name} upload`).toBe(name === owner[tab]);
     expect(voiceConsent.ticked).toBe(tab !== 'audio');
+  });
+
+  it.each([['video', 'txt2vid', 'extend'], ['extend', 'extend', 'video']] as const)('on %s clears its own reference list and held uploads, and leaves the other kind\'s and the Image tab\'s', (list, workflow, other) => {
+    const key = referencePathsKey(list);
+    const otherKey = referencePathsKey(other);
+    draft.hydrateFromContext(ctx, null);
+    openTab(workflow);
+    draft.patch({ [key]: ['/refs/own1.png', ''], [otherKey]: ['/refs/other.png'], referenceImagePaths: ['/refs/a.png'] });
+    heldUploads.setReferencesOf(list, [null, file('own2.png')]);
+    heldUploads.setReferencesOf(other, [file('other.png')]);
+    heldUploads.setReferencesOf('image', [file('image.png')]);
+
+    draft.resetSelections(ctx);
+
+    expect(draft.state).toMatchObject({ [key]: [], [otherKey]: ['/refs/other.png'], referenceImagePaths: ['/refs/a.png'] });
+    expect(heldUploads.referencesOf(list)).toEqual([]);
+    expect(heldUploads.referencesOf(other).map((held) => held?.name)).toEqual(['other.png']);
+    expect(heldUploads.references.map((held) => held?.name)).toEqual(['image.png']);
+  });
+
+  it('on Image leaves the Video and Extend lists and their held uploads', () => {
+    draft.hydrateFromContext(ctx, null);
+    draft.patch({ videoReferencePaths: ['/refs/v1.png'], extendReferencePaths: ['/refs/e1.png'], referenceImagePaths: ['/refs/a.png'] });
+    heldUploads.setReferencesOf('video', [file('v1.png')]);
+    heldUploads.setReferencesOf('extend', [file('e1.png')]);
+
+    draft.resetSelections(ctx);
+
+    expect(draft.state).toMatchObject({ videoReferencePaths: ['/refs/v1.png'], extendReferencePaths: ['/refs/e1.png'], referenceImagePaths: [] });
+    expect(heldUploads.videoReferences).toHaveLength(1);
+    expect(heldUploads.extendReferences).toHaveLength(1);
   });
 
   it('puts the image model\'s own defaults on the Image tab', () => {

@@ -186,7 +186,9 @@ def resolve_extend_frames(
     return resolved, f"{seconds_name} {seconds:g} is {seconds * fps:g} frames at {fps:g} fps; using {resolved} frames ({resolved / fps:.2f} s)."
 
 
-def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio: bool, prompt: str | None = None, family: VideoFamily | None = None, track: bool = False) -> EnhanceContext:
+def extend_enhance_context(
+    source: ExtendSource, extend_frames: int, *, no_audio: bool, prompt: str | None = None, family: VideoFamily | None = None, track: bool = False, references: int = 0
+) -> EnhanceContext:
     """Return the rewrite context of an extension: the generation window, the source's prompt and the new frames.
 
     Args:
@@ -197,6 +199,7 @@ def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio
             known about it, and callers set ``prompt_is_original`` for each prompt later.
         family: The model's family, which sets the carried frames of the window (``None``: the LTX frames).
         track: Whether an audio track is effective; the model then generates no sound, so the rewrite has no Sound rules.
+        references: How many reference images the extension carries; the rewrite keeps the ``<Picture N>`` names the prompt uses for them.
     """
     return enhance_context(
         mode="video",
@@ -206,6 +209,7 @@ def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio
         fps=source.fps,
         audio=extend_audio_output(source, no_audio=no_audio, track=track),
         reference_image=False,
+        references=references,
         extends=True,
         previous=source.prompt,
         extract_from=source.prompt if source.legacy else None,

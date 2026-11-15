@@ -47,6 +47,21 @@ def test_video_bootstrap_defaults_include_detected_family(monkeypatch, detected,
     assert workspace_api_module._build_video_bootstrap_defaults("ltx-8", web_config)["family"] == expected
 
 
+@pytest.mark.parametrize(("family", "cap"), [("h3", 2), ("ltx", 0), ("unknown", 0)])
+def test_video_bootstrap_defaults_carry_the_reference_cap_of_the_family(monkeypatch, family, cap):
+    """The Workspace shows reference rows by this cap; a family the config does not describe takes none."""
+    web_config = make_web_config()
+    web_config.app_config = load_packaged_config()
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(
+        workspace_api_module,
+        "detect_video_model",
+        lambda _model: VideoModelInfo(family=family, backend=family, supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32),
+    )
+
+    assert workspace_api_module._build_video_bootstrap_defaults("ltx-8", web_config)["max_reference_images"] == cap
+
+
 def test_image_bootstrap_defaults_include_detected_family(monkeypatch):
     """Image defaults name the detected family, and none when detection fails."""
     web_config = make_web_config()

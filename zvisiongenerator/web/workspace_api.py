@@ -785,6 +785,7 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "audio": True,
         "low_memory": True,
         "supports_i2v": supports_i2v,
+        "max_reference_images": described.max_reference_images if described is not None else 0,
         "supports_quantize": False,
         "quantize": None,
         "max_steps": described.max_steps if described is not None else _default_video_max_steps(app_config, family),

@@ -93,6 +93,7 @@ function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoMo
     supports_extend: true,
     supports_audio_track_upscale: true,
     extend_frame_step: 8,
+    max_reference_images: 0,
     upscale: { enabled: false, factor: 2, steps: null },
     ...overrides,
   };
@@ -2203,7 +2204,7 @@ describe('applyPreset', () => {
     workflow: 'img2img', promptSource: 'file', prompt: 'a prompt', scene: 'a scene', jsonPromptEnabled: true, jsonPrompt: '{"a":1}', negativePrompt: 'blurry',
     promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one', 'two'], promptFileLoaded: { path: '/prompts/set.yaml', count: 2 },
     seed: 42, referenceImagePath: '/refs/ref.png', referenceImageUpload: 'start.png', firstFramePath: '/refs/first.png', firstFrameUpload: 'first.png',
-    referenceImagePaths: ['/refs/a.png', '/refs/b.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', endImageUpload: 'end.png', audioTrackPath: '/audio/song.mp3', audioTrackUpload: 'memo.m4a', audioTrackStart: 90,
+    referenceImagePaths: ['/refs/a.png', '/refs/b.png'], videoReferencePaths: ['/refs/v1.png'], extendReferencePaths: ['/refs/e1.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', endImageUpload: 'end.png', audioTrackPath: '/audio/song.mp3', audioTrackUpload: 'memo.m4a', audioTrackStart: 90,
     extendAudioTrackPath: '/audio/other.mp3', extendAudioTrackUpload: 'extend.m4a', extendAudioTrackStart: 12, frameCount: 33, fps: 30, audio: true, lowMemory: true,
     historyCollapsed: true, sidebarCollapsed: true, lastGeneratedAt: '2026-01-01T00:00:00Z',
     enhancedPrompt: '{"caption":"x"}', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
@@ -2741,6 +2742,118 @@ describe('references', () => {
   });
 });
 
+describe('video references', () => {
+  /** "h3" takes 2 references and "ltx" none; the video workflows list the controls, as the server's contract does. */
+  const videoReferencesContext = (): WorkspaceContext => {
+    const ctx = makeContext({
+      image_models: [{ id: 'klein', label: 'Klein', type: 'image' }],
+      image_model_defaults: { klein: makeImageDefaults({ max_reference_images: 4 }) },
+      current_image_model: 'klein',
+      video_models: [{ id: 'h3', label: 'H3', type: 'video' }, { id: 'ltx', label: 'LTX', type: 'video' }],
+      video_model_defaults: { h3: makeVideoDefaults({ max_reference_images: 2 }), ltx: makeVideoDefaults() },
+      current_video_model: 'h3',
+    });
+    const { definitions } = ctx.workflow_contract;
+    for (const workflow of ['txt2img', 'img2img', 'txt2vid', 'img2vid'] as const) definitions[workflow].visible_controls.push('references', 'references_clear');
+    return ctx;
+  };
+  const IMAGE_LIST = ['/in/i1.png', '/in/i2.png'];
+  const VIDEO_LIST = ['/in/v1.png', '/in/v2.png'];
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('keeps its own list apart from the Image tab\'s, which Reuse of a video leaves alone', () => {
+    const ctx = videoReferencesContext();
+    draft.hydrateFromContext(ctx, 'klein');
+    draft.update('referenceImagePaths', IMAGE_LIST);
+
+    for (const workflow of ['txt2vid', 'img2vid'] as const) {
+      draft.loadFromUrl({ workflow, model: 'h3', reference_path: VIDEO_LIST }, ctx, { replaceSlots: true });
+      expect(draft.state.videoReferencePaths, workflow).toEqual(VIDEO_LIST);
+      expect(draft.state.referenceImagePaths, workflow).toEqual(IMAGE_LIST);
+    }
+  });
+
+  it('Reuse of an image fills the Image list and leaves the Video list alone', () => {
+    const ctx = videoReferencesContext();
+    draft.hydrateFromContext(ctx, 'klein');
+    draft.update('videoReferencePaths', VIDEO_LIST);
+
+    draft.loadFromUrl({ workflow: 'txt2img', model: 'klein', reference_path: IMAGE_LIST }, ctx, { replaceSlots: true });
+
+    expect(draft.state.referenceImagePaths).toEqual(IMAGE_LIST);
+    expect(draft.state.videoReferencePaths).toEqual(VIDEO_LIST);
+  });
+
+  it('a replacing Reuse of a video made without references empties the Video list, and an image Reuse empties only its own', () => {
+    const ctx = videoReferencesContext();
+    draft.hydrateFromContext(ctx, 'klein');
+    draft.patch({ referenceImagePaths: IMAGE_LIST, videoReferencePaths: VIDEO_LIST });
+
+    draft.loadFromUrl({ workflow: 'txt2vid', model: 'h3' }, ctx, { replaceSlots: true });
+    expect(draft.state).toMatchObject({ videoReferencePaths: [], referenceImagePaths: IMAGE_LIST });
+
+    draft.update('videoReferencePaths', VIDEO_LIST);
+    draft.loadFromUrl({ workflow: 'txt2img', model: 'klein' }, ctx, { replaceSlots: true });
+    expect(draft.state).toMatchObject({ videoReferencePaths: VIDEO_LIST, referenceImagePaths: [] });
+  });
+
+  it('a Use as of the first frame leaves the Video list alone', () => {
+    const ctx = videoReferencesContext();
+    draft.hydrateFromContext(ctx, 'h3');
+    draft.loadFromUrl({ workflow: 'txt2vid', model: 'h3' }, ctx);
+    draft.update('videoReferencePaths', VIDEO_LIST);
+
+    draft.loadFromUrl({ workflow: 'img2vid', image_path: '/in/first.png', use_as: 'start' }, ctx);
+
+    expect(draft.state).toMatchObject({ firstFramePath: '/in/first.png', videoReferencePaths: VIDEO_LIST });
+  });
+
+  it('keeps the whole Video list through a model that takes none, and back', () => {
+    const ctx = videoReferencesContext();
+    draft.hydrateFromContext(ctx, 'h3');
+    draft.loadFromUrl({ workflow: 'txt2vid', model: 'h3', reference_path: VIDEO_LIST }, ctx);
+
+    draft.hydrateFromContext(ctx, 'ltx');
+    expect(draft.state.videoReferencePaths).toEqual(VIDEO_LIST);
+    draft.hydrateFromContext(ctx, 'h3');
+    expect(draft.state.videoReferencePaths).toEqual(VIDEO_LIST);
+  });
+
+  it('flags and unflags its rows like the other slots: a Reuse drops the flags of the rows it replaces', () => {
+    const ctx = videoReferencesContext();
+    draft.hydrateFromContext(ctx, 'h3');
+    draft.patch({ videoReferencePaths: ['/in/old.png'], missingReferencePaths: ['/in/old.png'] });
+
+    draft.loadFromUrl({ workflow: 'txt2vid', model: 'h3', reference_path: VIDEO_LIST }, ctx, { replaceSlots: true });
+
+    expect(draft.state.missingReferencePaths).toEqual([]);
+  });
+
+  it('retargets a moved Video reference with the other slots', () => {
+    const ctx = videoReferencesContext();
+    draft.hydrateFromContext(ctx, 'h3');
+    draft.loadFromUrl({ workflow: 'txt2vid', model: 'h3', reference_path: VIDEO_LIST }, ctx);
+
+    draft.retargetPaths(new Map([['/in/v2.png', '/moved/v2.png']]));
+
+    expect(draft.state.videoReferencePaths).toEqual(['/in/v1.png', '/moved/v2.png']);
+  });
+
+  it('retargets a moved Extend reference with the other slots, and leaves New\'s list as it is', () => {
+    const ctx = videoReferencesContext();
+    draft.hydrateFromContext(ctx, 'h3');
+    draft.patch({ extendReferencePaths: ['/in/e1.png', '/in/e2.png'], videoReferencePaths: ['/in/v1.png'] });
+
+    draft.retargetPaths(new Map([['/in/e2.png', '/moved/e2.png']]));
+
+    expect(draft.state).toMatchObject({ extendReferencePaths: ['/in/e1.png', '/moved/e2.png'], videoReferencePaths: ['/in/v1.png'] });
+  });
+});
+
 describe('image slots', () => {
   /** Klein takes a start image and 4 references; "ideogram" has no image-to-image; "no-end" is a video model without a last frame. */
   const slotContext = (): WorkspaceContext => {
@@ -2919,7 +3032,7 @@ describe('image slots', () => {
       openTab('txt2img', ctx);
       draft.setStartImage('image', { file: file('start.png') }, ctx);
       draft.patch({ referenceImagePaths: ['/in/ref.png'], missingReferencePaths: ['/in/ref.png'], referenceImageStrength: 0.9, prompt: 'kept' });
-      heldUploads.setReferences([file('ref.png')]);
+      heldUploads.setReferencesOf('image', [file('ref.png')]);
     }
 
     const imageSlots = () => ({ referenceImagePath: null, referenceImageUpload: null, referenceImagePaths: [] as string[] });
