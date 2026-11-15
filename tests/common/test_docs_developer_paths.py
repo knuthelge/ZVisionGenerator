@@ -41,7 +41,7 @@ _MODULE_SUFFIXES = (".py", ".ts", ".svelte", ".svelte.ts")
 # Files and folders that exist only while the app, the e2e targets or the benches run.
 _CREATED_AT_RUN_TIME = frozenset({"output", ".web_uploads", "ziv-quant.json", "ziv-h3.json", "meta.json", "runs"})
 # Folders no source lives in, left out of the lookup for a bare file name.
-_PRUNED_DIRECTORIES = frozenset({".git", ".venv", "node_modules", "__pycache__", "site", ".ruff_cache", ".pytest_cache"})
+_PRUNED_DIRECTORIES = frozenset({".git", ".venv", "node_modules", "__pycache__", "site", ".ruff_cache", ".pytest_cache", "target"})
 # The frontend's import aliases (``$lib/api/client``) and the folder each stands for.
 _ALIASES = {"$lib": "lib", "$features": "features", "$app": "app"}
 _CODE_SPAN = re.compile(r"`([^`\n]+)`")

@@ -124,6 +124,77 @@ describe('Mascot pointer tracking', () => {
   });
 });
 
+describe('Mascot gaze', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (window as { matchMedia?: unknown }).matchMedia;
+  });
+
+  const look = (svg: SVGSVGElement): [number, number] => [parseFloat(svg.style.getPropertyValue('--look-x')), parseFloat(svg.style.getPropertyValue('--look-y'))];
+
+  it('aims the irises along the angle, clockwise from straight up', () => {
+    const cases: [number, number, number][] = [
+      [0, 0, -2],
+      [90, 5, 0],
+      [180, 0, 4],
+      [270, -5, 0]
+    ];
+    for (const [gaze, x, y] of cases) {
+      const svg = mood(mountComponent(Mascot, { mood: 'creating', size: 120, gaze }).target);
+      expect(svg.hasAttribute('data-gaze'), `${gaze}`).toBe(true);
+      const [lookX, lookY] = look(svg);
+      expect(lookX, `${gaze} x`).toBeCloseTo(x, 1);
+      expect(lookY, `${gaze} y`).toBeCloseTo(y, 1);
+    }
+  });
+
+  it('looks half as far up as it looks down', () => {
+    const up = look(mood(mountComponent(Mascot, { mood: 'creating', size: 120, gaze: 0 }).target))[1];
+    const down = look(mood(mountComponent(Mascot, { mood: 'creating', size: 120, gaze: 180 }).target))[1];
+    expect(up).toBeCloseTo(-down / 2, 1);
+  });
+
+  it('follows a changing angle and lets go when the gaze is removed', () => {
+    const props = reactiveProps<{ mood: MascotMood; size: number; gaze: number | undefined }>({ mood: 'creating', size: 120, gaze: 90 });
+    const { target } = mountComponent(Mascot, props);
+    const svg = mood(target);
+    expect(look(svg)[0]).toBeCloseTo(5, 1);
+
+    props.gaze = 270;
+    flushSync();
+    expect(look(svg)[0]).toBeCloseTo(-5, 1);
+
+    props.gaze = undefined;
+    flushSync();
+    expect(svg.hasAttribute('data-gaze')).toBe(false);
+    expect(svg.style.getPropertyValue('--look-x')).toBe('');
+  });
+
+  it('leaves the irises to the mood and the pointer when no gaze is given', () => {
+    const svg = mood(mountComponent(Mascot, { mood: 'creating', size: 120 }).target);
+    expect(svg.hasAttribute('data-gaze')).toBe(false);
+    expect(svg.style.getPropertyValue('--look-x')).toBe('');
+  });
+
+  it('does not follow the pointer while it gazes', () => {
+    const spy = vi.spyOn(window, 'addEventListener');
+    mountComponent(Mascot, { mood: 'idle', size: 120, gaze: 90 });
+    expect(spy.mock.calls.some(([type]) => type === 'pointermove')).toBe(false);
+  });
+
+  it('does nothing in the simple form, which has no irises', () => {
+    const svg = mood(mountComponent(Mascot, { mood: 'creating', size: 24, gaze: 90 }).target);
+    expect(svg.hasAttribute('data-gaze')).toBe(false);
+  });
+
+  it('does nothing when the user asked for reduced motion', () => {
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true }) as unknown as typeof window.matchMedia;
+    const svg = mood(mountComponent(Mascot, { mood: 'creating', size: 120, gaze: 90 }).target);
+    expect(svg.hasAttribute('data-gaze')).toBe(false);
+    expect(svg.style.getPropertyValue('--look-x')).toBe('');
+  });
+});
+
 describe('Mascot creating canvas', () => {
   type Props = { mood: MascotMood; progress: number | undefined };
   /** What the mascot draws right now: while creating, only his canvas changes with the job's steps. */

@@ -258,6 +258,39 @@ frontend-test: ## TypeScript check + vitest tests
 frontend-dev: ## Start Vite dev server (for development)
 	pnpm --dir frontend run dev
 
+# ——— Desktop launcher ————————————————————————————————————————
+
+# The launcher is a Tauri app in launcher/. Its window is a second Vite entry in frontend/ built into launcher/dist.
+# Not part of `make check`: it needs Rust (and WebKitGTK on Linux), and `launcher-test` runs in the release workflow.
+# cargo is looked up on PATH, then in rustup's default folder.
+LAUNCHER_BUNDLES ?=
+LAUNCHER_PATH = PATH="$$PATH:$$HOME/.cargo/bin"
+LAUNCHER_TAURI = cd launcher && $(LAUNCHER_PATH) node ../frontend/node_modules/@tauri-apps/cli/tauri.js
+
+.PHONY: launcher-ui launcher-dev launcher-build launcher-test launcher-licenses launcher-clean
+
+launcher-ui: ## Build the launcher window UI into launcher/dist
+	pnpm --dir frontend run build:launcher
+
+launcher-dev: launcher-ui launcher-licenses ## Run the launcher in development (rebuild the UI first)
+	$(LAUNCHER_TAURI) dev
+
+launcher-build: launcher-ui launcher-licenses ## Build the launcher bundles (LAUNCHER_BUNDLES=appimage,deb,rpm for a subset)
+	$(LAUNCHER_TAURI) build $(if $(LAUNCHER_BUNDLES),--bundles $(LAUNCHER_BUNDLES))
+
+launcher-test: launcher-ui launcher-licenses ## Check the launcher's Rust code: fmt, clippy, tests
+	cd launcher/src-tauri && $(LAUNCHER_PATH) cargo fmt --check
+	cd launcher/src-tauri && $(LAUNCHER_PATH) cargo clippy --all-targets -- -D warnings
+	cd launcher/src-tauri && $(LAUNCHER_PATH) cargo test
+
+launcher-licenses: ## Generate the Rust crates' licence notices (cargo-about; a stub without it)
+	mkdir -p launcher/src-tauri/licenses
+	cd launcher/src-tauri && export $(LAUNCHER_PATH) && if cargo about --version >/dev/null 2>&1; then cargo about generate --fail about.hbs -o licenses/rust-crates.md; \
+	else echo "The Rust crates' licence notices are generated in release builds." > licenses/rust-crates.md; fi
+
+launcher-clean: ## Remove the launcher's build output
+	rm -rf launcher/src-tauri/target launcher/dist
+
 # ——— Build ————————————————————————————————————————————————
 
 .PHONY: build clean

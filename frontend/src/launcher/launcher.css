@@ -1,0 +1,9 @@
+/* Nunito (latin, variable weight, SIL OFL: see fonts/OFL.txt), bundled so the headline is rounded on every OS and the
+   window loads nothing from the network. The family name matches `--font-heading` in the shared tokens. */
+@font-face {
+  font-family: 'Nunito';
+  src: url('./fonts/nunito-latin-wght-normal.woff2') format('woff2');
+  font-weight: 200 1000;
+  font-style: normal;
+  font-display: block;
+}

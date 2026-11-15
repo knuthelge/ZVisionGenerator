@@ -1,0 +1,15 @@
+# Rust crates in the launcher
+
+The launcher is built from the Rust crates below, each under the licence shown with it. The source of every crate is at
+https://crates.io/crates/NAME, including the ones under the MPL-2.0.
+
+{{#each licenses}}
+## {{{name}}}
+
+Used by:{{#each used_by}} {{crate.name}} {{crate.version}}{{#unless @last}},{{/unless}}{{/each}}
+
+````text
+{{{text}}}
+````
+
+{{/each}}

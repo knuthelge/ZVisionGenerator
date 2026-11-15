@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="14 24 172 172" width="16" height="16">
+  <!-- Flat colours for 16-32px: the app icon's gradients blur at this size. The 1px ink outline keeps it visible on light panels. -->
+  <ellipse cx="74" cy="184" rx="18" ry="8" fill="#0b3b37"/><ellipse cx="126" cy="184" rx="18" ry="8" fill="#0b3b37"/>
+  <path d="M100,184 C50,184 26,166 28,132 C30,96 56,64 94,55 C97,42 108,32 124,32 C117,39 115,46 118,56 C152,68 174,98 172,134 C170,166 150,184 100,184 Z" fill="#2dd4bf" stroke="#0b3b37" stroke-width="10" stroke-linejoin="round"/>
+  <g transform="rotate(-18 76 62)"><ellipse cx="76" cy="62" rx="36" ry="13" fill="#fb8f7c" stroke="#0b3b37" stroke-width="9"/><circle cx="76" cy="47" r="9" fill="#fb8f7c" stroke="#0b3b37" stroke-width="7"/></g>
+  <ellipse cx="79" cy="113" rx="12" ry="14" fill="#0b3b37"/>
+  <ellipse cx="123" cy="113" rx="12" ry="14" fill="#0b3b37"/>
+  <path d="M89,147 Q101,158 113,147" stroke="#0b3b37" stroke-width="9" stroke-linecap="round" fill="none"/>
+  
+</svg>

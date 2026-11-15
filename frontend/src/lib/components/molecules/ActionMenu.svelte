@@ -14,6 +14,8 @@
     download?: string;
     /** Makes the item a radio: it shows a check while true and keeps the label's place while false. */
     checked?: boolean;
+    /** With `checked`: makes the item a checkbox (an independent on/off setting) instead of a radio. */
+    toggle?: boolean;
     /** Muted text after the label. */
     hint?: string;
     /** A muted sentence under the label, for a choice that needs saying what it does. */
@@ -76,7 +78,7 @@
 
   // A disabled item stays in the keys' reach so its reason can be read; Enter and click on it do nothing (see `select`).
   function menuItems(): HTMLElement[] {
-    return Array.from(menuEl?.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]') ?? []);
+    return Array.from(menuEl?.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]') ?? []);
   }
 
   function firstEnabledItem(): HTMLElement | undefined {
@@ -155,7 +157,7 @@
   {:else}
     <button
       type="button"
-      role={entry.checked === undefined ? 'menuitem' : 'menuitemradio'}
+      role={entry.checked === undefined ? 'menuitem' : entry.toggle ? 'menuitemcheckbox' : 'menuitemradio'}
       aria-checked={entry.checked === undefined ? undefined : entry.checked}
       tabindex="-1"
       class="action-menu-item"

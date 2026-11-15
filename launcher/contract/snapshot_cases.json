@@ -1,0 +1,836 @@
+[
+  {
+    "name": "1 checking",
+    "snapshot": {
+      "phase": "checking",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": null,
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "2a unsupported driver_too_old",
+    "snapshot": {
+      "phase": "unsupported",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": {
+        "code": "driver_too_old",
+        "found": "575.51.03",
+        "needed": "580"
+      },
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "check_again",
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "2a unsupported driver_not_working",
+    "snapshot": {
+      "phase": "unsupported",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": {
+        "code": "driver_not_working",
+        "found": null,
+        "needed": "580"
+      },
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "check_again",
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "2a unsupported low_disk (macos)",
+    "snapshot": {
+      "phase": "unsupported",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "macos_app",
+      "unsupported": {
+        "code": "low_disk",
+        "found": "7300000000",
+        "needed": "10000000000"
+      },
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "check_again",
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "2b unsupported no_nvidia_gpu",
+    "snapshot": {
+      "phase": "unsupported",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": {
+        "code": "no_nvidia_gpu",
+        "found": null,
+        "needed": "7.5"
+      },
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "see_requirements",
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "2b unsupported gpu_too_old",
+    "snapshot": {
+      "phase": "unsupported",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": {
+        "code": "gpu_too_old",
+        "found": "NVIDIA GeForce GTX 1080",
+        "needed": "7.5"
+      },
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "see_requirements",
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "3 move_to_applications",
+    "snapshot": {
+      "phase": "move_to_applications",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "macos_app",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "quit",
+        "update": false,
+        "bar": false,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "4a needs_install",
+    "snapshot": {
+      "phase": "needs_install",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "install",
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "4b installing",
+    "snapshot": {
+      "phase": "installing",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": {
+        "steps": [
+          "download_tools",
+          "install_app",
+          "finish"
+        ],
+        "index": 1,
+        "fraction": 0.41,
+        "line": "Downloading torch (2.1GiB)"
+      },
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": null,
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "4c failed install",
+    "snapshot": {
+      "phase": "failed",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": {
+        "steps": [
+          "download_tools",
+          "install_app",
+          "finish"
+        ],
+        "index": 1,
+        "fraction": 0.41,
+        "line": "Downloading torch (2.1GiB)"
+      },
+      "failedAction": "install",
+      "error": "download_failed",
+      "leftoverFolder": null,
+      "logTail": [
+        "Resolved 212 packages in 1.2s",
+        "error: Failed to download `torch`",
+        "  Caused by: request timed out"
+      ],
+      "controls": {
+        "primary": "retry",
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "4c failed install (windows)",
+    "snapshot": {
+      "phase": "failed",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "windows_nsis",
+      "unsupported": null,
+      "progress": {
+        "steps": [
+          "download_tools",
+          "install_app",
+          "finish"
+        ],
+        "index": 1,
+        "fraction": null,
+        "line": null
+      },
+      "failedAction": "install",
+      "error": "uv_failed",
+      "leftoverFolder": null,
+      "logTail": [
+        "Resolved 212 packages in 1.2s",
+        "error: Failed to download `torch`",
+        "  Caused by: request timed out"
+      ],
+      "controls": {
+        "primary": "retry",
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "5 starting",
+    "snapshot": {
+      "phase": "starting",
+      "installedVersion": "0.14.0",
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "linux_package",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "starting",
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": true
+      }
+    }
+  },
+  {
+    "name": "6 running",
+    "snapshot": {
+      "phase": "running",
+      "installedVersion": "0.14.0",
+      "updateVersion": null,
+      "autostart": true,
+      "beta": false,
+      "packaging": "macos_app",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "6 running a beta version",
+    "snapshot": {
+      "phase": "running",
+      "installedVersion": "0.15.0b2",
+      "updateVersion": null,
+      "autostart": true,
+      "beta": true,
+      "packaging": "macos_app",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "7 running with update",
+    "snapshot": {
+      "phase": "running",
+      "installedVersion": "0.14.0",
+      "updateVersion": "0.14.1",
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "open",
+        "update": true,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "7 running with a beta update",
+    "snapshot": {
+      "phase": "running",
+      "installedVersion": "0.15.0b2",
+      "updateVersion": "0.15.0b3",
+      "autostart": false,
+      "beta": true,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "open",
+        "update": true,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "8a updating",
+    "snapshot": {
+      "phase": "updating",
+      "installedVersion": "0.14.0",
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": {
+        "steps": [
+          "update_app",
+          "finish"
+        ],
+        "index": 0,
+        "fraction": null,
+        "line": "Updating z-vision-generator"
+      },
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": null,
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": true
+      }
+    }
+  },
+  {
+    "name": "8a updating with updateVersion",
+    "snapshot": {
+      "phase": "updating",
+      "installedVersion": "0.14.0",
+      "updateVersion": "0.14.1",
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": {
+        "steps": [
+          "update_app",
+          "finish"
+        ],
+        "index": 0,
+        "fraction": null,
+        "line": null
+      },
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": null,
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": true
+      }
+    }
+  },
+  {
+    "name": "8a updating with new tools",
+    "snapshot": {
+      "phase": "updating",
+      "installedVersion": "0.14.0",
+      "updateVersion": "0.14.1",
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": {
+        "steps": [
+          "download_tools",
+          "update_app",
+          "finish"
+        ],
+        "index": 0,
+        "fraction": null,
+        "line": null
+      },
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": null,
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": true
+      }
+    }
+  },
+  {
+    "name": "8b repairing",
+    "snapshot": {
+      "phase": "repairing",
+      "installedVersion": "0.14.0",
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": {
+        "steps": [
+          "download_tools",
+          "clean_cache",
+          "install_app",
+          "finish"
+        ],
+        "index": 2,
+        "fraction": 0.3,
+        "line": "Downloading torch (2.1GiB)"
+      },
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": null,
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": true
+      }
+    }
+  },
+  {
+    "name": "9 stopped",
+    "snapshot": {
+      "phase": "stopped",
+      "installedVersion": "0.14.0",
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [
+        "MemoryError",
+        "Killed"
+      ],
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "9b failed start",
+    "snapshot": {
+      "phase": "failed",
+      "installedVersion": "0.14.0",
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": "start",
+      "error": "start_failed",
+      "leftoverFolder": null,
+      "logTail": [
+        "Traceback (most recent call last):",
+        "ImportError: libcudnn.so.9"
+      ],
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "10a failed update",
+    "snapshot": {
+      "phase": "failed",
+      "installedVersion": "0.14.0",
+      "updateVersion": "0.14.1",
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": "update",
+      "error": "uv_failed",
+      "leftoverFolder": null,
+      "logTail": [
+        "Resolved 212 packages in 1.2s",
+        "error: Failed to download `torch`",
+        "  Caused by: request timed out"
+      ],
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "R failed repair",
+    "snapshot": {
+      "phase": "failed",
+      "installedVersion": "0.14.0",
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": "repair",
+      "error": "low_disk",
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "open",
+        "update": false,
+        "bar": true,
+        "autostart": true,
+        "menu": [
+          "repair",
+          "uninstall",
+          "beta"
+        ],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "U uninstalling",
+    "snapshot": {
+      "phase": "uninstalling",
+      "installedVersion": "0.14.0",
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": null,
+        "update": false,
+        "bar": true,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "11b uninstalled",
+    "snapshot": {
+      "phase": "uninstalled",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "appimage",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": null,
+      "leftoverFolder": null,
+      "logTail": [],
+      "controls": {
+        "primary": "quit",
+        "update": false,
+        "bar": false,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  },
+  {
+    "name": "11b uninstalled incomplete",
+    "snapshot": {
+      "phase": "uninstalled",
+      "installedVersion": null,
+      "updateVersion": null,
+      "autostart": false,
+      "beta": false,
+      "packaging": "macos_app",
+      "unsupported": null,
+      "progress": null,
+      "failedAction": null,
+      "error": "uninstall_incomplete",
+      "leftoverFolder": "/home/example/.local/share/zvision",
+      "logTail": [],
+      "controls": {
+        "primary": "quit",
+        "update": false,
+        "bar": false,
+        "autostart": false,
+        "menu": [],
+        "locked": false
+      }
+    }
+  }
+]

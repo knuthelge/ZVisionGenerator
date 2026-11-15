@@ -40,6 +40,29 @@ describe('ActionMenu', () => {
     expect(row('plain')?.hasAttribute('aria-checked')).toBe(false);
   });
 
+  it('renders a checked toggle item as a menuitemcheckbox, reachable by the arrow keys, and leaves a radio as it was', () => {
+    mountMenu([
+      { kind: 'item', id: 'plain', label: 'Plain' },
+      { kind: 'item', id: 'beta', label: 'Beta', checked: true, toggle: true },
+      { kind: 'item', id: 'off', label: 'Off', checked: false, toggle: true },
+      { kind: 'item', id: 'radio', label: 'Radio', checked: false },
+    ]);
+    expect(row('beta')?.getAttribute('role')).toBe('menuitemcheckbox');
+    expect(row('beta')?.getAttribute('aria-checked')).toBe('true');
+    expect(row('off')?.getAttribute('role')).toBe('menuitemcheckbox');
+    expect(row('off')?.getAttribute('aria-checked')).toBe('false');
+    expect(row('radio')?.getAttribute('role')).toBe('menuitemradio');
+
+    const keydown = (key: string) => flushSync(() => menu()?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+    expect(document.activeElement).toBe(row('plain'));
+    keydown('ArrowDown');
+    expect(document.activeElement).toBe(row('beta'));
+    keydown('ArrowDown');
+    expect(document.activeElement).toBe(row('off'));
+    keydown('End');
+    expect(document.activeElement).toBe(row('radio'));
+  });
+
   it('says what a choice does in a description under its label', () => {
     mountMenu([{ kind: 'item', id: 'smart', label: 'Smart', description: 'Follows your idea more closely.', checked: false }]);
 

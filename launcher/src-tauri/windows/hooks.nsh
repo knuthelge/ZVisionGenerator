@@ -1,0 +1,36 @@
+; NSIS installer hooks (bundle.windows.nsis.installerHooks).
+;
+; Before the files are removed, stop a running launcher with Tauri's own running-app check (CheckIfAppIsRunning, from
+; the template's utils.nsh, which is included before this file; the template calls it only after this hook), then run
+; the launcher headless so it stops the server it started. Whether the data root and the start-at-login registry
+; values go too depends on why the uninstaller runs:
+;   - A real uninstall (Settings > Apps, or Uninstall in the app) starts uninstall.exe, which copies itself to %TEMP%
+;     and runs from there, so $EXEDIR is not $INSTDIR. It deletes the root and the registry values.
+;   - A reinstall over an existing install ("Uninstall before installing") runs the old uninstall.exe in place
+;     (`_?=<install dir>`), so $EXEDIR is $INSTDIR. It only stops things (`--keep-data`): the data and the
+;     start-at-login setting belong to the install that comes next. Tauri's own uninstaller section deletes the Run
+;     value on this path, so the hook saves the value here and writes it back in NSIS_HOOK_POSTUNINSTALL, which runs
+;     after that delete in the same process. The StartupApproved value is left alone, because nothing deletes it on
+;     this path.
+; The value name is the app name tauri-plugin-autostart writes, which is the product name.
+
+; Declared at file scope, like the template's own uninstaller variables; empty unless an in-place uninstall saved it.
+Var SavedAutostartCommand
+
+!macro NSIS_HOOK_PREUNINSTALL
+  !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  ${If} $EXEDIR != $INSTDIR
+    ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --uninstall-cleanup'
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "${PRODUCTNAME}"
+  ${Else}
+    ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --uninstall-cleanup --keep-data'
+    ReadRegStr $SavedAutostartCommand HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
+  ${EndIf}
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  ${If} $SavedAutostartCommand != ""
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}" "$SavedAutostartCommand"
+  ${EndIf}
+!macroend

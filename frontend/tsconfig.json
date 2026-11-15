@@ -5,6 +5,8 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "paths": {
       "$lib/*": ["./src/lib/*"],
       "$features/*": ["./src/features/*"],

@@ -34,6 +34,8 @@
     size?: number;
     /** Share (0 to 1) of the active job's steps done; the creating mood's canvas follows it, and holds its last step while it is absent. */
     progress?: number;
+    /** Where the irises look, in degrees clockwise from straight up; overrides the pointer and the mood's own iris motion. */
+    gaze?: number;
     /** Hidden from assistive technology, for a copy that only decorates (the logo). */
     decorative?: boolean;
     class?: string;
@@ -44,6 +46,7 @@
     tool = 'brush',
     size = 120,
     progress,
+    gaze,
     decorative = false,
     class: extraClass = ''
   }: Props = $props();
@@ -80,6 +83,8 @@
   // Furthest the iris looks (SVG units), reached once the pointer is this far away (CSS px).
   const LOOK_MAX = 5;
   const LOOK_RANGE_PX = 320;
+  // A look upward goes half as far: a squinting mood's lid covers the top of the iris.
+  const GAZE_UP = 0.5;
   // Where the effect tile sits beside his head.
   const TILE = { x: 168, y: 2, size: 40 };
   const EYES = [
@@ -103,6 +108,7 @@
   let heldStep = $state(0);
 
   const simple = $derived(size < SIMPLE_BELOW_PX);
+  const gazing = $derived(gaze !== undefined && !simple && !prefersReducedMotion());
   const bubble = $derived(bubbleCells(tool === 'audio' ? 'note' : 'picture'));
   const tile = $derived(tileCells(mood === 'finishing' ? null : heldStep));
   const dotsLit = $derived(mood === 'finishing' ? TILE_STEP_COUNT : heldStep + 1);
@@ -182,7 +188,7 @@
 
   // While idle, the eyes follow the pointer around the page; the simple form has no eyes to move.
   $effect(() => {
-    if (mood !== 'idle' || simple || !svg || prefersReducedMotion()) return;
+    if (gaze !== undefined || mood !== 'idle' || simple || !svg || prefersReducedMotion()) return;
     const root = svg;
     let frame = 0;
     let pointer = { x: 0, y: 0 };
@@ -194,6 +200,23 @@
     return () => {
       window.removeEventListener('pointermove', onPointerMove);
       cancelAnimationFrame(frame);
+      root.style.removeProperty('--look-x');
+      root.style.removeProperty('--look-y');
+    };
+  });
+
+  /** Round an iris offset to two decimals for a CSS length; never "-0". */
+  const unit = (value: number): string => `${Number(value.toFixed(2))}px`;
+
+  // The irises look along an angle (the head of a progress ring); declared after the pointer effect so its cleanup cannot wipe these.
+  $effect(() => {
+    if (!gazing || gaze === undefined || !svg) return;
+    const root = svg;
+    const radians = (gaze * Math.PI) / 180;
+    const y = -LOOK_MAX * Math.cos(radians) * 0.8;
+    root.style.setProperty('--look-x', unit(LOOK_MAX * Math.sin(radians)));
+    root.style.setProperty('--look-y', unit(y < 0 ? y * GAZE_UP : y));
+    return () => {
       root.style.removeProperty('--look-x');
       root.style.removeProperty('--look-y');
     };
@@ -218,6 +241,7 @@
   data-mood={mood}
   data-tool={tool}
   data-simple={simple ? '' : undefined}
+  data-gaze={gazing ? '' : undefined}
   data-boop={booping ? '' : undefined}
   onclick={boop}
   width={size}
@@ -1088,6 +1112,13 @@
     0% { transform: translateY(0); }
     40% { transform: translateY(-10px) rotate(4deg); }
     100% { transform: translateY(-2px) rotate(2deg); }
+  }
+
+  /* Gaze: the irises look where the component aims them, in place of the mood's own iris motion. */
+  .mascot[data-gaze] .iris {
+    animation: none;
+    transform: translate(var(--look-x, 0px), var(--look-y, 0px));
+    transition: transform 400ms var(--ease-standard);
   }
 
   /* Reduced motion: no loops, and each effect holds a still frame. */

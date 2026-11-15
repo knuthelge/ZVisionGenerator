@@ -39,6 +39,11 @@ zvisiongenerator/_version.py
 .idea/
 .vscode/
 
+# Desktop launcher build output (launcher/dist is covered by dist/); licenses/ holds the generated Rust crate notices
+launcher/src-tauri/target/
+launcher/src-tauri/gen/
+launcher/src-tauri/licenses/
+
 # Large model files
 *.safetensors
 *.gguf
