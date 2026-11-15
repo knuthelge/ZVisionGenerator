@@ -28,9 +28,10 @@
   // Paused between images: the image that just finished, sharp. Otherwise the transient live preview.
   const pausedBetween = $derived(isPaused(job) && phase === 'generate' && !!job.itemFinished);
   const lastOutput = $derived(job.outputs[job.outputs.length - 1]);
-  // A finished cut-out sits on a checkerboard; the live preview is the opaque render and never does.
-  const transparent = $derived(pausedBetween && lastOutput?.transparent === true);
-  let failedUrl = $state<string | null>(null);
+  // Once the job has ended nothing is rendering any more: its frame is a last preview, with no percentage.
+  const ended = $derived(!isActive(job));
+  // The addresses that failed to load (a frame the server no longer keeps, say), so the next best picture takes the slot.
+  let failedUrls = $state<ReadonlySet<string>>(new Set());
   // From a take's first progress event the slot shows the Aurora animation, which lands on the take's waveform when it is ready.
   // Before that, while the job loads or enhances (and before its first take reports), the same animation waits at zero progress.
   const waiting = $derived(audio && phase !== 'queue' && isActive(job) && !job.audio && job.outputs.length === 0);
@@ -50,8 +51,15 @@
   const holdsLast = $derived(audio && phase === 'generate' && (pausedBetween || stopped || (!job.audio && job.outputs.length > 0)));
   const lastPeaks = $derived(holdsLast ? (lastOutput?.peaks ?? []) : []);
   // Between takes an image shows in full; a video shows its still, since an <img> cannot play the file.
-  const src = $derived(pausedBetween ? ((lastOutput?.media_type === 'video' ? lastOutput.thumbnail_url : lastOutput?.url) ?? null) : job.previewUrl);
-  const shown = $derived(!audio && src !== null && failedUrl !== src);
+  const savedFrame = $derived((lastOutput?.media_type === 'video' ? lastOutput.thumbnail_url : lastOutput?.url) ?? null);
+  const usable = (url: string | null): string | null => (url !== null && !failedUrls.has(url) ? url : null);
+  // While the job runs, the live frame; between images, the image that just finished. Once it has ended, the live frame
+  // if the server still serves it, otherwise the last image the job saved.
+  const src = $derived(pausedBetween ? usable(savedFrame) : ended ? (usable(job.previewUrl) ?? usable(savedFrame)) : usable(job.previewUrl));
+  const shown = $derived(!audio && src !== null);
+  const savedShown = $derived(shown && ended && src !== job.previewUrl);
+  // A finished cut-out sits on a checkerboard; the live preview is the opaque render and never does.
+  const transparent = $derived((pausedBetween || savedShown) && lastOutput?.transparent === true);
   const wave = $derived(lastPeaks.length > 0);
   // The held take can be played from the slot: a job that waits or ended leaves it no other player on a phone.
   // It is the waveform the slot shows, whether the Aurora has landed on it (a take just finished, or the job is paused) or the slot holds it still.
@@ -73,13 +81,21 @@
     if (held.paused) void held.play().catch(() => { heldPlaying = false; });
     else held.pause();
   }
-  const tag = $derived(pausedBetween ? 'Last finished image' : `Live preview · ${Math.round(stepFraction(job) * 100)}%`);
+  const tag = $derived(savedShown ? 'Last saved image' : ended ? 'Last preview' : pausedBetween ? 'Last finished image' : `Live preview · ${Math.round(stepFraction(job) * 100)}%`);
+  const endWord = $derived(job.status === 'failed' ? 'failed' : job.status === 'completed' ? 'finished' : 'stopped');
+  const alt = $derived(
+    savedShown ? `The last image saved before the job ${endWord}`
+      : ended ? `Last preview before the job ${endWord}`
+      : pausedBetween ? 'The last finished image' : 'Live preview of the generation in progress'
+  );
   // What fills the slot until a preview arrives, by phase.
   const note = $derived.by(() => {
+    // An ended job's phase says what it was doing, not what the slot holds.
+    if (ended) return audio ? 'No take saved' : 'No preview kept';
     if (phase === 'queue') return 'Waiting in the queue';
     if (phase === 'enhance') return 'Enhancing the prompt';
     if (phase === 'load') return loadNote;
-    if (audio) return stopped ? 'No take saved' : 'Waiting for the take';
+    if (audio) return 'Waiting for the take';
     if (isVideo(job)) return 'No live preview for video';
     return livePreviewNote(job);
   });
@@ -104,14 +120,15 @@
 {/snippet}
 
 <!-- The forming image, as large as the stage allows; the job's facts sit in the card beside it. -->
-<figure class="job-preview {extraClass}" class:empty={!shown && !wave && !live && !designing} style:aspect-ratio={aspect} style:--ar={aspect} data-testid="job-preview">
+<figure class="job-preview {extraClass}" class:empty={!shown && !wave && !live && !designing} data-sheen={!shown && !wave && !live && !designing && !ended ? '' : undefined} style:aspect-ratio={aspect} style:--ar={aspect} data-testid="job-preview">
   {#if shown && src}
     <img
       {src}
-      alt={pausedBetween ? 'The last finished image' : 'Live preview of the generation in progress'}
+      {alt}
+      class:ended
       class:ui-checkerboard={transparent}
       data-transparent={transparent}
-      onerror={(event) => { failedUrl = event.currentTarget.getAttribute('src'); }}
+      onerror={(event) => { const url = event.currentTarget.getAttribute('src'); if (url) failedUrls = new Set([...failedUrls, url]); }}
     >
     <figcaption class="media-tag job-preview-tag">{tag}</figcaption>
   {:else if designing}
@@ -141,10 +158,13 @@
      (a portrait phone fits a landscape job by width, a desktop stage a portrait one by height). */
   .job-preview { position: relative; flex: none; margin: 0; width: min(100cqw, 100cqh * var(--ar, 1)); max-width: 100%; max-height: 100%; overflow: hidden; border-radius: var(--radius-xs); background: var(--color-bg-surface); }
   .job-preview img { display: block; width: 100%; height: 100%; object-fit: cover; }
-  /* Until a preview arrives, a slow sheen crosses the output's shape, so the slot reads as working rather than empty. */
-  .job-preview.empty { display: grid; place-items: center; background: linear-gradient(105deg, transparent 30%, color-mix(in srgb, var(--color-text-primary) 5%, transparent) 50%, transparent 70%) var(--color-bg-surface) no-repeat; background-size: 250% 100%; animation: job-preview-sheen 2.4s ease-in-out infinite; }
+  /* The last frame of a job that ended is desaturated to 60 % and darkened to 80 %: it no longer shows work in progress. */
+  .job-preview img.ended { filter: saturate(0.6) brightness(0.8); }
+  /* Until a preview arrives, a slow sheen crosses the output's shape, so the slot reads as working rather than empty. A job that has ended has none: nothing is coming. */
+  .job-preview.empty { display: grid; place-items: center; }
+  .job-preview.empty[data-sheen] { background: linear-gradient(105deg, transparent 30%, color-mix(in srgb, var(--color-text-primary) 5%, transparent) 50%, transparent 70%) var(--color-bg-surface) no-repeat; background-size: 250% 100%; animation: job-preview-sheen 2.4s ease-in-out infinite; }
   @keyframes job-preview-sheen { from { background-position: 100% 0; } to { background-position: -150% 0; } }
-  @media (prefers-reduced-motion: reduce) { .job-preview.empty { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .job-preview.empty[data-sheen] { animation: none; } }
   .job-preview-tag { position: absolute; top: 8px; left: 8px; }
   .job-preview-wave { position: absolute; inset: 14% 6%; display: block; }
   .job-preview-design { color: var(--color-text-muted); }

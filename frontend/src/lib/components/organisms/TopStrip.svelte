@@ -1,9 +1,12 @@
 <script lang="ts">
-  import { Icon, MascotHome } from '$lib/components/atoms';
+  import { Icon, MascotHome, ProgressRing } from '$lib/components/atoms';
   import { Select } from '$lib/components/molecules';
   import { draft } from '$lib/state/draft.svelte';
   import { jobStore } from '$lib/state/job.svelte';
+  import { ringView } from '$lib/state/jobRing';
   import { jobStatusLine } from '$lib/state/jobStatusLine';
+  import { isActive } from '$lib/state/jobView';
+  import { RING_SPECS } from '$lib/state/ringGeom';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import { router } from '$lib/state/router.svelte';
   import { navTab, visibleTabs, WORKSPACE_TABS } from '$lib/state/workspaceTab';
@@ -32,7 +35,15 @@
   const tabLabel = $derived(WORKSPACE_TABS.find((tab) => tab.id === activeTab)?.label ?? '');
   const onWorkspace = $derived(currentPage === 'workspace');
   const status = $derived(jobStatusLine(jobStore.current, jobStore.queuedJobs.length));
+  // The pill's ring is the job's, drawn small and still: the same arcs the card shows, with a big batch blending into one ring.
+  const job = $derived(jobStore.current && isActive(jobStore.current) ? jobStore.current : null);
+  const ring = $derived(job ? ringView(job) : null);
 </script>
+
+<!-- A running job is a small still ring; with no job the pill has no marker. -->
+{#snippet marker()}
+  {#if ring}<ProgressRing size={RING_SPECS.XS.box} stroke={RING_SPECS.XS.stroke} kind={ring.kind} arcs={ring.arcs} faded={ring.faded} head={null} decorative still />{/if}
+{/snippet}
 
 <!-- The phone's top strip: the menu on every page; on the Workspace the workflow, the job state and the Gallery;
      elsewhere an arrow back to the Workspace and the page's name; the job log button ends the strip. It pads for the status bar in a standalone app. -->
@@ -56,7 +67,7 @@
       {/snippet}
     </Select>
     <button type="button" class="strip-status" data-tone={status.tone} data-testid="strip-status" onclick={onstatus}>
-      <i class="strip-dot" aria-hidden="true"></i><span class="truncate">{status.text}</span>
+      {@render marker()}<span class="truncate">{status.text}</span>
     </button>
     <button type="button" class="strip-btn" aria-label="Gallery" onclick={() => router.navigate('gallery')}><Icon name="grid" size={20} /></button>
   {:else}
@@ -65,7 +76,7 @@
     <h1 class="strip-title"><button type="button" class="strip-title-btn" onclick={ontitle}>{PAGE_TITLES[currentPage]}</button></h1>
     {#if status.tone !== 'idle'}
       <button type="button" class="strip-status" data-tone={status.tone} onclick={() => router.navigate('workspace')}>
-        <i class="strip-dot" aria-hidden="true"></i><span class="truncate">{status.text}</span>
+        {@render marker()}<span class="truncate">{status.text}</span>
       </button>
     {/if}
   {/if}
@@ -78,13 +89,10 @@
   .strip-btn:active { background: var(--color-bg-surface-hover); }
   .top-strip :global(.strip-select-box) { flex: none; max-width: 48vw; }
   .top-strip :global(.strip-select) { gap: 6px; height: 32px; padding: 0 8px 0 6px; border-radius: 16px; font-size: var(--text-content); font-weight: 700; color: var(--color-text-primary); }
+  .strip-status :global(.pring) { flex: none; }
   .strip-status { display: inline-flex; flex: 1; min-width: 0; align-items: center; justify-content: flex-end; gap: 6px; margin-left: auto; padding: 0 4px; overflow: hidden; white-space: nowrap; font-size: var(--text-meta); font-weight: 600; color: var(--color-text-muted); text-overflow: ellipsis; }
-  .strip-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-muted); }
   .strip-status[data-tone='running'] { color: var(--color-primary-main); }
-  .strip-status[data-tone='running'] .strip-dot { background: var(--color-primary-main); animation: strip-pulse 1.2s infinite; }
   .strip-status[data-tone='review'] { color: var(--color-warning); }
-  .strip-status[data-tone='review'] .strip-dot { background: var(--color-warning); }
   .strip-title { display: flex; flex: 1; min-width: 0; overflow: hidden; font-family: var(--font-heading); font-size: 15px; font-weight: 800; white-space: nowrap; }
   .strip-title-btn { display: block; max-width: 100%; height: 40px; overflow: hidden; padding: 0; border-radius: var(--radius-sm); font: inherit; color: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-  @keyframes strip-pulse { 50% { opacity: 0.3; } }
 </style>

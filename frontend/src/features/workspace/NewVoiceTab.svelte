@@ -9,7 +9,8 @@
   import { confirmDownloads } from '$lib/state/confirmDownloads';
   import { draft } from '$lib/state/draft.svelte';
   import { jobStore } from '$lib/state/job.svelte';
-  import { isVoiceDesignJob, jobBar, jobPhase, voiceDesignProgress } from '$lib/state/jobView';
+  import { ringView } from '$lib/state/jobRing';
+  import { isVoiceDesignJob, jobPhase, voiceDesignProgress } from '$lib/state/jobView';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { newVoiceForm as form } from '$lib/state/newVoiceForm.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
@@ -64,8 +65,8 @@
   const statusLine = $derived(queued !== null ? 'Waiting in the queue' : running !== null ? runLine(running, total > 0) : '');
   const statusFraction = $derived.by(() => {
     if (running === null || waiting) return 0;
-    const bar = jobBar(running);
-    return bar.kind === 'segments' ? 0 : (bar.fraction ?? 0);
+    // The ring's own number: the first-use download while the model downloads, then the voices made.
+    return ringView(running).percent / 100;
   });
   const endedDone = $derived(ended === null ? 0 : voiceDesignProgress(ended).done);
   const endedTotal = $derived(ended === null ? 0 : voiceDesignProgress(ended).total);
@@ -279,7 +280,7 @@
                   <Icon name="stop" size={14} />{stopping === activeId ? 'Stopping…' : 'Stop'}
                 </button>
               </div>
-              <div class="ui-progress"><span class="ui-progress-fill" style:width="{statusFraction * 100}%"></span></div>
+              <div class="ui-progress"><span class="ui-progress-fill" data-testid="design-progress" style:width="{statusFraction * 100}%"></span></div>
               {#if total === 0}
                 <p class="ui-help nv-status-help">{waiting ? 'It starts when the job ahead ends. You can close this; it keeps its place.' : 'You can close this; the job keeps running.'}</p>
               {/if}

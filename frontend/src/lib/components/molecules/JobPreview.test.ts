@@ -395,3 +395,79 @@ describe('JobPreview', () => {
     });
   });
 });
+
+describe('JobPreview once the job has ended', () => {
+  const ended = (status: ActiveJobState['status']) => ({
+    job_id: 'job-ended', workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 1, created_at: '', supported_controls: [], status, phase: 'generate', currentStep: 3, totalSteps: 8,
+    elapsed: 0, remaining: 0, stageName: '', stageIndex: 0, batchLabel: '', batchIndex: 0, paused: false, message: '', outputs: [], previewUrl: '/jobs/job-ended/preview?v=3',
+  }) as ActiveJobState;
+
+  it.each([
+    ['failed', 'Last preview before the job failed'],
+    ['cancelled', 'Last preview before the job stopped'],
+    ['unknown', 'Last preview before the job stopped'],
+  ] as const)('keeps the last frame in its slot, tagged "Last preview" with no percentage, for a %s job', (status, alt) => {
+    const { target } = mountComponent(JobPreview, { job: ended(status) });
+
+    expect(target.querySelector('img')?.getAttribute('alt')).toBe(alt);
+    expect(target.querySelector('figcaption')?.textContent).toBe('Last preview');
+    expect(target.textContent).not.toContain('Live preview');
+  });
+
+  it('still says live preview, with the step\'s percentage, while the job runs', () => {
+    const { target } = mountComponent(JobPreview, { job: { ...ended('running'), currentStep: 5 } });
+
+    expect(target.querySelector('figcaption')?.textContent).toBe('Live preview · 63%');
+    expect(target.querySelector('img')?.getAttribute('alt')).toBe('Live preview of the generation in progress');
+  });
+
+  describe('with no live frame to show', () => {
+    const saved = { id: 'a.png', url: '/media/a.png', thumbnail_url: '/media/thumb/a.png', filename: 'a.png', created_at: '', workflow: 'txt2img', prompt: '', model: 'zit', reuse_workspace_url: '', media_type: 'image' } as never;
+    const figure = (target: HTMLElement) => target.querySelector('[data-testid="job-preview"]')!;
+
+    it('shows the last saved image of a job paused between images and then cancelled', () => {
+      // The finished image dropped its live frame, so the stage used to say "Finishing up…" over a moving sheen.
+      const { target } = mountComponent(JobPreview, { job: { ...ended('cancelled'), previewUrl: null, itemFinished: true, outputs: [saved] } });
+
+      expect(target.querySelector('img')?.getAttribute('src')).toBe('/media/a.png');
+      expect(target.querySelector('img')?.getAttribute('alt')).toBe('The last image saved before the job stopped');
+      expect(target.querySelector('figcaption')?.textContent).toBe('Last saved image');
+      expect(figure(target).hasAttribute('data-sheen')).toBe(false);
+    });
+
+    it('falls back to the last saved image when the kept frame is gone from the server', () => {
+      const { target } = mountComponent(JobPreview, { job: { ...ended('failed'), outputs: [saved] } });
+      expect(target.querySelector('img')?.getAttribute('src')).toBe('/jobs/job-ended/preview?v=3');
+      expect(target.querySelector('figcaption')?.textContent).toBe('Last preview');
+
+      flushSync(() => target.querySelector('img')!.dispatchEvent(new Event('error')));
+
+      expect(target.querySelector('img')?.getAttribute('src')).toBe('/media/a.png');
+      expect(target.querySelector('figcaption')?.textContent).toBe('Last saved image');
+      expect(target.querySelector('img')?.getAttribute('alt')).toBe('The last image saved before the job failed');
+    });
+
+    it('says "No preview kept", still and with no sheen, when nothing is left to show', () => {
+      const { target } = mountComponent(JobPreview, { job: { ...ended('cancelled'), previewUrl: null } });
+
+      expect(target.querySelector('img')).toBeNull();
+      expect(figure(target).textContent).toContain('No preview kept');
+      expect(figure(target).hasAttribute('data-sheen')).toBe(false);
+    });
+
+    it('says the same when the kept frame is gone and the job saved nothing', () => {
+      const { target } = mountComponent(JobPreview, { job: ended('cancelled') });
+
+      flushSync(() => target.querySelector('img')!.dispatchEvent(new Event('error')));
+
+      expect(target.querySelector('img')).toBeNull();
+      expect(figure(target).textContent).toContain('No preview kept');
+      expect(figure(target).hasAttribute('data-sheen')).toBe(false);
+    });
+
+    it('keeps the working sheen for a job that is still waiting for its first frame', () => {
+      const { target } = mountComponent(JobPreview, { job: { ...ended('running'), previewUrl: null } });
+      expect(figure(target).hasAttribute('data-sheen')).toBe(true);
+    });
+  });
+});

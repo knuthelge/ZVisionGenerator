@@ -30,7 +30,7 @@ Plain descriptions work best: the subject, where it is, the light, and how it's 
 
 Press **Generate**, or ++ctrl+enter++ (++cmd+enter++ on a Mac).
 
-![A running job: the live preview at 75% beside the job card with its steps](../assets/screenshots/job-running.webp)
+![A running job: the live preview beside the job card with its steps](../assets/screenshots/job-running.webp)
 
 The job card shows each phase and how long it took. The preview shows the image taking shape after every step; it is only a preview and is never saved.
 

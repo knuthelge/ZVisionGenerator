@@ -172,8 +172,15 @@ export function trackJobEvent(job: ActiveJobState, type: string, event: EventDat
     const stop = downloadStopFromEvent(event);
     if (stop) next.downloadStop = stop;
   }
-  if (type === 'generation_finished') next.itemFinished = true;
-  if (type === 'prompt_started' || type === 'generation_repeat') next.itemFinished = false;
+  // An item the runner stopped or skipped ends with a status other than success: it made no output.
+  if (type === 'generation_finished') {
+    next.itemFinished = true;
+    next.itemSkipped = event?.status !== 'success';
+  }
+  if (type === 'prompt_started' || type === 'generation_repeat') {
+    next.itemFinished = false;
+    next.itemSkipped = false;
+  }
   if (type === 'workflow_started' && Array.isArray(event?.stage_names)) {
     next.stageNames = event.stage_names.filter((name): name is string => typeof name === 'string');
     next.stageSteps = {};

@@ -32,7 +32,7 @@
   import { runFrameGrab } from '$lib/state/frameGrab.svelte';
   import { audioModelLabel, cutNote } from '$lib/state/audioAsset';
   import { formatClock } from '$lib/state/clock';
-  import { Badge, Icon, MascotSpot, PullHint, Tooltip } from '$lib/components/atoms';
+  import { Badge, Icon, Mascot, MascotSpot, PullHint, Tooltip } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import {
@@ -46,7 +46,7 @@
     mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, LicenceMark, ModelStatusBadges, ReviewStage, SaveVoiceDialog, Segmented, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobPreview, LicenceMark, ModelStatusBadges, ReviewStage, SaveVoiceDialog, Segmented, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { compactUi } from '$lib/state/compactUi.svelte';
   import { failureToastText, isReviewing, isVoiceDesignJob } from '$lib/state/jobView';
   import { first, jobSettingsPrefill } from '$lib/state/jobSettings';
@@ -69,7 +69,7 @@
   import DiscoverDrawer, { type LoraUse } from './discover/DiscoverDrawer.svelte';
   import { discoverTarget } from './discover/discoverView';
   import WaitingLabel from './WaitingLabel.svelte';
-  import QueuePanel from './QueuePanel.svelte';
+  import JobColumn from './JobColumn.svelte';
   import FirstRunDialog from './FirstRunDialog.svelte';
   import { firstRun, shouldOfferFirstRun } from './firstRun.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
@@ -360,6 +360,7 @@
   const lookingForHistory = $derived(!historyChecked || galleryStore.loading);
   const mascotMood = $derived(pickMascotMood({
     job: jobStore.current,
+    ended: previewView === 'job' && !jobStore.isRunning,
     reaction,
     loadError: loadError !== null,
     loading: latestLoading || (previewView === 'empty' && lookingForHistory),
@@ -1651,7 +1652,6 @@
   // The mascot lives in the logo and is called out to one spot here while there is work for him.
   const mascotAt = $derived(pickMascotSpot({
     view: previewView,
-    running: jobStore.isRunning,
     reviewing,
     reacting: reaction !== null,
     lookingForHistory,
@@ -1707,6 +1707,18 @@
   {:else}
     {label}
   {/if}
+{/snippet}
+
+<!-- Blob inside the job ring: a spot, so he still flies in from the logo. He is elsewhere while the review overlay holds him. -->
+{#snippet jobMascot(size: number, gaze: number | undefined)}
+  {#if mascotAt === 'job'}
+    <MascotSpot mood={mascotMood} tool={mascotTool} progress={mascotProgress} {size} {gaze} />
+  {/if}
+{/snippet}
+
+<!-- The Job sheet's ring on a phone: Blob there is a plain copy, since the bar under the sheet's scrim holds his spot. -->
+{#snippet sheetMascot(size: number, gaze: number | undefined)}
+  <Mascot mood={mascotMood} tool={mascotTool} progress={mascotProgress} {size} {gaze} decorative />
 {/snippet}
 
 {#snippet assetMeta(asset: GalleryAsset)}
@@ -2051,39 +2063,29 @@
             </div>
             {#if compact}
               <div class="job-bar-dock">
-                <!-- Blob rides the bar, peeking over its top edge. -->
-                <div class="job-bar-mascot">
-                  {#if mascotAt === 'job'}
-                    <MascotSpot mood={mascotMood} tool={mascotTool} progress={mascotProgress} size={56} />
-                  {/if}
-                </div>
                 <JobBar
                   job={jobStore.current!}
                   queuedCount={jobStore.queuedJobs.length}
                   onpause={sendControl('pause')}
                   onresume={sendControl('resume')}
+                  mascot={jobMascot}
                   ondetails={() => { jobSheetOpen = true; }}
                 />
               </div>
             {:else}
-            <div class="job-view-card">
-              <!-- Blob hosts the job: it stands on the card, clear of the forming image. His place stays when he goes home. -->
-              <div class="job-view-mascot">
-                {#if mascotAt === 'job'}
-                  <MascotSpot mood={mascotMood} tool={mascotTool} progress={mascotProgress} size={112} />
-                {/if}
-              </div>
-              <JobCard
+              <JobColumn
                 job={jobStore.current!}
-                preview={false}
+                queued={jobStore.queuedJobs}
                 oncancel={sendControl('quit')}
                 onpause={sendControl('pause')}
                 onresume={sendControl('resume')}
                 onnext={sendControl('next')}
                 onrepeat={sendControl('repeat')}
+                onremove={removeQueuedJob}
+                onload={loadQueuedSettings}
+                onclear={clearQueuedJobs}
+                mascot={jobMascot}
               />
-              <QueuePanel jobs={jobStore.queuedJobs} onremove={removeQueuedJob} onload={loadQueuedSettings} onclear={clearQueuedJobs} />
-            </div>
             {/if}
           </div>
         {:else if viewedAsset}
@@ -2281,20 +2283,20 @@
         </div>
       </div>
       <Sheet bind:open={jobSheetOpen} title="Job">
-        <div class="job-sheet">
-          {#if jobStore.current}
-            <JobCard
-              job={jobStore.current}
-              preview={false}
-              oncancel={sendControl('quit')}
-              onpause={sendControl('pause')}
-              onresume={sendControl('resume')}
-              onnext={sendControl('next')}
-              onrepeat={sendControl('repeat')}
-            />
-          {/if}
-          <QueuePanel jobs={jobStore.queuedJobs} onremove={removeQueuedJob} onload={loadQueuedSettings} onclear={clearQueuedJobs} />
-        </div>
+        <JobColumn
+          variant="sheet"
+          job={jobStore.current}
+          queued={jobStore.queuedJobs}
+          oncancel={sendControl('quit')}
+          onpause={sendControl('pause')}
+          onresume={sendControl('resume')}
+          onnext={sendControl('next')}
+          onrepeat={sendControl('repeat')}
+          onremove={removeQueuedJob}
+          onload={loadQueuedSettings}
+          onclear={clearQueuedJobs}
+          mascot={sheetMascot}
+        />
       </Sheet>
       <Sheet bind:open={sheetOpen} title="All settings" meta={changedCount ? `${changedCount} changed` : undefined} keepMounted>
         {#snippet headActions()}
@@ -2427,7 +2429,8 @@
   }
   /* Phone: toasts sit above the strip, the composer and any message over Generate, whatever height they have (`dockHeight` measures them). */
   :global(:root:has(.compact-workspace)) { --toast-bottom: calc(var(--toast-dock, 120px) + 12px); }
-  :global(:root:has(.compact-workspace .job-bar)) { --toast-bottom: calc(var(--toast-dock, 120px) + 104px); }
+  /* With the job bar (84 px) over the preview, toasts sit above it. */
+  :global(:root:has(.compact-workspace .job-bar)) { --toast-bottom: calc(var(--toast-dock, 120px) + 88px); }
   /* The phone composition. */
   .compact-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
   .compact-workspace > :global(.workspace-preview) { flex: 1; min-height: 0; }
@@ -2446,11 +2449,10 @@
   @media (hover: none) { .stage-position-pill button:active { background: var(--color-bg-surface-hover); } }
   /* Phone: the preview takes the stage with the bar over its foot. */
   .job-view-compact { position: relative; padding: 12px 12px 12px; }
-  .job-view-compact .job-view-preview { padding-bottom: 140px; }
+  /* The bar is 84 px and the ring stands 20 px above it: the dock is 104 px, and the preview leaves 116 under it (the dock's 12 px inset included). */
+  .job-view-compact .job-view-preview { padding-bottom: 116px; }
   .job-bar-dock { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; flex-direction: column; }
   /* The mascot's place on the bar; his feet overlap its top edge. */
-  .job-bar-mascot { position: relative; z-index: 1; height: 56px; margin: 0 0 -14px 8px; pointer-events: none; }
-  .job-sheet { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
   .compact-controls { position: relative; flex: none; }
   /* The popover rises from the strip; a clear scrim behind it catches the tap that dismisses it, and the strip stays
      above the scrim so another chip switches the popover in one tap. */
@@ -2479,15 +2481,13 @@
   .sheet-model { flex: none; }
   .sheet-model :global(.toolbar-stacked) { background: transparent; }
   .sheet-model :global(.toolbar-stacked .ui-select-shell) { height: 40px; font-size: 14px; }
-  /* A running job: the preview fills the height on the left, the card is a column that scrolls on its own. */
+  /* A running job: the preview fills the height on the left, and the card and queue are a column beside it (`JobColumn`). */
   /* The view may shrink below its content's width: a centred flex item otherwise grows to the preview and spills both
      edges (and the phone's job bar) off the screen. The preview is a size container that the live image fits. */
   .job-view { display: flex; width: 100%; min-width: 0; height: 100%; align-items: stretch; gap: 16px; padding: 16px; }
   .job-view-preview { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; container-type: size; }
-  /* Blob peeks over the card's top edge; its foot overlaps the card by a little. */
-  .job-view-mascot { position: relative; z-index: 1; flex: none; align-self: center; height: 112px; margin: 4px 0 -26px; pointer-events: none; }
+  /* Blob waits at the foot of the review overlay, beside the decision. */
   .review-overlay :global(.review-mascot) { position: absolute; left: 12px; bottom: 12px; pointer-events: none; }
-  .job-view-card { display: flex; flex: none; width: 400px; max-width: 46%; flex-direction: column; gap: 12px; overflow-y: auto; }
   /* A drag moves what the stage shows with the finger, and lets it settle back or away when it lifts. */
   .stage-body > :global(:not(.stage-drag-count, .pull-hint)) { transition: translate 260ms cubic-bezier(0.32, 0.72, 0, 1); }
   .stage-body.moved > :global(:not(.stage-drag-count, .pull-hint)) { translate: var(--stage-dx, 0px) var(--stage-dy, 0px); }

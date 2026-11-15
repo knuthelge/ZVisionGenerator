@@ -52,7 +52,6 @@
   --color-success: #34d399;
   --color-error: #f87171;
   --color-warning: #fbbf24;
-  --color-info: #60a5fa;
   --color-warning-surface: rgb(251 191 36 / 0.1);
   --color-warning-border: rgb(251 191 36 / 0.2);
   --color-error-surface: rgb(248 113 113 / 0.08);
@@ -197,6 +196,13 @@
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
+    }
+    /* The one exemption: the job ring's spark breathes in opacity (nothing moves), the sign that work still runs. It is
+       a rule of this layer, more specific than the clamp above, because an important declaration of an earlier layer
+       beats one outside any layer. */
+    .pring .spark {
+      animation-duration: 2.4s !important;
+      animation-iteration-count: infinite !important;
     }
   }
 
@@ -407,10 +413,8 @@
   .ui-btn[aria-pressed='true'], .ui-btn[aria-expanded='true'], .ui-btn-on { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
   @media (hover: hover) { .ui-btn[aria-pressed='true']:hover:not(:disabled), .ui-btn[aria-expanded='true']:hover:not(:disabled), .ui-btn-on:hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); } }
   .ui-btn kbd { font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 400; opacity: 0.7; }
-  /* A key chip, in text or on a button. */
+  /* A key chip in running text; a key hint on a button is a bare kbd (above). */
   .ui-kbd { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: var(--radius-xs); background: var(--color-bg-surface-hover); font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 400; line-height: 16px; text-align: center; color: var(--color-text-muted); }
-  .ui-btn .ui-kbd { opacity: 1; }
-  .ui-btn-primary .ui-kbd { background: color-mix(in srgb, var(--color-primary-ink) 18%, transparent); color: var(--color-primary-ink); }
   /* The main action of a section (a bar, panel, form, dialog or popover): at most one per section. */
   .ui-btn-primary { background: var(--color-primary-main); color: var(--color-primary-ink); font-family: var(--font-heading); font-weight: 800; }
   @media (hover: hover) { .ui-btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); color: var(--color-primary-ink); } }

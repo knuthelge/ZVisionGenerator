@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/i
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
+import { jobStore } from '$lib/state/job.svelte';
 import { router } from '$lib/state/router.svelte';
 import TopStrip from './TopStrip.svelte';
 import { optionValues, pickOption } from '../../../test-utils/select';
@@ -91,5 +92,28 @@ describe('TopStrip', () => {
     app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'workspace', workflows: null, onmenu: vi.fn() } }));
     const select = target.querySelector('[role="combobox"][aria-label="Workflow"]') as HTMLButtonElement;
     expect(optionValues(select)).toEqual(['image', 'video']);
+  });
+
+  describe('the job state pill', () => {
+    afterEach(() => jobStore.clearJob());
+    const pill = () => target.querySelector('[data-testid="strip-status"]')!;
+
+    it('has no marker with no job', () => {
+      app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'workspace', onmenu: vi.fn() } }));
+
+      expect(pill().textContent).toContain('Ready');
+      expect(pill().querySelector('[data-testid="progress-ring"]')).toBeNull();
+    });
+
+    it('shows the running job as a small still ring that says nothing of its own, beside the status text', () => {
+      jobStore.startJob({ job_id: 'strip-job', workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 4, created_at: '' });
+      app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'workspace', onmenu: vi.fn() } }));
+
+      const ring = pill().querySelector('[data-testid="progress-ring"]')!;
+      expect(ring).not.toBeNull();
+      expect(ring.getAttribute('aria-hidden')).toBe('true');
+      expect(ring.getAttribute('width')).toBe('14');
+      expect(pill().textContent).toContain('Queued');
+    });
   });
 });

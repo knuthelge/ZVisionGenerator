@@ -166,12 +166,12 @@
   <ActionBar class="review-actions">
     {#if decisions.includes('approve')}
       <Button variant="primary" data-decision="approve" disabled={busy || offline} aria-label="Approve" title={`Upscale this ${noun} (Y)`} onclick={() => void decide('approve')}>
-        <Icon name="check" size={14} />Approve<kbd class="ui-kbd" aria-hidden="true">Y</kbd>
+        <Icon name="check" size={14} />Approve<kbd aria-hidden="true">Y</kbd>
       </Button>
     {/if}
     {#if decisions.includes('discard')}
       <Button data-decision="discard" disabled={busy || offline} aria-label="Discard" title={`Skip this ${noun}: no upscale, nothing saved (N)`} onclick={() => void decide('discard')}>
-        <Icon name="close" size={14} />Discard<kbd class="ui-kbd" aria-hidden="true">N</kbd>
+        <Icon name="close" size={14} />Discard<kbd aria-hidden="true">N</kbd>
       </Button>
     {/if}
   </ActionBar>

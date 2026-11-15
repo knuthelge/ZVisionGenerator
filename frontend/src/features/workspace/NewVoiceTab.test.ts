@@ -300,6 +300,29 @@ describe.each<Layout>(['wide', 'compact'])('the New voice tab (%s)', (layoutName
       expect(make().disabled).toBe(false);
     });
 
+    it('fills its bar with the first-use download, then counts voices, and keeps it empty while the job waits', async () => {
+      const fill = (): string => inWindow('[data-testid="design-progress"]')?.style.width ?? '';
+      await openNewVoice(layoutName);
+      jobStore.startJob(DESIGN_JOB);
+      await settle();
+      expect(fill()).toBe('0%');
+
+      const emit = (type: string, data: Record<string, unknown>) => lastEventSource().emit(type, { type, timestamp: 100, ...data });
+      emit('job_started', { job_id: DESIGN_JOB.job_id });
+      emit('model_downloading', { mode: 'audio', role: 'model', model: 'qwen3_tts', repo: 'org/voice-design', part: 1, parts: 1, bytes_done: 500, bytes_total: 1000, bytes_per_sec: 1, download_eta_secs: 1, shared: false });
+      await settle();
+      expect(fill()).toBe('50%');
+
+      emit('model_loading', { mode: 'audio', model: 'qwen3_tts', phase: 'loading' });
+      await settle();
+      expect(fill()).toBe('0%');
+
+      emit('batch_started', { mode: 'audio' });
+      emit('audio_progress', { phase: 'Design', step: 2, total: 3 });
+      await settle();
+      expect(fill()).toBe('66%');
+    });
+
     it('shows a running design job by how many voices it has made, and Stop sends it quit', async () => {
       await openNewVoice(layoutName);
       await runJob(2);

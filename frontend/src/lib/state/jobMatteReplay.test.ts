@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { jobStore } from './job.svelte';
-import { activeDownload, finishingLabel, headline, itemActivity, jobBar, phaseRows } from './jobView';
+import { activeDownload, finishingLabel, headline, itemActivity, phaseRows } from './jobView';
+import { ringView } from './jobRing';
 import { lastEventSource } from '../../test-utils/eventSource';
 
 const MODEL = { type: 'model_downloading', mode: 'image', role: 'model', model: 'atlas', repo: 'org/atlas', part: 1, parts: 1, bytes_total: 1000, bytes_per_sec: 100, download_eta_secs: 1, shared: false };
@@ -26,12 +27,12 @@ describe('a transparent image job, replayed event by event', () => {
     emit('job_started');
     emit('model_downloading', { ...MODEL, bytes_done: 500 });
     expect(headline(current())).toBe('Downloading Atlas');
-    expect(jobBar(current())).toMatchObject({ kind: 'download', role: 'model' });
+    expect(ringView(current())).toMatchObject({ kind: 'arc', stamp: 50 });
 
     emit('model_downloading', { ...MODEL, bytes_done: 1000 });
     emit('model_downloading', { ...MATTE, repo: 'org/birefnet', part: 1, parts: 2, bytes_done: 100 });
     expect(headline(current())).toBe('Downloading background removal');
-    expect(jobBar(current())).toMatchObject({ kind: 'download', role: 'matte' });
+    expect(ringView(current())).toMatchObject({ kind: 'arc', stamp: 16 });
     expect(phaseRow('load').label).toBe('Background removal download');
     expect(current().message).toContain('Downloading background removal');
     expect(current().message).not.toContain('Atlas');

@@ -23,35 +23,37 @@ describe('the job card and bar for the background removal stages', () => {
     component = null;
   });
 
-  it('names the matte download in the card headline, header bar and load row', () => {
+  const ring = (root: ParentNode) => root.querySelector('[data-testid="progress-ring"]')!;
+
+  it('names the matte download in the card headline and load row, and the ring is the download', () => {
     component = mountComponent(JobCard, { job: makeJob({ phase: 'load', download: MATTE_DOWNLOAD }) });
     const { target } = component;
 
-    expect(target.querySelector('.job-head')!.textContent).toContain('Downloading background removal');
-    expect(target.querySelector('.job-head [aria-label="Background removal download"]')?.getAttribute('aria-valuenow')).toBe('0.25');
-    expect(target.querySelector('.job-log [aria-label="Background removal download"]')).not.toBeNull();
-    expect(target.querySelector('.job-head [aria-label="Model download"]')).toBeNull();
-    expect(target.querySelector('.job-log')!.textContent).toContain('Downloading org/birefnet. Only the first time.');
+    expect(target.querySelector('h3')!.textContent).toBe('Downloading background removal');
+    expect(ring(target).getAttribute('aria-valuenow')).toBe('25');
+    expect(ring(target).getAttribute('aria-valuetext')).toContain('part 1 of 2');
+    expect(target.querySelector('[data-phase="load"]')!.textContent).toContain('Background removal download');
+    expect(target.querySelector('[data-testid="job-log"]')!.textContent).toContain('Downloading org/birefnet. Only the first time.');
   });
 
-  it('keeps an enhancer download named as before', () => {
+  it('keeps an enhancer download on the enhance row', () => {
     component = mountComponent(JobCard, { job: makeJob({ phase: 'enhance', download: { ...MATTE_DOWNLOAD, role: 'enhancer' } }) });
-    expect(component.target.querySelector('.job-head [aria-label="Enhancer download"]')).not.toBeNull();
+    expect(component.target.querySelector('h3')!.textContent).toBe('Downloading the prompt enhancer');
+    expect(component.target.querySelector('[data-testid="job-log"]')!.textContent).toContain('Downloading org/birefnet. Only the first time.');
   });
 
   it('names the matte download in the compact job bar', () => {
     component = mountComponent(JobBar, { job: makeJob({ phase: 'load', download: MATTE_DOWNLOAD }), ondetails: vi.fn() });
-    expect(component.target.querySelector('[aria-label="Background removal download"]')?.getAttribute('aria-valuenow')).toBe('0.25');
+    expect(ring(component.target).getAttribute('aria-valuenow')).toBe('25');
     expect(component.target.querySelector('[data-testid="job-bar"]')!.textContent).toContain('Downloading background removal');
   });
 
-  it('reads the cut-out after the steps as removing the background, to the eye and to assistive technology', () => {
+  it('reads the cut-out after the steps as removing the background, to the eye', () => {
     const matting: Partial<ActiveJobState> = { stageNames: ['text_to_image', 'matte', 'save'], stageName: 'matte', stageSteps: { text_to_image: 8, matte: 1 }, currentStep: 1, totalSteps: 1, stepPhase: 'image_matte' };
     component = mountComponent(JobCard, { job: makeJob(matting) });
     const { target } = component;
 
-    expect(target.querySelector('.job-head [role="progressbar"]')?.getAttribute('aria-valuetext')).toBe('Removing background');
-    expect(target.querySelector('.job-log')!.textContent).toContain('Removing background…');
-    expect(target.querySelector('.job-log')!.textContent).not.toContain('Finishing up');
+    expect(target.querySelector('[data-testid="job-caption"]')!.textContent).toContain('Removing background…');
+    expect(target.textContent).not.toContain('Finishing up');
   });
 });

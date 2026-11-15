@@ -31,15 +31,27 @@ export function sizeLabel(bytes: number): string {
   return `${amount} ${unit}`;
 }
 
-/** One-line byte progress, e.g. "12.4 / 34.7 GB · 48 MB/s · about 8 min"; unknown speed, ETA or total segments are left out. */
-export function downloadLine(p: DownloadLineFields): string {
+/** What a download's byte progress says, in parts: "12.4 / 34.7 GB", "48 MB/s" and "about 8 min"; an unknown speed or ETA is null. */
+export interface DownloadLineParts {
+  amount: string;
+  speed: string | null;
+  eta: string | null;
+}
+
+export function downloadParts(p: DownloadLineFields): DownloadLineParts {
   const { divisor, unit, digits } = unitFor(p.bytes_total ?? p.bytes_done);
   const done = (p.bytes_done / divisor).toFixed(digits);
-  const amount = p.bytes_total === null ? `${done} ${unit}` : `${done} / ${(p.bytes_total / divisor).toFixed(digits)} ${unit}`;
-  const segments = [amount];
-  if (p.bytes_per_sec !== null) segments.push(speedLabel(p.bytes_per_sec));
-  if (p.bytes_total !== null && p.download_eta_secs !== null) segments.push(etaLabel(p.download_eta_secs));
-  return segments.join(' · ');
+  return {
+    amount: p.bytes_total === null ? `${done} ${unit}` : `${done} / ${(p.bytes_total / divisor).toFixed(digits)} ${unit}`,
+    speed: p.bytes_per_sec !== null ? speedLabel(p.bytes_per_sec) : null,
+    eta: p.bytes_total !== null && p.download_eta_secs !== null ? etaLabel(p.download_eta_secs) : null,
+  };
+}
+
+/** One-line byte progress, e.g. "12.4 / 34.7 GB · 48 MB/s · about 8 min"; unknown speed, ETA or total segments are left out. */
+export function downloadLine(p: DownloadLineFields): string {
+  const { amount, speed, eta } = downloadParts(p);
+  return [amount, speed, eta].filter((part) => part !== null).join(' · ');
 }
 
 /** "part 1 of 2" for a download with several parts, otherwise an empty string. */

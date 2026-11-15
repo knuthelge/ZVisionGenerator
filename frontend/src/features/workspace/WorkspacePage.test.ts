@@ -464,14 +464,14 @@ describe('WorkspacePage', () => {
       const panel = target.querySelector('[data-testid="queue-panel"]') as HTMLElement;
       expect(panel.textContent).toContain('Up next · 1');
       expect(panel.textContent).toContain('Another run');
-      expect(panel.textContent).toContain('Starts next');
-      expect(panel.textContent).toContain('2:3 · m · 8 steps');
+      expect(panel.querySelector('[aria-label="Position 1, starts next"]')).not.toBeNull();
+      expect(Array.from(panel.querySelectorAll('[data-testid="queue-meta"] span')).map((part) => part.textContent)).toEqual(expect.arrayContaining(['2:3', 'm', '8 steps']));
     });
 
     it('puts the mascot on the job card, clear of the live preview', async () => {
       await mountWorkspace(queueContext([]));
       const view = target.querySelector('[data-testid="job-view"]') as HTMLElement;
-      expect(view.querySelector('.job-view-card svg.mascot')).not.toBeNull();
+      expect(view.querySelector('[data-testid="ring-hero"] svg.mascot')).not.toBeNull();
       expect(view.querySelector('.job-view-preview svg.mascot')).toBeNull();
       expect(mascotHome.placement.away).toBe(true);
     });
@@ -551,7 +551,7 @@ describe('WorkspacePage', () => {
       const settings = { mode: 'image', workflow: 'txt2img', model: 'zit', prompt_source: 'inline', prompt: 'from the queue', steps: '7', runs: '3', seed: '99' };
       await mountWorkspace(queueContext([jobSnap('job-2', 'queued', { queue_position: 1, settings })]));
 
-      (target.querySelector('[data-job-id="job-2"] button[title="Copy this job\'s settings into the form"]') as HTMLButtonElement).click();
+      (target.querySelector('[data-job-id="job-2"] button[aria-label="Load settings"]') as HTMLButtonElement).click();
       await settle();
 
       expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('from the queue');

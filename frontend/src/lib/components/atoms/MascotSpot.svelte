@@ -12,6 +12,8 @@
     size?: number;
     /** Share (0 to 1) of the active job's steps done; the creating mood's canvas follows it. */
     progress?: number;
+    /** Where he looks, in degrees clockwise from straight up; overrides the pointer. */
+    gaze?: number;
     /** Spots sharing a key hand the mascot over to each other as a stream of pixels. */
     travelKey?: string;
     /** Hidden from assistive technology, for a copy that only decorates (the logo). */
@@ -24,6 +26,7 @@
     tool = 'brush',
     size = 120,
     progress,
+    gaze,
     travelKey = 'mascot',
     decorative = false,
     class: extraClass = ''
@@ -36,5 +39,5 @@
   in:arrive|global={travelKey}
   out:depart|global={travelKey}
 >
-  <Mascot {mood} {tool} {size} {progress} {decorative} />
+  <Mascot {mood} {tool} {size} {progress} {gaze} {decorative} />
 </div>

@@ -105,7 +105,9 @@ async def shot_job_running(browser: Browser, url: str) -> None:
     await page.get_by_role("button", name="Generate").last.click()
     await page.get_by_text("Live preview · 75%").wait_for(timeout=180_000)
     await _save(page, "job-running")
-    await _save(page, "job-card", {"x": 1015, "y": 160, "width": 417, "height": 368})
+    card = await page.locator('article[aria-label="Active job"]').bounding_box()
+    assert card is not None
+    await _save(page, "job-card", card)
     await page.get_by_text("Generating image").wait_for(state="detached", timeout=180_000)
     await page.wait_for_timeout(2000)
     _delete_new_outputs(url, before)

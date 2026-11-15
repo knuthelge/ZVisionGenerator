@@ -1,10 +1,15 @@
 <script lang="ts">
   import { errorText } from '$lib/api/client';
-  import { Badge, Icon, StepProgress } from '$lib/components/atoms';
-  import { workflowLabel } from '$lib/state/assetActions';
-  import { downloadLabel, etaLabel, headline, isActive, isPaused, isVoiceDesignJob, itemNoun, iterations, jobBar, jobControls, jobPhase, stageBars } from '$lib/state/jobView';
+  import { Badge, Icon } from '$lib/components/atoms';
+  import { formatClock } from '$lib/state/clock';
+  import { barSubline, pendingNotice, promptText, shortHeadline } from '$lib/state/jobCaption';
+  import { ringView, stepKey } from '$lib/state/jobRing';
+  import { etaLabel, headline, isActive, isPaused, isVoiceDesignJob, jobControls, jobTone, outcome } from '$lib/state/jobView';
+  import { useStepTiming } from '$lib/state/stepClock.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ActiveJobState, JobControlAction } from '$lib/types';
+  import RingHero, { type RingMascot } from './RingHero.svelte';
+  import SaveProject from './SaveProject.svelte';
 
   type ControlCallback = (jobId: string) => void | Promise<unknown>;
 
@@ -14,33 +19,25 @@
     queuedCount?: number;
     onpause?: ControlCallback;
     onresume?: ControlCallback;
+    /** Blob, drawn inside the ring at the size the snippet receives. */
+    mascot?: RingMascot;
     /** Open the full card: phases, timings, Skip, Repeat, Cancel and the queue. */
     ondetails: () => void;
   }
 
-  let { job, queuedCount = 0, onpause, onresume, ondetails }: Props = $props();
+  let { job, queuedCount = 0, onpause, onresume, mascot, ondetails }: Props = $props();
 
   const active = $derived(isActive(job));
   const paused = $derived(isPaused(job));
   const offline = $derived(job.connection === 'reconnecting');
   const controls = $derived(jobControls(job));
   const available = $derived(new Set([...controls.job, ...controls.item]));
-  const noun = $derived(itemNoun(job));
-  const phase = $derived(jobPhase(job));
-  const bar = $derived(jobBar(job));
-  const bars = $derived(stageBars(job));
-  const items = $derived(iterations(job));
-  const eta = $derived(etaLabel(job));
   const pending = $derived(active ? (job.controlQueued ?? null) : null);
-  const shownPrompt = $derived(job.enhancedPrompt || job.prompt || 'No prompt supplied');
-  const notice = $derived.by(() => {
-    if (pending === 'pause') return phase === 'enhance' ? 'Pausing after this rewrite' : `Pausing after this ${noun}`;
-    if (pending === 'next') return phase === 'enhance' ? 'Skipping this rewrite' : 'Skipping after this step';
-    if (pending === 'repeat') return `Repeating after this ${noun}`;
-    if (pending === 'quit') return 'Stopping at the next step';
-    if (offline) return 'Reconnecting…';
-    return null;
-  });
+  const stepTiming = useStepTiming(() => job);
+  const ring = $derived(ringView(job, stepTiming.ms));
+  const sub = $derived(barSubline(job, etaLabel(job), formatClock(job.elapsed)));
+  const ended = $derived(outcome(job));
+  const notice = $derived(pendingNotice(job, pending));
 
   let sending = $state(false);
 
@@ -57,93 +54,50 @@
   }
 </script>
 
-<!-- The compact job card: one row of facts, the progress, the prompt. ⋯ opens the full card as the Job sheet. A design job has no Pause: Cancel is in the sheet. -->
-<div class="job-bar ui-overlay" data-tone={paused ? 'paused' : 'running'} data-testid="job-bar" aria-label="Running job">
-  <div class="jb-row">
-    <span class="jb-status"><i class="jb-dot"></i><span class="ui-area-label jb-workflow">{workflowLabel(job.workflow)}</span></span>
-    <span class="jb-headline">{headline(job)}</span>
-    {#if eta}<span class="jb-eta" title={eta}>{eta}</span>{/if}
-    <span class="jb-controls">
-      {#if active}
-        {#if paused}
-          <button type="button" class="ui-btn ui-btn-sm ui-btn-primary" disabled={!available.has('resume') || offline || sending} onclick={() => void send('resume', onresume)}><Icon name="play" size={12} />Resume</button>
-        {:else if !isVoiceDesignJob(job)}
-          <button type="button" class="ui-btn ui-btn-sm" disabled={!available.has('pause') || offline || sending || pending === 'pause'} onclick={() => void send('pause', onpause)}><Icon name="pause" size={12} />{pending === 'pause' ? 'Pausing' : 'Pause'}</button>
-        {/if}
+<!-- The phone's job bar: the ring with Blob on its top-left corner, the headline over "ETA · step", Pause or Resume and ⋯
+     with the queue count, then the prompt (or what the job saved) and the project. ⋯ opens the Job sheet, which holds Skip,
+     Repeat and Cancel. A design job has no Pause. An ended job keeps its ring, mark and colours, and nothing pulses. -->
+<div class="job-bar ui-overlay" data-tone={jobTone(job)} data-testid="job-bar" role="group" aria-label={active ? 'Running job' : 'Last job'}>
+  <div class="ring-slot"><RingHero size="S" view={ring} {mascot} host="var(--color-bg-overlay)" stepMs={stepTiming.ms} stepKey={stepKey(job)} /></div>
+  <div class="row">
+    <div class="text">
+      <p class="headline" data-testid="job-bar-headline">{shortHeadline(headline(job))}</p>
+      <p class="sub" data-testid="job-bar-sub">{#if sub.eta}<b>{sub.eta}</b>{' · '}{/if}{sub.text}</p>
+    </div>
+    {#if active}
+      {#if paused}
+        <button type="button" class="ui-btn ui-btn-primary ui-btn-icon" aria-label="Resume" title="Resume" disabled={!available.has('resume') || offline || sending} onclick={() => void send('resume', onresume)}><Icon name="play" size={18} /></button>
+      {:else if !isVoiceDesignJob(job)}
+        <button type="button" class="ui-btn ui-btn-icon" class:ui-btn-on={pending === 'pause'} aria-label={pending === 'pause' ? 'Pausing' : 'Pause'} aria-busy={pending === 'pause' ? 'true' : undefined} title="Pause" disabled={!available.has('pause') || offline || sending || !!pending} onclick={() => void send('pause', onpause)}><Icon name="pause" size={18} /></button>
       {/if}
-      <button type="button" class="ui-btn ui-btn-sm ui-btn-icon" aria-label="Job details" aria-haspopup="dialog" onclick={ondetails}><Icon name="more" size={14} /></button>
-    </span>
+    {/if}
+    <button type="button" class="ui-btn ui-btn-icon details" aria-haspopup="dialog" aria-label={queuedCount > 0 ? `Job details and queue, ${queuedCount} queued` : 'Job details'} title="Job details" onclick={ondetails}>
+      <Icon name="more" size={18} />
+      {#if queuedCount > 0}<span class="count" data-testid="queue-count" aria-hidden="true">{queuedCount}</span>{/if}
+    </button>
   </div>
-  {#if bar.kind === 'download'}
-    <StepProgress
-      class="jb-download"
-      value={bar.fraction ?? 0}
-      max={1}
-      label={downloadLabel(bar.role)}
-      live={active && !paused && !offline && bar.fraction !== null}
-      busy={active && !paused && !offline && bar.fraction === null}
-      indeterminate={bar.fraction === null}
-      valuetext={bar.fraction === null ? 'Size unknown' : `${Math.round(bar.fraction * 100)}% downloaded`}
-    />
-  {:else if bar.kind === 'segments'}
-    <div class="jb-segments" role="progressbar" aria-label="Job progress" aria-valuemin="0" aria-valuemax={items.total} aria-valuenow={items.done}>
-      {#each bar.segments as segment, index (index)}
-        <i class="jb-segment" class:run-break={segment.runBreak} data-state={segment.state}>{#if segment.state === 'now'}<b style:width="{segment.fill * 100}%"></b>{/if}</i>
-      {/each}
-    </div>
-  {:else if bars.length > 1}
-    <!-- An item with two passes (generate, then upscale): both bars side by side. -->
-    <div class="jb-stages">
-      {#each bars as stage (stage.name)}
-        <div class="jb-stage" data-state={stage.state}>
-          <span class="jb-stage-label">{stage.label}<small>{stage.state === 'current' ? `${stage.current}/${stage.total}` : stage.state === 'done' ? 'done' : job.review ? 'after review' : 'next'}</small></span>
-          <div class="ui-progress"><span class="ui-progress-fill" style:width="{stage.state === 'done' ? 100 : stage.state === 'current' && stage.total > 0 ? (stage.current / stage.total) * 100 : 0}%"></span></div>
-        </div>
-      {/each}
-    </div>
-  {:else}
-    <div class="ui-progress" role="progressbar" aria-label="Job progress" aria-valuemin="0" aria-valuemax="1" aria-valuenow={bar.fraction}><span class="ui-progress-fill" style:width="{bar.fraction * 100}%"></span></div>
-  {/if}
-  <p class="jb-prompt">
-    {#if notice}<Badge variant={pending === 'quit' || offline ? 'warning' : 'info'}>{notice}</Badge>{/if}
-    {#if job.enhanceStatus === 'enhanced'}<Badge variant="info"><Icon name="sparkle" size={10} />Enhanced</Badge>{/if}
-    {#if queuedCount > 0}<button type="button" class="jb-queue" onclick={ondetails}>{queuedCount} queued</button>{/if}
-    <span class="jb-prompt-text" title={shownPrompt}>{shownPrompt}</span>
+  <p class="foot">
+    {#if notice}<Badge variant={notice.tone}><Icon name="clock" size={12} />{notice.text}</Badge>{/if}
+    {#if !active && ended}<span class="saved">{ended.saved}</span>{:else}<span class="prompt" title={promptText(job)}>{promptText(job)}</span>{/if}
+    {#if job.save_project}<SaveProject name={job.save_project} testid="job-bar-project" />{/if}
   </p>
 </div>
 
 <style>
-  .job-bar { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; font-size: var(--text-ui); --jb-tone: var(--color-primary-main); }
-  .job-bar[data-tone='paused'] { --jb-tone: var(--color-warning); }
-  .jb-row { display: flex; align-items: center; gap: 8px; min-height: 28px; }
-  .jb-status { display: flex; flex: none; align-items: center; gap: 6px; color: var(--jb-tone); }
-  .jb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--jb-tone); animation: jb-pulse 1.2s infinite; }
-  .job-bar[data-tone='paused'] .jb-dot { animation: none; }
-  @keyframes jb-pulse { 50% { opacity: 0.3; } }
-  .jb-headline { min-width: 0; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; color: var(--color-text-primary); }
-  .jb-eta { flex: 0 1 auto; min-width: 0; max-width: 50%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-  .jb-controls { display: flex; flex: none; align-items: center; gap: 4px; margin-left: auto; }
-  .jb-segments { display: flex; gap: 2px; height: 6px; }
-  .jb-segment { position: relative; flex: 1; min-width: 0; overflow: hidden; border-radius: 1px; background: var(--color-zinc-700); }
-  .jb-segment.run-break { margin-left: 4px; }
-  .jb-segment[data-state='done'] { background: var(--jb-tone); }
-  .jb-segment[data-state='failed'] { background: var(--color-error); }
-  .jb-segment > b { position: absolute; inset: 0 auto 0 0; background: var(--jb-tone); transition: width 0.3s ease; }
-  .jb-stages { display: flex; gap: 8px; }
-  .jb-stage { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
-  .jb-stage-label { display: flex; justify-content: space-between; gap: 6px; overflow: hidden; font-size: var(--text-meta); font-weight: 600; white-space: nowrap; color: var(--color-text-secondary); }
-  .jb-stage-label small { font-family: var(--font-mono); font-weight: 400; color: var(--color-text-muted); }
-  .jb-stage[data-state='current'] .jb-stage-label { color: var(--color-text-primary); }
-  .jb-stage[data-state='done'] .ui-progress-fill { background: color-mix(in srgb, var(--color-primary-main) 55%, var(--color-zinc-700)); }
-  .job-bar .ui-progress, .job-bar :global(.jb-download) { height: 6px; }
-  .jb-prompt { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--color-text-muted); }
-  .jb-prompt > :global(.ui-badge) { flex: none; }
-  .jb-queue { flex: none; font-size: var(--text-ui); color: var(--color-text-secondary); text-decoration: underline dotted; text-underline-offset: 3px; }
-  .jb-prompt-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  @media (max-width: 400px) { .jb-workflow { display: none; } }
-  /* A finger gets the touch layer's full control size, not the small one. */
-  @media (pointer: coarse) {
-    .jb-controls .ui-btn { height: var(--spacing-control); }
-    .jb-controls .ui-btn-icon { width: var(--spacing-control); }
-  }
+  .job-bar { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 10px 12px; font-size: var(--text-ui); }
+  /* The ring sits on the bar's top-left corner, 20 px above it; its foot lines up with the foot of the headline and step line (the first row's 40 px), clear of the prompt line below. */
+  .ring-slot { position: absolute; left: 8px; top: -20px; pointer-events: none; }
+  .row { display: flex; align-items: center; gap: 6px; min-height: 40px; padding-left: 80px; }
+  .text { min-width: 0; flex: 1; }
+  .headline { overflow: hidden; font-family: var(--font-heading); font-size: 14px; font-weight: 800; line-height: 18px; color: var(--color-text-primary); white-space: nowrap; text-overflow: ellipsis; }
+  .sub { overflow: hidden; margin-top: 1px; font-size: var(--text-ui); line-height: 16px; color: var(--color-text-muted); white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+  .sub b { font-weight: 600; color: var(--color-text-primary); }
+  .details { position: relative; }
+  /* The queue count: teal on the overlay, over the ⋯ that opens the queue. */
+  .count { position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9999px; background: color-mix(in srgb, var(--color-primary-main) 22%, var(--color-bg-overlay)); box-shadow: 0 0 0 2px var(--color-bg-overlay); font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 600; line-height: 18px; color: var(--color-primary-main); }
+  .foot { display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px; font-size: var(--text-ui); line-height: 16px; }
+  .foot > :global(.ui-badge) { flex: none; }
+  .prompt, .saved { min-width: 0; overflow: hidden; color: var(--color-text-secondary); white-space: nowrap; text-overflow: ellipsis; }
+  /* The project ends the row at the bar's right edge; the prompt is cut first. */
+  .foot > :global(.save-project) { flex: none; max-width: 55%; margin-left: auto; padding-left: 4px; }
 </style>

@@ -63,7 +63,7 @@ Under the preview, a strip shows one chip per setting with its value; tap one to
 
 The prompt sits at the bottom beside **Generate**, with the same tabs, enhancer and prompt-file controls as on a computer.
 
-While a job runs, a bar over the preview shows its progress with **Pause**. **⋯** on the bar opens the job's details, with **Skip**, **Repeat** and **Cancel**.
+While a job runs, a bar over the preview shows its progress ring, the time left, the step and the prompt, with **Pause** (**Resume** while paused). **⋯** on the bar opens the job's details, with **Skip**, **Repeat**, **Cancel** and the queue, whose length shows on **⋯**.
 
 ### Images on a phone { #images-on-a-phone }
 

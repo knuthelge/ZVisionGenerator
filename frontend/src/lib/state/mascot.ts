@@ -1,7 +1,7 @@
 import type { MascotMood, MascotTool } from '$lib/components/atoms/Mascot.svelte';
 import { PHASE_DECODE } from '$lib/components/molecules/audioAurora';
 import type { ActiveJobState, JobWorkflow } from '$lib/types';
-import { isAudioJob, isVoiceDesignJob, jobPhase, stepFraction } from './jobView';
+import { isAudioJob, isVoiceDesignJob, jobPhase, jobTone, stepFraction } from './jobView';
 import { isAudioWorkflow } from './workspaceTab';
 
 /**
@@ -26,6 +26,8 @@ export const DROWSY_AFTER_MS = 60_000;
 
 export interface MascotSignals {
   job: ActiveJobState | null;
+  /** The job card shows a job that has ended: Blob stays in its ring, sad for a failure and curious for a lost job. */
+  ended?: boolean;
   reaction?: MascotReaction | null;
   loadError?: boolean;
   loading?: boolean;
@@ -74,6 +76,8 @@ function jobMood(job: ActiveJobState | null): MascotMood | null {
     case 'running':
       // A render waiting for approval: the mascot looks to the user.
       if (job.review) return 'curious';
+      // The live connection is lost: he waits and thinks until it is back.
+      if (job.connection === 'reconnecting') return 'thinking';
       if (job.stageName === 'enhancing_prompts') return 'reading';
       if (isAudioJob(job) || isVoiceDesignJob(job)) {
         if (!isMakingTake(job)) return 'thinking';
@@ -88,16 +92,30 @@ function jobMood(job: ActiveJobState | null): MascotMood | null {
   }
 }
 
+/** The mood of Blob in the ring of an ended job's card, once his reaction to the end has passed; null means at ease. */
+function endedMood(job: ActiveJobState | null): MascotMood | null {
+  switch (job ? jobTone(job) : null) {
+    case 'failed':
+      return 'sad';
+    case 'unknown':
+      return 'curious';
+    default:
+      return null;
+  }
+}
+
 /**
  * Pick the mascot mood from workspace signals. A nod always shows; other
  * reactions win until the next job starts painting. Then comes the active job,
- * then workspace state, then the user's own activity.
+ * then an ended job's card, then workspace state, then the user's own activity.
  */
-export function mascotMood({ job, reaction, loadError, loading, greeting, typing, drowsy }: MascotSignals): MascotMood {
+export function mascotMood({ job, ended, reaction, loadError, loading, greeting, typing, drowsy }: MascotSignals): MascotMood {
   const active = jobMood(job);
   const painting = active === 'creating' || active === 'finishing';
   if (reaction === 'nodding' || (reaction && !painting)) return reaction;
   if (active) return active;
+  const atEnd = ended ? endedMood(job) : null;
+  if (atEnd) return atEnd;
   if (loadError) return 'sad';
   if (loading) return 'thinking';
   if (greeting) return 'waving';
@@ -126,7 +144,6 @@ export type MascotSpotId = 'welcome' | 'job' | 'outputs' | 'review' | 'empty' | 
 
 export interface MascotSpotSignals {
   view: 'error' | 'outputs' | 'job' | 'latest' | 'empty';
-  running: boolean;
   reviewing: boolean;
   reacting: boolean;
   lookingForHistory: boolean;
@@ -136,17 +153,17 @@ export interface MascotSpotSignals {
 
 /**
  * Pick the one Workspace spot the mascot works at, or null to send him home.
- * He stays on a job while it runs and while he reacts to its end, presents
- * finished outputs only while reacting, greets a first-time user in the welcome,
+ * He stays in the job card's ring for as long as the card shows, running or
+ * ended, presents finished outputs only while reacting, greets a first-time user in the welcome,
  * and explains a real empty or error stage.
  */
-export function mascotSpot({ view, running, reviewing, reacting, lookingForHistory, welcoming }: MascotSpotSignals): MascotSpotId | null {
+export function mascotSpot({ view, reviewing, reacting, lookingForHistory, welcoming }: MascotSpotSignals): MascotSpotId | null {
   if (view === 'error') return 'error';
   if (welcoming) return 'welcome';
   if (reviewing) return 'review';
   if (view === 'empty') return lookingForHistory ? null : 'empty';
   if (view === 'outputs') return reacting ? 'outputs' : null;
-  if (view === 'job') return running || reacting ? 'job' : null;
+  if (view === 'job') return 'job';
   return null;
 }
 

@@ -173,6 +173,15 @@ The drawer lives in `features/workspace/discover/`: a side `Modal` (a `Sheet` on
 - **Downloads.** A LoRA download is a lane item of kind `lora` in `downloadStore`. `lib/state/loraDownloads.ts` turns the lane into what a chip shows and what holds Generate back; a failure wins over a download still on its way. A failed item stays in the store after the server stops listing it, until it is retried or its LoRA deleted, so a red chip does not turn ready by itself.
 - **Trigger words.** `features/workspace/triggerMenu.ts` builds the Triggers menu and inserts a chosen word at the start of the text; nothing is written into a prompt without a choice.
 
+## The job ring
+
+The job card, the phone bar and the status pill draw one ring, `lib/components/atoms/ProgressRing.svelte`, from what `lib/state/jobRing.ts` decides. Four rules shape it:
+
+- **One gap rule, no count thresholds.** The gap between arcs is a quarter of an arc's slot, never more than the ring's own gap. A threshold would change the ring's shape at some number of images; with one rule, a big batch blends into one ring by itself. `lib/state/ringGeom.test.ts` pins the layout.
+- **A solid fill only for a real fraction.** A ring that shows a number the job doesn't have misleads, so an unknown length sweeps and a song's estimate carries no stamp. `lib/state/jobRing.test.ts` pins it for every phase.
+- **A job never looks stuck.** The step in progress fills in over the last step's time (`lib/state/stepTiming.ts`), and the spark beats at the working head the whole time work runs. Under `prefers-reduced-motion` the ghost stands still and the spark breathes in opacity only. That is the one animation the clamp in `app/global.css` lets through, set in the clamp's own layer because an important rule of an earlier layer beats one outside any layer. `lib/state/jobRing.test.ts` pins when each shows; nothing tests the reduced-motion form, since jsdom evaluates neither layers nor media queries.
+- **The card never shrinks.** Shrinking it clipped the card at 1440×900 and on a portrait iPad. It is `flex: none`; the queue folds only when more than one queue row would hide, and the user's own toggle wins for the rest of the job. `features/workspace/JobColumn.test.ts` pins it.
+
 ## The mascot
 
 Blob is one SVG, `atoms/Mascot.svelte`, with a `mood`, a `tool`, a `size` and an optional `progress` for the creating canvas. Every mood is CSS on the same parts, and a mood change blends from the pose on screen, so an idle mascot costs no script. Below 48px he is drawn in a simpler form, which is also what `public/ziv-icon.svg` shows.

@@ -231,6 +231,7 @@ function validTerminalOutputs(value: unknown): GalleryAsset[] | null {
 function makeInitialJobState(ctx: JobContext): ActiveJobState {
   return {
     ...ctx,
+    inputs: ctx.inputs ?? [],
     status: ctx.queue_position ? 'queued' : 'running',
     currentStep: 0,
     totalSteps: 0,
@@ -278,6 +279,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     created_at: String(snapshot.created_at),
     supported_controls: snapshot.supported_controls ?? [],
     notices: snapshot.notices ?? [],
+    inputs: snapshot.inputs ?? [],
     settings: snapshot.settings,
     save_project: snapshot.save_project,
     status: snapshot.status,
@@ -442,7 +444,8 @@ function attachJobEvents(jobId: string, afterEventId = 0): void {
         ..._job,
         outputs,
         batchIndex: typeof event.run_index === 'number' ? event.run_index : _job.batchIndex,
-        previewUrl: isReplayedBeforeSnapshot(event as unknown as Record<string, unknown>) ? _job.previewUrl : null,
+        // A finished image drops its preview. One that was stopped or skipped keeps its last frame, which a stopped job's stage still shows; the next prompt clears it.
+        previewUrl: isReplayedBeforeSnapshot(event as unknown as Record<string, unknown>) || event.status !== 'success' ? _job.previewUrl : null,
         review: isReplayedBeforeSnapshot(event as unknown as Record<string, unknown>) ? _job.review : null,
       };
     },

@@ -374,7 +374,10 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.previewUrl).toBe('/jobs/job-preview/preview?v=3');
     source.emit('step_progress', { type: 'step_progress', current_step: 3, total_steps: 8, elapsed_secs: 1 });
     expect(jobStore.current?.previewUrl).toBe('/jobs/job-preview/preview?v=3');
+    // A skipped or stopped image keeps its last frame; a finished one drops it.
     source.emit('generation_finished', { type: 'generation_finished', job_id: 'job-preview', status: 'skipped' });
+    expect(jobStore.current?.previewUrl).toBe('/jobs/job-preview/preview?v=3');
+    source.emit('generation_finished', { type: 'generation_finished', job_id: 'job-preview', status: 'success' });
     expect(jobStore.current?.previewUrl).toBeNull();
     source.emit('step_progress', { type: 'step_progress', current_step: 2, total_steps: 8, elapsed_secs: 1, preview_version: 4 });
     source.emit('prompt_started', { type: 'prompt_started', prompt: 'Next' });
@@ -1083,6 +1086,45 @@ describe('jobStore queue', () => {
 
     await vi.waitFor(() => expect(jobStore.current?.job_id).toBe('other-tab'));
     expect(jobStore.queuedJobs.map((job) => job.job_id)).toEqual(['mine']);
+  });
+
+  it('lists the inputs of each queued job, and of the active job when it is followed', async () => {
+    const door = { role: 'source', name: 'door.png', kind: 'image' };
+    serveJobs(() => ({
+      active_job: snap('first', 'running', { inputs: [{ ...door }] }),
+      queued_jobs: [snap('second', 'queued', { queue_position: 1, inputs: [door] }), snap('third', 'queued', { queue_position: 2 })],
+    }));
+
+    await jobStore.refreshJobs();
+
+    // A job from a server that lists no inputs has none.
+    expect(jobStore.queuedJobs.map((job) => job.inputs ?? [])).toEqual([[door], []]);
+    expect(jobStore.current?.inputs).toEqual([{ ...door }]);
+  });
+
+  it('shows the inputs a submit response carries before the job list answers', () => {
+    serveJobs(() => ({ active_job: null, queued_jobs: [] }));
+    const start = { role: 'start', name: 'first.png', kind: 'image' };
+
+    jobStore.startJob({ job_id: 'head', workflow: 'img2vid', prompt: 'p', model: 'ltx', runs: 1, created_at: '', inputs: [start as never] });
+
+    expect(jobStore.current?.inputs).toEqual([start]);
+  });
+
+  it('keeps the inputs of the followed job through its events', () => {
+    serveJobs(() => ({ active_job: null, queued_jobs: [] }));
+    const source = { role: 'source', name: 'clip.mp4', kind: 'video' };
+    jobStore.startJob({ job_id: 'head', workflow: 'extend', prompt: 'p', model: 'ltx', runs: 1, created_at: '', inputs: [source as never] });
+
+    lastSource().emit('job_started', { type: 'job_started', job_id: 'head' });
+
+    expect(jobStore.current?.inputs).toEqual([source]);
+  });
+
+  it('seeds the queue from the workspace payload with its inputs', () => {
+    jobStore.seedQueue([snap('second', 'queued', { queue_position: 1, inputs: [{ role: 'reference', name: 'fox.png', kind: 'image' }] }) as never]);
+
+    expect(jobStore.queuedJobs[0].inputs).toEqual([{ role: 'reference', name: 'fox.png', kind: 'image' }]);
   });
 
   it('follows the next job when the followed one ends, without the workspace mounted', async () => {

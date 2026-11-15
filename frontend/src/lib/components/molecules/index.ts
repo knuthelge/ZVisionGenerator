@@ -28,6 +28,8 @@ export { default as Sheet } from './Sheet.svelte';
 export { default as JobCard } from './JobCard.svelte';
 export { default as SaveProject } from './SaveProject.svelte';
 export { default as JobPreview } from './JobPreview.svelte';
+export { default as JobInputs } from './JobInputs.svelte';
+export { default as RingHero } from './RingHero.svelte';
 export { default as JobBar } from './JobBar.svelte';
 export { default as ReviewStage } from './ReviewStage.svelte';
 export { default as ModelStatusBadges } from './ModelStatusBadges.svelte';

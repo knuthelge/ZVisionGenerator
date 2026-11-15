@@ -12,6 +12,7 @@ export { default as FileName } from './FileName.svelte';
 export { default as Icon } from './Icon.svelte';
 export { default as InspectorNumber } from './InspectorNumber.svelte';
 export { default as ShortcutList } from './ShortcutList.svelte';
+export { default as ProgressRing } from './ProgressRing.svelte';
 export { default as StepProgress } from './StepProgress.svelte';
 export { default as Wordmark } from './Wordmark.svelte';
 export { default as Waveform } from './Waveform.svelte';

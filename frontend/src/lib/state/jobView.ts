@@ -2,7 +2,7 @@ import type { ActiveJobState, AudioWorkflow, JobControlAction, JobDownload, JobP
 import { jobReviewUrl } from '$lib/api/workspace';
 import { auroraNote, auroraProgress, MUSIC_PHASES, PHASE_DECODE, PHASE_SONG_TOKENS, TOKENS_PER_SECOND } from '$lib/components/molecules/audioAurora';
 import { formatClock } from './clock';
-import { downloadLine, partLabel } from './downloadProgress';
+import { downloadParts, partLabel } from './downloadProgress';
 import { phaseSeconds } from './jobPhases';
 import { checked } from './jobSettings';
 
@@ -43,21 +43,16 @@ export interface StageBar {
   total: number;
 }
 
-export type JobBarSegment = { state: 'done' | 'now' | 'failed' | 'pending'; runBreak: boolean; fill: number };
-export type JobBar =
-  | { kind: 'segments'; segments: JobBarSegment[] }
-  | { kind: 'bar'; fraction: number }
-  /** A model download: *fraction* is its progress in [0, 1], or null while the total size is unknown. */
-  | { kind: 'download'; fraction: number | null; role: JobDownload['role'] };
-
 /** What the job card's download block shows for one download. */
 export interface DownloadView {
-  /** The head's left side, one entry per nowrap segment: "Part 2 of 3", "18.3 / 46.1 GB", "52 MB/s", "about 9 min". */
-  segments: string[];
-  /** Whole percent done, or null while the total size is unknown. */
-  percent: number | null;
-  /** Accessible name of the progress bar. */
-  label: string;
+  /** "Part 2 of 3" for a download with several parts, otherwise null. */
+  part: string | null;
+  /** "18.3 / 46.1 GB", or "18.3 GB" while the total is unknown. */
+  amount: string;
+  /** "52 MB/s", or null while the speed is unknown. */
+  speed: string | null;
+  /** "about 9 min" or "less than a minute", or null while the time left is unknown. */
+  eta: string | null;
   valuetext: string;
   /** The line under the bar: why the download happens and what Cancel does. */
   help: string;
@@ -70,9 +65,6 @@ export interface JobControls {
   item: JobControlAction[];
 }
 
-/** Up to this many items the job bar is one segment per item; above it, one plain bar. */
-export const SEGMENT_LIMIT = 48;
-
 /** Workflow stages that run denoising steps, with the label their bar gets. */
 const STEPPED_STAGES: Record<string, string> = {
   text_to_image: 'Generate', edit: 'Generate', upscale: 'Upscale', text_to_video: 'Generate', image_to_video: 'Generate', extend_video: 'Generate',
@@ -84,11 +76,6 @@ const FINISHING_LABELS: Record<string, string> = { join_clips: 'Joining clips…
 /** The label for the stretch after the last step: what the current stage is doing, or "Finishing up…". */
 export function finishingLabel(job: ActiveJobState): string {
   return FINISHING_LABELS[job.stageName] ?? 'Finishing up…';
-}
-
-/** The same label without its ellipsis, for a progress bar's accessible value text. */
-export function finishingText(job: ActiveJobState): string {
-  return finishingLabel(job).replace(/…$/, '');
 }
 
 /** Whether a workflow stage runs denoising steps (as opposed to e.g. resolving the prompt or saving the file). */
@@ -282,7 +269,11 @@ export function iterations(job: ActiveJobState): Iterations {
   const run = Number.isFinite(job.batchIndex) ? Math.max(0, Math.floor(job.batchIndex)) : 0;
   const prompt = perRun > 1 && Number.isInteger(job.promptNumber) ? Math.max(1, job.promptNumber!) : 1;
   const index = jobPhase(job) === 'generate' ? Math.min(total - 1, run * perRun + prompt - 1) : 0;
-  const done = jobPhase(job) === 'generate' ? index + (job.itemFinished ? 1 : 0) : 0;
+  if (jobPhase(job) !== 'generate') return { total, index, done: 0 };
+  // An item that was stopped or skipped made no output, so it is not done.
+  let done = index + (job.itemFinished && !job.itemSkipped ? 1 : 0);
+  // A job that ended early has only what it saved: items skipped before the end are not counted as done.
+  if (!isActive(job) && job.status !== 'completed') done = Math.min(done, job.outputs.length);
   return { total, index, done };
 }
 
@@ -354,54 +345,21 @@ export function downloadLabel(role: JobDownload['role']): string {
 
 /** The text, percentage and accessible values of a download block. */
 export function downloadView(download: JobDownload): DownloadView {
-  const line = downloadLine(download).split(' · ');
+  const { amount, speed, eta } = downloadParts(download);
   const part = partLabel(download);
   const fraction = downloadFraction(download);
-  const amount = line[0];
   const valuetext = fraction === null ? `${amount} downloaded, size unknown` : `${amount.replace(' / ', ' of ')}${part ? `, ${part}` : ''}`;
   let help = 'Only the first time; later jobs load the saved files.';
   if (download.shared) help = 'Already downloading. Cancel stops this job; the download keeps going.';
   else if (download.role === 'enhancer' || download.role === 'matte') help = `Downloading ${download.repo}. Only the first time.`;
   return {
-    segments: part ? [part.charAt(0).toUpperCase() + part.slice(1), ...line] : line,
-    percent: fraction === null ? null : Math.round(fraction * 100),
-    label: downloadLabel(download.role),
+    part: part ? part.charAt(0).toUpperCase() + part.slice(1) : null,
+    amount,
+    speed,
+    eta,
     valuetext,
     help,
   };
-}
-
-/** The whole-job bar: one segment per item, the current one filling as it runs, or a plain bar for long jobs. */
-export function jobBar(job: ActiveJobState): JobBar {
-  // While files download the bar shows that download; it goes back to the steps once generation starts.
-  const download = activeDownload(job);
-  if (download) return { kind: 'download', fraction: downloadFraction(download), role: download.role };
-  if (isVoiceDesignJob(job)) {
-    const { done, total } = iterations(job);
-    return { kind: 'bar', fraction: job.status === 'completed' ? 1 : done / total };
-  }
-  const { total, index, done } = iterations(job);
-  const active = isActive(job);
-  const generating = jobPhase(job) === 'generate';
-  const failedAt = job.status === 'failed' && generating ? index : -1;
-  const live = active && generating && !job.itemFinished;
-  if (total === 1) {
-    const fraction = failedAt === 0 ? 1 : active ? (generating ? itemFraction(job) : 0) : done;
-    return { kind: 'bar', fraction };
-  }
-  if (total > SEGMENT_LIMIT) {
-    const finished = active ? done : Math.max(done, job.outputs.length);
-    return { kind: 'bar', fraction: Math.min(1, (finished + (live ? itemFraction(job) : 0)) / total) };
-  }
-  const perRun = promptsPerRun(job);
-  const segments = Array.from({ length: total }, (_, k): JobBarSegment => {
-    const runBreak = perRun > 1 && k > 0 && k % perRun === 0;
-    if (k === failedAt) return { state: 'failed', runBreak, fill: 1 };
-    if (k < done) return { state: 'done', runBreak, fill: 1 };
-    if (live && k === index && !isPaused(job)) return { state: 'now', runBreak, fill: itemFraction(job) };
-    return { state: 'pending', runBreak, fill: 0 };
-  });
-  return { kind: 'segments', segments };
 }
 
 const DOWNLOAD_STOP_TEXT: Record<string, string> = {
@@ -648,7 +606,7 @@ function audioPositionLabel(job: ActiveJobState): string {
 
 /** Where the current item sits in the batch, or what runs next when paused between items. */
 export function positionLabel(job: ActiveJobState): string {
-  if (job.workflow === 'upscale') return 'Source';
+  if (job.workflow === 'upscale') return 'Source prompt';
   if (isVoiceDesignJob(job)) return 'Description';
   if (isAudioJob(job)) return audioPositionLabel(job);
   const perRun = promptsPerRun(job);

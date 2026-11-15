@@ -1,23 +1,23 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { errorText } from '$lib/api/client';
-  import { Badge, Icon, StepProgress } from '$lib/components/atoms';
+  import { Icon } from '$lib/components/atoms';
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import { acceptsPageShortcut } from '$lib/keyboard';
   import { workflowLabel } from '$lib/state/assetActions';
-  import {
-    downloadLabel, etaLabel, finishingText, headline, isActive, isAudioJob, isPaused, isVoiceDesignJob, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone, stepUnit,
-    stageBars, type JobTone
-  } from '$lib/state/jobView';
   import { formatClock } from '$lib/state/clock';
-  import { trackStepTiming, type StepTiming } from '$lib/state/stepTiming';
+  import { caption, cardHeadline, pendingNotice, splitModelName, timeParts } from '$lib/state/jobCaption';
+  import { ringView, stepKey, type RingView } from '$lib/state/jobRing';
+  import { etaLabel, GENERIC_FAILURE_MESSAGE, isActive, isPaused, isVoiceDesignJob, itemNoun, jobControls, jobPhase, jobTone, outcome, stageBars, type JobTone } from '$lib/state/jobView';
+  import { layout } from '$lib/state/layoutMode.svelte';
+  import { useStepTiming } from '$lib/state/stepClock.svelte';
   import type { ActiveJobState, JobControlAction } from '$lib/types';
   import Alert from './Alert.svelte';
-  import JobControls from './JobControls.svelte';
-  import { requestConfirm } from './confirm.svelte';
-  import { layout } from '$lib/state/layoutMode.svelte';
+  import JobControlsRow from './JobControls.svelte';
   import JobPhaseLog from './JobPhaseLog.svelte';
+  import RingHero, { type RingMascot } from './RingHero.svelte';
   import SaveProject from './SaveProject.svelte';
+  import { requestConfirm } from './confirm.svelte';
 
   type ControlCallback = (jobId: string) => void | Promise<unknown>;
 
@@ -28,21 +28,22 @@
     onresume?: ControlCallback;
     onnext?: ControlCallback;
     onrepeat?: ControlCallback;
-    /** Show the live preview inside the log; off when the stage shows it large beside the card. */
-    preview?: boolean;
+    /** Blob, drawn inside the ring at the size the snippet receives; left out while he is elsewhere (the review overlay). */
+    mascot?: RingMascot;
+    /** `panel` is a surface of its own; `sheet` sits straight on the Job sheet's surface, which is the card. */
+    variant?: 'panel' | 'sheet';
   }
 
-  let { job, oncancel, onpause, onresume, onnext, onrepeat, preview = true }: Props = $props();
+  let { job, oncancel, onpause, onresume, onnext, onrepeat, mascot, variant = 'panel' }: Props = $props();
 
   /** How long the first Esc keeps Cancel armed. */
   const ESC_ARM_MS = 3000;
   /** How long an accepted control counts as pending before the server's control_queued event confirms it. */
   const REQUEST_GRACE_MS = 3000;
 
-  const TONE_COLORS: Record<JobTone, string> = {
-    queued: 'var(--color-text-muted)', preparing: 'var(--color-info)', running: 'var(--color-primary-main)',
-    paused: 'var(--color-warning)', stale: 'var(--color-warning)', completed: 'var(--color-success)',
-    failed: 'var(--color-error)', stopped: 'var(--color-text-muted)', unknown: 'var(--color-text-muted)'
+  /** The workflow kicker's colour: teal while work runs (preparing included), amber when it waits on something, muted at rest and once ended. */
+  const KICKER_COLORS: Partial<Record<JobTone, string>> = {
+    preparing: 'var(--color-primary-main)', running: 'var(--color-primary-main)', paused: 'var(--color-warning)', stale: 'var(--color-warning)',
   };
 
   /** performance.now() of the last tick; the clock, ETA and armed Esc follow it. */
@@ -54,10 +55,8 @@
   const controls = $derived(jobControls(job));
   const phase = $derived(jobPhase(job));
   const noun = $derived(itemNoun(job));
-  const bar = $derived(jobBar(job));
-  const progress = $derived(iterations(job));
-  const total = $derived(progress.total);
-  const done = $derived(progress.done);
+  // A finger (or a phone-sized window): icon controls, a smaller ring and a dialog before Cancel.
+  const touch = $derived(layout.coarse || layout.compact);
 
   // ── Controls ─────────────────────────────────────────
 
@@ -113,24 +112,24 @@
     }
   }
 
-  /**
-   * Send a control the user clicked. A finger asks before Cancel, as the job bar's menu does: the button sits right
-   * under a sheet's Close, so one slip must not end the job. A mouse keeps the direct click, and Esc arms it twice.
-   */
+  /** Ask before Cancel on a finger, so nothing grows on the card and one slip cannot end the job. */
+  async function confirmCancel(): Promise<void> {
+    const approved = await requestConfirm({
+      question: 'Cancel this job?',
+      info: `The ${noun}s already ${isVoiceDesignJob(job) ? 'made' : 'saved'} are kept.`,
+      confirmLabel: 'Cancel job',
+      cancelLabel: 'Keep running',
+    });
+    if (approved) await send('quit');
+  }
+
+  /** Send a control the user clicked. A mouse cancels directly (Esc arms it twice); a finger asks first. */
   async function tapControl(action: JobControlAction): Promise<void> {
-    if (action === 'quit' && (layout.coarse || layout.compact) && !cancelArmed) {
-      const approved = await requestConfirm({
-        question: 'Cancel this job?',
-        info: `The ${noun}s already ${isVoiceDesignJob(job) ? 'made' : 'saved'} are kept.`,
-        confirmLabel: 'Cancel job',
-        cancelLabel: 'Keep running',
-      });
-      if (!approved) return;
-    }
+    if (action === 'quit' && touch) return confirmCancel();
     await send(action);
   }
 
-  // Esc arms Cancel and a second Esc sends it; P pauses or resumes, N skips and R repeats, unless a field, popover or dialog has the key.
+  // Esc arms Cancel and a second Esc sends it (on a finger, the first Esc opens the dialog); P pauses or resumes, N skips and R repeats, unless a field, popover or dialog has the key.
   $effect(() => {
     if (!active) return;
     function handleKeydown(event: KeyboardEvent): void {
@@ -143,6 +142,10 @@
       else if (key === 'r') action = available.has('repeat') ? 'repeat' : null;
       if (!action || !callbacks[action]) return;
       event.preventDefault();
+      if (action === 'quit' && touch) {
+        void confirmCancel();
+        return;
+      }
       // Checked against the time now: the display clock only ticks once a second.
       const armed = escArmedAt?.jobId === job.job_id && performance.now() - escArmedAt.at < ESC_ARM_MS;
       if (action === 'quit' && !armed) {
@@ -186,182 +189,135 @@
     void clock;
     return job.lastEventAt ? Math.max(0, Math.round((Date.now() - job.lastEventAt) / 1000)) : 0;
   });
-  const eta = $derived(etaLabel(job));
+
+  // ── The hero ─────────────────────────────────────────
 
   // Time each step so the step in progress can fill in over about as long as the last one took.
-  let stepTiming = $state<StepTiming | null>(null);
-  $effect(() => {
-    const sample = { scope: `${job.job_id}:${job.stageName}:${job.totalSteps}`, step: job.currentStep, paused: isPaused(job), now: performance.now() };
-    stepTiming = trackStepTiming(untrack(() => stepTiming), sample);
-  });
-  const stepMs = $derived(stepTiming?.stepMs ?? null);
-  // A single-stage, single-item job: the job bar is the step bar, so it carries the live step cues.
-  const headerSteps = $derived(total === 1 && active && phase === 'generate' && !stageBars(job).length && !isAudioJob(job) && !isVoiceDesignJob(job));
-  const activity = $derived(itemActivity(job));
-  const headerLive = $derived(ticking && !offline);
+  const stepTiming = useStepTiming(() => job);
+  const ring = $derived<RingView>(ringView(job, stepTiming.ms));
+  const headlineText = $derived(cardHeadline(job));
+  const headline = $derived(splitModelName(headlineText, job.model_label || job.model));
+  const now = $derived(caption(job));
+  const ended = $derived(outcome(job));
+  const times = $derived(timeParts({ active, offline, eta: etaLabel(job), elapsed: formatClock(liveElapsed), sinceUpdate }));
+  /** What the job saved, "3 of 4 saved to the Gallery · 1 not run", as parts that break only between each other. */
+  const savedParts = $derived(ended?.saved.split(' · ') ?? []);
 
   // ── Notice ───────────────────────────────────────────
 
-  const notice = $derived.by<{ text: string; variant: 'info' | 'warning' | 'error'; icon: IconName } | null>(() => {
-    if (cancelArmed) return { text: 'Press Esc again to cancel', variant: 'error', icon: 'alert' };
+  const notice = $derived.by<{ text: string; tone: 'info' | 'warning' | 'error'; icon: IconName } | null>(() => {
+    if (tone === 'failed') return { text: ended?.text || GENERIC_FAILURE_MESSAGE, tone: 'error', icon: 'alert' };
+    if (!active) return null;
+    if (offline) return { text: 'Lost the live connection. Controls come back when it reconnects.', tone: 'warning', icon: 'offline' };
+    if (cancelArmed && !touch) return { text: 'Press Esc again to cancel', tone: 'error', icon: 'alert' };
     if (rejected?.jobId === job.job_id) {
       const name = names[rejected.action].split(' ')[0];
-      return { text: `${name} didn’t go through.${rejected.reason ? ` ${rejected.reason}` : ' Try again.'}`, variant: 'error', icon: 'alert' };
+      return { text: `${name} didn’t go through.${rejected.reason ? ` ${rejected.reason}` : ' Try again.'}`, tone: 'error', icon: 'alert' };
     }
-    if (pending === 'pause') {
-      const text = phase === 'load' ? 'Pauses once the model is loaded' : phase === 'enhance' ? 'Pausing after this rewrite' : `Pausing after this ${noun}`;
-      return { text, variant: 'warning', icon: 'clock' };
-    }
-    if (pending === 'next') return { text: phase === 'enhance' ? 'Skipping this rewrite' : 'Skipping after this step', variant: 'info', icon: 'clock' };
-    if (pending === 'repeat') return { text: `Repeating after this ${noun}`, variant: 'info', icon: 'clock' };
-    if (pending === 'quit') return { text: 'Stopping at the next step', variant: 'warning', icon: 'clock' };
-    return null;
+    const waiting = pendingNotice(job, pending);
+    return waiting ? { ...waiting, icon: 'clock' } : null;
   });
-
-  const statusIcon = $derived<IconName | null>(tone === 'stale' ? 'offline' : tone === 'paused' ? 'pause' : null);
 </script>
 
-<article
-  class="ui-panel job-card"
-  data-tone={tone}
-  style:--job-tone={TONE_COLORS[tone]}
-  style:--job-fill={tone === 'stale' ? TONE_COLORS.running : tone === 'completed' ? TONE_COLORS.running : TONE_COLORS[tone]}
-  aria-label="Active job"
->
-  <header class="job-head">
-    <div class="job-row">
-      <span class="job-status">
-        {#if statusIcon}<Icon name={statusIcon} size={14} />{:else}<span class="job-dot"></span>{/if}
-        <span class="ui-area-label">{workflowLabel(job.workflow)}</span>
-      </span>
-      {#if active}
-        {#if controls.job.length}
-          <JobControls controls={controls.job} label="Job controls" {names} {pending} disabled={offline} {cancelArmed} onsend={(action) => void tapControl(action)} />
-        {:else if !controls.item.length && phase === 'generate'}
-          <span class="ui-help">No controls for {noun} jobs yet</span>
-        {/if}
-      {/if}
-    </div>
-    <!-- The notice answers the buttons above it, on a row of its own that is there only while it has something to say. -->
-    <div class="job-notice" role="status" aria-live="polite">
-      {#if notice}<Badge variant={notice.variant} class="job-notice-badge"><Icon name={notice.icon} size={12} /><span class="job-notice-text">{notice.text}</span></Badge>{/if}
-    </div>
-    <div class="job-row job-title-row">
-      <h3 class="job-title">{headline(job)}</h3>
-      <span class="job-time">
-        {#if !active}
-          <span class="num">{formatClock(liveElapsed)}</span> total
-        {:else if offline}
-          Last update {sinceUpdate} s ago
-        {:else}
-          {#if eta}<b>{eta}</b>{' · '}{/if}<span class="num">{formatClock(liveElapsed)}</span> elapsed
-        {/if}
-      </span>
-    </div>
-    {#if job.save_project}
-      <!-- Where the job saves, on a row of its own so it never takes room from the status label or the title. -->
-      <SaveProject name={job.save_project} testid="job-project" />
-    {/if}
-    {#if headerSteps}
-      <!-- Between steps (getting ready, or saving after the last one) the bar sweeps so the job never looks stuck. -->
-      <StepProgress
-        class="job-bar"
-        value={activity === 'stepping' ? job.currentStep : activity === 'finishing' ? 1 : 0}
-        max={activity === 'stepping' ? job.totalSteps : 1}
-        label="Job progress"
-        live={headerLive && activity === 'stepping'}
-        busy={headerLive && activity !== 'stepping'}
-        {stepMs}
-        valuetext={activity === 'stepping' ? `${stepUnit(job)} ${job.currentStep} of ${job.totalSteps}` : activity === 'finishing' ? finishingText(job) : 'Starting'}
-      />
-    {:else if bar.kind === 'download'}
-      <!-- While the model's files download, the bar is that download; it goes back to the steps once generation starts. -->
-      <StepProgress
-        class="job-bar"
-        value={bar.fraction ?? 0}
-        max={1}
-        label={downloadLabel(bar.role)}
-        live={headerLive && bar.fraction !== null}
-        busy={headerLive && bar.fraction === null}
-        indeterminate={bar.fraction === null}
-        valuetext={bar.fraction === null ? 'Size unknown' : `${Math.round(bar.fraction * 100)}% downloaded`}
-      />
-    {:else if bar.kind === 'bar'}
-      <!-- The fill is the bar's value: a one-item job fills while its item runs, though no item is done until it ends. -->
-      <div class="ui-progress job-bar" role="progressbar" aria-label="Job progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(bar.fraction * 100)} aria-valuetext={total === 1 ? `${Math.round(bar.fraction * 100)}% done` : `${done} of ${total} ${noun}s done`}>
-        <span class="ui-progress-fill" style:width="{bar.fraction * 100}%"></span>
-      </div>
-    {:else}
-      <div class="job-bar job-segments" role="progressbar" aria-label="Job progress" aria-valuemin="0" aria-valuemax={total} aria-valuenow={done} aria-valuetext="{done} of {total} {noun}s done">
-        {#each bar.segments as segment, index (index)}
-          <i class="job-segment" class:run-break={segment.runBreak} data-state={segment.state}>
-            {#if segment.state === 'now'}<b style:width="{segment.fill * 100}%"></b>{/if}
-          </i>
-        {/each}
-      </div>
-    {/if}
-  </header>
+{#snippet dotted(parts: string[])}{#each parts as part, index (index)}<span class="part" class:after={index > 0}>{part}</span>{/each}{/snippet}
 
-  {#if offline}
-    <div class="job-alert"><Alert tone="warning" live>Lost the live connection. Controls come back when it reconnects.</Alert></div>
-  {/if}
+<article class="job-card {variant}" class:ui-panel={variant === 'panel'} class:touch data-tone={tone} aria-label="Active job">
+  <div class="kicker-bar" data-testid="job-kicker">
+    <span class="ui-area-label kicker" data-testid="job-workflow" style:color={KICKER_COLORS[tone] ?? 'var(--color-text-muted)'}>{workflowLabel(job.workflow)}</span>
+    {#if job.save_project}<SaveProject name={job.save_project} testid="job-project" />{/if}
+  </div>
 
-  {#snippet itemControls()}
-    {#if controls.item.length}
-      <JobControls controls={controls.item} label={phase === 'enhance' ? 'Current rewrite' : `Current ${noun}`} {names} {pending} disabled={offline} onsend={(action) => void send(action)} />
+  <div class="hero">
+    <RingHero size={touch ? 'M' : 'L'} view={ring} {mascot} stepMs={stepTiming.ms} stepKey={stepKey(job)} />
+    <div class="text">
+      <div class="top">
+        <h3 class="headline">{#key headlineText}<span class="swap">{#each headline as part, index (index)}{#if part.model}<span class="model" data-testid="headline-model">{part.text}</span>{:else}{part.text}{/if}{/each}</span>{/key}</h3>
+        <p class="time dotline" data-testid="job-time">
+          {#each times as part, index (index)}<span class="part" class:after={index > 0}>{#if part.kind === 'eta'}<b>{part.text}</b>{:else if part.kind === 'estimate'}<span class="estimate">{part.text}</span>{:else}{part.text}{/if}</span>{/each}
+        </p>
+      </div>
+      <div class="bottom">
+        {#if now}
+          <div class="caption" class:wrap={now.wrap} data-testid="job-caption">
+            <p class="lead dotline" data-testid="caption-lead">{#if now.wrap}{now.lead.join(' ')}{:else}{@render dotted(now.lead)}{/if}</p>
+            {#if now.line.length}<p class="raw dotline" data-testid="caption-line">{@render dotted(now.line)}</p>{/if}
+          </div>
+        {/if}
+        <div class="foot">
+          {#if active}
+            {#if controls.job.length || controls.item.length}
+              <JobControlsRow {controls} itemLabel={phase === 'enhance' ? 'rewrite' : noun} {names} {pending} disabled={offline} {cancelArmed} {touch} onsend={(action) => void tapControl(action)} />
+            {:else if phase === 'generate'}
+              <p class="saved">No controls for {noun} jobs yet</p>
+            {/if}
+          {:else if ended}
+            <!-- Once the job ends, the controls give way to what it saved, in the same place. -->
+            <p class="saved" data-testid="job-saved"><Icon name={job.outputs.length ? 'grid' : 'minus'} size={12} /><span class="dotline">{@render dotted(savedParts)}</span></p>
+          {/if}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Two regions, always mounted so a screen reader hears a notice when it appears, with no height of their own while empty.
+       Each notice is announced through one of them: errors assertively, everything else politely. -->
+  <div role="status" aria-live="polite" data-testid="job-notice-region">
+    {#if notice && notice.tone !== 'error'}
+      <div class="notice" data-testid="job-notice"><Alert tone={notice.tone} icon={notice.icon}>{notice.text}</Alert></div>
     {/if}
-  {/snippet}
-  <JobPhaseLog {job} now={serverNow} {stepMs} {preview} itemControls={controls.item.length ? itemControls : undefined} />
+  </div>
+  <div role="alert" data-testid="job-alert-region">
+    {#if notice && notice.tone === 'error'}
+      <div class="notice" data-testid="job-notice"><Alert tone="error" icon={notice.icon}>{notice.text}</Alert></div>
+    {/if}
+  </div>
+
+  <JobPhaseLog {job} now={serverNow} {touch} />
 </article>
 
 <style>
-  .job-card {
-    --job-gutter: 12px;
-    /* 16px glyph + 12px gap: labels and detail share this edge. */
-    --job-indent: 28px;
-    width: 100%;
-    overflow: hidden;
-    font-size: var(--text-content);
-    line-height: 20px;
-    container-type: inline-size;
-  }
-  .job-head { display: flex; flex-direction: column; gap: 2px; padding: 10px var(--job-gutter) 14px; border-bottom: 1px solid var(--color-border-subtle); }
-  .job-row { display: flex; align-items: center; gap: 12px; min-width: 0; height: var(--spacing-control-sm); }
-  .job-title-row { align-items: baseline; justify-content: space-between; gap: 16px; height: 24px; }
-  .job-status { display: flex; flex: 0 1 auto; align-items: center; gap: 8px; min-width: 0; color: var(--job-tone); }
-  .job-status :global(.ui-area-label) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .job-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--job-tone); }
-  /* The controls sit at the right edge; an armed Cancel is a filled button, so it keeps inside the gutter. */
-  .job-head :global(.job-controls) { flex: none; margin-left: auto; margin-right: -7px; }
-  .job-head :global(.job-controls.armed) { margin-right: 0; }
-  /* The notice has the card's full width on a row of its own, so it reads in full at every size; a long one wraps. */
-  .job-notice { display: flex; min-width: 0; }
-  .job-notice:empty { margin-top: -2px; }
-  .job-notice :global(.job-notice-badge) { height: auto; min-height: var(--spacing-control-sm); max-width: 100%; margin: 2px 0 4px; padding: 3px 8px; gap: 6px; border-radius: var(--radius-sm); font-size: var(--text-ui); line-height: 16px; white-space: normal; }
-  .job-notice :global(.job-notice-badge svg) { flex: none; }
-  .job-notice-text { min-width: 0; overflow-wrap: anywhere; }
-  .job-title { flex: 1; min-width: 0; overflow: hidden; font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; line-height: 24px; white-space: nowrap; text-overflow: ellipsis; }
-  .job-time { flex: none; font-size: var(--text-ui); line-height: 16px; white-space: nowrap; color: var(--color-text-muted); }
-  .job-time b { font-weight: 500; color: var(--color-text-primary); }
-  .job-time .num { font-variant-numeric: tabular-nums; }
+  .job-card { container-type: inline-size; min-width: 0; flex: none; font-size: var(--text-content); line-height: 20px; }
+  /* In the Job sheet the sheet is the card: no second container of the same shade. */
+  .job-card.sheet { background: transparent; }
 
-  /* The job bar: 6px, one segment per item up to 48, a wider gap at each run boundary. */
-  .job-head :global(.job-bar) { --progress-color: var(--job-fill); height: 6px; margin-top: 10px; }
-  .job-segments { display: flex; gap: 2px; }
-  .job-segment { position: relative; flex: 1; min-width: 0; overflow: hidden; border-radius: 1px; background: var(--color-zinc-700); }
-  .job-segment.run-break { margin-left: 4px; }
-  .job-segment[data-state='done'] { background: var(--job-fill); }
-  .job-segment[data-state='failed'] { background: var(--color-error); }
-  .job-segment > b { position: absolute; inset: 0 auto 0 0; background: var(--job-fill); transition: width 0.3s ease; }
-  /* A failed job's saved items stay neutral; only the item that failed is red. */
-  [data-tone='failed'] .job-segment[data-state='done'] { background: var(--color-text-muted); }
-  [data-tone='stale'] .job-head :global(.job-bar) { opacity: 0.4; filter: saturate(0); }
+  /* The kicker bar runs across the card's top like a panel head: the workflow at the left, the project at the right. */
+  .kicker-bar { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px; min-width: 0; min-height: 16px; padding: 12px 14px 0; }
+  .touch .kicker-bar { padding: 10px 12px 0; }
+  .kicker { flex: none; line-height: 16px; white-space: nowrap; transition: color 600ms var(--ease-standard); }
+  .kicker-bar > :global(.save-project) { flex: 0 1 auto; margin-left: auto; }
 
-  .job-alert { padding: var(--job-gutter) var(--job-gutter) 4px; }
+  /* The hero: the ring on the left, one block centred on it. */
+  .hero { display: flex; gap: 14px; padding: 8px 14px 14px 12px; }
+  .touch .hero { gap: 12px; padding: 6px 12px 8px; }
+  .text { display: flex; min-width: 0; flex: 1; flex-direction: column; justify-content: center; }
+  .top, .bottom { display: flex; min-width: 0; flex-direction: column; }
+  .bottom { margin-top: 12px; gap: 10px; }
 
-  /* Phone width: the time drops under the headline instead of cutting it short. */
-  @container (max-width: 440px) {
-    .job-title-row { flex-wrap: wrap; height: auto; row-gap: 0; }
-    .job-title { flex-basis: 100%; }
-  }
+  .headline { font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; line-height: 20px; color: var(--color-text-primary); text-wrap: balance; }
+  .swap { display: inline; animation: headline-in 220ms var(--ease-soft-out); }
+  @keyframes headline-in { from { opacity: 0; translate: 0 6px; } }
+  /* The model's name never breaks inside itself ("Downloading / Z-Image Turbo"). */
+  .model { white-space: nowrap; }
+  .time { margin-top: 2px; font-size: var(--text-ui); line-height: 16px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+  .time b { font-weight: 600; color: var(--color-text-primary); }
+  .estimate { font-weight: 400; color: var(--color-text-muted); }
+
+  /* "·"-joined lines break only between parts. The "·" hangs in the gap before its part; a part that starts a new line
+     has its dot in the clipped margin, so no line starts with "·". */
+  .part { display: inline-block; white-space: nowrap; }
+  .part:not(:last-child) { margin-right: 1em; }
+  .dotline { margin-left: -1em; padding-left: 1em; clip-path: inset(0 0 0 1em); }
+  .after::before { content: '·'; display: inline-block; width: 1em; margin-left: -1em; text-align: center; color: var(--color-border-strong); }
+  .raw .after::before { color: inherit; }
+
+  .caption { min-width: 0; }
+  .lead { overflow: hidden; font-size: var(--text-ui); font-weight: 600; line-height: 16px; color: var(--color-text-secondary); }
+  .caption.wrap .lead { display: -webkit-box; font-weight: 400; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+  .raw { margin-top: 2px; font-family: var(--font-mono); font-size: var(--text-meta); line-height: 15px; color: var(--color-text-muted); }
+  .foot { display: flex; align-items: center; min-height: var(--spacing-control-sm); }
+  .saved { display: flex; align-items: flex-start; gap: 6px; font-size: var(--text-ui); line-height: 16px; color: var(--color-text-secondary); }
+  .saved :global(svg) { flex: none; margin-top: 2px; color: var(--color-text-muted); }
+
+  /* The notice sits under the hero and never moves it. */
+  .notice { padding: 0 12px 12px; }
 </style>

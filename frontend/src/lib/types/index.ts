@@ -1557,6 +1557,8 @@ export interface JobContext {
   queue_position?: number | null;
   /** Short notes about how the job deviates from what was asked, e.g. "original settings unknown". */
   notices?: string[];
+  /** The files the job starts from, in order: start, end, references, or the one source. Empty for a text-only job. */
+  inputs?: JobInput[];
 }
 
 /** A small render that waits for the user to approve or discard it before its upscale. */
@@ -1565,6 +1567,17 @@ export interface JobReview {
   iteration: number;
   /** 1-based attempt at that generation: a repeat after a discard is a new attempt of the same iteration; a missing value is 1. */
   attempt?: number;
+}
+
+/** What a job uses an input as: the picture or clip it works on (`source`), the first (`start`) or last (`end`) frame of a video, or a `reference`. */
+export type JobInputRole = 'source' | 'start' | 'end' | 'reference';
+
+/** One file a job starts from, by name only (never a path). */
+export interface JobInput {
+  role: JobInputRole;
+  /** The file's name: for an upload, the name it was sent as, or "Uploaded image" when it only has a stored name. */
+  name: string;
+  kind: 'image' | 'video';
 }
 
 /** Form fields a job was submitted with; a field sent more than once is a list. */
@@ -1635,6 +1648,8 @@ export interface ActiveJobState extends JobContext {
   loadReplacesDownload?: boolean;
   /** The current item has finished (its generation_finished arrived); the next item has not started yet. */
   itemFinished?: boolean;
+  /** The item that finished made no output: the runner skipped it, or the job was stopped inside it. */
+  itemSkipped?: boolean;
   /** Ordered workflow stages of the current item, e.g. ["text_to_image", "upscale"]. */
   stageNames?: string[];
   /** Step counts of the current item's stepped stages that have run, by stage name. */

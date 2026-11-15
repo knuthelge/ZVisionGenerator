@@ -4,8 +4,8 @@ import { auroraNote, auroraProgress, MUSIC_PHASES } from '$lib/components/molecu
 import type { ActiveJobState, AudioWorkflow } from '$lib/types';
 import { downloadFromEvent, trackJobEvent } from './jobPhases';
 import {
-  activeDownload, AUDIO_FIELD_LABELS, audioFraction, audioRows, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, finishingText, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isAudioJob, isSteppedStage, isVideo, isVideoUpscale, isVoiceDesignJob, itemActivity, itemFraction, iterations, itemNoun,
-  jobBar, jobControls, jobTone, livePreviewNote, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
+  activeDownload, AUDIO_FIELD_LABELS, audioFraction, audioRows, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isAudioJob, isSteppedStage, isVideo, isVideoUpscale, isVoiceDesignJob, itemActivity, itemFraction, iterations, itemNoun,
+  jobControls, jobTone, livePreviewNote, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
   reviewVideoUrl, stageBars, stepUnit, timeLeft, voiceDesignLine, voiceDesignProgress
 } from './jobView';
 import { formatClock } from './clock';
@@ -55,7 +55,7 @@ describe('jobView', () => {
       ['a failure while loading', job({ status: 'failed', phase: 'load' }), 'Failed while loading the model'],
       ['a failure on an item', batch({ status: 'failed' }), 'Failed on image 8 of 24'],
       ['a stop during enhancement', job({ status: 'cancelled', phase: 'enhance' }), 'Stopped while enhancing prompts'],
-      ['a stop mid-batch', batch({ status: 'cancelled', itemFinished: true }), 'Stopped after 8 of 24 images'],
+      ['a stop mid-batch', batch({ status: 'cancelled', itemFinished: true, outputs: Array.from({ length: 8 }, () => ({ id: 'a' }) as never) }), 'Stopped after 8 of 24 images'],
       ['a lost connection', batch({ connection: 'reconnecting' }), 'Reconnecting…'],
       ['a video', job({ workflow: 'txt2vid' }), 'Generating video'],
     ])('describes %s', (_, state, text) => {
@@ -90,28 +90,6 @@ describe('jobView', () => {
       expect(jobControls(job({ workflow: 'upscale', supported_controls: ['quit'] }))).toEqual({ job: ['quit'], item: [] });
       expect(jobControls(batch({ workflow: 'txt2vid', supported_controls: IMAGE_CONTROLS }))).toEqual({ job: ['pause', 'quit'], item: ['next', 'repeat'] });
       expect(jobControls(batch({ status: 'completed' }))).toEqual({ job: [], item: [] });
-    });
-  });
-
-  describe('job bar', () => {
-    it('gives each item a segment, marks run boundaries and fills the current one by step', () => {
-      const bar = jobBar(job({ runs: 2, promptCount: 2, promptNumber: 1, batchIndex: 1, currentStep: 7, totalSteps: 28 }));
-      expect(bar.kind === 'segments' && bar.segments.map((s) => [s.state, s.runBreak, s.fill])).toEqual([
-        ['done', false, 1], ['done', false, 1], ['now', true, 0.25], ['pending', false, 0],
-      ]);
-    });
-
-    it('marks the failed item and leaves no current item once the job ended', () => {
-      const bar = jobBar(job({ runs: 3, batchIndex: 1, status: 'failed' }));
-      expect(bar.kind === 'segments' && bar.segments.map((s) => s.state)).toEqual(['done', 'failed', 'pending']);
-    });
-
-    it('becomes one bar above 48 items', () => {
-      expect(jobBar(job({ runs: 200, batchIndex: 50, currentStep: 14 }))).toEqual({ kind: 'bar', fraction: 50.5 / 200 });
-    });
-
-    it('fills a single item by its progress', () => {
-      expect(jobBar(job({ currentStep: 7 }))).toEqual({ kind: 'bar', fraction: 0.25 });
     });
   });
 
@@ -212,6 +190,7 @@ describe('jobView', () => {
     expect(positionLabel(batch())).toBe('Prompt 2 of 3 · run 3 of 8');
     expect(positionLabel(batch({ status: 'paused', paused: true, itemFinished: true }))).toBe('Next: prompt 3 of 3 · run 3 of 8');
     expect(positionLabel(job({ runs: 4 }))).toBe('Run 1 of 4');
+    expect(positionLabel(job({ workflow: 'upscale' }))).toBe('Source prompt');
   });
 
   it('gives an estimate only for running multi-item jobs', () => {
@@ -334,7 +313,6 @@ describe('jobView', () => {
       const stepped = { ...matting, currentStep: 1, totalSteps: 1 };
       expect(itemActivity(stepped)).toBe('finishing');
       expect(finishingLabel(stepped)).toBe('Removing background…');
-      expect(finishingText(stepped)).toBe('Removing background');
       expect(livePreviewNote(stepped)).toBe('Removing background…');
     });
 
@@ -457,38 +435,27 @@ describe('review before upscaling', () => {
       expect(downloadFraction({ bytes_done: 0, bytes_total: 0 })).toBeNull();
     });
 
-    it('drives the job bar from the download, then back to the steps once generating', () => {
-      expect(jobBar(downloading())).toEqual({ kind: 'download', fraction: 0.25, role: 'model' });
-      expect(jobBar(downloading({}, { bytes_total: null }))).toEqual({ kind: 'download', fraction: null, role: 'model' });
-      expect(jobBar(downloading({ phase: 'enhance' }, { role: 'enhancer' }))).toMatchObject({ kind: 'download', role: 'enhancer' });
-      expect(jobBar(downloading({ phase: 'generate', currentStep: 14 })).kind).toBe('bar');
-      expect(jobBar(downloading({ status: 'cancelled' })).kind).toBe('bar');
-    });
-
-    it('describes the block: percent, parts, accessible values and the help for each kind of download', () => {
+    it('describes the block: parts, accessible values and the help for each kind of download', () => {
       const own = downloadView(download({ parts: 2, part: 2 }));
-      expect(own.percent).toBe(25);
-      expect(own.segments).toHaveLength(2);
+      expect(own.part).toBe('Part 2 of 2');
+      expect(own.amount).toMatch(/ \/ /);
       expect(own.valuetext).not.toBe(downloadView(download()).valuetext);
 
       const unknown = downloadView(download({ bytes_total: null }));
-      expect(unknown.percent).toBeNull();
+      expect(unknown.amount).not.toMatch(/ \/ /);
       expect(unknown.valuetext).not.toBe(own.valuetext);
 
       const shared = downloadView(download({ shared: true }));
       const enhancer = downloadView(download({ role: 'enhancer' }));
       expect(new Set([own.help, shared.help, enhancer.help]).size).toBe(3);
       expect(enhancer.help).toContain('org/repo');
-      expect(own.label).not.toBe(enhancer.label);
     });
 
-    it('puts a background removal download on the load row and names it in the headline, row, bar and help', () => {
+    it('puts a background removal download on the load row and names it in the headline, row and help', () => {
       const matte = { role: 'matte', model: 'Background removal', repo: 'org/birefnet' };
       expect(downloadRowKey(download(matte))).toBe('load');
-      expect(jobBar(downloading({}, matte))).toMatchObject({ kind: 'download', role: 'matte' });
 
       const view = downloadView(download(matte));
-      expect(view.label).toBe('Background removal download');
       expect(view.help).toContain('org/birefnet');
 
       expect(headline(downloading({}, matte))).toBe('Downloading background removal');
@@ -715,13 +682,6 @@ describe('a voice design job', () => {
     expect(headline(design({ audio: progress(2), status: 'failed' }))).toBe('Failed on voice 3 of 3');
     expect(headline(design({ audio: progress(2), status: 'cancelled' }))).toBe('Stopped after 2 of 3 voices');
     expect(headline(design({ audio: progress(2), connection: 'reconnecting' }))).toBe('Reconnecting…');
-  });
-
-  it('fills the bar by voices made, with no segments', () => {
-    expect(jobBar(design())).toEqual({ kind: 'bar', fraction: 0 });
-    expect(jobBar(design({ audio: progress(2) }))).toEqual({ kind: 'bar', fraction: 2 / 3 });
-    expect(jobBar(design({ audio: progress(2), status: 'failed' }))).toEqual({ kind: 'bar', fraction: 2 / 3 });
-    expect(jobBar(design({ audio: progress(3), status: 'completed' }))).toEqual({ kind: 'bar', fraction: 1 });
   });
 
   it('offers Cancel only: no Pause, Skip or Repeat', () => {

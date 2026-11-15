@@ -200,16 +200,18 @@ While a job runs, **Generate** reads **Add to queue**; see [The queue](#the-queu
 
 ### While a job runs
 
-![The job card at step 3 of 4, with Pause, Cancel and Repeat](../assets/screenshots/job-card.webp){ width="420" }
+![The job card of a running job, with its controls and phases](../assets/screenshots/job-card.webp){ width="420" }
 
-The **live preview** shows the current image taking shape after every step, so you can skip a bad one early. It is never saved, and a video shows none while it is made. Jobs already in the queue don't ask about downloads; they download when their turn comes. If a job fails, the card says why, and the [Job log](job-log.md) keeps the reason.
+The card lists the names of the files a job starts from. If a job fails, the card says why, and the [Job log](job-log.md) keeps the reason.
+
+The **live preview** shows the current image taking shape after every step, so you can skip a bad one early. It is never saved, and a video shows none while it is made. When the job ends, the stage keeps its last frame, tagged **Last preview**, or shows the last image the job saved when that frame is gone. Jobs already in the queue don't ask about downloads; they download when their turn comes.
 
 - **Pause** waits after the current image or video, until you resume.
 - **Skip** stops the current image or video at its next step and moves on.
 - **Repeat** makes the current image or video again with a new seed, once it finishes.
-- **Cancel** stops the job at its next step. On a touch screen it asks first.
+- **Cancel** stops the job at its next step. With a mouse a click cancels at once; on a touch screen it asks first.
 
-Keys are in [Keyboard shortcuts](shortcuts.md#workspace); the same controls work in a terminal, see [Pause, skip or stop a run](../guides/batches.md#keys-during-a-run). On a phone they are on the bar over the preview and in the job sheet under **⋯**.
+Keys are in [Keyboard shortcuts](shortcuts.md#workspace); the same controls work in a terminal, see [Pause, skip or stop a run](../guides/batches.md#keys-during-a-run). On a phone, see [Workspace on a phone](devices.md#workspace-on-a-phone).
 
 - **Video:** **Skip** and **Cancel** act on the video being made. Nothing is saved for it unless it was on its final step, in which case it is saved first. On a Mac, MiniMax H3 text to video can't stop in the middle of a clip, so **Skip** and **Cancel** take effect when the clip finishes, and the clip is kept.
 - **While prompts are rewritten:** a job with **Enhance each image when generating** rewrites every prompt before the model loads. **Skip** skips the current rewrite, and that image uses your own prompt. **Cancel** stops the job before the model loads.
@@ -222,7 +224,8 @@ Keys are in [Keyboard shortcuts](shortcuts.md#workspace); the same controls work
 You can keep working while a job runs. Change the prompt or settings and press **Add to queue**.
 
 - Queued jobs run one after another, in order, each with the settings it had when you added it.
-- Each job under **Up next** can be removed, or its settings copied back into the form with **Load settings**. **Clear queue** removes them all after asking and never stops the running job.
+- Each job under **Up next** shows its prompt, kind, runs and model, and the name of the file it starts from and the project it saves to when it has them. It can be removed, or its settings copied back into the form with **Load settings**. **Clear queue** removes them all after asking and never stops the running job.
+- When the card and the queue don't both fit, the queue folds to one line, **Up next**, which opens it again.
 - If a job fails, the next one starts anyway.
 
 The queue is shared by every open tab, and lives in the server's memory: stopping the server clears it. A job keeps running when you close or reload the tab; reopen the Workspace and it reconnects. Batches and the queue are covered in [Set runs and batch size](../guides/batches.md#set-runs-and-batch-size).

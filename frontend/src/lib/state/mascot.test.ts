@@ -28,6 +28,27 @@ describe('mascotMood', () => {
     expect(mascotMood({ job: job('running', 0, 0, { promptNumber: 2, promptCount: 3 }) })).toBe('creating');
   });
 
+  it('thinks while the connection is lost', () => {
+    expect(mascotMood({ job: job('running', 3, 20, { connection: 'reconnecting' }) })).toBe('thinking');
+  });
+
+  describe('in the ring of an ended job\'s card', () => {
+    it('is sad after a failure and curious about a lost job, once his reaction has passed', () => {
+      expect(mascotMood({ job: job('failed', 3, 20), ended: true })).toBe('sad');
+      expect(mascotMood({ job: job('unknown', 3, 20), ended: true })).toBe('curious');
+    });
+
+    it('is at ease after a stop, and after a finish once his cheer has passed', () => {
+      expect(mascotMood({ job: job('cancelled', 3, 20), ended: true })).toBe('idle');
+      expect(mascotMood({ job: job('completed', 20, 20), ended: true })).toBe('idle');
+    });
+
+    it('keeps his reaction first, and shows nothing of the failure away from the card', () => {
+      expect(mascotMood({ job: job('failed', 3, 20), ended: true, reaction: 'cheerful' })).toBe('cheerful');
+      expect(mascotMood({ job: job('failed', 3, 20) })).toBe('idle');
+    });
+  });
+
   it('reads while prompts are being enhanced', () => {
     expect(mascotMood({ job: job('running', 2, 4, { stageName: 'enhancing_prompts' }) })).toBe('reading');
   });
@@ -149,15 +170,14 @@ describe('mascotTool', () => {
 
 describe('mascotSpot', () => {
   const at = (overrides: Partial<MascotSpotSignals>) => mascotSpot({
-    view: 'latest', running: false, reviewing: false, reacting: false, lookingForHistory: false, welcoming: false, ...overrides,
+    view: 'latest', reviewing: false, reacting: false, lookingForHistory: false, welcoming: false, ...overrides,
   });
 
   it.each<[string, Partial<MascotSpotSignals>, ReturnType<typeof mascotSpot>]>([
     ['stays home while the latest output shows', {}, null],
-    ['works on the job while it runs', { view: 'job', running: true }, 'job'],
-    ['works on the job while reacting to its end', { view: 'job', reacting: true }, 'job'],
-    ['leaves an idle job view alone', { view: 'job' }, null],
-    ['waits beside a review instead of the job card', { view: 'job', running: true, reviewing: true }, 'review'],
+    ['stays in the ring while the job card shows', { view: 'job' }, 'job'],
+    ['stays in the ring while reacting to the job\'s end', { view: 'job', reacting: true }, 'job'],
+    ['waits beside a review instead of the job card', { view: 'job', reviewing: true }, 'review'],
     ['presents finished outputs while reacting', { view: 'outputs', reacting: true }, 'outputs'],
     ['leaves finished outputs alone otherwise', { view: 'outputs' }, null],
     ['explains a real empty stage', { view: 'empty' }, 'empty'],
