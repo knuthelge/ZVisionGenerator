@@ -66,7 +66,7 @@ The Zensical defaults include:
 - keys: `++ctrl+enter++`;
 - code blocks with titles: ```` ```yaml title="prompts.yaml" ````;
 - diagrams: ```` ```mermaid ````.
-- buttons: `[Your first image](first-image.md){ .md-button .md-button--primary }` for the one main action, `{ .md-button }` for the others. Use them on Home, not inside running text.
+- buttons: `[Your first image](first-image.md){ .md-button .md-button--primary }` for the one main action, `{ .md-button }` for the others. Use them on Home and for downloads, on a line of their own, not inside running text.
 
 ## Screenshots { data-search-exclude }
 

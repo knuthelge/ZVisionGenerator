@@ -58,6 +58,14 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 - **A cloned take's note is not shown in the Workspace.** "A cloned voice reads as recorded: the Delivery marks were left out." is saved with the take and shown in the Gallery and the CLI, but the Workspace result caption doesn't show it.
 - **Qwen3-TTS on the Mac peaks at 12.0 GiB, twice the CUDA figure** (a built-in voice reading four parts of about 450 characters at Very slow). 4.3 GiB stays resident. mlx-audio 0.6.2 already decodes each part's codes in 300-frame windows (`chunked_decode`), so it is not yet known whether the talker loop or the codec decode drives the peak. Measure peak memory around each on a Mac before changing anything; a smaller decode window would mean calling the codec's decoder directly. It matters on 16 GB Macs.
 
+## Desktop launcher
+
+Checks left open when `launcher-v0.1.0` shipped; see [A desktop launcher](archive/desktop-launcher.md#checks).
+
+- **A Mac that never had the Command Line Tools:** check that no "install developer tools?" popup appears during an install (the launcher hides `/usr/bin` from uv when the tools are missing).
+- **Measured sizes:** measure the install size and first-install time on macOS and Windows, to replace the estimated `EXPECTED_CACHE_BYTES` in `launcher/src-tauri/src/manifest.rs`, and check the folder size stays flat after an Update that changes torch.
+- **Linux distros:** the AppImage on a fresh Ubuntu 24.04 (no `libfuse2`) and on Fedora, the tray on KDE and on Fedora GNOME without AppIndicator, and the `.deb` from Ubuntu's App Center.
+
 ## Code hygiene (no user impact)
 
 - **Split the LTX backend.** `backends/cuda/video/backend.py` (about 1,600 lines) becomes LTX modules under `backends/cuda/video/ltx/` beside `h3/`, with no behaviour change. The plan and its conditions are step 2e of [LTX-2.5 and MiniMax H3](archive/ltx-2.5.md); its reload-test condition names a test that doesn't exist, so replace it or drop it. `backends/__init__.py`, `cuda/video/converted.py` and `docs/developer/backends.md` change in the same series.

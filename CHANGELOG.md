@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Download a selection as a zip.** **Download** in Select mode saves the picked files as one uncompressed zip, with their folders kept.
 - **Star the files you want to find again.** Star from a tile or the viewer, in the Gallery and the Workspace, and show starred files only with the **★** toggle. See [Stars](https://knuthelge.github.io/ZVisionGenerator/web-ui/gallery/#stars).
 - **Pull down in the Gallery to go back to the Workspace.** On a phone, drag down from the top of the grid, as swiping up on the Workspace preview opens the Gallery.
+- **Install without a terminal.** A desktop launcher for macOS, Windows and Linux installs the app and ffmpeg, starts it in your browser and offers updates. It installs its own copy beside a terminal install and shares your data and models. Its first builds are unsigned, so your system warns you the first time you open it. See [Install with the launcher](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install-with-the-launcher).
 
 ### Changed
 - **On a computer, a click on a tile always opens the viewer.** Picking files goes through Select mode.

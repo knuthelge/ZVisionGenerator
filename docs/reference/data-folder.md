@@ -58,6 +58,36 @@ Set `ZIV_DATA_DIR` to keep the data folder somewhere else, for example on a fast
 
 Set it for every command you run, so they all use the same folder.
 
+The launcher and a terminal install share the data folder and the model cache. The app the launcher starts sees only the variables the launcher itself was started with.
+
+=== "macOS"
+
+    Variables set in a terminal or in `~/.zshrc` don't reach the app the launcher starts. To move these folders, install from a terminal instead; see [Install from a terminal](../get-started/install.md#install-from-a-terminal).
+
+=== "Windows"
+
+    Press the Start key, type `environment variables` and choose **Edit environment variables for your account**. Add `ZIV_DATA_DIR` or `HF_HOME` as user variables, then quit the launcher and open it again. The app it starts uses them.
+
+=== "Linux"
+
+    Variables set in a terminal or in `~/.bashrc` don't reach the app the launcher starts. To move these folders, install from a terminal instead; see [Install from a terminal](../get-started/install.md#install-from-a-terminal).
+
+## Open a hidden folder { #open-a-hidden-folder }
+
+Folders such as `~/.ziv` and `~/.cache/huggingface` start with a dot, so the file manager hides them. To open one without a terminal:
+
+=== "macOS"
+
+    In the Finder, choose **Go → Go to Folder…** (++cmd+shift+g++), type the path, such as `~/.ziv`, and press ++enter++. To show hidden folders everywhere, press ++cmd+shift+period++.
+
+=== "Windows"
+
+    Neither folder is hidden here: paste `%USERPROFILE%\.ziv` into the File Explorer address bar and press ++enter++. The Hugging Face cache is at `%USERPROFILE%\.cache\huggingface`.
+
+=== "Linux"
+
+    In GNOME Files, press ++ctrl+l++ and type the path, such as `~/.ziv`, or press ++ctrl+h++ to show hidden folders. Other file managers have a similar shortcut or a **Show hidden files** option.
+
 ## Output files
 
 This is where your pictures are saved, and your videos and audio. The Web UI saves to the **Output folder** on the [Config page](../web-ui/config.md), which sets [`ui.output_dir`](configuration.md#ui); unset, it is `outputs` in the data folder. The CLI saves to the current folder, or to `-o`.
@@ -113,3 +143,19 @@ The Web UI keeps a record of finished jobs, with the reason each failed, in the 
 - Files the CLI writes to the output folder are picked up on the next load.
 - Several Web UIs, even different versions, can share it.
 - If it's ever found damaged, it is moved aside as `ziv.sqlite3.corrupt-<date>-<time>` and a new one is started with an empty job log; the old jobs stay in that copy. Delete those copies when you don't need them.
+
+## The launcher's folder { #the-launchers-folder }
+
+The launcher keeps the app, Python, uv and ffmpeg in a folder of its own, and **Uninstall…** in its window removes it. If you deleted the launcher first, delete the folder yourself, and the start-at-login entry if you turned it on.
+
+=== "macOS"
+
+    Delete `~/Library/Application Support/ZVision` and `~/Library/LaunchAgents/Z-Vision Generator.plist`. Both are hidden; see [Open a hidden folder](#open-a-hidden-folder).
+
+=== "Windows"
+
+    The folder is `%LOCALAPPDATA%\ZVision`. Uninstalling from **Settings → Apps** removes it and the start-at-login entry.
+
+=== "Linux"
+
+    Delete `~/.local/share/zvision` and `~/.config/autostart/Z-Vision Generator.desktop`. Both are hidden; see [Open a hidden folder](#open-a-hidden-folder).

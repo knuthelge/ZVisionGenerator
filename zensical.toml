@@ -76,6 +76,7 @@ nav = [
       { "Model downloads" = "developer/downloads.md" },
       { "App database" = "developer/app-database.md" },
       { "Frontend" = "developer/frontend.md" },
+      { "Desktop launcher" = "developer/launcher.md" },
     ] },
     { "Recipes" = [
       { "How-to" = "developer/how-to.md" },

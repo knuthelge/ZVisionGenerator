@@ -2,10 +2,13 @@
 
 Install the app and open it in your browser. No account or payment is needed.
 
-## 1. Check your machine { #check-your-machine }
+## Check your machine { #check-your-machine }
 
 - **Mac:** Apple silicon (M1 or newer) and macOS 14 Sonoma or newer.
 - **Windows and Linux:** an NVIDIA RTX 20-series or newer, with driver 580 or newer. There is no CPU fallback.
+- **Disk:** about 10 GB free for the app, plus room for the models you download.
+
+The launcher checks this for you; the commands below are for checking by hand.
 
 === "macOS"
 
@@ -21,7 +24,43 @@ Install the app and open it in your browser. No account or payment is needed.
 
 Models download into the Hugging Face cache; to move it to another drive, see [Data folder](../reference/data-folder.md#models-and-the-hugging-face-cache).
 
-## 2. Open a terminal { #open-a-terminal }
+## Install with the launcher { #install-with-the-launcher }
+
+The launcher installs the app and ffmpeg, starts the app and opens it in your browser, so you never open a terminal. It isn't signed yet, so your system warns you the first time you open it; the steps below get past it.
+
+=== "macOS"
+
+    [Download for macOS](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-macos-arm64.dmg){ .md-button .md-button--primary }
+
+    1. Open the downloaded `.dmg`, drag **Z-Vision Generator** into **Applications**, then open it from **Applications**. macOS says it can't verify the app.
+    2. Open **System Settings → Privacy & Security**, scroll to the message about Z-Vision Generator and choose **Open Anyway**.
+
+=== "Windows"
+
+    [Download for Windows](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-windows-x64-setup.exe){ .md-button .md-button--primary }
+
+    1. If your browser blocks the download, open its downloads list (++ctrl+j++) and choose **Keep**.
+    2. Run the downloaded `.exe`. At the **Windows protected your PC** warning, choose **More info**, then **Run anyway**.
+    3. Follow the installer, then open **Z-Vision Generator** from the Start menu.
+
+=== "Linux"
+
+    [Download the AppImage](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-linux-x86_64.AppImage){ .md-button .md-button--primary }
+    [Download the .deb](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-linux-amd64.deb){ .md-button }
+    [Download the .rpm](https://github.com/knuthelge/ZVisionGenerator/releases/download/launcher-v0.1.0/Z-Vision-Generator-Launcher-linux-x86_64.rpm){ .md-button }
+
+    - **AppImage**, for most distributions: in its **Properties**, tick **Allow executing file as program**, then open it.
+    - **.deb** (Ubuntu, Debian) or **.rpm** (Fedora): open it with your software installer, then open **Z-Vision Generator** from your applications menu.
+
+Choose **Install** in the launcher window. When it is done, your browser opens at the app, which offers an image model picked for your machine; [Your first image](first-image.md) takes it from there. Next time, open the launcher to start the app; **Quit** stops it. If it can't install, see [Troubleshooting](../reference/troubleshooting.md#launcher-install-failed).
+
+**Update**, **Repair**, **Uninstall…** and **Get beta versions** are in the launcher window (the last three in the **⋯** menu) and keep your data and models. Use **Uninstall…** before you delete the launcher; if you already did, see [The launcher's folder](../reference/data-folder.md#the-launchers-folder). The launcher doesn't update itself: quit it and download it again from [Install with the launcher](#install-with-the-launcher); on macOS, choose **Open Anyway** again.
+
+## Install from a terminal { #install-from-a-terminal }
+
+The steps below install the same app from a terminal; use them for the `ziv` commands, for [phones, tablets and other computers](../web-ui/devices.md), or to keep the [data folder](../reference/data-folder.md#use-another-folder) or models on another drive on macOS or Linux, and skip this section if you used the launcher.
+
+### 1. Open a terminal { #open-a-terminal }
 
 The rest of the steps are commands.
 
@@ -37,7 +76,7 @@ The rest of the steps are commands.
 
     Open your terminal application.
 
-## 3. Get uv { #get-uv }
+### 2. Get uv { #get-uv }
 
 [uv](https://docs.astral.sh/uv/) installs the app and brings its own Python, so you need nothing else first.
 
@@ -61,7 +100,7 @@ The rest of the steps are commands.
 
 Close the terminal and open a new one, so that it finds `uv`.
 
-## 4. Install { #install }
+### 3. Install { #install }
 
 === "macOS"
 
@@ -83,7 +122,7 @@ Close the terminal and open a new one, so that it finds `uv`.
     uv tool install z-vision-generator
     ```
 
-## 5. Get ffmpeg { #ffmpeg }
+### 4. Get ffmpeg { #ffmpeg }
 
 [ffmpeg](https://ffmpeg.org/) is a free tool that video and audio need to write their files.
 
@@ -107,7 +146,7 @@ Close the terminal and open a new one, so that it finds `uv`.
     sudo apt install ffmpeg
     ```
 
-## 6. Start it { #start-it }
+### 5. Start it { #start-it }
 
 ```bash
 ziv ui
@@ -119,11 +158,9 @@ The first time, the app offers to download an image model picked for your machin
 
 To use it from a phone or tablet, see [Phones, tablets and other computers](../web-ui/devices.md).
 
-## If it doesn't start { #if-it-doesnt-start }
+If it doesn't start, see [Troubleshooting](../reference/troubleshooting.md).
 
-See [Troubleshooting](../reference/troubleshooting.md).
-
-## Update { #update }
+### Update { #update }
 
 === "macOS"
 
@@ -145,9 +182,11 @@ See [Troubleshooting](../reference/troubleshooting.md).
     uv tool upgrade z-vision-generator
     ```
 
+If you installed with the launcher, use **Update** in its window instead.
+
 Your LoRAs, settings and outputs live in the [data folder](../reference/data-folder.md), and downloaded models in the Hugging Face cache, not in the install, so they survive an update.
 
-## Repair the install { #repair-the-install }
+### Repair the install { #repair-the-install }
 
 If the app reports a missing or outdated package, reinstall it. Your data folder and downloaded models stay as they are.
 
@@ -171,17 +210,19 @@ If the app reports a missing or outdated package, reinstall it. Your data folder
     uv tool install --reinstall z-vision-generator
     ```
 
-In a checkout, run `uv sync` instead.
+In a checkout, run `uv sync` instead. If you installed with the launcher, use **Repair** in its window instead.
 
-## Uninstall { #uninstall }
+### Uninstall { #uninstall }
 
 ```bash
 uv tool uninstall z-vision-generator
 ```
 
+If you installed with the launcher, use **Uninstall…** in its window instead; if you already deleted the launcher, see [The launcher's folder](../reference/data-folder.md#the-launchers-folder).
+
 The data folder stays, with your LoRAs, outputs and converted models, and so do the downloaded models in the Hugging Face cache. Delete them to free the space; both locations are in [Data folder](../reference/data-folder.md).
 
-## Other ways to install { #other-ways-to-install }
+### Other ways to install { #other-ways-to-install }
 
 ??? note "The latest code, or a checkout"
 
@@ -191,7 +232,7 @@ The data folder stays, with your LoRAs, outputs and converted models, and so do 
     uv tool install git+https://github.com/knuthelge/ZVisionGenerator.git
     ```
 
-    On Windows, add `--torch-backend cu132`, as in step 4.
+    On Windows, add `--torch-backend cu132`, as in step 3.
 
     A checkout for working on the code: see [Developer](../developer/index.md).
 

@@ -39,6 +39,7 @@ Run `make help` for every target. The ones you will use most:
 | `make frontend-test` | Frontend type checks and Vitest |
 | `make frontend-build` | Build the Web UI into the package; commit the result |
 | `make docs-check` | Build these docs strictly |
+| `make launcher-dev`, `make launcher-test`, `make launcher-build`, `make launcher-clean` | Run, check, build and clean the desktop launcher; see [Desktop launcher](launcher.md) |
 
 ### Working on the frontend
 

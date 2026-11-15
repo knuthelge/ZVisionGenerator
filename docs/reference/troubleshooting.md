@@ -6,7 +6,7 @@ A message that names a file, a setting or a model, or that says "use X instead",
 
 ## Where to look { #where-to-look }
 
-- [Installing and starting](#installing-and-starting): `ziv ui` won't start, no NVIDIA GPU found, a package or ffmpeg missing, the browser opens on another port, another device can't connect.
+- [Installing and starting](#installing-and-starting): `ziv ui` won't start, no NVIDIA GPU found, a package or ffmpeg missing, the browser opens on another port, another device can't connect, and the launcher's own messages: this computer isn't supported, the install failed and the app didn't start.
 - [Downloads](#downloads): a model won't download, Hugging Face refuses or can't be reached, the download is slow or stops, files missing from the cache.
 - [Stuck or slow](#stuck-or-slow): the first job seems stuck, Generate is greyed out, a job failed.
 - [Memory and slowdowns](#memory-and-slowdowns): the computer is slow, crawls, freezes or beachballs, out of memory, the terminal closes while a model loads, a model is refused for lack of memory.
@@ -32,7 +32,7 @@ Windows. The install came from PyPI alone, and PyPI's Windows PyTorch is CPU-onl
 
 ### A package is missing or too old { #a-package-is-missing-or-too-old }
 
-A package the app needs is missing or out of date, usually after a partial install. Reinstall: see [Repair the install](../get-started/install.md#repair-the-install). On Windows, use the command on that page, not the one a message prints: it reinstalls the package and keeps PyTorch's CUDA build.
+A package the app needs is missing or out of date, usually after a partial install. Reinstall: see [Repair the install](../get-started/install.md#repair-the-install). On Windows, use the command on that page, not the one a message prints: it reinstalls the package and keeps PyTorch's CUDA build. With the launcher, choose **Repair** in its window instead.
 
 #### "diffusers>=… is required for Windows/Linux LTX video support."
 
@@ -60,7 +60,7 @@ The Web UI's packages, which the message lists, aren't installed.
 
 ### ffmpeg is missing { #ffmpeg-is-missing }
 
-Video and audio need ffmpeg. `ziv-video` and `ziv-audio` offer to install it and ask first. The Web UI reports it when you press **Generate**: install ffmpeg, make sure it is on your `PATH`, and try again. On Windows, open a new terminal afterwards. On Fedora, `dnf install ffmpeg` needs RPM Fusion. The message reads "ffmpeg is required but was not found on PATH." See [Install](../get-started/install.md#ffmpeg).
+Video and audio need ffmpeg. `ziv-video` and `ziv-audio` offer to install it and ask first. The Web UI reports it when you press **Generate**: install ffmpeg, make sure it is on your `PATH`, and try again. On Windows, open a new terminal afterwards. On Fedora, `dnf install ffmpeg` needs RPM Fusion. The message reads "ffmpeg is required but was not found on PATH." See [Install](../get-started/install.md#ffmpeg). With the launcher, choose **Repair** in its window: it downloads ffmpeg again, which also helps when antivirus software has removed it.
 
 ### The browser opens on a different port { #the-browser-opens-on-a-different-port }
 
@@ -77,6 +77,18 @@ Another device reached the Web UI under a name the app doesn't know. List the na
 ### Another device can't reach the Web UI { #another-device-cant-reach-the-web-ui }
 
 The app answers only on this computer unless you ask it to share. Start it with `ziv ui --host local` and open the network address it prints from the other device. Allow it when Windows Firewall or macOS asks about incoming connections. If the browser then shows "Invalid Host header", use the entry above. See [Phones, tablets and other computers](../web-ui/devices.md#open-it-from-another-device).
+
+### The launcher says this computer isn't supported { #launcher-unsupported }
+
+The launcher checked the machine before downloading anything. The window names what it found and what is needed; when it is something you can fix, fix it and choose **Check again**. A driver that is installed but isn't working usually needs a restart after a driver update, or, on Linux, a driver key that Secure Boot accepts. Without an NVIDIA RTX 20-series or newer card the app can't run; see [Install](../get-started/install.md#check-your-machine).
+
+### The launcher's install failed { #launcher-install-failed }
+
+The window says why, and **Retry** carries on with what was already downloaded. A file that doesn't match usually comes from a cut-off download or a hotel or office Wi-Fi login page; retry, or try another network. If the window says a newer launcher fixes it, download it from [Install](../get-started/install.md#install-with-the-launcher). If **Retry** keeps failing, copy **Show the log** into a [bug report](#report-a-problem).
+
+### The launcher says Didn't start { #launcher-didnt-start }
+
+**Open Z-Vision Generator** tries again, and **Repair** in the **⋯** menu reinstalls. If it keeps failing, copy **Show the log** into a [bug report](#report-a-problem).
 
 ### Installed with pip
 
