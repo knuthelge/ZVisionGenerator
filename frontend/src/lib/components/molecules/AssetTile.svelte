@@ -1,20 +1,17 @@
 <script lang="ts">
-  import { tick } from 'svelte';
   import { on } from 'svelte/events';
-  import { Icon, Spinner, Waveform } from '$lib/components/atoms';
-  import type { IconName } from '$lib/components/atoms/Icon.svelte';
+  import { FileName, Icon, Spinner, Waveform } from '$lib/components/atoms';
   import type { AssetActionHandlers, UseAsState } from '$lib/state/assetActions';
-  import { audioFoot, hasNoWords, tileWords } from '$lib/state/audioAsset';
+  import { audioFoot, hasNoWords, kindIcon, tileWords } from '$lib/state/audioAsset';
   import { audioPeaks } from '$lib/state/audioPeaks.svelte';
   import { formatClock } from '$lib/state/clock';
   import type { FramePoint } from '$lib/state/framePoint';
   import { busyFor } from '$lib/state/frameGrab.svelte';
   import type { GalleryAsset } from '$lib/types';
-  import type { MenuLead } from '$lib/state/assetActions';
   import { hold } from '$lib/actions/hold';
-  import ActionMenu from './ActionMenu.svelte';
+  import AssetPanelMenu from './AssetPanelMenu.svelte';
+  import { assetPanel } from './assetMenu';
   import MediaPlayer from './MediaPlayer.svelte';
-  import { assetMenuEntries } from './assetMenu';
   import { frameMenuEntries } from './frameMenu';
   import MoveMenu from './MoveMenu.svelte';
 
@@ -29,7 +26,7 @@
     onselect?: (asset: GalleryAsset, selected: boolean) => void;
     /** A click on the media in Select mode, with its event so the owner can tell a Shift-click. */
     onmediaclick?: (asset: GalleryAsset, event: MouseEvent) => void;
-    /** Enter Select mode with this tile selected: the checkbox ticked outside the mode, and the menu's Select. */
+    /** Enter Select mode with this tile selected: the checkbox ticked outside the mode. */
     onstartselect?: (asset: GalleryAsset) => void;
     deleting?: boolean;
     /** What the Use as items show: which targets are disabled, and their hints. */
@@ -73,7 +70,6 @@
   // The Move list opens after the ⋯ menu has closed, anchored at the ⋯ button, which is there on every tile.
   let moveOpen = $state(false);
   let moreButton = $state<HTMLButtonElement | null>(null);
-  let mediaButton = $state<HTMLButtonElement | null>(null);
 
   const isVideo = $derived(asset.media_type === 'video');
   const isAudio = $derived(asset.media_type === 'audio');
@@ -87,7 +83,7 @@
   });
   // A tile with nothing to read, and every strip tile, shows only its icon and waveform.
   const bare = $derived(isAudio && (density === 'compact' || hasNoWords(asset)));
-  const kindIcon = $derived<IconName>(asset.kind === 'speech' ? 'speech' : asset.kind === 'sound' ? 'waveform' : 'music');
+  const kindOf = $derived(kindIcon(asset));
   const length = $derived(asset.duration != null ? formatClock(asset.duration) : null);
   const transparent = $derived(asset.transparent === true && !isVideo);
   const canReuse = $derived(asset.has_reusable_config === true);
@@ -95,10 +91,15 @@
   let point = $state<FramePoint | null>(null);
   const extracting = $derived(busyFor(asset.id) !== null);
   const frameActions = $derived(point ? frameMenuEntries(asset, point, { onextend, onuseframe }, useAs) : []);
-  // Only a tile that can start Select mode has a lead: Select outside the mode, View inside it.
-  const lead = $derived(onstartselect ? (selectMode ? 'view' : 'select') : null);
   const starred = $derived(asset.starred === true);
-  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onadjust: onadjust ? (picked) => onadjust(picked, moreButton) : undefined, onuseframe, onupscale, onuseaudio, ondelete, onstar, onlead: onLead }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined, point, lead));
+  // View is in the panel's head where a click on the picture doesn't open the viewer: in Select mode, on the preview and in the strip.
+  const viewInPanel = $derived(onpreview !== undefined && !audioPlayer && (selectMode || density !== 'card'));
+  // The panel the ⋯, a right-click and a press and hold open: built when it is read, which is when the menu opens.
+  const panel = $derived(assetPanel(
+    asset,
+    { onreuse, onreference, onextend, onedit, onadjust: onadjust ? (picked) => onadjust(picked, moreButton) : undefined, onuseframe, onupscale, onuseaudio, ondelete, onstar },
+    { deleting, useAs, openMove: onmove ? () => { moveOpen = true; } : undefined, point, onview: viewInPanel ? viewFromPanel : undefined }
+  ));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   const thumbnail = $derived(asset.thumbnail_url || asset.url);
@@ -127,14 +128,8 @@
     onpreview?.(asset, trigger);
   }
 
-  function onLead(picked: MenuLead): void {
-    if (picked === 'view') {
-      if (moreButton) preview(moreButton);
-      return;
-    }
-    onstartselect?.(asset);
-    // The menu's item had focus and goes with it: the tile's media takes it back.
-    void tick().then(() => mediaButton?.focus());
+  function viewFromPanel(): void {
+    if (moreButton) preview(moreButton);
   }
 
   // In Select mode the media toggles; outside it, it opens the viewer.
@@ -206,7 +201,7 @@
 >
   {#snippet audioCover()}
     <span class="audio-cover" class:bare data-bare={bare} data-testid="audio-cover">
-      <span class="audio-icon" aria-hidden="true"><Icon name={kindIcon} size={32} /></span>
+      <span class="audio-icon" aria-hidden="true"><Icon name={kindOf} size={32} /></span>
       {#if !bare}<span class="audio-words" data-testid="audio-words"><span class="audio-text">{words}</span></span>{/if}
       <Waveform class="audio-line" {peaks} />
     </span>
@@ -261,7 +256,6 @@
   {:else}
     <button
       type="button"
-      bind:this={mediaButton}
       class="asset-tile-media"
       aria-label="{selectMode ? 'Select' : 'View'} {asset.filename}"
       aria-pressed={selectMode ? selected : undefined}
@@ -334,7 +328,7 @@
   {#if density === 'card'}
     <div class="asset-tile-foot ui-media-foot" class:has-star={onstar}>
       <div class="foot-text">
-        <p class="truncate text-ui font-medium text-text-secondary">{asset.filename}</p>
+        <FileName name={asset.filename} class="text-ui font-medium text-text-secondary" />
         <p class="mt-0.5 truncate text-meta text-text-muted">{#if isAudio}{audioFoot(asset, new Date(asset.created_at).toLocaleDateString(), showProject)}{:else}{showProject && asset.project !== null ? asset.project : asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}{/if}</p>
       </div>
       {#if onstar}
@@ -353,11 +347,11 @@
   {/if}
 
   {#if contextAt}<span bind:this={contextAnchorEl} class="asset-tile-context-anchor" style:left="{contextAt.x}px" style:top="{contextAt.y}px" aria-hidden="true"></span>{/if}
-  <ActionMenu
+  <AssetPanelMenu
     open={menuOpen}
     anchor={contextAt ? contextAnchorEl : moreButton}
-    items={menuItems}
-    label="Actions for {asset.filename}"
+    {asset}
+    {panel}
     onclose={() => { menuOpen = false; contextAt = null; }}
   />
   {#if onmove && moveOpen}
@@ -489,11 +483,12 @@
     .audio-text { -webkit-line-clamp: 3; line-clamp: 3; }
   }
 
-  .asset-tile-check { position: absolute; top: 8px; left: 8px; z-index: 2; width: 16px; height: 16px; border-radius: 4px; }
+  /* The box is centred on the corner buttons' line: 12px in with a mouse, 10px with a finger. */
+  .asset-tile-check { position: absolute; top: 12px; left: 12px; z-index: 2; width: 16px; height: 16px; border-radius: 4px; }
   /* A finger gets the touch checkbox size and a 44px target: the box sits in the top-left corner, so the extra reach only
      covers the corner of the media button, never its middle. */
   @media (pointer: coarse) {
-    .asset-tile-check { width: 20px; height: 20px; }
+    .asset-tile-check { top: 10px; left: 10px; width: 20px; height: 20px; }
     .asset-tile-check::before { content: ''; position: absolute; inset: -12px; }
   }
   /* The checkbox is a way into Select mode: with a mouse it shows on hover or focus (and while the mode is on), on touch
@@ -509,10 +504,10 @@
   @media (hover: hover) { .asset-tile[data-select-mode='true'][data-selected='false']:hover { box-shadow: 0 0 0 2px var(--color-primary-border); } }
 
   /* The star. In the caption row it sits at the right end, beside the filename and date; 28px (32px on touch) with a 44px
-     hit area. With a mouse it shows on hover or focus and stays while starred; on touch only a starred one shows, and a
-     tap unstars it. */
+     hit area. With a mouse it shows on hover or focus and stays while starred; on touch it always shows, an outline in the
+     muted text colour until it is starred, so starring is one tap. */
   .asset-tile-star { position: relative; }
-  .asset-tile-foot.has-star { display: flex; align-items: center; gap: 6px; padding-right: 6px; }
+  .asset-tile-foot.has-star { display: flex; align-items: center; gap: var(--sp-4); padding-right: var(--sp-4); }
   .foot-text { min-width: 0; flex: 1; }
   .asset-tile-foot > .asset-tile-star {
     display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm);
@@ -528,7 +523,7 @@
     .asset-tile-foot > .asset-tile-star:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
     .asset-tile-foot > .asset-tile-star[aria-pressed='true']:hover { color: var(--color-star); }
   }
-  @media (hover: none) { .asset-tile-foot > .asset-tile-star:not([aria-pressed='true']) { display: none; } }
+  @media (hover: none) { .asset-tile-foot > .asset-tile-star { opacity: 1; } }
   @media (pointer: coarse) {
     .asset-tile-foot > .asset-tile-star::before { content: ''; position: absolute; inset: -6px; }
     .asset-tile-foot > .asset-tile-star { width: 32px; height: 32px; }

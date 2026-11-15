@@ -13,7 +13,7 @@
     emptyIcon?: IconName;
   }
 
-  let { file, path, alt, emptyIcon = 'reference' }: Props = $props();
+  let { file, path, alt, emptyIcon = 'image' }: Props = $props();
 
   let fileUrl = $state<string | null>(null);
 

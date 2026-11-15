@@ -28,4 +28,13 @@ export function dismissToast(id: string): void {
   if (idx >= 0) toasts.splice(idx, 1);
 }
 
+/**
+ * Say why an action is off, the one rule for every menu, sheet, bar and dock: a mouse reads the tooltip, so only a finger, a pen or a
+ * key (any other *pointerType*) gets the reason as a toast. Where the toast sits is the page's to say (`--toast-bottom`).
+ */
+export function explainOff(reason: string | undefined, pointerType: string): void {
+  if (!reason || pointerType === 'mouse') return;
+  addToast(reason, 'info');
+}
+
 export { toasts };

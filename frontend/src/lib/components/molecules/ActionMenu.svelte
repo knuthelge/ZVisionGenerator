@@ -35,20 +35,42 @@
     | ActionMenuItem
     /** A row that shows or hides its items in place; the menu stays open. The state resets each time the menu opens. */
     | { kind: 'group'; id: string; label: string; items: (ActionMenuItem | { kind: 'heading'; label: string })[]; defaultOpen?: boolean };
+
+  /** What a menu hands the content it draws itself (`content`): how to pick an item, and where it is drawn. */
+  export interface MenuContext {
+    /** Pick an item: a greyed one is explained and the menu stays open; any other closes the menu and runs it. */
+    select: (entry: ActionMenuItem, event: MouseEvent) => void;
+    /** Drawn in a sheet (a phone, or a phone held sideways) rather than a popover. */
+    sheet: boolean;
+    /** Drawn in a sheet held sideways: the content draws its own head, with Close. */
+    wide: boolean;
+    close: () => void;
+  }
 </script>
 
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import { popover, type PopoverAlign, type PopoverSide } from '$lib/actions/popover';
   import Icon from '../atoms/Icon.svelte';
   import { layout } from '$lib/state/layoutMode.svelte';
-  import { addToast } from '$lib/state/toasts.svelte';
+  import { dockHeight } from '$lib/actions/dockHeight';
+  import { explainOff } from '$lib/state/toasts.svelte';
   import Sheet from './Sheet.svelte';
 
   interface Props {
     open: boolean;
     anchor: HTMLElement | null;
-    items: ActionMenuEntry[];
+    items?: ActionMenuEntry[];
     label: string;
+    /**
+     * Draws the menu's body itself, in place of `items`: the file panel. It gets `select` for its items, which
+     * carry `role="menuitem"` (or `menuitemcheckbox`) so the keys reach them. A phone shows it in a sheet.
+     */
+    content?: Snippet<[MenuContext]>;
+    /** With `content` in a sheet: the sheet's head, in place of the label. */
+    head?: Snippet;
+    /** With `content` in a sheet: controls before Close. */
+    headActions?: Snippet<[MenuContext]>;
     /** Which edge of the anchor the menu lines up with. */
     align?: PopoverAlign;
     /** Which side of the anchor it opens on when there is room; below by default. */
@@ -60,7 +82,7 @@
     onclose: () => void;
   }
 
-  let { open, anchor, items, label, align = 'end', side = 'below', returnFocus = null, onkeydown, onclose }: Props = $props();
+  let { open, anchor, items = [], label, content, head, headActions, align = 'end', side = 'below', returnFocus = null, onkeydown, onclose }: Props = $props();
 
   let menuEl = $state<HTMLDivElement | null>(null);
   // Groups the person toggled since the menu opened; a group not listed here follows its `defaultOpen`.
@@ -85,21 +107,28 @@
     return menuItems().find((item) => item.getAttribute('aria-disabled') !== 'true');
   }
 
+  /** The item a menu with its own content opens on (Reuse settings), else the first that is not greyed. */
+  function initialItem(): HTMLElement | undefined {
+    return menuEl?.querySelector<HTMLElement>('[data-initial]:not([aria-disabled="true"])') ?? firstEnabledItem() ?? menuItems()[0];
+  }
+
   /**
    * Say why a greyed item is off: a mouse reads the tooltip, so only a finger, a pen or a key gets the reason as a toast. The menu
    * stays open. On a phone the toast sits above the sheet, so it never covers the menu.
    */
   function explain(entry: ActionMenuItem, event: MouseEvent): void {
-    if (!entry.title || (event as PointerEvent).pointerType === 'mouse') return;
-    if (layout.compact && menuEl) document.documentElement.style.setProperty('--toast-bottom', `${window.innerHeight - menuEl.getBoundingClientRect().top + 12}px`);
-    addToast(entry.title, 'info');
+    explainOff(entry.title, (event as PointerEvent).pointerType);
   }
 
-  // The toast's place above the sheet lasts as long as the menu is open.
+  // A phone's sheet publishes its height while it is open, so a toast sits above it (the rule at the foot of this file).
   $effect(() => {
-    if (!open) return;
-    return () => document.documentElement.style.removeProperty('--toast-bottom');
+    if (!open || !layout.compact || !menuEl) return;
+    const published = dockHeight(menuEl, '--menu-sheet');
+    return () => published.destroy();
   });
+
+  // Held sideways, a sheet spans the screen only for content that draws its own head (the file panel); a list of choices keeps the sheet's own title and Close.
+  const wide = $derived(layout.short && head !== undefined);
 
   function select(entry: ActionMenuItem, event: MouseEvent): void {
     if (entry.disabled) {
@@ -119,6 +148,13 @@
     else if (event.key === 'ArrowUp') { event.preventDefault(); list[(index - 1 + list.length) % list.length]?.focus(); }
     else if (event.key === 'Home') { event.preventDefault(); list[0]?.focus(); }
     else if (event.key === 'End') { event.preventDefault(); list[list.length - 1]?.focus(); }
+    else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && list[index]?.dataset.row) {
+      // Left and Right stay in the row of cells they are in; Up and Down walk every item in reading order.
+      event.preventDefault();
+      const row = list.filter((item) => item.dataset.row === list[index].dataset.row);
+      const at = row.indexOf(list[index]);
+      row[Math.min(Math.max(at + (event.key === 'ArrowRight' ? 1 : -1), 0), row.length - 1)]?.focus();
+    }
     else onkeydown?.(event);
   }
 
@@ -126,7 +162,7 @@
   $effect(() => {
     if (!open || !menuEl) return;
     if (layout.compact) menuEl.focus();
-    else (firstEnabledItem() ?? menuItems()[0])?.focus();
+    else initialItem()?.focus();
   });
 
 </script>
@@ -209,7 +245,20 @@
     {/each}
 {/snippet}
 
-{#if layout.compact}
+{#snippet headControls()}
+  {@render headActions?.({ select, sheet: true, wide, close: onclose })}
+{/snippet}
+
+{#snippet drawn()}
+  {@render content?.({ select, sheet: layout.compact, wide, close: onclose })}
+{/snippet}
+
+{#if layout.compact && content}
+  <!-- A body of its own (the file panel) in a sheet: it lays out and scrolls itself, with its foot pinned. Held sideways the sheet spans the screen. -->
+  <Sheet {open} title={label} role="menu" layer="menu" bare {head} headActions={headActions && headControls} {wide} bind:panel={menuEl} onkeydown={onKeydown} onclose={() => { if (open) onclose(); }}>
+    {@render drawn()}
+  </Sheet>
+{:else if layout.compact}
   <!-- On a phone a menu is a sheet from the bottom edge with finger-sized rows; the same items, the same keys. -->
   <Sheet {open} title={label} role="menu" layer="menu" bind:panel={menuEl} onkeydown={onKeydown} onclose={() => { if (open) onclose(); }}>
     <div class="action-sheet-body" data-testid="action-sheet">
@@ -218,23 +267,31 @@
   </Sheet>
 {:else if open}
   <div
-    use:popover={{ anchor, align, side, onclose, returnFocus }}
+    use:popover={{ anchor, align, side, onclose, returnFocus, room: content !== undefined }}
     bind:this={menuEl}
     class="action-menu ui-overlay"
+    class:action-panel={content !== undefined}
     role="menu"
     tabindex="-1"
     aria-label={label}
     onkeydown={onKeydown}
   >
-    {@render entries()}
+    {#if content}{@render drawn()}{:else}{@render entries()}{/if}
   </div>
 {/if}
 
 <style>
+  /* Toasts sit above an open menu sheet, but never so high that one over a sheet that is nearly full height leaves the screen. */
+  :global(:root:has(body > .sheet-root[data-layer='menu'][data-shown='true'])) {
+    --toast-bottom: min(calc(var(--menu-sheet, 0px) + 12px), calc(100dvh - env(safe-area-inset-top, 0px) - 96px));
+  }
   .action-sheet-body { padding: 4px max(12px, env(safe-area-inset-right, 0px)) 12px max(12px, env(safe-area-inset-left, 0px)); }
   .action-sheet-body .action-menu-item { min-height: 48px; padding: 0 12px; font-size: 15px; }
   .action-sheet-body .action-menu-heading { padding: 6px 12px 8px; }
   .action-menu { z-index: var(--z-menu); min-width: 200px; max-height: min(60vh, 22rem); overflow-y: auto; padding: 4px; }
+  /* The file panel is as tall as its content, up to the room its anchor leaves (the popover action sets that cap); it scrolls its own body. */
+  .action-menu.action-panel { display: flex; width: 360px; max-height: none; flex-direction: column; overflow: hidden; padding: var(--sp-8); }
+  @media (pointer: coarse) { .action-menu.action-panel { width: 400px; } }
   .action-menu-heading { padding: 6px 8px 3px; }
   .action-menu-note { max-width: 15rem; padding: 6px 8px 4px; font-size: var(--text-meta); line-height: 1.4; color: var(--color-text-muted); }
   .action-menu-note.error { color: var(--color-error); }

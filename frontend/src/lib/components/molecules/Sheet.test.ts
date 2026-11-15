@@ -67,4 +67,18 @@ describe('Sheet', () => {
     flushSync();
     expect(onclose).toHaveBeenCalledTimes(2);
   });
+
+  it('draws its own head content in place of the title, with Close still at the right', () => {
+    app = flushSync(() => mount(SheetHost, { target, props: { open: true, ownHead: true } }));
+    const head = document.querySelector('[data-testid="sheet"] .sheet-head') as HTMLElement;
+    expect(head.querySelector('[data-testid="own-head"]')).not.toBeNull();
+    expect(head.querySelector('h2')).toBeNull();
+    expect(head.querySelector('button[aria-label="Close"]')).not.toBeNull();
+  });
+
+  it('has no head row when wide, leaving the content to draw its own, and keeps the grab bar', () => {
+    app = flushSync(() => mount(SheetHost, { target, props: { open: true, wide: true } }));
+    expect(document.querySelector('[data-testid="sheet"] .sheet-head')).toBeNull();
+    expect(document.querySelector('[data-testid="sheet"] .ui-sheet-grab')).not.toBeNull();
+  });
 });

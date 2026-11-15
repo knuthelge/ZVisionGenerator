@@ -131,8 +131,8 @@ async function finishJob(outputs: GalleryAsset[]): Promise<void> {
 }
 
 const editor = (): HTMLElement | null => document.querySelector('[role="dialog"][aria-label^="Adjust "]');
-const shown = (): string | null | undefined => document.querySelector('#asset-viewer-title')?.textContent;
-const position = (): string | null | undefined => document.querySelector('.viewer-title small')?.textContent;
+const shown = (): string | null | undefined => document.querySelector('#asset-viewer-title .file-name')?.getAttribute('title');
+const position = (): string | null | undefined => document.querySelector('.vb-name small')?.textContent;
 const viewer = (): HTMLElement | null => document.querySelector('[data-testid="asset-viewer"]');
 const press = (key: string): void => {
   document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
@@ -179,7 +179,7 @@ describe('WorkspacePage adjust', () => {
       await adjustFrom(strip(), 'b.png');
 
       expect(shown()).toBe('b.png');
-      expect(document.querySelector('.viewer-title small')?.textContent).toContain('Gallery');
+      expect(document.querySelector('.vb-name small')?.textContent).toContain('Gallery');
       expect(editor()!.getAttribute('aria-label')).toBe('Adjust b.png');
 
       press('Escape');
@@ -232,7 +232,7 @@ describe('WorkspacePage adjust', () => {
       await adjustFrom(target.querySelector('.completed-output-grid')!, 'b.png');
 
       expect(shown()).toBe('b.png');
-      expect(document.querySelector('.viewer-title small')?.textContent).toContain('This run');
+      expect(document.querySelector('.vb-name small')?.textContent).toContain('This run');
       expect(editor()).not.toBeNull();
     });
 
@@ -247,7 +247,7 @@ describe('WorkspacePage adjust', () => {
       expect(editor()).toBeNull();
       expect(shown()).toBe('b_adjusted.png');
       expect(position()).toContain('1 of 3');
-      expect(document.querySelector('.viewer-title small')?.textContent).not.toContain('This run');
+      expect(document.querySelector('.vb-name small')?.textContent).not.toContain('This run');
     });
 
     it('offers Adjust from the viewer of a completed output, and A opens the editor', async () => {

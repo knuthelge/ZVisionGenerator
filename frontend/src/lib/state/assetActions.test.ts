@@ -291,7 +291,7 @@ describe('Use as for audio takes', () => {
 
   it('enables the audio track on a video model that follows one, with its hint, and says why on one that cannot', () => {
     const ok = useAsState(context(), state({ workflow: 'txt2vid', model: 'ltx-8' }));
-    expect(ok.audio_track).toEqual({ disabled: false, hint: 'Video tab, from 0 s' });
+    expect(ok.audio_track?.disabled).toBe(false);
 
     const no = useAsState(context(), state({ workflow: 'txt2vid', model: 'h3' }));
     expect(no.audio_track).toEqual({ disabled: true, hint: "MiniMax H3 can't follow an audio track" });
@@ -299,7 +299,7 @@ describe('Use as for audio takes', () => {
 
   it('enables the voice with a speech model that clones one, and takes its voice limit', () => {
     const result = useAsState(context(), state());
-    expect(result.voice).toEqual({ disabled: false, hint: 'Speech, text filled in' });
+    expect(result.voice?.disabled).toBe(false);
     expect(result.save_voice).toEqual({ disabled: false, hint: 'Keep it in your voices' });
     expect(result.voiceMaxSeconds).toBe(30);
     expect(result.voiceModel).toBe('qwen3_tts');

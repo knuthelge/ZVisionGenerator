@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
 import { modelsOf } from '$lib/state/workflowModels';
-import { assetMenuEntries } from '$lib/components/molecules/assetMenu';
+import { assetPanel } from '$lib/components/molecules/assetMenu';
 import { viewerActionFor, viewerShortcutsFor } from '$lib/components/molecules/viewerShortcuts';
 import type { GalleryAsset, WorkspaceContext } from '$lib/types';
 
@@ -133,7 +133,7 @@ describe('the viewer and menu action', () => {
   const video = makeAsset({ file_path: '/out/a.mp4', media_type: 'video' });
 
   it('lists Edit in the menu of an image, and only when there is a handler', () => {
-    const ids = (asset: GalleryAsset, onedit?: () => void) => assetMenuEntries(asset, { onedit }).flatMap((entry) => (entry.kind === 'item' ? [entry.id] : []));
+    const ids = (asset: GalleryAsset, onedit?: () => void) => assetPanel(asset, { onedit }).make.map((item) => item.id);
     expect(ids(image, () => {})).toContain('edit');
     expect(ids(image)).not.toContain('edit');
     expect(ids(video, () => {})).not.toContain('edit');

@@ -1,194 +1,246 @@
 import {
   AUDIO_TRACK_HINT, SAVE_VOICE_HINT, VOICE_HINT, canEdit, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, canUseFrame, plainUpscaleMethod, upscaleFactors, voiceTooLongReason,
-  type AssetActionHandlers, type MenuLead, type ReferenceTarget, type UseAsState,
+  type AssetActionHandlers, type ReferenceTarget, type UseAsState,
 } from '$lib/state/assetActions';
 import { canAdjust } from '$lib/state/adjustState';
-import type { FramePoint } from '$lib/state/framePoint';
+import { kindFact } from '$lib/state/audioAsset';
+import { formatClock } from '$lib/state/clock';
+import { copyPrompt, copyableText } from '$lib/state/copyPrompt';
+import { pointLabel, type FramePoint } from '$lib/state/framePoint';
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
-import type { ActionMenuEntry } from './ActionMenu.svelte';
+import type { ActionMenuItem } from './ActionMenu.svelte';
+import { formatSeconds } from './assetDetails';
 import { extendEntry, frameEntries } from './frameMenu';
 
+/** One action of the file panel: a choice (two lines, its name and what it makes) or a file cell (an icon over its label). */
+export interface PanelItem extends ActionMenuItem {
+  /** The teal primary: Reuse settings. */
+  primary?: boolean;
+  /** The only choice of its section: it spans the whole row. */
+  span?: boolean;
+  /** A warning on the name, in amber: `high memory`, `very slow`. */
+  warn?: string;
+  /** The accessible name, where the label and hint read together are not enough. */
+  name?: string;
+}
+
+/** A titled group of choices: Use as, Use frame at 3.2 s as, Upscale. */
+export interface PanelSection {
+  id: 'use-as' | 'frames' | 'upscale';
+  label: string;
+  items: PanelItem[];
+}
+
+/** What the file panel shows for one file, in the order it shows it. */
+export interface AssetPanel {
+  /** The head's controls: View where a click on the picture doesn't open the viewer, and the star. */
+  head: { view: PanelItem | null; star: PanelItem | null };
+  /** Reuse settings, then the kind's own way to make something new: Edit, Extend or Audio track. */
+  make: PanelItem[];
+  sections: PanelSection[];
+  /** Download, Move, Copy prompt, then Delete. */
+  file: PanelItem[];
+}
+
+export interface PanelOptions {
+  deleting?: boolean;
+  /** What the Use as choices show: which targets are disabled, and their reasons. */
+  useAs?: UseAsState;
+  /** Opens the Move to project list; Move is offered when it is given. */
+  openMove?: () => void;
+  /**
+   * The frame a paused video is on: Extend then reads `Extend from 3.2 s` (or is refused with the reason when the frame is
+   * too early), and the frame's own choices, First frame and Last frame, join the panel. No point, no frame choices.
+   */
+  point?: FramePoint | null;
+  /** Opens the viewer; View is in the head when it is given. */
+  onview?: () => void;
+}
+
+const REUSE_HINT = 'Load its settings';
+const REUSE_UNAVAILABLE = 'Reusable settings unavailable';
+const EDIT_HINT = 'Paint over part of it';
+const ADJUST_HINT = 'Crop, light and colour';
+const NO_PROMPT = 'No prompt recorded';
+
 /**
- * Build the actions for an asset's menu: reuse, use as, extend, upscale, move, star, download, delete.
+ * Build the file panel of an asset: the head's controls, Make (Reuse settings and the kind's own action), the choices
+ * (Use as, the paused frame, Upscale) and the file row (Download, Move, Copy prompt, Delete).
  *
- * `openMove` opens the Move to project list; the Move item is offered when it is given.
- *
- * *lead* is the item that comes first, then a separator: Select (the Gallery's tiles outside Select mode) or View (inside
- * it). It calls `handlers.onlead`. No lead, no item.
- *
- * Reuse follows the lead when offered: on a touch screen a grid tile shows only the menu button, so the menu is where the
- * tile's quick action lives.
- *
- * Star or Unstar comes after Move, when `onstar` is given; the label flips with the asset's state.
- *
- * *point* is the frame a paused video is on: Use as then offers it as a first or last frame, and Extend reads
- * `Extend from 3.2 s`, or is refused with the reason when the frame is too early; the rows are `frameMenu`'s, as in the
- * menu of the player's time chip. A menu without a player has no point.
+ * An action whose handler is absent is left out. A choice the model it opens on can't take stays, greyed, with its reason as
+ * its hint; the reason is also its tooltip, which a touch shows as a toast. Move is offered when `openMove` is given.
  */
-export function assetMenuEntries(
-  asset: GalleryAsset,
-  handlers: AssetActionHandlers,
-  deleting = false,
-  useAs: UseAsState = {},
-  openMove?: () => void,
-  point: FramePoint | null = null,
-  lead: MenuLead | null = null
-): ActionMenuEntry[] {
-  const entries: ActionMenuEntry[] = [];
-  const { onreuse, onreference, onextend, onedit, onadjust, onuseframe, onupscale, onuseaudio, ondelete, onstar, onlead } = handlers;
-  if (lead) {
-    entries.push(
-      { kind: 'item', id: lead, label: lead === 'select' ? 'Select' : 'View', onselect: () => onlead?.(lead) },
-      { kind: 'separator' }
-    );
-  }
+export function assetPanel(asset: GalleryAsset, handlers: AssetActionHandlers, options: PanelOptions = {}): AssetPanel {
+  const { onreuse, onreference, onextend, onedit, onadjust, onuseframe, onupscale, onuseaudio, ondelete, onstar } = handlers;
+  const { deleting = false, useAs = {}, openMove, point = null, onview } = options;
+
+  const make: PanelItem[] = [];
   if (onreuse) {
     const reusable = asset.has_reusable_config === true;
-    entries.push(
-      { kind: 'item', id: 'reuse', label: 'Reuse settings', disabled: !reusable, title: reusable ? undefined : 'Reusable settings unavailable', onselect: () => onreuse(asset) },
-      { kind: 'separator' }
-    );
+    make.push({
+      kind: 'item', id: 'reuse', label: 'Reuse settings', icon: 'reuse', primary: true, hint: reusable ? REUSE_HINT : REUSE_UNAVAILABLE, disabled: !reusable,
+      title: reusable ? undefined : REUSE_UNAVAILABLE, onselect: () => onreuse(asset),
+    });
   }
-  if (onreference && canUseAsReference(asset)) {
-    entries.push(
-      { kind: 'heading', label: 'Use as' },
-      ...referenceEntries(asset, onreference, useAs),
-      { kind: 'separator' }
-    );
-  }
-  if (onuseaudio && asset.media_type === 'audio') {
-    const audioItems = audioUseEntries(asset, onuseaudio, useAs);
-    if (audioItems.length > 0) entries.push({ kind: 'heading', label: 'Use as' }, ...audioItems, { kind: 'separator' });
-  }
-  if (onuseframe && canUseFrame(asset, point) && point) {
-    entries.push({ kind: 'heading', label: 'Use as' }, ...frameEntries(asset, point, onuseframe, useAs), { kind: 'separator' });
-  }
-  // A video that offers extending lists it, disabled with the reason when it can't be extended right now. On a paused
-  // frame it continues from there, and a frame too early says why it can't.
   const extend = extendEntry(asset, point, onextend);
-  if (extend) entries.push(extend, { kind: 'separator' });
-  // An image can be edited: its paint and prompt change part of it, or give it more room. It can also be adjusted: cropped,
-  // rotated, flipped, or changed in light and colour.
-  const editable = Boolean(onedit && canEdit(asset));
-  const adjustable = Boolean(onadjust && canAdjust(asset));
-  if (editable) entries.push({ kind: 'item', id: 'edit', label: 'Edit', icon: 'edit', onselect: () => onedit?.(asset) });
-  if (adjustable) entries.push({ kind: 'item', id: 'adjust', label: 'Adjust', icon: 'sliders', onselect: () => onadjust?.(asset) });
-  if (editable || adjustable) entries.push({ kind: 'separator' });
-  const upscaleItems = onupscale ? upscaleEntries(asset, onupscale) : [];
-  if (upscaleItems.length > 0) {
-    entries.push({ kind: 'heading', label: 'Upscale' }, ...upscaleItems, { kind: 'separator' });
+  if (extend) make.push(extend);
+  if (onedit && canEdit(asset)) make.push({ kind: 'item', id: 'edit', label: 'Edit', icon: 'edit', hint: EDIT_HINT, onselect: () => onedit(asset) });
+  // An image can also be adjusted by hand: cropped, rotated, flipped, or changed in light and colour.
+  if (onadjust && canAdjust(asset)) make.push({ kind: 'item', id: 'adjust', label: 'Adjust', icon: 'sliders', hint: ADJUST_HINT, onselect: () => onadjust(asset) });
+  if (onuseaudio && asset.media_type === 'audio') {
+    const track = audioTrackItem(asset, onuseaudio, useAs);
+    if (track) make.push(track);
   }
-  // Move opens the project list, which the menu's owner holds: this menu closes first, so it cannot host the list.
-  if (openMove) entries.push({ kind: 'item', id: 'move', label: 'Move to project…', disabled: deleting, onselect: openMove });
-  if (onstar) {
-    const starred = asset.starred === true;
-    entries.push({ kind: 'item', id: 'star', label: starred ? 'Unstar' : 'Star', onselect: () => onstar(asset, !starred) });
+
+  const sections: PanelSection[] = [];
+  const useAsItems = [
+    ...(onreference && canUseAsReference(asset) ? referenceItems(asset, onreference, useAs) : []),
+    ...(onuseaudio && asset.media_type === 'audio' ? voiceItems(asset, onuseaudio, useAs) : []),
+  ];
+  if (useAsItems.length > 0) sections.push({ id: 'use-as', label: 'Use as', items: useAsItems });
+  if (onuseframe && point && canUseFrame(asset, point)) {
+    sections.push({ id: 'frames', label: `Use frame at ${pointLabel(point)} as`, items: frameEntries(asset, point, onuseframe, useAs) });
   }
-  entries.push({ kind: 'item', id: 'download', label: 'Download', href: asset.url, download: asset.filename });
-  if (ondelete) {
-    entries.push(
-      { kind: 'separator' },
-      { kind: 'item', id: 'delete', label: deleting ? 'Deleting…' : 'Delete', danger: true, disabled: deleting, onselect: () => ondelete(asset) }
-    );
+  const upscale = onupscale ? upscaleItems(asset, onupscale) : [];
+  if (upscale.length > 0) sections.push({ id: 'upscale', label: 'Upscale', items: upscale });
+
+  const starred = asset.starred === true;
+  const text = copyableText(asset);
+  const file: PanelItem[] = [{ kind: 'item', id: 'download', label: 'Download', icon: 'download', href: asset.url, download: asset.filename }];
+  if (openMove) file.push({ kind: 'item', id: 'move', label: 'Move', icon: 'folder-move', disabled: deleting, onselect: openMove });
+  file.push({ kind: 'item', id: 'copy-prompt', label: 'Copy prompt', icon: 'copy', disabled: text === '', title: text === '' ? NO_PROMPT : undefined, onselect: () => void copyPrompt(text) });
+  if (ondelete) file.push({ kind: 'item', id: 'delete', label: deleting ? 'Deleting…' : 'Delete', icon: 'trash', danger: true, disabled: deleting, onselect: () => ondelete(asset) });
+
+  return {
+    head: {
+      view: onview ? { kind: 'item', id: 'view', label: 'View', icon: 'expand', onselect: onview } : null,
+      star: onstar ? { kind: 'item', id: 'star', label: starred ? 'Unstar' : 'Star', icon: 'star', checked: starred, onselect: () => onstar(asset, !starred) } : null,
+    },
+    make,
+    sections,
+    file,
+  };
+}
+
+/** Describe a file in the panel's head: its kind, its size or length. `Image · 1216 × 832`, `Video · 768 × 448 · 5.0 s`, `Speech · 0:06`. */
+export function assetKindLine(asset: GalleryAsset): string {
+  const size = asset.width && asset.height ? `${asset.width} × ${asset.height}` : null;
+  if (asset.media_type === 'audio') {
+    return [kindFact(asset), asset.duration != null ? formatClock(asset.duration) : null].filter(Boolean).join(' · ');
   }
-  return entries;
+  if (asset.media_type === 'video') return ['Video', size, asset.duration != null ? formatSeconds(asset.duration) : null].filter(Boolean).join(' · ');
+  return ['Image', size].filter(Boolean).join(' · ');
 }
 
-/**
- * Build the upscale items: the plain ones where offered (SeedVR2, or LTX for a video on macOS: `2× → 1664×2432`), a
- * separator, then the creative ones (`2× creative → 1664×2432`). A plain item is never disabled: over the memory estimate
- * it is marked and explained in its tooltip. A creative factor over a limit is disabled with its reason.
- */
-export function upscaleEntries(asset: GalleryAsset, onupscale: NonNullable<AssetActionHandlers['onupscale']>): ActionMenuEntry[] {
-  const method = plainUpscaleMethod(asset);
-  const block = method === 'seedvr2' ? asset.upscale?.seedvr2 : method === 'ltx' ? asset.upscale?.ltx : null;
-  const plain = block
-    ? block.options.map((option) => ({
-        kind: 'item' as const,
-        id: `upscale-${method}-${option.factor}`,
-        label: `${sizeLabel(option, '')}${warningMarker(option)}`,
-        title: plainTitle(option, block.download_size_label),
-        onselect: () => onupscale(asset, option.factor, method),
-      }))
-    : [];
-  const creative = upscaleFactors(asset).map((option) => ({
-    kind: 'item' as const,
-    id: `upscale-creative-${option.factor}`,
-    label: sizeLabel(option, ' creative'),
-    disabled: !option.allowed,
-    title: option.allowed ? undefined : (option.reason ?? undefined),
-    onselect: () => onupscale(asset, option.factor, 'creative'),
-  }));
-  return plain.length > 0 && creative.length > 0 ? [...plain, { kind: 'separator' as const }, ...creative] : [...plain, ...creative];
-}
-
-const HIGH_MEMORY_MARKER = ' · high memory';
-const ONE_FRAME_MARKER = ' · very slow';
-
-/** The label suffix for a warned plain option: what the warning is about, from its code; none without a warning. */
-function warningMarker(option: AssetUpscaleFactor): string {
-  if (!option.warning) return '';
-  return option.warning_code === 'one_frame_batch' ? ONE_FRAME_MARKER : HIGH_MEMORY_MARKER;
-}
-
-function sizeLabel(option: AssetUpscaleFactor, suffix: string): string {
-  return `${option.factor}×${suffix} → ${option.width}×${option.height}`;
-}
-
-/** The tooltip of a plain item: its memory warning, then the first-use download size while the model is not on disk. */
-function plainTitle(option: AssetUpscaleFactor, downloadSizeLabel: string | null): string | undefined {
-  const lines = [option.warning, downloadSizeLabel ? `First use downloads ${downloadSizeLabel}` : null].filter(Boolean);
-  return lines.length > 0 ? lines.join('\n') : undefined;
-}
+const sentence = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
 const REFERENCE_TARGETS: readonly ReferenceTarget[] = ['image', 'reference', 'video', 'last'];
-const REFERENCE_LABELS: Record<ReferenceTarget, string> = { image: 'Start image', reference: 'Reference', video: 'First frame', last: 'Last frame' };
+const REFERENCE_CHOICES: Record<ReferenceTarget, { label: string; icon: NonNullable<PanelItem['icon']>; hint: string }> = {
+  image: { label: 'Start image', icon: 'image', hint: 'A new image from it' },
+  reference: { label: 'Reference', icon: 'image-plus', hint: 'Guide a new image' },
+  video: { label: 'First frame', icon: 'frame-first', hint: 'Start a new clip on it' },
+  last: { label: 'Last frame', icon: 'frame-last', hint: 'End a new clip on it' },
+};
 
 /**
- * Build the "Use as" items: the start image, a reference, a video's first frame and its last frame. A target the model it
- * opens on can't use is disabled; its hint (or reason) shows beside the label and as the tooltip.
+ * Build the Use as choices of an image: the start image, a reference, a video's first frame and its last frame. A target the
+ * model it opens on can't use is greyed, and its reason is its hint. A reference adds which slot it fills (`as image 1`).
  */
-export function referenceEntries(
-  asset: GalleryAsset,
-  onreference: NonNullable<AssetActionHandlers['onreference']>,
-  useAs: UseAsState = {}
-): ActionMenuEntry[] {
+export function referenceItems(asset: GalleryAsset, onreference: NonNullable<AssetActionHandlers['onreference']>, useAs: UseAsState = {}): PanelItem[] {
   return REFERENCE_TARGETS.map((target) => {
     const state = useAs[target];
     const disabled = state?.disabled === true;
+    const { label, icon, hint } = REFERENCE_CHOICES[target];
+    const shown = disabled ? state?.hint : state?.hint ? `${hint} · ${state.hint}` : hint;
     return {
       kind: 'item' as const,
       id: `reference-${target === 'last' ? 'last-frame' : target}`,
-      label: REFERENCE_LABELS[target],
-      hint: state?.hint,
-      disabled,
+      label, icon, hint: shown, disabled,
       title: disabled ? state?.hint : undefined,
+      // A built-in hint reads as part of the sentence; a reason comes from the model and is passed through as it is.
+      name: `Use as ${sentence(label)}, ${disabled ? (shown ?? hint) : sentence(shown ?? hint)}`,
       onselect: () => onreference(asset, target),
     };
   });
 }
 
 /**
- * Build the "Use as" items of an audio take: the Video tab's audio track, and for a speech take the Speech tab's voice and a
- * saved voice. The hint shows beside the label of an enabled item. A voice item the machine can't take is greyed with no hint:
- * its reason is the tooltip, and a touch shows it as a toast. A speech take longer than the speech model's voice limit is
- * greyed with "Use a take of <limit> s or less as a voice".
+ * Build the Audio track choice of an audio take: the Video tab's audio track, the take's way to make something new. It is
+ * greyed, with its reason, where the Video model can't follow a track; null for a take that is not a file on the host.
  */
-export function audioUseEntries(asset: GalleryAsset, onuseaudio: NonNullable<AssetActionHandlers['onuseaudio']>, useAs: UseAsState = {}): ActionMenuEntry[] {
-  const entries: ActionMenuEntry[] = [];
-  if (canUseAsAudioTrack(asset)) {
-    const state = useAs.audio_track;
-    const disabled = state?.disabled === true;
-    const hint = disabled ? state?.hint : (state?.hint ?? AUDIO_TRACK_HINT);
-    entries.push({ kind: 'item', id: 'use-audio-track', label: 'Audio track', hint, disabled, title: disabled ? hint : undefined, onselect: () => onuseaudio(asset, 'audio_track') });
-  }
-  if (canUseAsVoice(asset)) {
-    const tooLong = voiceTooLongReason(asset, useAs);
-    for (const [target, id, label, fallback] of [['voice', 'use-voice', 'Voice', VOICE_HINT], ['save_voice', 'use-save-voice', 'Saved voice', SAVE_VOICE_HINT]] as const) {
-      const state = useAs[target];
-      const reason = tooLong ?? (state?.disabled === true ? state.hint : undefined);
-      entries.push({ kind: 'item', id, label, hint: reason === undefined ? (state?.hint ?? fallback) : undefined, disabled: reason !== undefined, title: reason, onselect: () => onuseaudio(asset, target) });
-    }
-  }
-  return entries;
+function audioTrackItem(asset: GalleryAsset, onuseaudio: NonNullable<AssetActionHandlers['onuseaudio']>, useAs: UseAsState = {}): PanelItem | null {
+  if (!canUseAsAudioTrack(asset)) return null;
+  const state = useAs.audio_track;
+  const disabled = state?.disabled === true;
+  const hint = disabled ? state?.hint : AUDIO_TRACK_HINT;
+  return { kind: 'item', id: 'use-audio-track', label: 'Audio track', icon: 'waveform', hint, disabled, title: disabled ? hint : undefined, onselect: () => onuseaudio(asset, 'audio_track') };
+}
+
+/**
+ * Build the Use as choices of a speech take: Voice and Saved voice. Music and sound have none. A voice the machine can't take
+ * is greyed with its reason; a take longer than the speech model's voice limit says `Use a take of <limit> s or less as a voice`.
+ */
+export function voiceItems(asset: GalleryAsset, onuseaudio: NonNullable<AssetActionHandlers['onuseaudio']>, useAs: UseAsState = {}): PanelItem[] {
+  if (!canUseAsVoice(asset)) return [];
+  const tooLong = voiceTooLongReason(asset, useAs);
+  const targets = [['voice', 'use-voice', 'Voice', 'speech', VOICE_HINT], ['save_voice', 'use-save-voice', 'Saved voice', 'bookmark', SAVE_VOICE_HINT]] as const;
+  return targets.map(([target, id, label, icon, fallback]) => {
+    const state = useAs[target];
+    const reason = tooLong ?? (state?.disabled === true ? state.hint : undefined);
+    return { kind: 'item' as const, id, label, icon, hint: reason ?? fallback, disabled: reason !== undefined, title: reason, onselect: () => onuseaudio(asset, target) };
+  });
+}
+
+const HIGH_MEMORY_MARKER = 'high memory';
+const ONE_FRAME_MARKER = 'very slow';
+
+/** The marker on a warned plain option's name: what the warning is about, from its code; none without a warning. */
+function warningMarker(option: AssetUpscaleFactor): string | undefined {
+  if (!option.warning) return undefined;
+  return option.warning_code === 'one_frame_batch' ? ONE_FRAME_MARKER : HIGH_MEMORY_MARKER;
+}
+
+const sizeHint = (option: AssetUpscaleFactor) => `${option.width} × ${option.height}`;
+
+/**
+ * Build the Upscale choices: the plain ones where offered (SeedVR2, or LTX for a video on macOS), named by the choice
+ * (`2×`, `4×`) with the output size as the hint, then the creative ones (`2× creative`). A plain choice is never greyed: over
+ * the memory estimate it is marked on its name and explained in its tooltip, and while the model is not on disk its hint says what
+ * the first use downloads. A creative factor over a limit is greyed, with its reason as the hint.
+ *
+ * A file that offers one choice gets that choice alone, named in full (`Upscale 2×`), spanning its row.
+ */
+export function upscaleItems(asset: GalleryAsset, onupscale: NonNullable<AssetActionHandlers['onupscale']>): PanelItem[] {
+  const method = plainUpscaleMethod(asset);
+  const block = method === 'seedvr2' ? asset.upscale?.seedvr2 : method === 'ltx' ? asset.upscale?.ltx : null;
+  const plain: PanelItem[] = block
+    ? block.options.map((option) => {
+        const warn = warningMarker(option);
+        const download = block.download_size_label ? ` · first use downloads ${block.download_size_label}` : '';
+        return {
+          kind: 'item' as const,
+          id: `upscale-${method}-${option.factor}`,
+          label: `${option.factor}×`,
+          icon: 'upscale' as const,
+          hint: `${sizeHint(option)}${download}`,
+          warn,
+          title: option.warning ?? undefined,
+          name: `Upscale ${option.factor}×, ${option.width} by ${option.height}${warn ? `, ${warn}` : ''}${download ? `, first use downloads ${block.download_size_label}` : ''}`,
+          onselect: () => onupscale(asset, option.factor, method),
+        };
+      })
+    : [];
+  const creative: PanelItem[] = upscaleFactors(asset).map((option) => ({
+    kind: 'item' as const,
+    id: `upscale-creative-${option.factor}`,
+    label: `${option.factor}× creative`,
+    icon: 'upscale' as const,
+    hint: option.allowed ? sizeHint(option) : (option.reason ?? sizeHint(option)),
+    disabled: !option.allowed,
+    title: option.allowed ? undefined : (option.reason ?? undefined),
+    name: `Upscale ${option.factor}× creative, ${option.width} by ${option.height}`,
+    onselect: () => onupscale(asset, option.factor, 'creative'),
+  }));
+  const items = [...plain, ...creative];
+  return items.length === 1 ? [{ ...items[0], label: `Upscale ${items[0].label}`, span: true }] : items;
 }

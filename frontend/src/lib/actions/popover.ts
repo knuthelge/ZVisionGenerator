@@ -20,6 +20,11 @@ export interface PopoverOptions {
    * the phone's keyboard sliding away (it resizes and scrolls the page) would otherwise close it as it opens.
    */
   followViewport?: boolean;
+  /**
+   * Size the popover to the room it has. It is as tall as its content, opens on the side of its anchor with more room when its
+   * own side has too little, and is capped at the room that side offers, so a body that scrolls is the caller's to arrange.
+   */
+  room?: boolean;
 }
 
 interface Box {
@@ -34,6 +39,12 @@ interface Box {
 const GAP_PX = 6;
 const MARGIN_PX = 8;
 
+/** The popover's left edge: lined up with its anchor's start or end edge, and kept inside the viewport. */
+function leftFor(anchor: Box, width: number, viewportWidth: number, align: PopoverAlign): number {
+  const wanted = align === 'end' ? anchor.right - width : anchor.left;
+  return Math.min(Math.max(MARGIN_PX, wanted), viewportWidth - width - MARGIN_PX);
+}
+
 /**
  * Place a popover below its anchor, or above when it would run off the bottom of the viewport (or the other way round with `side: 'above'`),
  * aligned to the anchor's start or end edge and kept inside the viewport horizontally.
@@ -46,9 +57,28 @@ export function placePopover(anchor: Box, popover: Box, viewport: { width: numbe
     : below + popover.height > viewport.height - MARGIN_PX
       ? Math.max(MARGIN_PX, above)
       : below;
-  const preferred = align === 'end' ? anchor.right - popover.width : anchor.left;
-  const left = Math.min(Math.max(MARGIN_PX, preferred), viewport.width - popover.width - MARGIN_PX);
-  return { top, left };
+  return { top, left: leftFor(anchor, popover.width, viewport.width, align) };
+}
+
+/**
+ * Place a popover that is as tall as its content: on the preferred side of its anchor when it fits there, else on the side with
+ * more room. The height is capped at the room on that side, so it never runs past the viewport's edge.
+ */
+export function placePopoverInRoom(
+  anchor: Box,
+  popover: { width: number; height: number },
+  viewport: { width: number; height: number },
+  align: PopoverAlign,
+  side: PopoverSide = 'below'
+): { top: number; left: number; maxHeight: number } {
+  const roomBelow = Math.max(0, viewport.height - anchor.bottom - GAP_PX - MARGIN_PX);
+  const roomAbove = Math.max(0, anchor.top - GAP_PX - MARGIN_PX);
+  const rooms = { below: roomBelow, above: roomAbove };
+  const other = side === 'above' ? 'below' : 'above';
+  const chosen = popover.height > rooms[side] && rooms[other] > rooms[side] ? other : side;
+  const height = Math.min(popover.height, rooms[chosen]);
+  const top = chosen === 'below' ? anchor.bottom + GAP_PX : anchor.top - GAP_PX - height;
+  return { top, left: leftFor(anchor, popover.width, viewport.width, align), maxHeight: height };
 }
 
 /**
@@ -67,6 +97,16 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
 
   function place(): void {
     if (!options.anchor) return;
+    if (options.room) {
+      // Measured at its natural height, then capped: a height set before would hide how tall the content wants to be.
+      node.style.maxHeight = '';
+      const box = node.getBoundingClientRect();
+      const fit = placePopoverInRoom(options.anchor.getBoundingClientRect(), box, { width: window.innerWidth, height: window.innerHeight }, options.align ?? 'start', options.side);
+      node.style.maxHeight = `${fit.maxHeight}px`;
+      node.style.top = `${fit.top}px`;
+      node.style.left = `${fit.left}px`;
+      return;
+    }
     const { top, left } = placePopover(
       options.anchor.getBoundingClientRect(),
       node.getBoundingClientRect(),
@@ -107,7 +147,7 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
   }
 
   // A popover that grows or shrinks after it opens (a group expanding in a menu) needs a new spot: it may now run
-  // off the bottom of the viewport. Placement moves only top and left, so it cannot retrigger this on its own.
+  // off the bottom of the viewport. Placement sets top and left (and, in room mode, a max-height that settles at the same size), so it cannot retrigger this on its own.
   const sizeWatch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => place());
   sizeWatch?.observe(node);
   place();

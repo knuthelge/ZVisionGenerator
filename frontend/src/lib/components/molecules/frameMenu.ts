@@ -16,8 +16,9 @@ const FRAME_ROWS: ReadonlyArray<{ target: FrameTarget; id: string; label: string
 /**
  * Build the Extend row of a video's menu, or null when the video does not offer extending or there is no handler.
  *
- * With a *point* it reads `Extend from 3.2 s` before the end and `Extend the clip` at it, and carries a note of what it keeps;
- * without one it is plain `Extend`. A clip that can't be extended, or a frame too early, keeps the row disabled with its reason.
+ * With a *point* it reads `Extend from 3.2 s` before the end and `Extend the clip` at it; without one it is plain `Extend`. Its note
+ * says what it keeps, or that it continues from the end. A clip that can't be extended, or a frame too early, keeps the row
+ * disabled with its reason as its hint and its tooltip. This is the one set of notes: the panel and the player's menu both show it.
  */
 export function extendEntry(asset: GalleryAsset, point: FramePoint | null, onextend: AssetActionHandlers['onextend']): ActionMenuItem | null {
   if (!onextend || asset.media_type !== 'video' || !asset.extend) return null;
@@ -29,8 +30,9 @@ export function extendEntry(asset: GalleryAsset, point: FramePoint | null, onext
     id: 'extend',
     label: available ? extendLabel(point) : 'Extend',
     icon: 'extend',
-    description: point && !reason ? extendNote(point, clipSeconds) : undefined,
+    description: reason ? undefined : extendNote(point, clipSeconds),
     hint: reason,
+    title: reason,
     disabled: !available || point?.tooShort === true,
     onselect: () => (point ? onextend(asset, point) : onextend(asset)),
   };
@@ -55,6 +57,7 @@ export function frameEntries(asset: GalleryAsset, point: FramePoint, onuseframe:
       icon,
       description: reason ? undefined : note,
       hint: reason,
+      title: reason,
       disabled: reason !== undefined || running !== null,
       busy,
       onselect: () => onuseframe(asset, point, target),

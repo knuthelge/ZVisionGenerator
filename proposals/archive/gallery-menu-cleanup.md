@@ -1,6 +1,6 @@
 # Tidy the Gallery's and the viewer's buttons and menus
 
-**Status:** Proposed (2026-11-14)
+**Status:** Done (2026-11-15; built on `design/gallery-menus`)
 
 Every action on a Gallery file sits in one of several places, each with its own order:
 
@@ -20,7 +20,7 @@ Checked in the running UI on a desktop (1440 × 900, mouse), an iPad both ways (
 - **The menus are long single columns.** An image's menu is 15 actions, two headings and seven rules. On a desktop it is capped at 22 rem and scrolls, so a right-click on a tile shows neither Download nor Delete. On a phone the sheet fills the screen and Download and Delete need a scroll. Held sideways it shows four rows at a time.
 - **The same action sits in a different place on every surface.** The toolbar runs Reuse, Use as, Edit, Upscale, Move, Star, Download, Delete, Details. The menu runs Select, Reuse, Use as, Edit, Upscale, Move, Star, Download, Delete. Copy the prompt is only in the viewer's menus and the C key.
 - **Delete is not set apart in the viewer.** It sits between Download and Details.
-- **Below 1100 px every toolbar label goes at once,** leaving 11 bare icons. Three of them mislead: Upscale uses the tile's "view full size" arrows, Reuse settings looks like refresh, Use as is a bare picture (also in [the backlog](backlog.md)).
+- **Below 1100 px every toolbar label goes at once,** leaving 11 bare icons. Three of them mislead: Upscale uses the tile's "view full size" arrows, Reuse settings looks like refresh, Use as is a bare picture (also in [the backlog](../backlog.md)).
 - **On a phone, Reuse, Edit and Download are two taps away** inside ⋯.
 - **Rows do work a smaller shape could do.** Four Use as rows are four choices of one kind; four upscale rows are four sizes.
 
@@ -167,7 +167,7 @@ One path changes and seven are new in `Icon.svelte` (exact paths under "How it m
 - **One mark for "opens a choice":** the `chevdown` icon, 2 px after its label, on every button and cell that opens a list (Use as, Upscale with several choices, Move), in the bar, the docks and the touch Select bar. In a cell it hangs from the label (absolutely positioned), so the label stays centred under its icon.
 
 
-This is the [backlog item](backlog.md) about the icons. It belongs here because the new bars put View and Upscale side by side.
+This is the [backlog item](../backlog.md) about the icons. It belongs here because the new bars put View and Upscale side by side.
 
 ## Visual spec
 
@@ -423,4 +423,4 @@ None are blocking. The open questions of the last round are settled as you chose
 
 - The project list behind Move, the paused video's time-chip menu and the Details content.
 - A confirmation for the high-memory upscale.
-- [Copy a CLI command](asset-cli-command.md), if built, joins Copy prompt in the file row.
+- [Copy a CLI command](../asset-cli-command.md), if built, joins Copy prompt in the file row.

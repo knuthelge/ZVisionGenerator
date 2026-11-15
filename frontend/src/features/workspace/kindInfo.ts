@@ -11,7 +11,7 @@ export interface KindInfo {
 
 /** How each kind of the Image tab reads. */
 export const IMAGE_KIND_INFO: Record<'new' | 'edit', KindInfo> = {
-  new: { label: 'New', icon: 'reference', description: 'From text or a start image', title: 'A new image, from text or a start image' },
+  new: { label: 'New', icon: 'image', description: 'From text or a start image', title: 'A new image, from text or a start image' },
   edit: { label: 'Edit', icon: 'edit', description: 'Change part of an image', title: 'Change part of an image' },
 };
 

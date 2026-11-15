@@ -64,7 +64,7 @@
         {#if chip.icon}<Icon name={chip.icon} size={14} />{/if}
         {#if chip.key === 'preset'}<Icon name="list" size={14} />{/if}
         {#if chip.key === 'model'}<Icon name="cube" size={14} />{/if}
-        {#if chip.key === 'images'}<Icon name="reference" size={14} />{/if}
+        {#if chip.key === 'images'}<Icon name="image" size={14} />{/if}
         {#if chip.key === 'source'}<Icon name="film" size={14} />{/if}
         {#if chip.download?.kind === 'downloading'}<Icon name="download" size={12} class="setchip-dl" />{:else if chip.download?.kind === 'failed'}<Icon name="alert" size={12} class="setchip-bad" />{/if}
         {#if chip.label}<span class="setchip-k">{chip.label}</span>{/if}

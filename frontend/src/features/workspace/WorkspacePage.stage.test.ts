@@ -241,7 +241,7 @@ describe('WorkspacePage viewers follow their asset by id', () => {
     await settle();
 
     expect(shown()).toBe(c.url);
-    expect(document.querySelector('.viewer-title small')?.textContent).toContain('2 of 2');
+    expect(document.querySelector('.vb-name small')?.textContent).toContain('2 of 2');
   });
 
   it('keeps the History viewer on its asset when an earlier asset is deleted and older ones load', async () => {
@@ -278,7 +278,7 @@ describe('WorkspacePage viewers follow their asset by id', () => {
     await settle();
 
     expect(shown()).toBe(b.url);
-    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 3');
+    expect(document.querySelector('.vb-name small')?.textContent).toContain('3 of 3');
     expect(document.querySelector('.viewer-pane-prev img')?.getAttribute('src')).toBe(a.url);
   });
 });
@@ -1732,11 +1732,11 @@ describe('WorkspacePage extend', () => {
       flushSync();
     }
 
-    it('lists Extend, then Move, Star, Download and Delete, in a history tile\'s menu', async () => {
+    it('lists View, Reuse, Extend, then the file row, in a history tile\'s panel', async () => {
       const asset = clip();
       await mountWithClip(asset);
       openMenu(asset);
-      expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'move', 'star', 'download', 'delete']);
+      expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['view', 'reuse', 'extend', 'download', 'move', 'copy-prompt', 'delete']);
     });
 
     it('turns the Workspace to Extend with the clip as source, its scene in the boxes, and checks it', async () => {

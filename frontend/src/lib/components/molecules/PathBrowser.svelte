@@ -49,7 +49,7 @@
 
   let { open = $bindable(false), purpose, initialPath = null, onchoose, onclose }: Props = $props();
 
-  const PLACE_ICONS: Record<string, IconName> = { home: 'home', output: 'reference', models: 'cube', loras: 'cube' };
+  const PLACE_ICONS: Record<string, IconName> = { home: 'home', output: 'image', models: 'cube', loras: 'cube' };
   // A skeleton only after this long, so quick folders don't flash.
   const SKELETON_DELAY_MS = 150;
   // The phone's Choose button cuts the file name in the middle to this many characters; the full name is its accessible name.
@@ -535,7 +535,7 @@
           onchange={(next) => void setView(next)}
         />
         {#if !compact}
-          <Button aria-pressed={previewOn} title="Preview (Alt+P)" aria-keyshortcuts="Alt+P" onclick={togglePreview}><Icon name="reference" size={12} />Preview</Button>
+          <Button aria-pressed={previewOn} title="Preview (Alt+P)" aria-keyshortcuts="Alt+P" onclick={togglePreview}><Icon name="image" size={12} />Preview</Button>
         {/if}
       {/if}
       <label class="filter" class:filter-set={filter !== ''}>

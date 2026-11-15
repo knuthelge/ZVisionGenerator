@@ -39,7 +39,7 @@
   ondragleave={() => { dragOver = false; }}
   ondrop={handleDrop}
 >
-  <p class="edit-drop-text"><Icon name="reference" size={16} />{dragOver ? 'Drop to choose' : 'Choose an image to edit'}</p>
+  <p class="edit-drop-text"><Icon name="image" size={16} />{dragOver ? 'Drop to choose' : 'Choose an image to edit'}</p>
   <ImageSources layout="buttons" onfiles={takeFiles} onpath={(path) => chooseSource(sourceOfPath(path))} onlatest={(asset) => chooseSource(sourceOfAsset(asset))} />
 </div>
 

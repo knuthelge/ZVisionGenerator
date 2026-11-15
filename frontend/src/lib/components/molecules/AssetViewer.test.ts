@@ -11,13 +11,13 @@ import { toasts } from '$lib/state/toasts.svelte';
 import { requestConfirm } from './confirm.svelte';
 
 // The touch layer (neighbour panes) follows the pointer; a test switches it on without a real media query.
-const touch = vi.hoisted(() => ({ coarse: false, compact: false }));
+const touch = vi.hoisted(() => ({ coarse: false, compact: false, short: false }));
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
   return {
     ...actual,
     layout: new Proxy(actual.layout, {
-      get: (target, key) => (key === 'coarse' && touch.coarse) || (key === 'compact' && touch.compact) ? true : Reflect.get(target, key),
+      get: (target, key) => (key === 'coarse' && touch.coarse) || (key === 'compact' && touch.compact) || (key === 'short' && touch.short) ? true : Reflect.get(target, key),
     }),
   };
 });
@@ -25,6 +25,9 @@ const adjustApi = vi.hoisted(() => ({ saveAdjusted: vi.fn() }));
 vi.mock('$lib/api/adjust', () => adjustApi);
 const projectApi = vi.hoisted(() => ({ listProjects: vi.fn(), createProject: vi.fn() }));
 vi.mock('$lib/api/projects', () => projectApi);
+
+/** The open file's full name, as the viewer names itself: the file name keeps its whole text for assistive technology and the title. */
+const title = () => document.querySelector('#asset-viewer-title .file-name')?.getAttribute('title');
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -150,7 +153,7 @@ describe('AssetViewer', () => {
     (document.querySelector('[data-action="reuse"]') as HTMLButtonElement).click();
     expect(onreuse).toHaveBeenCalledWith(assetB);
 
-    (document.querySelector('[data-action="reference"]') as HTMLButtonElement).click();
+    (document.querySelector('[data-action="use-as"]') as HTMLButtonElement).click();
     flushSync();
     (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
     expect(onreference).toHaveBeenCalledWith(assetB, 'image');
@@ -169,7 +172,7 @@ describe('AssetViewer', () => {
       },
     });
 
-    (document.querySelector('[data-action="reference"]') as HTMLButtonElement).click();
+    (document.querySelector('[data-action="use-as"]') as HTMLButtonElement).click();
     flushSync();
     const items = [...document.querySelectorAll<HTMLElement>('[role="menu"] [data-action^="reference-"]')];
     expect(items.map((item) => item.getAttribute('data-action'))).toEqual(['reference-image', 'reference-reference', 'reference-video', 'reference-last-frame']);
@@ -189,7 +192,7 @@ describe('AssetViewer', () => {
     const onreference = vi.fn();
     mountViewer({ onreference, useAs: { reference: { disabled: false, hint: 'next slot' } } });
 
-    (document.querySelector('[data-action="reference"]') as HTMLButtonElement).click();
+    (document.querySelector('[data-action="use-as"]') as HTMLButtonElement).click();
     flushSync();
     const reference = document.querySelector<HTMLElement>('[role="menu"] [data-action="reference-reference"]')!;
     expect(reference.textContent).toContain('next slot');
@@ -202,11 +205,11 @@ describe('AssetViewer', () => {
     const onnavigate = vi.fn();
     const props = reactiveProps({ assets: [makeAsset(), assetB], currentId: assetB.id, open: true, onclose, onnavigate });
     page = mountComponent(AssetViewer, props);
-    expect(document.querySelector('#asset-viewer-title')?.textContent).toBe('asset-b.png');
+    expect(title()).toBe('asset-b.png');
 
     props.assets = [makeAsset()];
     flushSync();
-    expect(document.querySelector('#asset-viewer-title')?.textContent).toBe('asset-a.png');
+    expect(title()).toBe('asset-a.png');
     expect(onnavigate).toHaveBeenLastCalledWith(0);
 
     props.assets = [];
@@ -218,8 +221,7 @@ describe('AssetViewer', () => {
   it('keeps the open asset when others land before or after it', () => {
     const props = reactiveProps({ assets: [makeAsset(), assetB], currentId: assetB.id, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
     page = mountComponent(AssetViewer, props);
-    const title = () => document.querySelector('#asset-viewer-title')?.textContent;
-    const counter = () => document.querySelector('.viewer-title small')?.textContent;
+    const counter = () => document.querySelector('.vb-name small')?.textContent;
     expect(counter()).toContain('2 of 2');
 
     props.assets = [makeAsset({ id: 'out/new.png', filename: 'new.png' }), makeAsset(), assetB];
@@ -382,7 +384,7 @@ describe('AssetViewer', () => {
       const onextend = vi.fn();
       const asset = clip();
       mountViewer({ assets: [asset], onextend });
-      expect(extendButton()?.disabled).toBe(false);
+      expect(extendButton()?.getAttribute('aria-disabled')).toBeNull();
       extendButton()!.click();
       expect(onextend).toHaveBeenCalledWith(asset);
     });
@@ -400,13 +402,15 @@ describe('AssetViewer', () => {
       expect(extendButton()).toBeNull();
     });
 
-    it('disables the button with the reason as its tooltip when the video cannot be extended', () => {
+    it('greys the button with the reason as its tooltip when the video cannot be extended, and a tap says why', () => {
       const onextend = vi.fn();
+      toasts.length = 0;
       mountViewer({ assets: [clip({ extend: { available: false, reason: 'The file is missing.' } })], onextend });
-      expect(extendButton()?.disabled).toBe(true);
+      expect(extendButton()?.getAttribute('aria-disabled')).toBe('true');
       expect(extendButton()?.getAttribute('title')).toBe('The file is missing.');
       extendButton()!.click();
       expect(onextend).not.toHaveBeenCalled();
+      expect(toasts.map((toast) => toast.message)).toEqual(['The file is missing.']);
     });
 
     it('extends with E on a video instead of opening the reference menu', () => {
@@ -423,7 +427,7 @@ describe('AssetViewer', () => {
       mountViewer({ assets: [clip({ extend: { available: false, reason: "Upscaled videos can't be extended yet." } })], onextend });
       press('e');
       expect(onextend).not.toHaveBeenCalled();
-      expect(toasts.map((toast) => [toast.type, toast.message])).toContainEqual(['warning', "Upscaled videos can't be extended yet."]);
+      expect(toasts.map((toast) => [toast.type, toast.message])).toContainEqual(['info', "Upscaled videos can't be extended yet."]);
     });
 
     it('leaves E alone for a video that cannot be extended on this machine', () => {
@@ -437,9 +441,11 @@ describe('AssetViewer', () => {
 
   it('copies the prompt with C', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('isSecureContext', true);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     mountViewer({});
     press('c');
+    vi.unstubAllGlobals();
     expect(writeText).toHaveBeenCalledWith('Test asset');
   });
 
@@ -458,9 +464,12 @@ describe('AssetViewer', () => {
 
     await page.unmount();
     onreuse.mockClear();
+    toasts.length = 0;
     mountViewer({ onreuse, assets: [makeAsset({ has_reusable_config: false })] });
-    expect(press('R').defaultPrevented).toBe(false);
+    press('R');
     expect(onreuse).not.toHaveBeenCalled();
+    // A key on a greyed action says why instead of doing nothing.
+    expect(toasts).toHaveLength(1);
   });
 
   it('downloads the shown asset with D', () => {
@@ -549,7 +558,10 @@ describe('AssetViewer', () => {
     flushSync(() => document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!.click());
 
     const items = upscaleItems();
-    expect(items.map((item) => item.textContent?.trim())).toEqual(['2× creative → 1664×2432', '4× creative → 3328×4864']);
+    expect(items.map((item) => item.getAttribute('data-action'))).toEqual(['upscale-creative-2', 'upscale-creative-4']);
+    // The greyed choice gives its reason as its hint, which is also its tooltip; the open one says what it makes.
+    expect(items[0].getAttribute('aria-disabled')).toBeNull();
+    expect(items[1].textContent).toContain(items[1].getAttribute('title'));
     expect(items[1].getAttribute('aria-disabled')).toBe('true');
     expect(items[1].getAttribute('title')).toBe('Over the 16-megapixel upscale limit.');
     flushSync(() => items[0].click());
@@ -574,12 +586,20 @@ describe('AssetViewer', () => {
     }
   });
 
-  it('upscales a video with the SeedVR2 2x item from the menu', () => {
+  it('upscales a video with one click on a direct Upscale 2× button, which has no menu', () => {
     const onupscale = vi.fn();
     mountViewer({ assets: [makeAsset({ media_type: 'video', upscale: videoUpscale() })], onupscale });
-    flushSync(() => document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!.click());
-    flushSync(() => upscaleItems()[0].click());
+    const button = document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!;
+    expect(button.hasAttribute('aria-haspopup')).toBe(false);
+    expect(button.title).toBeTruthy();
+    flushSync(() => button.click());
+    expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ media_type: 'video' }), 2, 'seedvr2');
+  });
+
+  it('gives an image with several sizes an Upscale that opens them, and a direct button only when exactly one is offered', () => {
+    mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale: vi.fn() });
+    expect(document.querySelector('[data-action="upscale"]')?.getAttribute('aria-haspopup')).toBe('menu');
   });
 
   const ltxVideoUpscale = (warning: string | null = null) => ({
@@ -588,12 +608,10 @@ describe('AssetViewer', () => {
     ltx: { options: [{ factor: 2 as const, width: 1536, height: 896, allowed: true as const, reason: null, warning }], model: 'LTX-2.3 4-bit', downloaded: true, download_size_label: null },
   });
 
-  it('upscales a video on macOS with the LTX 2x item from the menu', () => {
+  it('upscales a video on macOS with the direct LTX 2x button', () => {
     const onupscale = vi.fn();
     mountViewer({ assets: [makeAsset({ media_type: 'video', upscale: ltxVideoUpscale() })], onupscale });
     flushSync(() => document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!.click());
-    expect(upscaleItems().map((item) => item.textContent?.trim())).toEqual(['2× → 1536×896']);
-    flushSync(() => upscaleItems()[0].click());
     expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ media_type: 'video' }), 2, 'ltx');
   });
 
@@ -637,7 +655,7 @@ describe('AssetViewer', () => {
     expect(onupscale).not.toHaveBeenCalled();
   });
 
-  it('lists the SeedVR2 items, a separator and the creative items in the upscale menu', () => {
+  it('lists the SeedVR2 choices, then the creative choices, in the upscale menu', () => {
     const onupscale = vi.fn();
     mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale });
 
@@ -645,7 +663,6 @@ describe('AssetViewer', () => {
 
     const items = upscaleItems();
     expect(items.map((item) => item.getAttribute('data-action'))).toEqual(['upscale-seedvr2-2', 'upscale-seedvr2-4', 'upscale-creative-2', 'upscale-creative-4']);
-    expect(document.querySelectorAll('[role="menu"][aria-label="Upscale"] [role="separator"]')).toHaveLength(1);
     flushSync(() => items[1].click());
     expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 4, 'seedvr2');
   });
@@ -793,13 +810,14 @@ describe('AssetViewer Move', () => {
   beforeEach(() => {
     localStorage.clear();
     touch.compact = false;
+    touch.coarse = false;
     projectApi.listProjects.mockReset().mockResolvedValue([{ name: 'Night Bus', path: '/out/Night Bus' }, ZOO]);
   });
 
-  it('shows a labelled Move button between Use as and Download, and none without a handler', () => {
+  it('shows a labelled Move button after Download, and none without a handler', () => {
     mountViewer({ onreference: vi.fn() });
     const actions = Array.from(document.querySelectorAll('.viewer-bar [data-action]')).map((el) => el.getAttribute('data-action'));
-    expect(actions.indexOf('move')).toBe(actions.indexOf('download') - 1);
+    expect(actions.indexOf('move')).toBe(actions.indexOf('download') + 1);
     expect(moveButton()?.title).toBe('Move to project');
     expect(moveButton()?.textContent).toContain('Move');
     expect(moveButton()?.getAttribute('aria-haspopup')).toBe('menu');
@@ -856,8 +874,9 @@ describe('AssetViewer Move', () => {
     expect(onnavigate).not.toHaveBeenCalled();
   });
 
-  it('keeps Move in the actions sheet on a phone, with no toolbar button and no heading', async () => {
+  it('keeps Move in the actions sheet on a phone, with no Move in its dock and no heading', async () => {
     touch.compact = true;
+    touch.coarse = true;
     mountViewer();
     expect(moveButton()).toBeNull();
     document.querySelector<HTMLButtonElement>('button[data-action="more"]')!.click();
@@ -872,7 +891,7 @@ describe('AssetViewer Move', () => {
 
 describe('AssetViewer star', () => {
   let page: ReturnType<typeof mountComponent>;
-  beforeEach(() => { localStorage.clear(); touch.compact = false; });
+  beforeEach(() => { localStorage.clear(); touch.compact = false; touch.coarse = false; });
   function mountViewer(props: Record<string, unknown>): void {
     const assets = (props.assets as GalleryAsset[] | undefined) ?? [makeAsset(), assetB];
     page = mountComponent(AssetViewer, { assets, currentId: assets[0].id, open: true, onclose: vi.fn(), onnavigate: vi.fn(), ...props });
@@ -920,12 +939,13 @@ describe('AssetViewer star', () => {
     expect(onstar).not.toHaveBeenCalled();
   });
 
-  it('offers Star in the phone actions menu with no lead', async () => {
+  it('offers Star in the phone actions panel, with no Select and no View', async () => {
     touch.compact = true;
+    touch.coarse = true;
     mountViewer({ onstar: vi.fn() });
     document.querySelector<HTMLButtonElement>('button[data-action="more"]')!.click();
     await settle();
-    const items = Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'));
+    const items = Array.from(document.querySelectorAll('[role="menu"] [data-action]')).map((item) => item.getAttribute('data-action'));
     expect(items).toContain('star');
     expect(items).not.toContain('select');
     expect(items).not.toContain('view');
@@ -1007,12 +1027,13 @@ describe('AssetViewer adjust', () => {
 
     it('lists Adjust in the actions menu on a phone, with no toolbar button', async () => {
       touch.compact = true;
+      touch.coarse = true;
       await mountViewer();
       expect(adjustButton()).toBeNull();
       document.querySelector<HTMLButtonElement>('button[data-action="more"]')!.click();
       await settle();
       const item = document.querySelector<HTMLElement>('[role="menu"] [data-action="adjust"]')!;
-      expect(item.textContent?.trim()).toBe('Adjust');
+      expect(item.textContent).toContain('Adjust');
       item.click();
       await settle();
       expect(editor()).not.toBeNull();
@@ -1032,6 +1053,7 @@ describe('AssetViewer adjust', () => {
         document.querySelector('[data-testid="asset-viewer"]')!.remove();
       }
       touch.compact = true;
+      touch.coarse = true;
       await mountViewer({ assets: [makeAsset({ media_type: 'video', file_path: '/out/a.mp4' })] });
       document.querySelector<HTMLButtonElement>('button[data-action="more"]')!.click();
       await settle();
@@ -1268,7 +1290,7 @@ describe('AssetViewer adjust', () => {
       await settle();
       await save('Save as copy');
       expect(editor()).toBeNull();
-      expect(document.querySelector('#asset-viewer-title')!.textContent).toBe('asset-a_adjusted.png');
+      expect(title()).toBe('asset-a_adjusted.png');
       expect(props.onclose).not.toHaveBeenCalled();
     });
   });
@@ -1287,5 +1309,263 @@ describe('AssetViewer adjust', () => {
       flushSync(() => document.querySelector<HTMLButtonElement>('[data-testid="viewer-source"] button')!.click());
       expect(onnavigate).toHaveBeenCalledWith(1);
     });
+  });
+});
+
+describe('AssetViewer chrome', () => {
+  beforeEach(() => { localStorage.clear(); Object.assign(touch, { coarse: false, compact: false, short: false }); });
+
+  function mountViewer(props: Record<string, unknown> = {}): void {
+    const assets = (props.assets as GalleryAsset[] | undefined) ?? [makeAsset(), assetB];
+    mountComponent(AssetViewer, {
+      assets, currentId: assets[0].id, open: true, onclose: vi.fn(), onnavigate: vi.fn(), onreuse: vi.fn(), onreference: vi.fn(), onedit: vi.fn(), ondelete: vi.fn(), onmove: vi.fn(), onstar: vi.fn(), ...props,
+    });
+  }
+
+  const actions = (root: string) => Array.from(document.querySelectorAll(`${root} [data-action]`)).map((el) => el.getAttribute('data-action'));
+  const viewer = () => document.querySelector<HTMLElement>('[data-testid="asset-viewer"]')!;
+
+  it('gives a mouse the toolbar and no dock, in the one order: Reuse, Edit, Use as, then Download, Move, Copy prompt and Delete', () => {
+    mountViewer();
+
+    expect(viewer().dataset.dock).toBe('toolbar');
+    expect(document.querySelector('.viewer-dock')).toBeNull();
+    expect(actions('.vb-actions')).toEqual(['reuse', 'edit', 'adjust', 'use-as', 'download', 'move', 'copy-prompt', 'delete']);
+    expect(document.querySelector('.viewer-bar [data-action="star"]')).not.toBeNull();
+  });
+
+  it('leads the bar with the star, then the name', () => {
+    mountViewer();
+    const star = document.querySelector('[data-action="star"]')!;
+    const name = document.querySelector('#asset-viewer-title')!;
+
+    expect(star.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(star.nextElementSibling?.contains(name)).toBe(true);
+  });
+
+  it('puts the same actions in a full dock for a finger on a screen that is not compact, with no More', () => {
+    touch.coarse = true;
+    mountViewer();
+
+    expect(viewer().dataset.dock).toBe('dock');
+    expect(actions('.viewer-dock')).toEqual(['reuse', 'edit', 'adjust', 'use-as', 'download', 'move', 'copy-prompt', 'delete']);
+    expect(document.querySelector('.vb-actions')).toBeNull();
+    expect(document.querySelector('[data-action="more"]')).toBeNull();
+    expect(viewer().dataset.dock).not.toBe('phone');
+  });
+
+  it('keeps ✕ alone in the top bar with a finger, after Details and the shortcuts on a tablet', () => {
+    touch.coarse = true;
+    mountViewer();
+
+    expect(actions('.viewer-bar')).toEqual(['star', 'details', 'shortcuts']);
+    expect(document.querySelector('.viewer-bar .vb-close button[aria-label="Close viewer"]')).not.toBeNull();
+  });
+
+  it('gives a phone four fixed slots, Reuse, the kind\'s own action, Download and More', () => {
+    Object.assign(touch, { coarse: true, compact: true });
+    mountViewer();
+
+    expect(viewer().dataset.dock).toBe('phone');
+    expect(actions('.viewer-dock')).toEqual(['reuse', 'edit', 'download', 'more']);
+    // Four slots: a phone's dock holds exactly the four fixed actions.
+    expect(document.querySelectorAll('.viewer-dock [data-action]')).toHaveLength(4);
+    expect(actions('.viewer-bar')).toEqual(['star', 'details']);
+  });
+
+  it('puts a phone\'s four slots in a rail when it is held sideways', () => {
+    Object.assign(touch, { coarse: true, compact: true, short: true });
+    mountViewer();
+
+    expect(viewer().dataset.dock).toBe('rail');
+    expect(actions('.viewer-dock')).toEqual(['reuse', 'edit', 'download', 'more']);
+  });
+
+  it('opens the whole panel from More, as a sheet', async () => {
+    Object.assign(touch, { coarse: true, compact: true });
+    mountViewer();
+
+    document.querySelector<HTMLButtonElement>('.viewer-dock [data-action="more"]')!.click();
+    await settle();
+
+    const panel = document.querySelector('[data-testid="file-panel"]')!;
+    expect(panel.querySelector('[data-action="copy-prompt"]')).not.toBeNull();
+    expect(panel.querySelector('[data-action="reference-image"]')).not.toBeNull();
+  });
+
+  it('opens a dock cell\'s choices from Use as, with Extend meaning from the end in the panel', async () => {
+    touch.coarse = true;
+    mountViewer();
+
+    document.querySelector<HTMLButtonElement>('.viewer-dock [data-action="use-as"]')!.click();
+    await settle();
+
+    expect(document.querySelector('[role="menu"][aria-label="Use as"] [data-action="reference-image"]')).not.toBeNull();
+    expect(document.querySelector('[data-action="use-as"]')?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('shows a video Reuse, Extend and a direct Upscale 2×, and no Use as', () => {
+    const clip = makeAsset({
+      media_type: 'video', filename: 'clip.mp4', extend: { available: true, reason: null },
+      upscale: { factors: [], seedvr2: { options: [{ factor: 2, width: 1536, height: 896, allowed: true, reason: null, warning: null }], model: 'SeedVR2', downloaded: true, download_size_label: null } },
+    });
+    mountViewer({ assets: [clip], onextend: vi.fn(), onupscale: vi.fn() });
+
+    expect(actions('.vb-actions')).toEqual(['reuse', 'extend', 'upscale', 'download', 'move', 'copy-prompt', 'delete']);
+  });
+
+  it('greys Copy prompt with its reason for a file with no recorded text', () => {
+    mountViewer({ assets: [makeAsset({ prompt: '' })] });
+
+    const copy = document.querySelector<HTMLButtonElement>('[data-action="copy-prompt"]')!;
+    expect(copy.getAttribute('aria-disabled')).toBe('true');
+    expect(copy.title).toBeTruthy();
+  });
+
+  it('asks before it deletes, from the toolbar and from the dock', () => {
+    const ondelete = vi.fn();
+    mountViewer({ ondelete });
+    flushSync(() => document.querySelector<HTMLButtonElement>('.vb-actions [data-action="delete"]')!.click());
+    expect(ondelete).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }));
+    // The viewer hands the question to its owner, as the keys do: it never deletes without it.
+    expect(ondelete.mock.calls[0]).toHaveLength(1);
+  });
+
+  it('runs the panel item of an enabled dock action on a tap', () => {
+    touch.coarse = true;
+    const onreuse = vi.fn();
+    const onedit = vi.fn();
+    mountViewer({ onreuse, onedit });
+
+    document.querySelector<HTMLButtonElement>('.viewer-dock [data-action="reuse"]')!.click();
+    document.querySelector<HTMLButtonElement>('.viewer-dock [data-action="edit"]')!.click();
+
+    expect(onreuse).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }));
+    expect(onedit).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }));
+  });
+
+  it('says why a tap on a greyed dock action does nothing, and runs nothing', () => {
+    touch.coarse = true;
+    toasts.length = 0;
+    const onreuse = vi.fn();
+    mountViewer({ onreuse, assets: [makeAsset({ has_reusable_config: false })] });
+    const reuse = document.querySelector<HTMLButtonElement>('.viewer-dock [data-action="reuse"]')!;
+
+    expect(reuse.getAttribute('aria-disabled')).toBe('true');
+    expect(reuse.disabled).toBe(false);
+    reuse.click();
+
+    expect(onreuse).not.toHaveBeenCalled();
+    expect(toasts).toHaveLength(1);
+  });
+
+  it('says why a key on a greyed action does nothing', () => {
+    toasts.length = 0;
+    mountViewer({ assets: [makeAsset({ prompt: '' })] });
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true, cancelable: true }));
+
+    expect(toasts).toHaveLength(1);
+  });
+
+  it('announces the open state of More, without a chevron', () => {
+    Object.assign(touch, { coarse: true, compact: true });
+    mountViewer();
+    const more = document.querySelector<HTMLButtonElement>('.viewer-dock [data-action="more"]')!;
+
+    expect(more.getAttribute('aria-haspopup')).toBe('menu');
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    expect(more.querySelectorAll('svg')).toHaveLength(1);
+    // Actions that open nothing announce no popup.
+    expect(document.querySelector('.viewer-dock [data-action="reuse"]')?.hasAttribute('aria-haspopup')).toBe(false);
+  });
+
+  it('marks a warned direct upscale with its warning, on the bar and in the dock, and keeps the warning in its tooltip', () => {
+    const warning = 'May need more memory than this computer has.';
+    const clip = makeAsset({
+      media_type: 'video', filename: 'clip.mp4', extend: { available: true, reason: null },
+      upscale: { factors: [], seedvr2: { options: [{ factor: 2, width: 1536, height: 896, allowed: true, reason: null, warning, warning_code: 'memory' }], model: 'SeedVR2', downloaded: false, download_size_label: '17 GB' } },
+    });
+    mountViewer({ assets: [clip], onupscale: vi.fn() });
+
+    const bar = document.querySelector<HTMLElement>('.vb-actions [data-action="upscale"]')!;
+    expect(bar.querySelector('em')).not.toBeNull();
+    expect(bar.title).toContain(warning);
+    expect(bar.title).toContain('17 GB');
+  });
+
+  it('leaves a mouse click on a greyed action to its tooltip, and tells a finger', () => {
+    touch.coarse = true;
+    toasts.length = 0;
+    mountViewer({ assets: [makeAsset({ has_reusable_config: false })] });
+    const reuse = document.querySelector<HTMLButtonElement>('.viewer-dock [data-action="reuse"]')!;
+
+    reuse.dispatchEvent(new PointerEvent('click', { pointerType: 'mouse', bubbles: true, cancelable: true }));
+    expect(toasts).toHaveLength(0);
+    reuse.dispatchEvent(new PointerEvent('click', { pointerType: 'touch', bubbles: true, cancelable: true }));
+    expect(toasts).toHaveLength(1);
+  });
+
+  it.each([['a mouse', false, false], ['a tablet', true, false], ['a phone', true, true]])('downloads with D from the link of %s\'s chrome', (_name, coarse, compact) => {
+    Object.assign(touch, { coarse, compact });
+    mountViewer();
+    const link = document.querySelector<HTMLAnchorElement>('[data-action="download"]')!;
+    const click = vi.spyOn(link, 'click').mockImplementation(() => {});
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }));
+
+    expect(click).toHaveBeenCalled();
+  });
+
+  it('opens a popup from the button that was clicked, and from the button of the chrome on screen for a key', () => {
+    mountViewer();
+    const use = document.querySelector<HTMLButtonElement>('.vb-actions [data-action="use-as"]')!;
+    const rect = vi.spyOn(use, 'getBoundingClientRect');
+    use.click();
+    flushSync();
+    expect(use.getAttribute('aria-expanded')).toBe('true');
+    expect(rect).toHaveBeenCalled();
+
+    // Clicking the same button again closes it.
+    use.click();
+    flushSync();
+    expect(use.getAttribute('aria-expanded')).toBe('false');
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true, cancelable: true }));
+    flushSync();
+    expect(use.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('opens only one popup at a time', () => {
+    mountViewer({ assets: [makeAsset({ upscale: { factors: [{ factor: 2, width: 1, height: 1, allowed: true, reason: null, warning: null }, { factor: 4, width: 2, height: 2, allowed: true, reason: null, warning: null }], seedvr2: null } })], onupscale: vi.fn() });
+    const use = document.querySelector<HTMLButtonElement>('[data-action="use-as"]')!;
+    const upscale = document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!;
+
+    use.click();
+    flushSync();
+    upscale.click();
+    flushSync();
+
+    expect(use.getAttribute('aria-expanded')).toBe('false');
+    expect(upscale.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('publishes the height of its foot while it is open, for toasts to clear, and removes it when it closes', async () => {
+    const props = reactiveProps({ assets: [makeAsset(), assetB], currentId: 'out/asset-a.png', open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+    mountComponent(AssetViewer, props);
+    flushSync();
+    expect(document.documentElement.style.getPropertyValue('--viewer-foot')).not.toBe('');
+
+    flushSync(() => { props.open = false; });
+    expect(document.documentElement.style.getPropertyValue('--viewer-foot')).toBe('');
+  });
+
+  it('keeps a phone\'s rail while the details are open, beside the details', () => {
+    localStorage.setItem('ziv-viewer-details-v1', 'true');
+    Object.assign(touch, { coarse: true, compact: true, short: true });
+    mountViewer();
+
+    expect(viewer().dataset.details).toBe('true');
+    expect(document.querySelector('.viewer-dock[data-dock="rail"]')).not.toBeNull();
   });
 });

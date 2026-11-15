@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { placePopover, popover } from './popover';
+import { placePopover, placePopoverInRoom, popover } from './popover';
 
 function box(left: number, top: number, width: number, height: number) {
   return { left, top, width, height, right: left + width, bottom: top + height };
@@ -29,6 +29,26 @@ describe('placePopover', () => {
   it('stays inside the viewport horizontally', () => {
     expect(placePopover(box(900, 100, 80, 26), box(0, 0, 320, 200), viewport, 'start').left).toBe(672);
     expect(placePopover(box(10, 100, 28, 28), box(0, 0, 220, 200), viewport, 'end').left).toBe(8);
+  });
+});
+
+describe('placePopoverInRoom', () => {
+  const viewport = { width: 1000, height: 800 };
+
+  it('is as tall as its content and opens below when that fits', () => {
+    expect(placePopoverInRoom(box(100, 100, 80, 26), { width: 360, height: 423 }, viewport, 'start')).toEqual({ top: 132, left: 100, maxHeight: 423 });
+  });
+
+  it('opens on the side with more room when its own side has too little, even when neither fits whole', () => {
+    // 440 px tall window: below the anchor at y 50 there are 440 - 76 - 14 = 350 px, above 36 px.
+    const short = { width: 1000, height: 440 };
+    expect(placePopoverInRoom(box(600, 50, 28, 26), { width: 360, height: 423 }, short, 'end')).toEqual({ top: 82, left: 268, maxHeight: 350 });
+    expect(placePopoverInRoom(box(600, 400, 28, 26), { width: 360, height: 423 }, short, 'end').maxHeight).toBe(386);
+  });
+
+  it('keeps a preferred side that fits, and caps the height at the room when the other side has no more', () => {
+    expect(placePopoverInRoom(box(100, 500, 80, 26), { width: 360, height: 300 }, viewport, 'start', 'above')).toEqual({ top: 194, left: 100, maxHeight: 300 });
+    expect(placePopoverInRoom(box(100, 20, 80, 26), { width: 360, height: 900 }, viewport, 'start', 'above').maxHeight).toBe(740);
   });
 });
 

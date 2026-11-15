@@ -49,13 +49,13 @@ const confirmMocks = vi.hoisted(() => ({
 vi.mock('$lib/components/molecules/confirm.svelte', () => confirmMocks);
 
 // A test sets the layout before it mounts the page.
-const layoutState = vi.hoisted(() => ({ mode: 'wide' as 'wide' | 'tall' | 'compact' }));
+const layoutState = vi.hoisted(() => ({ mode: 'wide' as 'wide' | 'tall' | 'compact', coarse: false }));
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
   return {
     ...actual,
     layout: new Proxy(actual.layout, {
-      get: (target, key) => (key === 'mode' ? layoutState.mode : key === 'compact' ? layoutState.mode === 'compact' : Reflect.get(target, key)),
+      get: (target, key) => (key === 'mode' ? layoutState.mode : key === 'compact' ? layoutState.mode === 'compact' : key === 'coarse' ? layoutState.coarse : Reflect.get(target, key)),
     }),
   };
 });
@@ -96,6 +96,7 @@ vi.mock('$lib/state/router.svelte', () => ({
 vi.mock('$lib/state/toasts.svelte', () => ({
   addToast: toastMocks.addToast,
   dismissToast: toastMocks.dismissToast,
+  explainOff: (reason: string | undefined, pointerType: string) => { if (reason && pointerType !== 'mouse') (toastMocks.addToast as (...args: unknown[]) => void)(reason, 'info'); },
 }));
 
 import GalleryPage from './GalleryPage.svelte';
@@ -209,6 +210,7 @@ async function openViewer(filename: string): Promise<void> {
 
 beforeEach(() => {
   layoutState.mode = 'wide';
+  layoutState.coarse = false;
   projectPick.set(null);
   galleryMemory.forget();
   galleryStore.reset();
@@ -301,22 +303,22 @@ describe('GalleryPage Select mode', () => {
     expect(media('a.png').getAttribute('aria-label')).toBe('View a.png');
   });
 
-  it('enters the mode with the tile selected from the tile menu, whose Select item leads outside the mode', async () => {
+  it('enters the mode with the tile selected from the tile\'s checkbox, and has no Select in the tile menu', async () => {
     await mountTiles();
     target.querySelector<HTMLButtonElement>('button[aria-label="More actions for b.png"]')!.click();
     flushSync();
-    const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menu"] [data-action]'));
-    expect(items[0].dataset.action).toBe('select');
+    expect(Array.from(document.querySelectorAll<HTMLElement>('[role="menu"] [data-action]')).map((item) => item.dataset.action)).not.toContain('select');
+    target.querySelector<HTMLButtonElement>('button[aria-label="More actions for b.png"]')!.click();
+    flushSync();
 
-    items[0].click();
+    target.querySelector<HTMLInputElement>('input[type="checkbox"][aria-label="Select b.png"]')!.click();
     await settle();
 
     expect(selectedNames()).toEqual(['b.png']);
     expect(bulkButton('Done')).not.toBeNull();
-    expect(document.activeElement).toBe(media('b.png'));
   });
 
-  it('leads the tile menu with View inside the mode, and View opens the viewer without changing the selection', async () => {
+  it('puts View in the tile menu\'s head inside the mode, and View opens the viewer without changing the selection', async () => {
     await mountTiles();
     await enterSelectMode();
     click(media('a.png'));
@@ -455,15 +457,48 @@ describe('GalleryPage Select mode', () => {
     expect(target.querySelector('[data-testid="gallery-select-bar"]')).toBeNull();
   });
 
-  it('offers Select all, Move, Download and Delete in the bar at the foot on the phone', async () => {
+  it('puts the header\'s Select all, Download, Move and Delete in the file order, with rules between the groups', async () => {
+    await mountTiles();
+    await enterSelectMode();
+
+    const bulk = Array.from(header().querySelectorAll('button')).map((el) => el.dataset.bulk ?? null);
+    // Done, Select all, Download, Move, Delete: the ones the page marks are in their places.
+    expect(bulk).toEqual(['done', null, null, 'move', 'delete']);
+  });
+
+  for (const mode of ['compact', 'tall'] as const) {
+    it(`offers Select all, Download, Move and Delete in the bar at the foot with a finger, on ${mode === 'compact' ? 'a phone' : 'a tablet'}`, async () => {
+      layoutState.mode = mode;
+      layoutState.coarse = true;
+      await mountTiles();
+      await enterSelectMode();
+
+      const bar = target.querySelector<HTMLElement>('[data-testid="gallery-select-bar"]')!;
+      // Select all, Download, Move, Delete.
+      expect(Array.from(bar.querySelectorAll('button')).map((el) => el.dataset.bulk ?? null)).toEqual([null, null, 'move', 'delete']);
+      expect(Array.from(header().querySelectorAll('button')).map((el) => el.dataset.bulk)).toEqual(['done']);
+    });
+  }
+
+  it('moves the count into the header beside Done with a finger, and leaves no description line', async () => {
+    layoutState.mode = 'compact';
+    layoutState.coarse = true;
+    await mountTiles();
+    await enterSelectMode();
+
+    expect(header().querySelector('[role="status"]')).not.toBeNull();
+    expect(header().querySelector('.ui-page-sub')).toBeNull();
+    expect(target.querySelector('[data-testid="gallery-select-bar"] [role="status"]')).toBeNull();
+  });
+
+  it('keeps the mouse header, with no foot bar, in a narrow window', async () => {
     layoutState.mode = 'compact';
     await mountTiles();
     await enterSelectMode();
 
-    const bar = target.querySelector<HTMLElement>('[data-testid="gallery-select-bar"]')!;
-    const names = Array.from(bar.querySelectorAll('button')).map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim());
-    expect(names).toEqual(expect.arrayContaining(['Select all', 'Move selected', 'Download selected', 'Delete selected']));
-    expect(bulkButton('Done')).not.toBeNull();
+    expect(target.querySelector('[data-testid="gallery-select-bar"]')).toBeNull();
+    expect(header().querySelector('[data-bulk="move"]')).not.toBeNull();
+    expect(header().querySelector('[data-bulk="delete"]')).not.toBeNull();
   });
 
   it('describes the view being selected from in the mode line, without a count', async () => {
@@ -474,7 +509,7 @@ describe('GalleryPage Select mode', () => {
     await settle();
     await enterSelectMode();
 
-    expect(modeLineText()).toBe(modeLine({ project: null, starred: true, filter: 'video', coarse: false }));
+    expect(modeLineText()).toBe(modeLine({ project: null, starred: true, filter: 'video' }));
   });
 
   it('selects every matching file with Select all, shows the server\'s count, and sends one request while it is busy', async () => {
@@ -885,7 +920,7 @@ describe('GalleryPage regressions', () => {
     mountPage();
     await settle();
     await openViewer('b.png');
-    const title = () => document.querySelector('#asset-viewer-title')?.textContent;
+    const title = () => document.querySelector('#asset-viewer-title .file-name')?.getAttribute('title');
     expect(title()).toBe('b.png');
 
     galleryStore.mergeOutputs([makeAsset({ id: 'new.png', filename: 'new.png' })]);
@@ -893,7 +928,7 @@ describe('GalleryPage regressions', () => {
 
     expect(target.querySelector('button[aria-label="View new.png"]')).not.toBeNull();
     expect(title()).toBe('b.png');
-    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 4');
+    expect(document.querySelector('.vb-name small')?.textContent).toContain('3 of 4');
   });
 
   it('keeps paging in the viewer after a delete without skipping shifted assets', async () => {
@@ -1047,7 +1082,7 @@ describe('GalleryPage regressions', () => {
     expect(getViewer()?.querySelector('[role="note"]')).toBeNull();
     expect(getViewer()?.textContent).toContain('Unavailable');
     expect(getViewer()?.textContent).toContain('Display-only prompt');
-    expect((getViewer()?.querySelector('[data-action="reuse"]') as HTMLButtonElement | null)?.disabled).toBe(true);
+    expect(getViewer()?.querySelector('[data-action="reuse"]')?.getAttribute('aria-disabled')).toBe('true');
     expect(routerMocks.navigate).not.toHaveBeenCalled();
   });
 
@@ -2512,6 +2547,7 @@ describe('GalleryPage Move', () => {
 
     it('shows the Move label on a tablet, named Move selected', async () => {
       layoutState.mode = 'tall';
+      layoutState.coarse = true;
       galleryApiMocks.getGallery.mockResolvedValue(reply([top('a.png')]));
       mountPage();
       await settle();
@@ -2522,8 +2558,9 @@ describe('GalleryPage Move', () => {
       expect(button.disabled).toBe(true);
     });
 
-    it('puts Move on the phone select bar between Select all and Download, and moves the selection from there', async () => {
+    it('puts Move on the phone select bar after Download, and moves the selection from there', async () => {
       layoutState.mode = 'compact';
+      layoutState.coarse = true;
       const [a, b] = [top('a.png'), top('b.png')];
       galleryApiMocks.getGallery.mockResolvedValue(reply([a, b]));
       galleryApiMocks.moveAssets.mockResolvedValue({ moved: [moved('a.png', inBus('a.png'))], failed: [] });
@@ -2533,7 +2570,7 @@ describe('GalleryPage Move', () => {
 
       const bar = target.querySelector<HTMLElement>('[data-testid="gallery-select-bar"]')!;
       const names = () => Array.from(bar.querySelectorAll('button')).map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim());
-      expect(names()).toEqual(['Select all', 'Move selected', 'Download selected', 'Delete selected']);
+      expect(names()).toEqual(['Select all', 'Download selected', 'Move selected', 'Delete selected']);
       const barMove = bar.querySelector<HTMLButtonElement>('button[aria-label="Move selected"]')!;
       expect(barMove.disabled).toBe(true);
 
@@ -2843,9 +2880,9 @@ describe('GalleryPage stars', () => {
     starToggle().click();
     await settle();
     await openViewer('a.png');
-    const title = () => document.querySelector('#asset-viewer-title')?.textContent;
+    const title = () => document.querySelector('#asset-viewer-title .file-name')?.getAttribute('title');
     expect(title()).toBe('a.png');
-    expect(document.querySelector('.viewer-title small')?.textContent).toContain('1 of 3');
+    expect(document.querySelector('.vb-name small')?.textContent).toContain('1 of 3');
     galleryApiMocks.getGallery.mockClear();
     galleryApiMocks.getGallery.mockResolvedValue(reply([starredC]));
 
@@ -2861,7 +2898,7 @@ describe('GalleryPage stars', () => {
 
     expect(galleryApiMocks.setStarred).toHaveBeenLastCalledWith('b.png', false);
     expect(title()).toBe('c.png');
-    expect(document.querySelector('.viewer-title small')?.textContent).toContain('1 of 1');
+    expect(document.querySelector('.vb-name small')?.textContent).toContain('1 of 1');
     expect(target.querySelector('.ui-page-sub')?.textContent).toContain('of 1');
     // The page reloads once the viewer closes, so the list is the server's again.
     expect(galleryApiMocks.getGallery).not.toHaveBeenCalled();
@@ -3005,7 +3042,7 @@ describe('GalleryPage adjust', () => {
 
   const editor = (): HTMLElement | null => document.querySelector('[role="dialog"][aria-label^="Adjust "]');
   const order = (): string[] => Array.from(target.querySelectorAll('.asset-tile')).map((tile) => tile.getAttribute('data-asset-id')!.replace('out/', ''));
-  const shown = (): string | null | undefined => document.querySelector('#asset-viewer-title')?.textContent;
+  const shown = (): string | null | undefined => document.querySelector('#asset-viewer-title .file-name')?.getAttribute('title');
   const press = (key: string): void => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
     flushSync();
@@ -3112,7 +3149,7 @@ describe('GalleryPage adjust', () => {
     expect(adjustApiMocks.saveAdjusted).toHaveBeenCalledOnce();
     expect(editor()).toBeNull();
     expect(shown()).toBe('b_adjusted.png');
-    expect(document.querySelector('.viewer-title small')?.textContent).toContain('1 of 4');
+    expect(document.querySelector('.vb-name small')?.textContent).toContain('1 of 4');
     expect(order()).toEqual(['b_adjusted.png', 'a.png', 'b.png', 'c.png']);
   });
 
@@ -3124,7 +3161,7 @@ describe('GalleryPage adjust', () => {
     await save('Save as copy');
 
     expect(shown()).toBe('b_adjusted.png');
-    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 4');
+    expect(document.querySelector('.vb-name small')?.textContent).toContain('3 of 4');
     expect(order()).toEqual(['a.png', 'b.png', 'b_adjusted.png', 'c.png']);
   });
 
@@ -3141,7 +3178,7 @@ describe('GalleryPage adjust', () => {
 
     expect(editor()).toBeNull();
     expect(shown()).toBe('b_adjusted.png');
-    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 4');
+    expect(document.querySelector('.vb-name small')?.textContent).toContain('3 of 4');
     // The grid behind keeps listing starred files only.
     expect(order()).toEqual(['a.png', 'b.png', 'c.png']);
 
@@ -3154,12 +3191,12 @@ describe('GalleryPage adjust', () => {
     await settle();
     expect(getViewer()).toBeNull();
     await openViewer('c.png');
-    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 3');
+    expect(document.querySelector('.vb-name small')?.textContent).toContain('3 of 3');
   });
 
   describe('a copy the starred view does not list', () => {
     const [sa, sb, sc] = [a, b, c].map((item) => ({ ...item, starred: true }));
-    const position = (): string | null | undefined => document.querySelector('.viewer-title small')?.textContent;
+    const position = (): string | null | undefined => document.querySelector('.vb-name small')?.textContent;
     const starButton = (): HTMLElement => document.querySelector<HTMLElement>('button[data-action="star"]')!;
     const rowNamed = (label: string): HTMLElement =>
       Array.from(document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitemradio"]')).find((item) => item.textContent?.trim() === label)!;
@@ -3248,7 +3285,7 @@ describe('GalleryPage adjust', () => {
 
     expect(editor()).toBeNull();
     expect(shown()).toBe('b.png');
-    expect(document.querySelector('.viewer-title small')?.textContent).toContain('2 of 3');
+    expect(document.querySelector('.vb-name small')?.textContent).toContain('2 of 3');
     expect(document.querySelector('[data-testid="viewer-image"]')?.getAttribute('src')).toBe('/media/out/b.png?v=2');
     expect(order()).toEqual(['a.png', 'b.png', 'c.png']);
   });

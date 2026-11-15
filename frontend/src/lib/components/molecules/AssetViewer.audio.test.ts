@@ -128,53 +128,78 @@ describe('AssetViewer with audio', () => {
     expect(document.querySelector('[data-testid="viewer-words"]')).toBeNull();
   });
 
-  it('keeps the bar to Reuse, Use as, Download, Delete, Details, shortcuts and Close, with no Extend or Upscale for a null upscale and extend', () => {
+  it('keeps the bar to Reuse, Audio track, Download, Delete, Details and Close, with no Use as for a song and no Extend or Upscale', () => {
     mountViewer();
 
-    expect(['reuse', 'reference', 'download', 'delete', 'details', 'shortcuts'].map((name) => action(name) !== null)).toEqual([true, true, true, true, true, true]);
+    expect(['reuse', 'use-audio-track', 'download', 'delete', 'details'].map((name) => action(name) !== null)).toEqual([true, true, true, true, true]);
+    expect(action('shortcuts')).toBeNull();
+    expect(action('use-as')).toBeNull();
     expect(action('extend')).toBeNull();
     expect(action('upscale')).toBeNull();
   });
 
-  it('lists no upscale shortcut for a take, and says what E does for one', () => {
+  it('lists no upscale shortcut for a take, and lists E for it', () => {
     mountViewer();
-    flushSync(() => action('shortcuts')!.click());
+    flushSync(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true, cancelable: true })); });
 
     const help = document.querySelector('#asset-viewer-shortcuts')!;
     expect(help.textContent).not.toContain('Upscale');
-    expect(help.textContent).toContain('audio track or voice');
+    expect(Array.from(help.querySelectorAll('kbd')).some((key) => key.textContent === 'E')).toBe(true);
   });
 
-  it('lists the audio track under Use as, and the voice and the saved voice for a speech take', () => {
+  it('lists the voice and the saved voice under Use as for a speech take, and starts its audio track from its own button', () => {
     const onuseaudio = vi.fn();
-    mountViewer({ assets: [talk], onuseaudio, useAs: { audio_track: { disabled: false, hint: 'Video tab, from 0 s' }, voice: { disabled: false, hint: 'Speech, text filled in' }, save_voice: { disabled: false, hint: 'Keep it in your voices' } } });
+    mountViewer({ assets: [talk], onuseaudio, useAs: { audio_track: { disabled: false }, voice: { disabled: false }, save_voice: { disabled: false } } });
 
-    flushSync(() => action('reference')!.click());
-    const items = Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
-    expect(items).toEqual(['Audio track Video tab, from 0 s', 'Voice Speech, text filled in', 'Saved voice Keep it in your voices']);
+    flushSync(() => action('use-as')!.click());
+    const items = Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'));
+    expect(items).toEqual(['use-voice', 'use-save-voice']);
 
     flushSync(() => (document.querySelector('[role="menu"] [data-action="use-voice"]') as HTMLElement).click());
     expect(onuseaudio).toHaveBeenCalledWith(talk, 'voice');
+
+    flushSync(() => action('use-audio-track')!.click());
+    expect(onuseaudio).toHaveBeenLastCalledWith(talk, 'audio_track');
+  });
+
+  it('starts the Audio track on E for every take, without opening a menu', async () => {
+    const onuseaudio = vi.fn();
+    for (const take of [song, talk]) {
+      const page = mountViewer({ assets: [take], onuseaudio });
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true, cancelable: true }));
+      expect(onuseaudio).toHaveBeenLastCalledWith(take, 'audio_track');
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      await page.unmount();
+    }
+  });
+
+  it('explains instead of starting when the Video model cannot follow an audio track', () => {
+    const onuseaudio = vi.fn();
+    mountViewer({ assets: [song], onuseaudio, useAs: { audio_track: { disabled: true, hint: 'LTX 2.3 can\'t follow an audio track' } } });
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true, cancelable: true }));
+
+    expect(onuseaudio).not.toHaveBeenCalled();
   });
 
   it('reports Saved voice to the host', () => {
     const onuseaudio = vi.fn();
     mountViewer({ assets: [talk], onuseaudio, useAs: { voice: { disabled: false }, save_voice: { disabled: false }, voiceMaxSeconds: 30 } });
-    flushSync(() => action('reference')!.click());
+    flushSync(() => action('use-as')!.click());
     flushSync(() => (document.querySelector('[role="menu"] [data-action="use-save-voice"]') as HTMLElement).click());
     expect(onuseaudio).toHaveBeenCalledWith(talk, 'save_voice');
   });
 
-  it('greys Voice and Saved voice for a take over the limit, with the reason as the tooltip and none in the row', () => {
+  it('greys Voice and Saved voice for a take over the limit, with the reason as the tooltip and the hint', () => {
     const long = makeSpeechAsset({ duration: 44 });
     mountViewer({ assets: [long], useAs: { voice: { disabled: false }, save_voice: { disabled: false }, voiceMaxSeconds: 30 } });
-    flushSync(() => action('reference')!.click());
+    flushSync(() => action('use-as')!.click());
 
     for (const id of ['use-voice', 'use-save-voice']) {
       const item = document.querySelector<HTMLElement>(`[role="menu"] [data-action="${id}"]`)!;
       expect(item.getAttribute('aria-disabled')).toBe('true');
       expect(item.title).toBe('Use a take of 30 s or less as a voice');
-      expect(item.querySelector('.action-menu-hint')).toBeNull();
+      expect(item.textContent).toContain(item.title);
     }
   });
 

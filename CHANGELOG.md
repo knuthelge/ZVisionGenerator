@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Adjust a picture without a model.** **Adjust** in the viewer (key `A`) crops, rotates and flips an image and corrects its light and colour with seven sliders, Vibrance among them, and a Colour mixer that sets the saturation of eight colour families, with a live preview and a **Compare** against the original. **Save as copy** keeps the original and links the copy back to it; **Replace** overwrites a PNG. See [Adjust a picture](https://knuthelge.github.io/ZVisionGenerator/guides/images/#adjust).
 - **Add a Hugging Face token in the app.** **Add token** on the Config and Models pages saves a token after Hugging Face checks it, for higher download limits (big downloads are less likely to be slowed down) and gated models, with no terminal and no restart. From a terminal, the messages now say `uvx hf auth login`, which works without installing anything else. See [Hugging Face token](https://knuthelge.github.io/ZVisionGenerator/reference/data-folder/#hugging-face-token).
 
+### Changed
+- **The Gallery and the viewer list a file's actions the same way everywhere.** ⋯, right-click and press and hold open one [file panel](https://knuthelge.github.io/ZVisionGenerator/web-ui/gallery/#the-file-panel) whose choices say what they make, and the viewer's toolbar and touch docks follow its order. A narrow window shows icons instead of hiding actions, Copy prompt is on every tile, a touch tile's star is one tap, and E starts Audio track on an audio take.
+
 ### Fixed
 - **Sliders, checkboxes and path boxes are finger-sized on touch screens.** The larger touch sizes were being overridden by the desktop ones.
 - **Copying works when the Web UI is opened over plain HTTP from another machine.** **Copy prompt**, the Job log's **Copy error** and the Discover panel's copy button had no clipboard to use on a plain-HTTP address; they now copy there too.

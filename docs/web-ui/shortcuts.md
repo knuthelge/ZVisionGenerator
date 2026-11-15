@@ -78,10 +78,10 @@ A held key moves the handle without asking; the point is set when the key lifts.
 | ++left++ / ++right++ | Previous / next file |
 | ++home++ / ++end++ | First / last file |
 | ++r++ | Reuse settings |
-| ++e++ | Use as (image or audio) or Extend (video) |
+| ++e++ | **Use as** (image), **Extend** (video) or **Audio track** (audio) |
 | ++m++ | [Edit an image](workspace.md#edit-an-image) |
 | ++a++ | [Adjust an image](gallery.md#adjust) |
-| ++x++ then ++2++ / ++4++ | Plain upscale 2× / 4× of an image (a creative upscale where the plain one isn't offered); ++x++ then ++2++ upscales a video where its **Upscale** menu offers one |
+| ++x++ then ++2++ / ++4++ | Plain upscale 2× / 4× of an image (a creative upscale where the plain one isn't offered); ++x++ then ++2++ upscales a video where it offers one |
 | ++s++ | Star or unstar the file |
 | ++d++ | Download |
 | ++c++ | Copy the prompt |

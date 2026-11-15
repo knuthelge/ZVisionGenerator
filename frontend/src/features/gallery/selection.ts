@@ -73,17 +73,15 @@ const MEDIA_LABELS: Record<MediaFilter, string> = {
 };
 
 /**
- * The Select mode's description line: the view being selected from, then how to select. It carries no count, which the
- * header and the phone bar already show.
- *
- * @param coarse Whether the pointer is coarse (touch), where the instruction says Tap.
+ * The Select mode's description line for a mouse: the view being selected from, then how to select. It carries no count, which
+ * the header shows. A finger's header has the count in its place and no line.
  */
-export function modeLine(view: { project: string | null; starred: boolean; filter: MediaFilter; coarse: boolean }): string {
+export function modeLine(view: { project: string | null; starred: boolean; filter: MediaFilter }): string {
   const parts = [
     ...(view.project === null ? [] : [view.project]),
     ...(view.starred ? ['Starred'] : []),
     MEDIA_LABELS[view.filter],
-    `${view.coarse ? 'Tap' : 'Click'} files to add or remove`,
+    'Click files to add or remove',
   ];
   return parts.join(' · ');
 }

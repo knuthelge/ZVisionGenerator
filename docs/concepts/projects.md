@@ -57,7 +57,7 @@ A result that belongs to a different project than the pick, because you changed 
 
 ## Move a file to another project { #move-a-file-to-another-project }
 
-Move sorts existing files into projects, or takes them out of one. The steps are in [Move to project](../web-ui/gallery.md#move-to-project) on the Gallery page: **Move to project…** in a file's **⋯** menu, or **Move selected** for several. The target list holds **No project**, each project and **New project…**.
+Move sorts existing files into projects, or takes them out of one. The steps are in [Move to project](../web-ui/gallery.md#move-to-project) on the Gallery page: **Move** in a file's **⋯** panel, or **Move selected** for several. The target list holds **No project**, each project and **New project…**.
 
 A move is a rename inside the output folder:
 

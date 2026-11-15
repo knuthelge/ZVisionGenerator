@@ -62,13 +62,13 @@ describe('AssetTile, the stage video', () => {
     flushSync();
   }
 
-  /** The menu's items: label, then whether it is disabled. */
+  /** The file panel's items, in reading order. */
   async function menu(): Promise<{ items: string[]; item: (id: string) => HTMLElement | null }> {
     more().click();
     await settle();
     const root = document.querySelector('[role="menu"]')!;
     return {
-      items: Array.from(root.querySelectorAll('.action-menu-heading, [role="menuitem"]')).map((el) => el.textContent?.trim() ?? ''),
+      items: Array.from(root.querySelectorAll('[role="menuitem"]')).map((el) => el.getAttribute('data-action') ?? ''),
       item: (id) => root.querySelector<HTMLElement>(`[data-action="${id}"]`),
     };
   }
@@ -78,9 +78,10 @@ describe('AssetTile, the stage video', () => {
 
     const { items, item } = await menu();
 
-    expect(items).not.toContain('Use as');
-    expect(item('extend')?.textContent?.trim()).toBe('Extend');
+    expect(items).toContain('extend');
+    expect(item('extend')?.getAttribute('aria-disabled')).toBeNull();
     expect(item('frame-first')).toBeNull();
+    expect(item('frame-last')).toBeNull();
   });
 
   it('offers Use as and Extend from the frame it is paused on', async () => {
@@ -89,16 +90,15 @@ describe('AssetTile, the stage video', () => {
 
     const { items, item } = await menu();
 
-    expect(items[0]).toBe('Use as');
-    expect(items[1]).toMatch(/^First frame/);
-    expect(items[2]).toMatch(/^Last frame/);
+    expect(items.indexOf('frame-last')).toBe(items.indexOf('frame-first') + 1);
+    expect(items.indexOf('frame-first')).toBeGreaterThan(items.indexOf('extend'));
     expect(item('extend')?.textContent).toContain('Extend from 3.0 s');
     item('frame-last')!.click();
     flushSync();
     expect(onuseframe).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/c.mp4' }), expect.objectContaining({ seconds: 3 }), 'last');
   });
 
-  it('refuses Extend on a frame too early, with the reason as the item\'s description, and still offers Use as', async () => {
+  it('refuses Extend on a frame too early, with the reason as the choice\'s hint, and still offers the frame choices', async () => {
     await stage();
     seekTo(10);
 
@@ -157,15 +157,14 @@ describe('AssetTile, the stage video', () => {
     expect(menuButton()).toBeNull();
   });
 
-  it('keeps the ⋯ menu as it was beside the menu button', async () => {
+  it('keeps the frame choices in the ⋯ panel beside the menu button', async () => {
     await stage();
     seekTo(72);
 
     const { items } = await menu();
 
-    expect(items[0]).toBe('Use as');
-    expect(items[1]).toMatch(/^First frame/);
-    expect(items[2]).toMatch(/^Last frame/);
+    expect(items.indexOf('frame-last')).toBe(items.indexOf('frame-first') + 1);
+    expect(items.indexOf('frame-first')).toBeGreaterThan(-1);
     expect(menuButton()).not.toBeNull();
   });
 

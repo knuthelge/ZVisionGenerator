@@ -57,7 +57,7 @@ The preview is the screen:
 
 - **Swipe sideways** through earlier outputs, and **swipe up** for the Gallery.
 - **Tap** the preview to open the viewer. Pinch or double-tap to zoom. A video or take plays in the preview instead; open the viewer with the expand button in its corner.
-- **Press and hold** any image, in the preview, the Gallery strip, the Gallery or the viewer, for its menu.
+- **Press and hold** any image, in the preview, the Gallery strip, the Gallery or the viewer, for its [file panel](gallery.md#the-file-panel).
 
 Under the preview, a strip shows one chip per setting with its value; tap one to change that setting, or **All** for every setting. The preset is a chip too, and a dot shows a setting that differs from its default. The controls themselves are described in [Workspace](workspace.md).
 
@@ -83,7 +83,7 @@ In **Image**, the first chip is **Kind**: **New** or **Edit**. In **Edit**, *Ima
 
 ### Audio on a phone { #audio-on-a-phone }
 
-The **Audio** chips follow the kind, and a chip shows a ✦ when [Describe it](audio.md#describe-it) filled it. The helpers and **Insert** open as sheets, and song blocks are reordered with **Move up** and **Move down** in a block's **⋯** menu. The finished take is a player on the preview, and its **⋯** button has **Use as** → **Audio track**, **Voice** and **Saved voice**. See [Audio tab](audio.md).
+The **Audio** chips follow the kind, and a chip shows a ✦ when [Describe it](audio.md#describe-it) filled it. The helpers and **Insert** open as sheets, and song blocks are reordered with **Move up** and **Move down** in a block's **⋯** menu. The finished take is a player on the preview, and its **⋯** button opens the panel with **Audio track**, and for a speech take **Use as** → **Voice** and **Saved voice**. See [Audio tab](audio.md).
 
 ![The Audio tab on a phone, on Speech, with a take as a player on the preview and the Kind, Model and Voice chips under it](../assets/screenshots/phone-audio.webp){ width="300" }
 
@@ -95,7 +95,11 @@ Tapping an image grows it out of its tile into the viewer, which fills the scree
 - **Pull down** and the image shrinks back into its tile.
 - **Swipe up** for its details, which rise as a sheet under the image.
 - **Tap the image** to hide the bar and the strip, and tap again to bring them back. On a video, a tap plays or pauses it instead.
-- **Pinch or double-tap** to zoom, and **press and hold** for the image's menu.
+- **Pinch or double-tap** to zoom, and **press and hold** for the image's [file panel](gallery.md#the-file-panel).
+
+**The dock** under the picture holds **Reuse**, the file's own action where it has one (**Edit**, **Extend** or **Audio track**), **Download** and **More**, which opens the whole [file panel](gallery.md#the-file-panel). A tap on the picture hides the dock with the bar and the strip.
+
+Held sideways, the dock is a rail on the right.
 
 A video plays in the page. Swipe over the picture to page, or drag the timeline to seek. Pause it partway and tap the time under it for the frame menu; see [Use a paused frame](gallery.md#use-a-paused-frame).
 
@@ -106,3 +110,5 @@ In the Gallery, a tap opens the image, and in [Select mode](gallery.md#select-mo
 Held upright, an iPad shows the preview and the Gallery strip across the top, with *Compose* and *Settings* side by side under them. Held sideways, it has the computer layout.
 
 Any touch screen gets finger-sized controls, and numbers get − and + buttons (hold to repeat) in place of the label dragging a mouse uses.
+
+In the viewer, a tablet gets the toolbar's actions in a dock under the picture, held either way. See [Gallery and viewer](gallery.md#the-viewer).

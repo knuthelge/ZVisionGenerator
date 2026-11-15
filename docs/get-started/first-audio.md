@@ -26,7 +26,7 @@ Plain text is enough. The line under the box counts the characters and says how 
 
 Press **Generate**, or ++ctrl+enter++ (++cmd+enter++ on a Mac).
 
-When the take is done, its waveform shows in the preview; press the play button to listen. The take is also in the [Gallery](../web-ui/gallery.md#audio), which has an **Audio only** filter, and it's the same file you can give to a video: **Use as** → **Audio track**.
+When the take is done, its waveform shows in the preview; press the play button to listen. The take is also in the [Gallery](../web-ui/gallery.md#audio), which has an **Audio only** filter, and it's the same file you can give to a video: **Audio track**, beside **Reuse settings**.
 
 ## Next
 

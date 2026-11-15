@@ -186,7 +186,7 @@ describe('WorkspacePage stars', () => {
 
       expect(galleryApiMocks.setStarred).toHaveBeenLastCalledWith('out/b.png', true);
       expect(tileIds()).toEqual(['out/a.png', 'out/b.png']);
-      expect(document.querySelector('.viewer-title small')?.textContent).toContain('2 of 2');
+      expect(document.querySelector('.vb-name small')?.textContent).toContain('2 of 2');
     });
   });
 

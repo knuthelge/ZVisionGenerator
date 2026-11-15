@@ -14,8 +14,18 @@
     describedby?: string;
     /** Short status after the title, e.g. "3 changed". */
     meta?: string;
+    /**
+     * The head's own content, in place of the title and meta: a file's thumbnail and name, say. Close stays at the right, and the
+     * head row then has 12px sides, a 4px cluster and no bottom border.
+     */
+    head?: Snippet;
     /** Extra controls in the head, before Close. */
     headActions?: Snippet;
+    /**
+     * Span the screen instead of the usual width, padded by the safe areas, and hide the head row (the grab bar stays): for a
+     * phone held sideways, where the content draws its own head and Close in its first row.
+     */
+    wide?: boolean;
     /** `menu` for an action menu, `alertdialog` for a question to approve. */
     role?: 'dialog' | 'alertdialog' | 'menu';
     /** Which rung of the overlay ladder the sheet sits on (`global.css`). */
@@ -43,7 +53,9 @@
     labelledby,
     describedby,
     meta,
+    head,
     headActions,
+    wide = false,
     role = 'dialog',
     layer = 'sheet',
     onclose,
@@ -105,6 +117,7 @@
       use:sheetDrag={{ onclose: close }}
       class="sheet ui-sheet"
       class:fill
+      class:wide
       {role}
       aria-modal={open && role !== 'menu' ? 'true' : undefined}
       aria-label={labelledby ? undefined : title}
@@ -114,14 +127,20 @@
       {onkeydown}
     >
       <div class="ui-sheet-grab" data-sheet-handle aria-hidden="true"></div>
-      <div class="ui-sheet-head sheet-head" data-sheet-handle role="presentation">
-        {#if title}<h2 class="ui-area-label sheet-title">{title}</h2>{/if}
-        {#if meta}<span class="sheet-meta">{meta}</span>{/if}
-        <span class="ui-sheet-end">
-          {@render headActions?.()}
-          <button type="button" class="ui-btn ui-btn-icon" aria-label="Close" onclick={close}><Icon name="close" size={16} /></button>
-        </span>
-      </div>
+      {#if !wide}
+        <div class="ui-sheet-head sheet-head" class:flush={head !== undefined} data-sheet-handle role="presentation">
+          {#if head}
+            {@render head()}
+          {:else}
+            {#if title}<h2 class="ui-area-label sheet-title">{title}</h2>{/if}
+            {#if meta}<span class="sheet-meta">{meta}</span>{/if}
+          {/if}
+          <span class="ui-sheet-end">
+            {@render headActions?.()}
+            <button type="button" class="ui-btn ui-btn-icon" aria-label="Close" onclick={close}><Icon name="close" size={16} /></button>
+          </span>
+        </div>
+      {/if}
       <div class="sheet-body" class:bare>
         {@render children()}
       </div>
@@ -148,6 +167,12 @@
   .sheet-root[data-shown='true'] .sheet { translate: none; }
   .sheet.fill { height: calc(100% - 44px - env(safe-area-inset-top, 0px) - 8px); }
   .sheet-head { border-bottom: 1px solid var(--color-border-subtle); }
+  /* A head that holds a file: the grid's edge for its sides, one cluster of controls, and no rule under it. */
+  .sheet-head.flush { gap: var(--sp-8); padding: var(--sp-2) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px)); border-bottom: 0; }
+  .sheet-head.flush :global(.ui-sheet-end) { gap: var(--sp-4); }
+  /* Held sideways: the whole screen's width, with the safe areas for its sides (the sheet's own cap is for a tall screen). */
+  .sheet.wide { width: auto; margin-inline: 0; }
+  .sheet.wide .sheet-body { padding-inline: max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px)); }
   .sheet-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sheet-meta { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-primary-main); }
   .sheet-body { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding-bottom: env(safe-area-inset-bottom, 0px); }

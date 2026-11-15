@@ -78,7 +78,7 @@
     {#if source && !failed}
       <img src={source.thumbUrl} alt="" onerror={() => { failed = true; }}>
     {:else}
-      <Icon name="reference" size={16} />
+      <Icon name="image" size={16} />
     {/if}
     <canvas bind:this={canvas} style:width="{size}px" style:height="{size}px" aria-hidden="true"></canvas>
     {#if whole}<span class="thumb-frame" style={box(frameBox)}></span>{/if}

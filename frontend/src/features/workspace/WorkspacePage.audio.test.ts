@@ -4346,7 +4346,7 @@ describe('Use as from an audio take on the stage', () => {
     await settle();
 
     openMenu();
-    expect(item('use-audio-track')?.textContent).toContain('Video tab, from 0 s');
+    expect(item('use-audio-track')?.getAttribute('aria-disabled')).toBeNull();
     item('use-audio-track')!.click();
     await settle();
 

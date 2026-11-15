@@ -72,7 +72,7 @@ describe('selectionProject', () => {
 });
 
 describe('modeLine', () => {
-  const base = { project: null, starred: false, filter: 'all', coarse: false } as const;
+  const base = { project: null, starred: false, filter: 'all' } as const;
 
   it('names the project when one is picked, and only then', () => {
     expect(modeLine({ ...base, project: 'Night Bus' })).toContain('Night Bus');

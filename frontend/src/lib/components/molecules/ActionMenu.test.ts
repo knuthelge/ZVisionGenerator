@@ -17,7 +17,7 @@ describe('ActionMenu', () => {
   beforeEach(() => {
     Object.assign(layoutMock, { compact: false, mode: 'wide', coarse: false });
     toasts.splice(0, toasts.length);
-    document.documentElement.style.removeProperty('--toast-bottom');
+    document.documentElement.style.removeProperty('--menu-sheet');
   });
 
   function mountMenu(items: ActionMenuEntry[], onclose = vi.fn()) {
@@ -162,17 +162,19 @@ describe('ActionMenu', () => {
         expect(toasts).toHaveLength(0);
       });
 
-      it('lift the toast above the sheet on a phone while the menu is open, and let it drop back when the menu closes', () => {
+      it('publish the sheet\'s height while a phone\'s menu is open, for the toast to sit above, and drop it when the menu closes', () => {
         Object.assign(layoutMock, { compact: true, mode: 'compact', coarse: true });
-        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
         const props = mountMenu(greyed());
         flushSync();
-        vi.spyOn(document.querySelector('[role="menu"]') as HTMLElement, 'getBoundingClientRect').mockReturnValue({ top: 500 } as DOMRect);
-        click('touch');
 
-        expect(document.documentElement.style.getPropertyValue('--toast-bottom')).toBe('312px');
+        expect(document.documentElement.style.getPropertyValue('--menu-sheet')).not.toBe('');
         flushSync(() => { props.open = false; });
-        expect(document.documentElement.style.getPropertyValue('--toast-bottom')).toBe('');
+        expect(document.documentElement.style.getPropertyValue('--menu-sheet')).toBe('');
+      });
+
+      it('publish no height for a popover, which no toast needs to clear', () => {
+        mountMenu(greyed());
+        expect(document.documentElement.style.getPropertyValue('--menu-sheet')).toBe('');
       });
     });
 

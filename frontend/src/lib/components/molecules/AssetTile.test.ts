@@ -50,6 +50,15 @@ describe('AssetTile', () => {
     flushSync();
   }
 
+  it('names the file in the caption with its full name as the title, so a cut name keeps its time', () => {
+    const asset = makeAsset({ filename: 'web_2026-11-14_09-12-33.png' });
+    mountTile({ asset });
+
+    const name = target.querySelector('.asset-tile-foot .file-name') as HTMLElement;
+    expect(name.title).toBe('web_2026-11-14_09-12-33.png');
+    expect(name.textContent).toContain('web_2026-11-14_09-12-33.png');
+  });
+
   describe('meta line with showProject', () => {
     const foot = () => target.querySelector('.asset-tile-foot p:nth-child(2)')?.textContent ?? '';
     const date = new Date(makeAsset().created_at).toLocaleDateString();
@@ -135,7 +144,7 @@ describe('AssetTile', () => {
     const asset = makeAsset();
     mountTile({ asset, onreuse, ondelete: vi.fn() });
     openMenu(asset);
-    expect(menuActions()).toEqual(['reuse', 'download', 'delete']);
+    expect(menuActions()).toEqual(['reuse', 'download', 'copy-prompt', 'delete']);
     (document.querySelector('[data-action="reuse"]') as HTMLButtonElement).click();
     expect(onreuse).toHaveBeenCalledWith(asset);
     flushSync();
@@ -154,7 +163,7 @@ describe('AssetTile', () => {
     mountTile({ asset, onreference, ondelete });
 
     openMenu(asset);
-    expect(menuActions()).toEqual(['reference-image', 'reference-reference', 'reference-video', 'reference-last-frame', 'download', 'delete']);
+    expect(menuActions()).toEqual(['reference-image', 'reference-reference', 'reference-video', 'reference-last-frame', 'download', 'copy-prompt', 'delete']);
     expect(document.querySelector('[data-action="download"]')?.getAttribute('href')).toBe(asset.url);
 
     (document.querySelector('[data-action="reference-video"]') as HTMLButtonElement).click();
@@ -211,7 +220,7 @@ describe('AssetTile', () => {
     const asset = makeAsset({ media_type: 'video', filename: 'a.mp4', url: '/media/out/a.mp4' });
     mountTile({ asset, onreference: vi.fn(), ondelete: vi.fn() });
     openMenu(asset);
-    expect(menuActions()).toEqual(['download', 'delete']);
+    expect(menuActions()).toEqual(['download', 'copy-prompt', 'delete']);
   });
 
   describe('extend', () => {
@@ -223,7 +232,7 @@ describe('AssetTile', () => {
       const onextend = vi.fn();
       mountTile({ asset, onextend, ondelete: vi.fn(), onreference: vi.fn() });
       openMenu(asset);
-      expect(menuActions()).toEqual(['extend', 'download', 'delete']);
+      expect(menuActions()).toEqual(['extend', 'download', 'copy-prompt', 'delete']);
 
       (document.querySelector('[data-action="extend"]') as HTMLButtonElement).click();
       flushSync();
@@ -502,7 +511,7 @@ describe('AssetTile Move', () => {
     page.unmount();
     mountTile({ asset, onmove: vi.fn() });
     openMenu(asset);
-    expect(menuActions().indexOf('move')).toBe(menuActions().indexOf('download') - 1);
+    expect(menuActions().indexOf('move')).toBe(menuActions().indexOf('download') + 1);
   });
 
   it('opens the project list after the menu closes, with the current location checked and disabled', async () => {
@@ -618,20 +627,14 @@ describe('AssetTile Select mode', () => {
       expect(onselect).toHaveBeenCalledWith(asset, true);
     });
 
-    it('leads the menu with Select, which starts the mode and returns focus to the media', async () => {
-      const onstartselect = vi.fn();
-      mountTile({ onstartselect, onpreview: vi.fn() });
-      expect((await openMenu())[0]).toBe('select');
-      document.querySelector<HTMLElement>('[data-action="select"]')!.click();
-      await settle();
-      expect(onstartselect).toHaveBeenCalledWith(asset);
-      expect(document.activeElement).toBe(mediaButton('View'));
+    it('has no Select and no View in the menu: the checkbox starts the mode, and a click opens the viewer', async () => {
+      mountTile({ onstartselect: vi.fn(), onpreview: vi.fn(), onreuse: vi.fn() });
+      const actions = await openMenu();
+      expect(actions).not.toContain('select');
+      expect(actions).not.toContain('view');
+      expect(actions[0]).toBe('reuse');
     });
 
-    it('has no lead on a tile that cannot start the mode', async () => {
-      mountTile({ onpreview: vi.fn(), onreuse: vi.fn() });
-      expect((await openMenu())[0]).toBe('reuse');
-    });
   });
 
   describe('in the mode', () => {
@@ -691,7 +694,7 @@ describe('AssetTile Select mode', () => {
       expect(onstartselect).not.toHaveBeenCalled();
     });
 
-    it('leads the menu with View, which opens the viewer and leaves the selection alone', async () => {
+    it('puts View in the menu\'s head, which opens the viewer and leaves the selection alone', async () => {
       const onpreview = vi.fn();
       const onstartselect = vi.fn();
       const onselect = vi.fn();

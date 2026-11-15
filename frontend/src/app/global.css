@@ -105,6 +105,18 @@
   --spacing-row: 30px;
   --spacing-bar: 36px;
   --spacing-badge: 18px;
+  /* One height for every action row of the file panel and the touch bars. */
+  --row: 44px;
+  /* The spacing scale of the Gallery's and the viewer's actions. Each step has one job:
+     2 a chevron after its label; 4 controls in one cluster, an icon over its label, cells in a row of cells;
+     6 an icon beside its label, buttons in a bar, the panel grid; 8 inside a popover or a cell, a head to its first row;
+     12 between groups (6 + a 1px rule + 6), a bar's ends, a sheet's sides; 16 a screen edge. */
+  --sp-2: 2px;
+  --sp-4: 4px;
+  --sp-6: 6px;
+  --sp-8: 8px;
+  --sp-12: 12px;
+  --sp-16: 16px;
 
   /* The media player: glass only where it is asked for. The surfaces are the overlay colour at rising strength, so what
      lies behind them stays readable. */
@@ -123,6 +135,8 @@
   --ease-standard: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-soft-out: cubic-bezier(0.16, 1, 0.3, 1);
   --glass-blur: 16px;
+  /* Under the viewer's top bar when it lies over the picture (a phone held sideways), so the name reads on a bright image. */
+  --viewer-top-scrim: linear-gradient(rgb(4 4 5 / 0.88), rgb(4 4 5 / 0.6) 55%, transparent);
 }
 
 /* Static, so they are always emitted: the Colour mixer builds their names (`--color-band-<band>`), which Tailwind cannot see. */
@@ -236,6 +250,7 @@
       --spacing-control-sm: 32px;
       --spacing-row: 44px;
       --spacing-bar: 44px;
+      --row: 52px;
       --toggle-track-w: 40px;
       --toggle-track-h: 24px;
       --toggle-knob: 18px;
@@ -400,6 +415,18 @@
   .ui-btn-primary { background: var(--color-primary-main); color: var(--color-primary-ink); font-family: var(--font-heading); font-weight: 800; }
   @media (hover: hover) { .ui-btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); color: var(--color-primary-ink); } }
   .ui-btn-primary:disabled { opacity: 1; background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
+  /* A button that is off for a reason a tap or a key explains stays focusable (aria-disabled) and looks as a disabled one does, without
+     a hover or pressed fill. It opts in with this class, so other buttons that use aria-disabled keep their own look. */
+  .ui-btn-reason[aria-disabled='true'] { opacity: 0.4; cursor: not-allowed; }
+  .ui-btn-primary.ui-btn-reason[aria-disabled='true'] { opacity: 1; background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
+  @media (hover: hover) {
+    .ui-btn-reason[aria-disabled='true']:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+    .ui-btn-primary.ui-btn-reason[aria-disabled='true']:hover { color: var(--color-text-muted); }
+  }
+  @media (hover: none) {
+    .ui-btn-reason[aria-disabled='true']:active { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+    .ui-btn-primary.ui-btn-reason[aria-disabled='true']:active { color: var(--color-text-muted); }
+  }
   /* A button that waits on a download: its text is cut before its percentage, and a 3px bar along its foot shows how far. */
   .ui-btn-wait { position: relative; overflow: hidden; min-width: 0; }
   .ui-btn-wait-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -477,6 +504,111 @@
   @media (min-width: 640px) {
     .ui-sheet { width: min(520px, calc(100% - 32px)); margin-inline: auto; }
   }
+
+  /* A divider between groups of buttons in a bar (the viewer's toolbar, Select mode's header): 1px, with the bar's 6px gap on each side. */
+  .ui-bar-rule { width: 1px; height: 20px; flex: none; background: var(--color-border-strong); }
+
+  /* The file panel's choices and file cells (FilePanel, the viewer's dock and rail, the touch Select bar).
+     A choice has two lines, its name and what it makes; a cell is an icon over its label. */
+  .ui-choice {
+    display: flex;
+    min-width: 0;
+    min-height: var(--row);
+    align-items: center;
+    gap: var(--sp-8);
+    padding: var(--sp-6) var(--sp-8);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-surface-hover);
+    color: var(--color-text-primary);
+    text-align: left;
+  }
+  .ui-choice > svg { color: var(--color-text-secondary); }
+  .ui-choice-text { display: flex; min-width: 0; flex-direction: column; }
+  .ui-choice-name, .ui-choice-hint {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow-wrap: anywhere;
+    line-height: 1.3;
+  }
+  .ui-choice-name { font-size: var(--text-ui); font-weight: 600; }
+  .ui-choice-hint { text-wrap: balance; font-size: var(--text-meta); color: var(--color-text-muted); }
+  .ui-choice-warn { font-style: normal; font-weight: 600; color: var(--color-star); }
+  .ui-choice-primary { background: var(--color-primary-main); color: var(--color-primary-ink); }
+  .ui-choice-primary > svg, .ui-choice-primary .ui-choice-hint { color: var(--color-primary-ink); }
+  .ui-choice-primary .ui-choice-name { font-family: var(--font-heading); font-size: var(--text-content); font-weight: 800; }
+  .ui-choice:focus { outline: none; }
+  .ui-choice:focus-visible, .ui-tool:focus-visible { box-shadow: inset 0 0 0 2px var(--color-primary-main); outline: none; }
+  .ui-choice-primary:focus-visible { box-shadow: inset 0 0 0 2px var(--color-primary-ink); }
+  @media (hover: hover) {
+    .ui-choice:hover { background: var(--color-bg-control-hover); }
+    .ui-choice:hover .ui-choice-hint { color: var(--color-text-secondary); }
+    .ui-choice-primary:hover { background: var(--color-primary-hover); }
+    .ui-choice-primary:hover .ui-choice-hint { color: var(--color-primary-ink); }
+  }
+  @media (hover: none) {
+    .ui-choice:active { background: var(--color-bg-control-hover); }
+    .ui-choice-primary:active { background: var(--color-primary-hover); }
+  }
+  .ui-choice[aria-disabled='true'] { background: transparent; box-shadow: inset 0 0 0 1px var(--color-border-subtle); cursor: not-allowed; }
+  .ui-choice[aria-disabled='true']:focus-visible { box-shadow: inset 0 0 0 2px var(--color-primary-main); }
+  .ui-choice[aria-disabled='true'] > svg, .ui-choice[aria-disabled='true'] .ui-choice-name { color: var(--color-text-muted); }
+  .ui-choice[aria-disabled='true'] .ui-choice-hint { color: var(--color-text-muted); }
+  .ui-choice[aria-busy='true'] { cursor: progress; }
+
+  .ui-tool {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    min-height: var(--row);
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-4);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-meta);
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+    color: var(--color-text-secondary);
+  }
+  .ui-tool > svg { color: var(--color-text-primary); }
+  /* The label is the box a "opens a choice" chevron hangs from, so the label stays centred under its icon. */
+  .ui-tool-label { position: relative; display: inline-block; }
+  .ui-tool .chev { position: absolute; top: 50%; left: 100%; display: inline-flex; margin-left: var(--sp-2); opacity: 0.7; transform: translateY(-50%); }
+  .ui-tool-primary { background: var(--color-primary-main); color: var(--color-primary-ink); font-family: var(--font-heading); font-weight: 800; }
+  .ui-tool-primary > svg { color: var(--color-primary-ink); }
+  .ui-tool-danger, .ui-tool-danger > svg { color: var(--color-error); }
+  .ui-tool[aria-expanded='true'] { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
+  .ui-tool[aria-expanded='true'] > svg { color: var(--color-primary-main); }
+  .ui-tool[aria-disabled='true'], .ui-tool:disabled { cursor: not-allowed; color: var(--color-text-muted); }
+  .ui-tool[aria-disabled='true'] > svg, .ui-tool:disabled > svg { color: var(--color-text-muted); }
+  /* A greyed Reuse loses its teal fill, as the toolbar's and the panel's do: a muted name and icon on the grey of a control. */
+  .ui-tool-primary[aria-disabled='true'], .ui-tool-primary:disabled { background: var(--color-bg-surface-hover); }
+  .ui-tool[aria-busy='true'] { cursor: progress; }
+  @media (hover: hover) {
+    .ui-tool:hover:not([aria-disabled='true'], :disabled) { background: var(--color-bg-control-hover); color: var(--color-text-primary); }
+    .ui-tool-primary:hover:not([aria-disabled='true'], :disabled) { background: var(--color-primary-hover); color: var(--color-primary-ink); }
+    .ui-tool-danger:hover:not([aria-disabled='true'], :disabled) { background: color-mix(in srgb, var(--color-error) 14%, transparent); color: var(--color-error); }
+  }
+  @media (hover: none) {
+    .ui-tool:active:not([aria-disabled='true'], :disabled) { background: var(--color-bg-control-hover); }
+    .ui-tool-primary:active:not([aria-disabled='true'], :disabled) { background: var(--color-primary-hover); }
+    .ui-tool-danger:active:not([aria-disabled='true'], :disabled) { background: color-mix(in srgb, var(--color-error) 14%, transparent); }
+  }
+
+  /* A row of cells: the viewer's dock and the touch Select bar. Cells grow to 96px and shrink to their minimum; the spare
+     room goes to the spacer between the groups, which never closes below 12px. The fixed parts of a full dock are 69px, so
+     eight cells fit from 640px. */
+  .ui-tool-row { --tool-min: 70px; display: flex; flex: none; align-items: stretch; gap: var(--sp-4); padding: var(--sp-6) var(--sp-8) var(--sp-8); }
+  .ui-tool-row > .ui-tool { flex: 0 1 96px; min-width: var(--tool-min); height: 56px; }
+  .ui-tool-row-bar { --tool-min: 66px; }
+  /* A phone's dock: four slots that share the width. */
+  .ui-tool-row-four > .ui-tool { flex: 1 1 0; min-width: 0; }
+  .ui-tool-spacer { flex: 1 0 12px; min-width: 12px; }
+  .ui-tool-rule { flex: none; align-self: stretch; width: 1px; margin: 10px var(--sp-2); background: var(--color-border-strong); }
 
   /* Fields */
   .ui-field {

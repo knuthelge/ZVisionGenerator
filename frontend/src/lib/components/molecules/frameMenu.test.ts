@@ -5,8 +5,8 @@ import { EXTEND_SHORT_REASON, type FramePoint } from '$lib/state/framePoint';
 import { videoFacts } from '$lib/state/videoFacts.svelte';
 import type { GalleryAsset } from '$lib/types';
 
-import type { ActionMenuEntry, ActionMenuItem } from './ActionMenu.svelte';
-import { assetMenuEntries } from './assetMenu';
+import type { ActionMenuItem } from './ActionMenu.svelte';
+import { assetPanel } from './assetMenu';
 import { FRAME_BUSY_LABEL, frameMenuEntries } from './frameMenu';
 
 const mocks = vi.hoisted(() => ({ busyFor: vi.fn(), browseInfo: vi.fn() }));
@@ -95,10 +95,15 @@ describe('frameMenuEntries', () => {
   });
 });
 
-describe('the time chip\'s menu and the stage ⋯ menu (which lists Use as before Extend)', () => {
-  const frameRows = (entries: readonly ActionMenuEntry[]): ActionMenuItem[] =>
-    entries.filter((entry): entry is ActionMenuItem => entry.kind === 'item' && ['extend', 'frame-first', 'frame-last'].includes(entry.id));
-  const view = (rows: readonly ActionMenuItem[]) => [...rows].sort((a, b) => a.id.localeCompare(b.id)).map(({ id, label, icon, description, hint, disabled, busy }) => ({ id, label, icon, description, hint, disabled, busy: busy ?? false }));
+describe('the time chip\'s menu and the stage\'s file panel', () => {
+  const frameRows = (panel: ReturnType<typeof assetPanel>): ActionMenuItem[] => [
+    ...panel.make.filter((item) => item.id === 'extend'),
+    ...panel.sections.filter((section) => section.id === 'frames').flatMap((section) => section.items),
+  ];
+  // The panel words what each row makes in its own hints; what it shares with the chip's menu is the row, its state and its reason.
+  const view = (rows: readonly ActionMenuItem[]) => [...rows].sort((a, b) => a.id.localeCompare(b.id)).map(({ id, label, icon, disabled, busy }) => ({ id, label, icon, disabled, busy: busy ?? false }));
+  // A reason is what a greyed row says is wrong: the chip's menu puts it in the hint, the panel in the hint and the tooltip, and its hint otherwise says what the row makes.
+  const reasons = (rows: readonly ActionMenuItem[], from: 'hint' | 'title') => [...rows].sort((a, b) => a.id.localeCompare(b.id)).map((row) => (row.disabled ? row[from] : undefined));
 
   it.each([
     ['mid-clip', point(), {}, null],
@@ -112,9 +117,10 @@ describe('the time chip\'s menu and the stage ⋯ menu (which lists Use as befor
     const on = handlers();
 
     const chip = frameMenuEntries(clip(), frame, on, useAs);
-    const stage = frameRows(assetMenuEntries(clip(), on, false, useAs, undefined, frame));
+    const stage = frameRows(assetPanel(clip(), on, { useAs, point: frame }));
 
     expect(chip).toHaveLength(3);
     expect(view(stage)).toEqual(view(chip));
+    expect(reasons(stage, 'title')).toEqual(reasons(chip, 'hint'));
   });
 });

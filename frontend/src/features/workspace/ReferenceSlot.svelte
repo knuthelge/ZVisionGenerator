@@ -59,7 +59,7 @@
 
   let {
     idBase, label, names, emptyText, emptyMuted = false, path, file, onfilechange, onpathchange,
-    emptyIcon = 'reference', clearable = true, onfileschange, dropText, missing = false, error, name = '', detail = '', unused = false, kind = 'image', thumb = true, swappable = true,
+    emptyIcon = 'image', clearable = true, onfileschange, dropText, missing = false, error, name = '', detail = '', unused = false, kind = 'image', thumb = true, swappable = true,
   }: Props = $props();
 
   const audio = $derived(kind === 'audio');

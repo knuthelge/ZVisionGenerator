@@ -133,9 +133,9 @@ The settings that made the take are stored inside the file, which is how **Reuse
 
 ## Use a take elsewhere
 
-**Use as** in the Gallery, the viewer or the **⋯** menu of the finished take has **Audio track**, which opens **Video** with the file as the clip's audio track. It is greyed, with the reason, when the open video model can't follow a track. See Add sound or an audio track in [Make video](video.md).
+**Audio track**, beside **Reuse settings** in the Gallery, the viewer (++e++) and the **⋯** panel of the finished take, opens **Video** with the file as the clip's audio track. It is greyed, with the reason, when the open video model can't follow a track. See Add sound or an audio track in [Make video](video.md).
 
-A speech take also offers **Voice** and **Saved voice**; see [Use a take as a voice](speech-and-sound.md#use-a-take-as-a-voice).
+A speech take also has **Use as** with **Voice** and **Saved voice**; see [Use a take as a voice](speech-and-sound.md#use-a-take-as-a-voice).
 
 ## From the command line
 

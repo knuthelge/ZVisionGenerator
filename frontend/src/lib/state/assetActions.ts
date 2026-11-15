@@ -52,16 +52,11 @@ export interface AssetActionHandlers {
   onmove?: (asset: GalleryAsset, project: string | null) => void;
   /** Star the asset, or unstar it when `starred` is false. */
   onstar?: (asset: GalleryAsset, starred: boolean) => void;
-  /** The menu's lead item was picked: Select enters Select mode with the asset selected; View opens the viewer. */
-  onlead?: (lead: MenuLead) => void;
 }
 
-/** The item that leads an asset's menu: Select outside Select mode, View inside it. */
-export type MenuLead = 'select' | 'view';
-
-/** The Use as hints of the audio targets. */
-export const AUDIO_TRACK_HINT = 'Video tab, from 0 s';
-export const VOICE_HINT = 'Speech, text filled in';
+/** The hints of the audio targets: what each makes. */
+export const AUDIO_TRACK_HINT = 'A new clip to its sound';
+export const VOICE_HINT = 'Speak new words in it';
 export const SAVE_VOICE_HINT = 'Keep it in your voices';
 const SPEECH_MODELS_UNKNOWN = 'Speech models not loaded';
 

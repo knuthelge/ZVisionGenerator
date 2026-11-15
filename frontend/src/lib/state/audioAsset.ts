@@ -1,3 +1,4 @@
+import type { IconName } from '$lib/components/atoms/Icon.svelte';
 import type { AudioModelOption, GalleryAsset } from '$lib/types';
 import { formatClock } from './clock';
 import { isSectionLine } from './musicMode';
@@ -84,6 +85,11 @@ const KIND_NAMES = { music: 'Music', speech: 'Speech', sound: 'Sound' } as const
 /** The kind's name for the viewer's Kind fact: "Music", "Speech", "Sound"; "Audio" without settings. */
 export function kindFact(asset: GalleryAsset): string {
   return asset.kind == null ? 'Audio' : KIND_NAMES[asset.kind];
+}
+
+/** The icon of an audio take's kind: speech, sound or music (also for a take without settings). */
+export function kindIcon(asset: Pick<GalleryAsset, 'kind'>): IconName {
+  return asset.kind === 'speech' ? 'speech' : asset.kind === 'sound' ? 'waveform' : 'music';
 }
 
 /** The fraction (0 to 1) of a waveform's width a pointer at *clientX* is over, for seeking. */

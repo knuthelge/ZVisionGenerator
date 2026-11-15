@@ -19,7 +19,7 @@ export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
   { keys: ['Home', 'End'], label: 'First / last file' },
   FRAME_STEP_SHORTCUT,
   { keys: ['R'], label: 'Reuse settings' },
-  { keys: ['E'], label: 'Use as start image or frame (image), extend (video), or audio track or voice (audio)' },
+  { keys: ['E'], label: 'Use as (image), extend (video), audio track (audio)' },
   { keys: ['M'], label: 'Edit image' },
   ADJUST_SHORTCUT,
   { keys: ['X → 2'], label: 'Upscale 2×' },

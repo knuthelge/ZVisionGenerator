@@ -859,30 +859,15 @@
   }
 </script>
 
-{#snippet selectAllButton()}
-  <!-- Busy while the matching IDs load: the label hides under the spinner so the button keeps its width, and aria-label keeps its name. It is not disabled, which would drop focus. -->
-  <button type="button" class="ui-btn sel-all" aria-busy={selectingAll} aria-label={selectingAll ? 'Select all' : undefined} onclick={() => void selectAllMatching()}>
-    <span class="sel-all-label">Select all</span>
-    {#if selectingAll}<span class="sel-all-spin"><Spinner size="sm" /></span>{/if}
-  </button>
-{/snippet}
-
 <div id="gallery-view" class="flex min-h-0 flex-1 flex-col bg-bg-base">
   <PageHeader
     title="Gallery"
     description={selectMode
-      ? (compact ? undefined : modeLine({ project: projectPick.current, starred: starredOnly, filter: mediaFilter, coarse: layout.coarse }))
+      ? (layout.coarse ? undefined : modeLine({ project: projectPick.current, starred: starredOnly, filter: mediaFilter }))
       : `${projectPick.current === null ? '' : `${projectPick.current} · `}Browsing ${assets.length} loaded file${assets.length !== 1 ? 's' : ''} of ${totalCount}, ${sortOrder === 'newest' ? 'newest' : 'oldest'} first.`}
   >
     {#snippet actions()}
       {#if !selectMode}
-        <Select
-          ariaLabel="Filter gallery media"
-          class={compact ? 'min-w-0 flex-1' : 'w-36'}
-          value={mediaFilter}
-          options={mediaOptions}
-          onchange={(next) => onFilterChange(next as MediaFilter)}
-        />
         <Button
           icon
           class="star-toggle"
@@ -891,6 +876,13 @@
           title={starredOnly ? 'Showing starred only' : 'Show starred only'}
           onclick={toggleStarredOnly}
         ><Icon name="star" size={16} solid={starredOnly} /></Button>
+        <Select
+          ariaLabel="Filter gallery media"
+          class={compact ? 'min-w-0 flex-1' : 'w-36'}
+          value={mediaFilter}
+          options={mediaOptions}
+          onchange={(next) => onFilterChange(next as MediaFilter)}
+        />
         <Select
           ariaLabel="Sort gallery files"
           class={compact ? 'min-w-0 flex-1' : 'w-36'}
@@ -902,28 +894,36 @@
           onchange={(next) => onSortChange(next as 'newest' | 'oldest')}
         />
         <Button data-bulk="select" onclick={startSelecting}>Select</Button>
-      {:else if compact}
-        <!-- Phone: the mode line and Done share one row; the actions are in the bar at the foot. -->
-        <p class="ui-page-sub min-w-0 flex-1" data-testid="mode-line">{modeLine({ project: projectPick.current, starred: starredOnly, filter: mediaFilter, coarse: layout.coarse })}</p>
-        <Button data-bulk="done" aria-pressed="true" onclick={doneSelecting}>Done</Button>
-      {:else}
+      {:else if layout.coarse}
+        <!-- Touch: Done and the count; the selection's actions are in the bar at the foot. -->
         <Button data-bulk="done" aria-pressed="true" onclick={doneSelecting}>Done</Button>
         <span class="mode-count" role="status">{selectedCount.toLocaleString()} selected</span>
-        {@render selectAllButton()}
-        <span class="inline-flex" bind:this={bulkMoveAnchor}>
-          <Button
-            data-bulk="move"
-            aria-haspopup="menu"
-            aria-expanded={bulkMoveOpen}
-            aria-label="Move selected"
-            disabled={actionableIds.length === 0 || moving}
-            onclick={() => { bulkMoveOpen = !bulkMoveOpen; }}
-          ><Icon name="folder" size={14} />{moving ? 'Moving…' : 'Move'}<Icon name="chevdown" size={12} class="opacity-70" /></Button>
-        </span>
-        <Button aria-label="Download selected" disabled={selectedCount === 0} onclick={downloadSelected}><Icon name="download" size={14} />Download</Button>
-        <Button data-bulk="delete" variant="danger" aria-label="Delete selected" disabled={actionableIds.length === 0} onclick={deleteSelected}>
-          <Icon name="trash" size={14} />{bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete'}
-        </Button>
+      {:else}
+        <div class="flex flex-wrap items-center gap-x-1.5 gap-y-1.5">
+          <Button data-bulk="done" aria-pressed="true" onclick={doneSelecting}>Done</Button>
+          <span class="mode-count" role="status">{selectedCount.toLocaleString()} selected</span>
+          <!-- Busy while the matching IDs load: the label hides under the spinner so the button keeps its width, and aria-label keeps its name. It is not disabled, which would drop focus. -->
+          <button type="button" class="ui-btn sel-all" aria-busy={selectingAll} aria-label={selectingAll ? 'Select all' : undefined} onclick={() => void selectAllMatching()}>
+            <span>Select all</span>
+            {#if selectingAll}<span class="sel-all-spin"><Spinner size="sm" /></span>{/if}
+          </button>
+          <span class="ui-bar-rule" aria-hidden="true"></span>
+          <Button aria-label="Download selected" disabled={selectedCount === 0} onclick={downloadSelected}><Icon name="download" size={14} />Download</Button>
+          <span class="inline-flex" bind:this={bulkMoveAnchor}>
+            <Button
+              data-bulk="move"
+              aria-haspopup="menu"
+              aria-expanded={bulkMoveOpen}
+              aria-label="Move selected"
+              disabled={actionableIds.length === 0 || moving}
+              onclick={() => { bulkMoveOpen = !bulkMoveOpen; }}
+            ><Icon name="folder-move" size={14} />{moving ? 'Moving…' : 'Move'}<Icon name="chevdown" size={12} class="opacity-70" /></Button>
+          </span>
+          <span class="ui-bar-rule" aria-hidden="true"></span>
+          <Button data-bulk="delete" variant="danger" aria-label="Delete selected" disabled={actionableIds.length === 0} onclick={deleteSelected}>
+            <Icon name="trash" size={14} />{bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete'}
+          </Button>
+        </div>
       {/if}
     {/snippet}
   </PageHeader>
@@ -1012,25 +1012,34 @@
       {/if}
     </section>
   </div>
-  {#if selectMode && compact}
-    <!-- Phone: the selection's actions, docked at the foot. -->
-    <div class="ui-action-bar select-bar" data-testid="gallery-select-bar">
-      <span class="sel-count" role="status">{selectedCount.toLocaleString()} selected</span>
-      {@render selectAllButton()}
-      <span class="inline-flex" bind:this={bulkMoveAnchor}>
-        <Button
-          icon
-          data-bulk="move"
-          aria-haspopup="menu"
-          aria-expanded={bulkMoveOpen}
-          aria-label="Move selected"
-          title={moving ? 'Moving…' : 'Move selected'}
-          disabled={actionableIds.length === 0 || moving}
-          onclick={() => { bulkMoveOpen = !bulkMoveOpen; }}
-        ><Icon name="folder" size={18} /></Button>
-      </span>
-      <Button icon aria-label="Download selected" title="Download selected" disabled={selectedCount === 0} onclick={downloadSelected}><Icon name="download" size={18} /></Button>
-      <Button icon data-bulk="delete" variant="danger" aria-label="Delete selected" title={bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete selected'} disabled={actionableIds.length === 0} onclick={deleteSelected}><Icon name="trash" size={18} /></Button>
+  {#if selectMode && layout.coarse}
+    <!-- Touch: the selection's actions at the foot, built like the viewer's dock. -->
+    <div class="select-bar ui-tool-row ui-tool-row-bar" data-testid="gallery-select-bar">
+      <!-- The same busy state as the header's button: the cell hides under the spinner while the matching IDs load. -->
+      <button type="button" class="ui-tool sel-all" aria-busy={selectingAll} aria-label={selectingAll ? 'Select all' : undefined} onclick={() => void selectAllMatching()}>
+        <Icon name="selectall" size={20} /><span class="ui-tool-label">Select all</span>
+        {#if selectingAll}<span class="sel-all-spin"><Spinner size="sm" /></span>{/if}
+      </button>
+      <span class="ui-tool-spacer"></span>
+      <button type="button" class="ui-tool" aria-label="Download selected" title="Download selected" disabled={selectedCount === 0} onclick={downloadSelected}>
+        <Icon name="download" size={20} /><span class="ui-tool-label">Download</span>
+      </button>
+      <button
+        type="button"
+        bind:this={bulkMoveAnchor}
+        class="ui-tool"
+        data-bulk="move"
+        aria-haspopup="menu"
+        aria-expanded={bulkMoveOpen}
+        aria-label="Move selected"
+        title={moving ? 'Moving…' : 'Move selected'}
+        disabled={actionableIds.length === 0 || moving}
+        onclick={() => { bulkMoveOpen = !bulkMoveOpen; }}
+      ><Icon name="folder-move" size={20} /><span class="ui-tool-label">{moving ? 'Moving…' : 'Move'}<Icon name="chevdown" size={10} class="chev" /></span></button>
+      <span class="ui-tool-rule" aria-hidden="true"></span>
+      <button type="button" class="ui-tool ui-tool-danger" data-bulk="delete" aria-label="Delete selected" title={bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete selected'} disabled={actionableIds.length === 0} onclick={deleteSelected}>
+        <Icon name="trash" size={20} /><span class="ui-tool-label">{bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete'}</span>
+      </button>
     </div>
   {/if}
 </div>
@@ -1086,15 +1095,12 @@
   @media (hover: none) { :global(.ui-btn.star-toggle[aria-pressed='true']:active:not(:disabled)) { background: color-mix(in srgb, var(--color-star) 22%, transparent); color: var(--color-star); } }
   /* The count in Select mode: status text between Done and Select all. */
   .mode-count { flex-shrink: 0; padding: 0 4px; font-size: var(--text-ui); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--color-text-primary); }
-  /* Select all while the IDs load: the same width, the label hidden under a centred spinner. */
   .sel-all { position: relative; }
-  .sel-all[aria-busy='true'] > .sel-all-label { visibility: hidden; }
   .sel-all-spin { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
-  /* The phone's bar: the selection's actions at the foot. */
-  .select-bar { flex-shrink: 0; gap: 6px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); }
-  .sel-count { min-width: 0; flex: 1; font-size: var(--text-content); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--color-text-primary); }
-  .select-bar :global(.ui-btn) { padding: 0 12px; }
-  .select-bar :global(.ui-btn-icon) { padding: 0; }
+  /* Select all, in the header or the touch bar, hides what it shows under the spinner while the IDs load. */
+  .sel-all[aria-busy='true'] > :global(:not(.sel-all-spin)) { visibility: hidden; }
+  /* The touch bar: the selection's actions at the foot, above the safe area. */
+  .select-bar { flex-shrink: 0; padding-bottom: calc(var(--sp-8) + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); }
   /* A tile's shape while the assets load: the image square over a caption, in the tile's surface. */
   .tile-placeholder { aspect-ratio: 1 / 1.32; border-radius: var(--radius-md); background: var(--color-bg-surface); }
 </style>

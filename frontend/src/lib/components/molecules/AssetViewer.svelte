@@ -19,25 +19,28 @@
 </script>
 
 <script lang="ts">
-  import { Icon, ShortcutList, Waveform } from '$lib/components/atoms';
+  import { FileName, Icon, ShortcutList, Waveform } from '$lib/components/atoms';
   import AdjustEditor from '$lib/components/organisms/adjust/AdjustEditor.svelte';
   import { inMenu, isPlainKey, isTyping } from '$lib/keyboard';
   import { canAdjust } from '$lib/state/adjustState';
-  import { canEdit, canExtend, canUseAsAudioTrack, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
-  import { takeWords, wordBlocks } from '$lib/state/audioAsset';
+  import { describeFallbackReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
+  import { wordBlocks } from '$lib/state/audioAsset';
   import { audioPeaks } from '$lib/state/audioPeaks.svelte';
   import type { FramePoint } from '$lib/state/framePoint';
-  import { addToast } from '$lib/state/toasts.svelte';
+  import { addToast, explainOff } from '$lib/state/toasts.svelte';
   import type { AudioModelOption, AudioSettingsVocabulary, GalleryAsset, UpscaleFactor } from '$lib/types';
-  import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
+  import AssetPanelMenu from './AssetPanelMenu.svelte';
   import { assetDetailSections, fileName, type DetailFact } from './assetDetails';
-  import { assetMenuEntries, audioUseEntries, referenceEntries, upscaleEntries } from './assetMenu';
+  import { assetPanel, type PanelItem } from './assetMenu';
+  import ViewerButton from './ViewerButton.svelte';
+  import { chromeFor, phoneActs, viewerActs, type ViewerAct } from './viewerActions';
   import MoveMenu from './MoveMenu.svelte';
   import { frameMenuEntries } from './frameMenu';
   import MediaPlayer from './MediaPlayer.svelte';
   import { viewerShortcutsFor, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { sheetDrag } from '$lib/actions/sheetDrag';
+  import { dockHeight } from '$lib/actions/dockHeight';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { tick, untrack } from 'svelte';
   import { FLIGHT_EASING, FLIGHT_MS, fitRect, flightKeyframes, rectOf, usableRect, type Rect } from './viewerFlight';
@@ -46,7 +49,7 @@
   import { hold } from '$lib/actions/hold';
   import { FIT, actualPixelsScale, clampPan, settleZoom, zoomAt, type Zoom } from './viewerZoom';
 
-  interface Props extends Omit<AssetActionHandlers, 'onpreview' | 'onlead' | 'onadjust'> {
+  interface Props extends Omit<AssetActionHandlers, 'onpreview' | 'onadjust'> {
     assets: readonly GalleryAsset[];
     /** The id of the open asset: the viewer follows it, so assets landing before or after it never move the view. */
     currentId: string | null;
@@ -107,7 +110,6 @@
   const asset = $derived(index >= 0 ? assets[index] : null);
   const hasPrev = $derived(index > 0);
   const hasNext = $derived(index < assets.length - 1);
-  const canReuse = $derived(asset?.has_reusable_config === true);
   const deleting = $derived(asset ? deletingIds.has(asset.id) : false);
   const fallbackReasons = $derived(asset?.reuse_state?.fallback_reasons ?? []);
   let filmEl = $state<HTMLDivElement | null>(null);
@@ -130,17 +132,13 @@
   });
 
   let detailsOpen = $state(loadDetailsOpen());
-  let referenceOpen = $state(false);
-  let referenceButton = $state<HTMLButtonElement | null>(null);
-  let upscaleOpen = $state(false);
-  let upscaleButton = $state<HTMLButtonElement | null>(null);
-  // The Move list. The toolbar button anchors it where there is one; the ⋯ menu closes before it opens, which clears its
-  // pointer position, and the phone's ⋯ button anchors it there.
-  let moveOpen = $state(false);
-  let moveButton = $state<HTMLButtonElement | null>(null);
+  // The one popup open over the viewer, and the element it opens from, taken when it opens: a button's, the one a key names, or none.
+  // Use as and Upscale open the panel's own choices, More the whole panel, Move the project list.
+  let popup = $state<'useas' | 'upscale' | 'move' | 'more' | null>(null);
+  let popupAnchor = $state<HTMLElement | null>(null);
+  let viewerEl = $state<HTMLElement | null>(null);
   let closeButton = $state<HTMLButtonElement | null>(null);
   let player = $state<ReturnType<typeof MediaPlayer> | null>(null);
-  let downloadLink = $state<HTMLAnchorElement | null>(null);
   let helpOpen = $state(false);
   // The shortcut list is a layer of its own: Escape closes it before the viewer.
   $effect(() => {
@@ -153,33 +151,23 @@
   $effect(() => {
     if (asset && isAudio) audioPeaks.ensure(asset);
   });
-  // Use as: an image's start image, reference or frame; an audio take's audio track or voice.
-  const referenceItems = $derived<ActionMenuEntry[]>(
-    !asset ? [] : asset.media_type === 'audio' ? (onuseaudio ? audioUseEntries(asset, onuseaudio, useAs) : []) : onreference ? referenceEntries(asset, onreference, useAs) : []
-  );
-  const canUseAs = $derived(asset ? (asset.media_type === 'audio' ? Boolean(onuseaudio) && (canUseAsAudioTrack(asset) || referenceItems.length > 0) : Boolean(onreference) && canUseAsReference(asset)) : false);
+  // The file panel's own list of actions: the toolbar, the menus and the keys all read it. Extend means from the end here, as the E key does.
+  const panelHandlers = $derived({ onreuse, onreference, onextend, onedit, onadjust: () => void startAdjust(), onupscale, onuseaudio, ondelete, onstar });
+  const panel = $derived(asset ? assetPanel(asset, panelHandlers, { deleting, useAs, openMove: onmove ? () => openPopup('move', buttonFor('move') ?? buttonFor('more')) : undefined }) : null);
+  // Use as: an image's start image, reference, first and last frame; a speech take's voice and saved voice.
+  const canUseAs = $derived(panel?.sections.some((section) => section.id === 'use-as') ?? false);
+  /** One of the panel's actions, which the toolbar, the dock, the menus and the keys all run: the viewer keeps no state of its own about what is offered. */
+  const panelItem = (id: string) => [...(panel?.make ?? []), ...(panel?.file ?? [])].find((item) => item.id === id) ?? null;
   const words = $derived(asset && isAudio ? wordBlocks(asset) : []);
 
-  const upscaleItems = $derived<ActionMenuEntry[]>(
-    asset && onupscale ? upscaleEntries(asset, onupscale) : []
-  );
   /** The keys that follow X for the factors this asset offers: "2 or 4" for an image, "2" for a video. */
   const upscaleKeys = $derived(asset ? offeredUpscaleFactors(asset).join(' or ') : '');
-
-  // A video offers Extend where an image offers Use as; the button is absent without the capability.
-  const showExtend = $derived(Boolean(onextend && asset?.media_type === 'video' && asset.extend));
-  // An image offers Edit beside Use as; the button is absent without the handler.
-  const showEdit = $derived(Boolean(onedit && asset && canEdit(asset)));
-  // An image offers Adjust beside Edit.
-  const showAdjust = $derived(Boolean(asset && canAdjust(asset)));
-  const extendBlocked = $derived(asset ? extendReason(asset) : null);
 
   // The Adjust editor is a layer of its own over the viewer. While it is open the viewer has no escape layer and no key
   // listeners, and its panel is inert, so no key, tap or gesture reaches the viewer's actions.
   let adjusting = $state(false);
   // The asset the editor was opened on: the editor closes when the viewer moves to another (it left the list).
   let adjustedId: string | null = null;
-  let adjustButton = $state<HTMLButtonElement | null>(null);
   // Set while the editor is open: when it closes, focus goes back to where Adjust is.
   let returnFocus = false;
 
@@ -209,30 +197,18 @@
     if (untrack(() => adjusting) && id !== adjustedId) adjusting = false;
   });
 
+  // The toolbar and the dock list the same actions, from the panel; the pointer decides which of them is drawn.
+  const acts = $derived(asset && panel ? viewerActs({ asset, panel, upscaleKeys }) : null);
+  const chrome = $derived(chromeFor(layout));
+  const phoneSlots = $derived(acts ? phoneActs(acts) : []);
+
   // The frame the shown video is paused on, which the player reports; null while it plays, at its start, or for anything but a video.
   let point = $state<FramePoint | null>(null);
   // The rows of the paused frame's menu: Extend from there, and the first and last frame.
   const frameActions = $derived(asset && point ? frameMenuEntries(asset, point, { onextend, onuseframe }, useAs) : []);
 
-  // A phone: one ⋯ menu holds every action (the same entries as a tile's menu, plus Reuse and Copy the prompt),
-  // the details open as a sheet, and a swipe moves between assets or closes.
+  // A phone: More opens the file panel as a sheet, the details open as a sheet, and a swipe moves between assets or closes.
   const compact = $derived(layout.compact);
-  let moreOpen = $state(false);
-  let moreButton = $state<HTMLButtonElement | null>(null);
-  const moreItems = $derived.by<ActionMenuEntry[]>(() => {
-    if (!asset) return [];
-    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onadjust: () => void startAdjust(), onupscale, onuseaudio, ondelete, onstar }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined);
-    const copyable = copyableText(asset);
-    if (!copyable) return entries;
-    const copy: ActionMenuEntry = { kind: 'item', id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(copyable) };
-    // Copy the prompt sits with Reuse at the top, before the first separator.
-    if (onreuse) return [entries[0], copy, ...entries.slice(1)];
-    return [copy, { kind: 'separator' }, ...entries];
-  });
-  /** The text Copy the prompt puts on the clipboard: the prompt of an image or video, the style, text or prompt of a take with settings. */
-  function copyableText(item: GalleryAsset): string {
-    return item.media_type === 'audio' ? takeWords(item) : (item.prompt ?? '');
-  }
 
   // --- Touch and zoom ---
   // A finger, at any width: a swipe moves between assets or (down) closes, a pinch or a double tap zooms an image,
@@ -346,7 +322,7 @@
         flight = null;
       });
     });
-    return () => { window.removeEventListener('resize', measureGap); flight = null; phase = 'open'; chromeHidden = false; drag = null; helpOpen = false; };
+    return () => { window.removeEventListener('resize', measureGap); flight = null; phase = 'open'; chromeHidden = false; drag = null; helpOpen = false; popup = null; };
   });
 
   $effect(() => {
@@ -568,7 +544,7 @@
     if (event.defaultPrevented || !asset) return;
     event.preventDefault();
     contextAt = { x: event.clientX, y: event.clientY };
-    moreOpen = true;
+    openPopup('more', null);
   }
 
   // A mouse: a click toggles real pixels at the cursor; a drag pans a zoomed image.
@@ -618,36 +594,61 @@
     return true;
   }
 
-  /** Extend the shown video from the keyboard; when it can't be extended, say why instead. */
-  function runExtend(): boolean {
-    if (!asset || !onextend || !showExtend) return false;
-    if (!canExtend(asset)) {
-      addToast(extendBlocked ?? 'This video cannot be extended.', 'warning');
-      return true;
+  /**
+   * Run one of the panel's items, which every button and key goes through. An item that is off does not run: a finger, a pen or a key
+   * is told why in a toast; a mouse reads the tooltip. A key passes a pointer type that is not a mouse's.
+   */
+  function runItem(item: PanelItem, pointerType = 'keyboard'): void {
+    if (item.disabled) {
+      explainOff(item.title, pointerType);
+      return;
     }
-    onextend(asset);
+    item.onselect?.();
+  }
+
+  /** Run the panel item behind a key; false where the shown file doesn't offer it, so the key is left alone. */
+  function runKey(id: string): boolean {
+    const item = panelItem(id);
+    if (!item) return false;
+    runItem(item);
     return true;
   }
 
-  /** Edit the shown image from the keyboard. */
-  function runEdit(): boolean {
-    if (!asset || !onedit || !showEdit) return false;
-    onedit(asset);
-    return true;
+  /** Whether the popup an action opens is open, or undefined for an action that opens none. */
+  function expandedOf(act: ViewerAct): boolean | undefined {
+    return act.menu ? popup === act.menu : act.id === 'more' ? popup === 'more' : undefined;
+  }
+
+  /** The button of an action in the toolbar or the dock, by its `data-action`; null where the chrome has none (a phone's dock has no Move). */
+  function buttonFor(action: string): HTMLElement | null {
+    return viewerEl?.querySelector<HTMLElement>(`[data-action="${action}"]`) ?? null;
+  }
+
+  /** Open a popup from *anchor*, or close it when it is the one open. The panel's own right-click and hold open More with no anchor. */
+  function openPopup(kind: NonNullable<typeof popup>, anchor: HTMLElement | null): void {
+    if (kind !== 'more') contextAt = null;
+    popup = popup === kind && anchor !== null ? null : kind;
+    popupAnchor = anchor;
+  }
+
+  /** Close the popup *kind*, unless another has opened since. */
+  function closePopup(kind: NonNullable<typeof popup>): void {
+    if (popup !== kind) return;
+    popup = null;
+    if (kind === 'more') contextAt = null;
+  }
+
+  /** Run a toolbar or dock action: open its choice from its own button, or run its item. A link (Download) acts on its own. */
+  function onAct(act: ViewerAct, event: MouseEvent & { currentTarget: HTMLElement }): void {
+    const pointerType = (event as MouseEvent & { pointerType?: string }).pointerType ?? 'touch';
+    if (act.menu) openPopup(act.menu, event.currentTarget);
+    else if (act.id === 'more') openPopup('more', event.currentTarget);
+    else runItem(act.item, pointerType);
   }
 
   function toggleDetails(): void {
     detailsOpen = !detailsOpen;
     saveDetailsOpen(detailsOpen);
-  }
-
-  async function copyPrompt(prompt: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      addToast('Prompt copied', 'success');
-    } catch {
-      addToast('Could not copy the prompt', 'error');
-    }
   }
 
   $effect(() => {
@@ -676,20 +677,17 @@
         if (hasNext) onnavigate(assets.length - 1);
         return hasNext;
       case 'reference':
-        if (asset.media_type === 'video') return runExtend();
-        if (referenceItems.length === 0) return false;
-        referenceOpen = true;
+        if (asset.media_type === 'video') return runKey('extend');
+        if (asset.media_type === 'audio') return runKey('use-audio-track');
+        if (!canUseAs) return false;
+        openPopup('useas', buttonFor('use-as'));
         return true;
       case 'edit':
-        return runEdit();
+        return runKey('edit');
       case 'adjust':
-        return startAdjust();
-      case 'copy': {
-        const text = copyableText(asset);
-        if (!text) return false;
-        void copyPrompt(text);
-        return true;
-      }
+        return runKey('adjust');
+      case 'copy':
+        return runKey('copy-prompt');
       case 'details':
         toggleDetails();
         return true;
@@ -697,12 +695,13 @@
         helpOpen = !helpOpen;
         return true;
       case 'reuse':
-        if (!onreuse || !canReuse) return false;
-        onreuse(asset);
-        return true;
+        return runKey('reuse');
       case 'download':
-        downloadLink?.click();
-        return downloadLink !== null;
+        {
+          const link = buttonFor('download');
+          link?.click();
+          return link !== null;
+        }
       case 'star':
         if (!onstar) return false;
         onstar(asset, asset.starred !== true);
@@ -718,7 +717,7 @@
 
   $effect(() => {
     if (!open || adjusting) return;
-    const back = returnFocus ? (adjustButton ?? moreButton) : null;
+    const back = returnFocus ? (buttonFor('adjust') ?? buttonFor('more')) : null;
     returnFocus = false;
     queueMicrotask(() => (back ?? closeButton)?.focus());
     // On the overlay stack like every layer: Escape closes it, innermost first (the shortcut list before it).
@@ -727,11 +726,11 @@
     let upscaleWaitingSince: number | null = null;
     /** Space on the viewer's Close, where a video or take opens, plays it instead of closing the viewer (the focus moves to the player, so the key's release does not click Close); Enter, Esc and a click still close it. */
     function playsFromClose(e: KeyboardEvent): boolean {
-      return e.key === ' ' && e.target === closeButton && player !== null && !(referenceOpen || upscaleOpen || moreOpen || moveOpen || helpOpen);
+      return e.key === ' ' && e.target === closeButton && player !== null && !(popup !== null || helpOpen);
     }
     /** Finish a waiting X with 2 or 4. It runs before the player hears the key and marks it handled, so the playhead stays; no other key is taken. */
     function handleChordKey(e: KeyboardEvent): void {
-      if (upscaleWaitingSince === null || e.defaultPrevented || referenceOpen || upscaleOpen || moreOpen || moveOpen || isTyping(e.target) || inMenu(e.target)) return;
+      if (upscaleWaitingSince === null || e.defaultPrevented || popup !== null || isTyping(e.target) || inMenu(e.target)) return;
       const chord = stepUpscaleChord(upscaleWaitingSince, e, Date.now());
       if (!chord.value) return;
       upscaleWaitingSince = null;
@@ -745,7 +744,7 @@
       }
       // While a menu is open, keys belong to it: the viewer's own, and one opened from the player (the frame menu).
       // A focused player keeps its own keys (arrows step or seek, Space plays): it handles them first and marks them, so they arrive here prevented.
-      if (e.defaultPrevented || referenceOpen || upscaleOpen || moreOpen || moveOpen || isTyping(e.target) || inMenu(e.target)) {
+      if (e.defaultPrevented || popup !== null || isTyping(e.target) || inMenu(e.target)) {
         upscaleWaitingSince = null;
         return;
       }
@@ -779,6 +778,7 @@
 
 {#if open && asset}
   <div
+    bind:this={viewerEl}
     class="asset-viewer ui-viewport"
     role="dialog"
     aria-modal="true"
@@ -786,6 +786,8 @@
     data-testid="asset-viewer"
     data-details={detailsOpen}
     data-compact={compact}
+    data-dock={chrome}
+    data-film={assets.length > 1}
     data-phase={phase}
     data-flight={flight !== null}
     data-chrome={chromeHidden ? 'hidden' : 'shown'}
@@ -794,154 +796,78 @@
     <!-- On a desktop or a tablet the viewer is a panel over the page; a click on the backdrop closes it. -->
     <button type="button" class="viewer-backdrop" aria-label="Close viewer" tabindex="-1" inert={adjusting} onclick={close}></button>
     <div class="viewer-panel" inert={adjusting}>
-    <div class="viewer-bar">
-      <div class="viewer-title">
-        <b id="asset-viewer-title" class="truncate">{asset.filename}</b>
-        <small>{index + 1} of {assets.length}{setLabel ? ` · ${setLabel}` : ''}</small>
-      </div>
-      {#if compact}
-        {#if onstar}
-          <button type="button" class="viewer-btn viewer-star ui-btn ui-btn-icon" data-action="star" aria-label="Star" aria-pressed={asset.starred === true} title={asset.starred === true ? 'Unstar (S)' : 'Star (S)'} onclick={() => onstar(asset, asset.starred !== true)}><Icon name="star" size={16} solid={asset.starred === true} /></button>
+    <div class="viewer-bar" data-bar={chrome}>
+      <div class="vb">
+        <div class="vb-head">
+          <div class="vb-title">
+            {#if onstar}
+              <button
+                type="button"
+                class="viewer-btn viewer-star ui-btn ui-btn-icon"
+                data-action="star"
+                aria-label="Star"
+                aria-pressed={asset.starred === true}
+                title={asset.starred === true ? 'Unstar (S)' : 'Star (S)'}
+                onclick={() => onstar(asset, asset.starred !== true)}
+              ><Icon name="star" size={16} solid={asset.starred === true} /></button>
+            {/if}
+            <div class="vb-name">
+              <b id="asset-viewer-title"><FileName name={asset.filename} /></b>
+              <small>{index + 1} of {assets.length}{setLabel ? ` · ${setLabel}` : ''}</small>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="viewer-btn ui-btn ui-btn-quiet vb-details"
+            class:ui-btn-icon={chrome === 'phone' || chrome === 'rail'}
+            data-action="details"
+            aria-expanded={detailsOpen}
+            aria-controls="asset-viewer-details"
+            aria-label={chrome === 'phone' || chrome === 'rail' ? 'Details' : undefined}
+            title="Details (I)"
+            onclick={toggleDetails}
+          ><Icon name="info" size={chrome === 'phone' || chrome === 'rail' ? 16 : 14} />{#if chrome !== 'phone' && chrome !== 'rail'}<span class="vb-label vb-details-label">Details</span>{/if}</button>
+          {#if chrome === 'dock'}
+            <button
+              type="button"
+              class="viewer-btn ui-btn ui-btn-quiet ui-btn-icon"
+              data-action="shortcuts"
+              aria-label="Keyboard shortcuts"
+              aria-expanded={helpOpen}
+              aria-controls="asset-viewer-shortcuts"
+              title="Keyboard shortcuts (?)"
+              onclick={() => { helpOpen = !helpOpen; }}
+            ><kbd class="viewer-kbd">?</kbd></button>
+          {/if}
+        </div>
+        {#if chrome === 'toolbar' && acts}
+          <span class="ui-bar-rule vb-rule-head" aria-hidden="true"></span>
+          <div class="vb-actions">
+            {#each acts.make as act (act.id)}
+              <ViewerButton {act} variant="bar" expanded={expandedOf(act)} onact={onAct} />
+            {/each}
+            <span class="vb-spacer"></span>
+            {#each acts.file as act (act.id)}
+              <ViewerButton {act} variant="bar" expanded={expandedOf(act)} onact={onAct} />
+            {/each}
+            {#if acts.del}
+              <span class="ui-bar-rule" aria-hidden="true"></span>
+              <ViewerButton act={acts.del} variant="bar" onact={onAct} />
+            {/if}
+          </div>
         {/if}
-        <button type="button" class="viewer-btn ui-btn ui-btn-icon" data-action="details" aria-label="Details" aria-expanded={detailsOpen} aria-controls="asset-viewer-details" onclick={toggleDetails}><Icon name="info" size={16} /></button>
-        <button type="button" bind:this={moreButton} class="viewer-btn ui-btn ui-btn-icon" data-action="more" aria-label="Actions" aria-haspopup="menu" aria-expanded={moreOpen} onclick={() => { contextAt = null; moreOpen = !moreOpen; }}><Icon name="more" size={16} /></button>
-        <button type="button" bind:this={closeButton} class="viewer-btn ui-btn ui-btn-icon" aria-label="Close viewer" onclick={close}><Icon name="close" size={16} /></button>
-      {:else}
-      {#if onreuse}
-        <button
-          type="button"
-          class="viewer-btn ui-btn ui-btn-primary"
-          data-action="reuse"
-          disabled={!canReuse}
-          title={canReuse ? 'Load these settings into the workspace (R)' : 'Reusable settings unavailable'}
-          onclick={() => onreuse(asset)}
-        ><Icon name="reuse" size={14} /><span class="viewer-btn-label">Reuse settings</span></button>
-      {/if}
-      {#if canUseAs}
-        <button
-          type="button"
-          bind:this={referenceButton}
-          class="viewer-btn ui-btn"
-          data-action="reference"
-          aria-haspopup="menu"
-          aria-expanded={referenceOpen}
-          title={isAudio ? 'Use as an audio track or a voice (E)' : 'Use as start image or frame (E)'}
-          onclick={() => { referenceOpen = !referenceOpen; }}
-        ><Icon name="reference" size={14} /><span class="viewer-btn-label">Use as</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
-      {/if}
-      {#if showExtend}
-        <button
-          type="button"
-          class="viewer-btn ui-btn"
-          data-action="extend"
-          disabled={!canExtend(asset)}
-          title={extendBlocked ?? 'Extend this video (E)'}
-          onclick={() => onextend?.(asset)}
-        ><Icon name="extend" size={14} /><span class="viewer-btn-label">Extend</span></button>
-      {/if}
-      {#if showEdit}
-        <button
-          type="button"
-          class="viewer-btn ui-btn"
-          data-action="edit"
-          title="Edit this image (M)"
-          onclick={() => onedit?.(asset)}
-        ><Icon name="edit" size={14} /><span class="viewer-btn-label">Edit</span></button>
-      {/if}
-      {#if showAdjust}
-        <button
-          type="button"
-          bind:this={adjustButton}
-          class="viewer-btn ui-btn"
-          data-action="adjust"
-          title="Adjust (A)"
-          onclick={() => void startAdjust()}
-        ><Icon name="sliders" size={14} /><span class="viewer-btn-label">Adjust</span></button>
-      {/if}
-      {#if upscaleItems.length > 0}
-        <button
-          type="button"
-          bind:this={upscaleButton}
-          class="viewer-btn ui-btn"
-          data-action="upscale"
-          aria-haspopup="menu"
-          aria-expanded={upscaleOpen}
-          title="Upscale (X then {upscaleKeys})"
-          onclick={() => { upscaleOpen = !upscaleOpen; }}
-        ><Icon name="expand" size={14} /><span class="viewer-btn-label">Upscale</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
-      {/if}
-      {#if onmove}
-        <button
-          type="button"
-          bind:this={moveButton}
-          class="viewer-btn ui-btn"
-          data-action="move"
-          aria-haspopup="menu"
-          aria-expanded={moveOpen}
-          title="Move to project"
-          onclick={() => { moveOpen = !moveOpen; }}
-        ><Icon name="folder" size={14} /><span class="viewer-btn-label">Move</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
-      {/if}
-      {#if onstar}
-        <button
-          type="button"
-          class="viewer-btn viewer-star ui-btn ui-btn-icon"
-          data-action="star"
-          aria-label="Star"
-          aria-pressed={asset.starred === true}
-          title={asset.starred === true ? 'Unstar (S)' : 'Star (S)'}
-          onclick={() => onstar(asset, asset.starred !== true)}
-        ><Icon name="star" size={16} solid={asset.starred === true} /></button>
-      {/if}
-      <a
-        bind:this={downloadLink}
-        class="viewer-btn ui-btn"
-        data-action="download"
-        href={asset.url}
-        download={asset.filename}
-        title="Download (D)"
-      >
-        <Icon name="download" size={14} /><span class="viewer-btn-label">Download</span>
-      </a>
-      {#if ondelete}
-        <button
-          type="button"
-          class="viewer-btn ui-btn ui-btn-danger"
-          data-action="delete"
-          disabled={deleting}
-          title="Delete (Del)"
-          onclick={() => ondelete(asset)}
-        ><Icon name="trash" size={14} /><span class="viewer-btn-label">{deleting ? 'Deleting…' : 'Delete'}</span></button>
-      {/if}
-      <span class="viewer-sep" aria-hidden="true"></span>
-      <button
-        type="button"
-        class="viewer-btn ui-btn"
-        data-action="details"
-        aria-expanded={detailsOpen}
-        aria-controls="asset-viewer-details"
-        title="Details (I)"
-        onclick={toggleDetails}
-      ><Icon name="info" size={14} /><span class="viewer-btn-label">Details</span> <kbd class="viewer-kbd">I</kbd></button>
-      <button
-        type="button"
-        class="viewer-btn ui-btn ui-btn-icon"
-        data-action="shortcuts"
-        aria-label="Keyboard shortcuts"
-        aria-expanded={helpOpen}
-        aria-controls="asset-viewer-shortcuts"
-        title="Keyboard shortcuts (?)"
-        onclick={() => { helpOpen = !helpOpen; }}
-      ><kbd class="viewer-kbd">?</kbd></button>
-      <button
-        type="button"
-        bind:this={closeButton}
-        class="viewer-btn ui-btn ui-btn-icon"
-        aria-label="Close viewer"
-        title="Close (Esc)"
-        onclick={close}
-      ><Icon name="close" size={16} /></button>
-      {/if}
+        <div class="vb-close">
+          {#if chrome === 'toolbar'}<span class="ui-bar-rule" aria-hidden="true"></span>{/if}
+          <button
+            type="button"
+            bind:this={closeButton}
+            class="viewer-btn ui-btn ui-btn-icon"
+            aria-label="Close viewer"
+            title="Close (Esc)"
+            onclick={close}
+          ><Icon name="close" size={chrome === 'toolbar' ? 16 : 18} /></button>
+        </div>
+      </div>
     </div>
 
     <div class="viewer-main">
@@ -952,7 +878,7 @@
         bind:clientHeight={stageHeight}
         class="viewer-stage"
         data-touch={touchLayer}
-        use:hold={{ onhold: () => { contextAt = pressAt; moreOpen = true; }, ignore: 'button, [data-own-drag]' }}
+        use:hold={{ onhold: () => { contextAt = pressAt; openPopup('more', null); }, ignore: 'button, [data-own-drag]' }}
         onpointerdown={(event) => { pressAt = { x: event.clientX, y: event.clientY }; }}
         oncontextmenu={onStageContextMenu}
         ontouchstart={onStageTouchStart}
@@ -1117,31 +1043,64 @@
       {/if}
     </div>
 
-    {#if assets.length > 1}
-      <div class="viewer-film" aria-label="Files in this set" bind:this={filmEl}>
-        {#each assets as item, itemIndex (item.id)}
-          <button
-            type="button"
-            data-film-index={itemIndex}
-            aria-label="Show {item.filename}"
-            aria-current={itemIndex === index}
-            onclick={() => onnavigate(itemIndex)}
-          >
-            {#if item.media_type === 'audio'}
-              <span class="film-audio" aria-hidden="true"><Waveform peaks={audioPeaks.of(item)} /></span>
-            {:else}
-              <img src={thumbOf(item)} alt="" loading="lazy" class:ui-checkerboard={isTransparent(item)} data-transparent={isTransparent(item)}>
-              {#if item.media_type === 'video'}
-                <span class="film-play" data-testid="film-play-badge" aria-hidden="true"><Icon name="play" size={8} /></span>
-              {/if}
+    <!-- The foot, dock and film strip, publishes its height (`--viewer-foot`) so a toast sits above it, as the Workspace's controls do. -->
+    <div class="viewer-foot" use:dockHeight={'--viewer-foot'}>
+      <!-- A finger gets the toolbar's actions in a dock under the picture: the full list on a tablet, four slots on a phone, a rail on the right when a phone is held sideways. -->
+      {#if acts && (chrome === 'dock' || chrome === 'phone' || chrome === 'rail')}
+        <div class="viewer-dock ui-tool-row" class:ui-tool-row-four={chrome !== 'dock'} data-dock={chrome} role="toolbar" aria-label="Actions">
+          {#if chrome === 'dock'}
+            {#each acts.make as act (act.id)}
+              <ViewerButton {act} variant="cell" expanded={expandedOf(act)} onact={onAct} />
+            {/each}
+            <span class="ui-tool-spacer"></span>
+            {#each acts.file as act (act.id)}
+              <ViewerButton {act} variant="cell" expanded={expandedOf(act)} onact={onAct} />
+            {/each}
+            {#if acts.del}
+              <span class="ui-tool-rule" aria-hidden="true"></span>
+              <ViewerButton act={acts.del} variant="cell" onact={onAct} />
             {/if}
-          </button>
-        {/each}
-      </div>
-    {/if}
+          {:else}
+            {#each phoneSlots as act (act.id)}
+              <ViewerButton {act} variant="cell" expanded={expandedOf(act)} onact={onAct} />
+            {/each}
+          {/if}
+        </div>
+      {/if}
+
+      {#if assets.length > 1}
+        <div class="viewer-film" aria-label="Files in this set" bind:this={filmEl}>
+          {#each assets as item, itemIndex (item.id)}
+            <button
+              type="button"
+              data-film-index={itemIndex}
+              aria-label="Show {item.filename}"
+              aria-current={itemIndex === index}
+              onclick={() => onnavigate(itemIndex)}
+            >
+              {#if item.media_type === 'audio'}
+                <span class="film-audio" aria-hidden="true"><Waveform peaks={audioPeaks.of(item)} /></span>
+              {:else}
+                <img src={thumbOf(item)} alt="" loading="lazy" class:ui-checkerboard={isTransparent(item)} data-transparent={isTransparent(item)}>
+                {#if item.media_type === 'video'}
+                  <span class="film-play" data-testid="film-play-badge" aria-hidden="true"><Icon name="play" size={8} /></span>
+                {/if}
+              {/if}
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
 
     {#if contextAt}<span bind:this={contextAnchorEl} class="viewer-context-anchor" style:left="{contextAt.x}px" style:top="{contextAt.y}px" aria-hidden="true"></span>{/if}
-    <ActionMenu open={moreOpen} anchor={contextAt ? contextAnchorEl : moreButton} items={moreItems} label={asset.filename} onclose={() => { moreOpen = false; contextAt = null; }} />
+    <AssetPanelMenu
+      open={popup === 'more'}
+      anchor={contextAt ? contextAnchorEl : popupAnchor}
+      {asset}
+      panel={panel!}
+      metaSuffix="{index + 1} of {assets.length}"
+      onclose={() => closePopup('more')}
+    />
 
     {#if helpOpen}
       <div id="asset-viewer-shortcuts" class="viewer-shortcuts ui-overlay" role="note" aria-label="Keyboard shortcuts">
@@ -1151,29 +1110,35 @@
     {/if}
 
     </div>
-    <ActionMenu
-      open={referenceOpen}
-      anchor={referenceButton}
-      items={referenceItems}
-      label="Use as"
-      onclose={() => { referenceOpen = false; }}
+    <AssetPanelMenu
+      open={popup === 'useas'}
+      anchor={popupAnchor}
+      {asset}
+      panel={panel!}
+      only="use-as"
+      align="start"
+      side={chrome === 'dock' ? 'above' : 'below'}
+      onclose={() => closePopup('useas')}
     />
     {#if onmove && asset}
       <MoveMenu
-        open={moveOpen}
-        anchor={compact ? moreButton : moveButton}
+        open={popup === 'move'}
+        anchor={popupAnchor}
         align={compact ? 'end' : 'start'}
         current={asset.project}
         onmove={(project) => onmove(asset, project)}
-        onclose={() => { moveOpen = false; }}
+        onclose={() => closePopup('move')}
       />
     {/if}
-    <ActionMenu
-      open={upscaleOpen}
-      anchor={upscaleButton}
-      items={upscaleItems}
-      label="Upscale"
-      onclose={() => { upscaleOpen = false; }}
+    <AssetPanelMenu
+      open={popup === 'upscale'}
+      anchor={popupAnchor}
+      {asset}
+      panel={panel!}
+      only="upscale"
+      align="start"
+      side={chrome === 'dock' ? 'above' : 'below'}
+      onclose={() => closePopup('upscale')}
     />
     {#if adjusting}
       {#key asset.id}
@@ -1235,14 +1200,96 @@
   .asset-viewer[data-compact='false'] { padding: 24px; }
   .asset-viewer[data-compact='false'] .viewer-backdrop { background: var(--color-scrim); cursor: default; }
   .asset-viewer[data-compact='false'] .viewer-panel { flex: none; width: 100%; height: 100%; overflow: hidden; border-radius: var(--radius-lg); background: var(--color-bg-base); box-shadow: 0 24px 64px var(--color-scrim); }
+  .viewer-foot { flex: none; }
   .viewer-bar, .viewer-main, .viewer-film { position: relative; }
   .viewer-bar, .viewer-film { opacity: var(--pull, 1); transition: opacity 160ms ease; }
   .asset-viewer[data-chrome='hidden'] .viewer-bar, .asset-viewer[data-chrome='hidden'] .viewer-film { opacity: 0; pointer-events: none; }
-  .viewer-bar { display: flex; flex: none; align-items: center; gap: 6px; min-height: 44px; padding: 6px 12px 6px 16px; background: var(--color-bg-surface); }
-  .viewer-title { display: flex; flex: 1 1 auto; min-width: 7rem; flex-direction: column; }
-  .viewer-title b { font-size: var(--text-content); font-weight: 600; }
-  .viewer-title small { font-size: var(--text-meta); color: var(--color-text-muted); }
-  .viewer-sep { width: 1px; height: 20px; margin: 0 2px; background: var(--color-border-subtle); }
+  /* The bar is the container its label steps are measured in: the actions drop their words by whole groups as it narrows. */
+  .viewer-bar { container: viewer-bar / inline-size; flex: none; min-height: 52px; padding: var(--sp-8) var(--sp-12); background: var(--color-bg-surface); }
+  /* Under 768px the viewer drops its inset, so a tablet's full dock fits from 640px. */
+  @media (max-width: 767px) {
+    .asset-viewer[data-compact='false'] { padding: 0; }
+    .asset-viewer[data-compact='false'] .viewer-panel { border-radius: 0; }
+    .viewer-bar { padding-top: calc(var(--sp-8) + env(safe-area-inset-top, 0px)); }
+  }
+  .vb { display: flex; align-items: center; gap: var(--sp-6); }
+  .vb-head { display: flex; min-width: 0; flex: none; align-items: center; gap: var(--sp-6); }
+  /* The star leads, the name follows 4px after it, in a block of one width, so what comes next starts in the same place for every file. */
+  .vb-title { display: flex; width: var(--name-w, 240px); min-width: 0; flex: none; align-items: center; gap: var(--sp-4); }
+  .vb-name { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+  .vb-name b { display: block; min-width: 0; font-size: var(--text-content); font-weight: 600; line-height: 1.3; }
+  .vb-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-meta); color: var(--color-text-muted); }
+  .vb-actions { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: var(--sp-6); }
+  .vb-spacer { min-width: var(--sp-12); flex: 1 1 var(--sp-12); }
+  .vb-close { display: flex; flex: none; align-items: center; gap: var(--sp-6); }
+  .vb-actions :global(.vb-chev) { margin-left: calc(var(--sp-2) - var(--sp-6)); opacity: 0.7; }
+  /* A starred file's glyph and colour change, never its box. */
+  .viewer-star, .viewer-star[aria-pressed='true'] { background: transparent; color: var(--color-text-secondary); }
+  .viewer-star[aria-pressed='true'] { color: var(--color-star); }
+  @media (hover: hover) {
+    .viewer-star:hover:not(:disabled), .viewer-star[aria-pressed='true']:hover:not(:disabled) { background: var(--color-bg-control-hover); }
+  }
+  @media (hover: none) { .viewer-star:active:not(:disabled), .viewer-star[aria-pressed='true']:active:not(:disabled) { background: var(--color-bg-control-hover); } }
+
+  /* The label steps, measured on the bar's own width (the window minus the viewer's 48px inset and the bar's 24px of padding):
+     Details, then the File group, then the Make group after Reuse, then Reuse's second word, then two rows. Delete keeps its word. */
+  @container viewer-bar (max-width: 1257px) {
+    .viewer-bar[data-bar='toolbar'] .vb-title { --name-w: 180px; }
+    .viewer-bar[data-bar='toolbar'] .vb-details-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .viewer-bar[data-bar='toolbar'] .vb-details { width: var(--spacing-control); padding: 0; }
+  }
+  @container viewer-bar (max-width: 1141px) {
+    .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='file'] .vb-label) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='file']:not([data-menu])) { width: var(--spacing-control); padding: 0; }
+    .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='file'][data-menu]) { padding: 0 var(--sp-6); }
+  }
+  @container viewer-bar (max-width: 930px) {
+    .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='make'] .vb-label) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='make']:not([data-menu])) { width: var(--spacing-control); padding: 0; }
+    .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='make'][data-menu]) { padding: 0 var(--sp-6); }
+  }
+  @container viewer-bar (max-width: 782px) {
+    .viewer-bar[data-bar='toolbar'] .vb-title { --name-w: 160px; }
+    .viewer-bar[data-bar='toolbar'] .vb-actions :global(.vb-tail) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  }
+  /* Two rows: the name, Details, ? and ✕ (still at the top right), then the actions. */
+  @container viewer-bar (max-width: 709px) {
+    .viewer-bar[data-bar='toolbar'] .vb { flex-wrap: wrap; row-gap: var(--sp-6); }
+    .viewer-bar[data-bar='toolbar'] .vb-title { --name-w: 200px; }
+    .viewer-bar[data-bar='toolbar'] .vb-head { order: 0; flex: 1 1 0; }
+    .viewer-bar[data-bar='toolbar'] .vb-close { order: 1; }
+    .viewer-bar[data-bar='toolbar'] .vb-actions { order: 2; flex: 1 0 100%; }
+    .viewer-bar[data-bar='toolbar'] .vb-rule-head, .viewer-bar[data-bar='toolbar'] .vb-close .ui-bar-rule { display: none; }
+  }
+
+  /* A finger: a top bar with the star, the name, Details and ✕ alone at the right; the actions are in the dock. */
+  .viewer-bar:not([data-bar='toolbar']) .vb-title { width: 300px; flex: 0 1 auto; }
+  .viewer-bar:is([data-bar='phone'], [data-bar='rail']) .vb-title { width: 210px; }
+  .viewer-bar:not([data-bar='toolbar']) .vb-close { margin-left: auto; }
+  .viewer-bar:not([data-bar='toolbar']) .vb-head { flex: 0 1 auto; }
+
+  /* The dock hides and fades with the bar and the strip (a tap, a pull), and goes while the details are a sheet over the picture. */
+  .viewer-dock { position: relative; background: var(--color-bg-surface); opacity: var(--pull, 1); transition: opacity 160ms ease; }
+  .asset-viewer[data-chrome='hidden'] .viewer-dock { opacity: 0; pointer-events: none; }
+  .asset-viewer[data-film='false'] .viewer-dock { padding-bottom: calc(var(--sp-8) + env(safe-area-inset-bottom, 0px)); }
+  /* The rail stays beside the details sheet: it is out of the picture's way at the right, and its band is already reserved. */
+  .asset-viewer[data-compact='true'][data-details='true'] .viewer-dock:not([data-dock='rail']) { display: none; }
+  @media (max-width: 767px) { .asset-viewer[data-details='true'] .viewer-dock:not([data-dock='rail']) { display: none; } }
+  /* Toasts clear the foot, whatever its height (`dockHeight` measures it); a hidden dock measures nothing, so a reason shown with the details open stays on screen. */
+  :global(:root:has(.asset-viewer .viewer-panel .viewer-foot)) { --toast-bottom: calc(var(--viewer-foot, 0px) + 12px); }
+  /* A phone held sideways: the dock is a rail on the right, padded by the safe area; the top bar lies over the picture on a scrim, and the strip stays. */
+  .asset-viewer[data-dock='rail'] .viewer-panel { padding-right: calc(76px + env(safe-area-inset-right, 0px)); }
+  .viewer-dock[data-dock='rail'] {
+    position: absolute; top: 0; right: 0; bottom: 0; z-index: 4; width: calc(76px + env(safe-area-inset-right, 0px)); flex-direction: column; justify-content: center;
+    padding: var(--sp-8) calc(var(--sp-8) + env(safe-area-inset-right, 0px)) var(--sp-8) var(--sp-8);
+  }
+  .viewer-dock[data-dock='rail'] > :global(.ui-tool) { flex: none; height: 60px; }
+  /* The bar pads for the status bar; set before the rail's own padding-bottom, which it must not override. */
+  .asset-viewer[data-compact='true'] .viewer-bar { padding: calc(6px + env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) 6px max(12px, env(safe-area-inset-left, 0px)); }
+  .asset-viewer[data-dock='rail'] .viewer-bar {
+    position: absolute; top: 0; left: 0; right: calc(76px + env(safe-area-inset-right, 0px)); z-index: 3; padding-bottom: 28px; background: var(--viewer-top-scrim);
+  }
+  .asset-viewer[data-dock='rail'] .viewer-film { padding: 4px max(8px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); }
   .viewer-kbd { padding: 0 4px; border-radius: var(--radius-xs); background: var(--color-bg-surface-hover); font-family: var(--font-mono); font-size: var(--text-meta); line-height: 15px; color: var(--color-text-muted); }
   .viewer-shortcuts { position: absolute; top: 52px; right: 12px; z-index: 3; width: 280px; padding: 12px; }
   .viewer-main { display: flex; flex: 1; min-height: 0; }
@@ -1289,12 +1336,10 @@
   .film-play { position: absolute; right: 2px; bottom: 2px; display: flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: color-mix(in srgb, var(--color-bg-base) 78%, transparent); color: var(--color-text-primary); }
   .viewer-film img { display: block; width: 100%; height: 100%; object-fit: cover; }
   @media (max-width: 767px) {
-    .viewer-bar { flex-wrap: wrap; padding: 8px; }
     .viewer-stage { padding: 12px 52px; }
     .viewer-details { position: absolute; inset: auto 0 0 0; z-index: 3; width: auto; max-height: 50%; }
   }
-  /* Phone: no arrows (a swipe moves), the bar pads for the status bar, the details rise as a sheet. */
-  .asset-viewer[data-compact='true'] .viewer-bar { flex-wrap: nowrap; padding: calc(6px + env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) 6px max(12px, env(safe-area-inset-left, 0px)); }
+  /* Phone: no arrows (a swipe moves), the details rise as a sheet. */
   .asset-viewer[data-compact='true'] .viewer-nav { display: none; }
   .viewer-details-scrim { position: absolute; inset: 0; z-index: 2; background: transparent; cursor: default; }
   .asset-viewer[data-compact='true'] .viewer-stage { padding: 8px 12px; }
@@ -1303,12 +1348,6 @@
   .asset-viewer[data-compact='true'] .viewer-details { position: static; z-index: 3; width: auto; max-height: 50%; flex: none; }
   .asset-viewer[data-compact='true'][data-details='true'] .viewer-film { display: none; }
   .asset-viewer[data-compact='true'] .viewer-details-body { padding: 4px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
-  /* Below a full desktop the labelled buttons show their icons only, so the title keeps its room; the tooltip names them. */
-  @media (max-width: 1099px) {
-    .viewer-btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  }
-  /* A starred file's toggle is amber, with the amber tint under it. */
-  .viewer-star[aria-pressed='true'] { background: color-mix(in srgb, var(--color-star) 14%, transparent); color: var(--color-star); }
   .asset-viewer[data-compact='true'] .viewer-film { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
 
   /* The pager: the shown asset's pane between its neighbours, one pane to each side, moved by transform alone. */
