@@ -417,14 +417,9 @@
   .ui-btn-row { width: 24px; height: 24px; padding: 0; background: transparent; border-radius: var(--radius-xs); color: var(--color-text-muted); }
   @media (hover: hover) { .ui-btn-row:hover:not(:disabled) { background: var(--color-bg-surface-hover); color: var(--color-primary-main); } }
   @media (hover: hover) { .ui-btn-row.ui-btn-danger:hover:not(:disabled) { background: var(--color-error-surface); color: var(--color-error); } }
-  /* Touch: row actions, path boxes, checkboxes and slider thumbs grow to a finger's size. */
+  /* Touch: row actions grow to a finger's size. Path boxes, checkboxes and sliders do too, further down: their base rules come later in this layer and would win. */
   @media (pointer: coarse) {
     .ui-btn-row { width: 36px; height: 36px; }
-    .inspector-text { height: 36px; padding: 0 8px; background: var(--color-bg-surface-hover); }
-    .ui-checkbox { width: 20px; height: 20px; background-size: 14px 14px; }
-    .ui-range { height: 28px; }
-    .ui-range::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -8px; }
-    .ui-range::-moz-range-thumb { width: 20px; height: 20px; }
     /* A finger rarely has a keyboard: buttons drop their shortcut hints, but an icon button whose glyph is a key keeps it. */
     .ui-btn:not(.ui-btn-icon) kbd { display: none; }
   }
@@ -570,6 +565,15 @@
   .ui-range-hue::-moz-range-progress { background: transparent; }
   .ui-range-hue::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--color-bg-surface); }
   .ui-range-hue::-moz-range-thumb { box-shadow: 0 0 0 2px var(--color-bg-surface); }
+  /* Touch: path boxes, checkboxes and slider thumbs grow to a finger's size. These follow the base rules above, which have the
+     same specificity and would otherwise win. */
+  @media (pointer: coarse) {
+    .inspector-text { height: 36px; padding: 0 8px; background: var(--color-bg-surface-hover); }
+    .ui-checkbox { width: 20px; height: 20px; background-size: 14px 14px; }
+    .ui-range { height: 28px; }
+    .ui-range::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -8px; }
+    .ui-range::-moz-range-thumb { width: 20px; height: 20px; }
+  }
 
   /* The toolbar select (Select's shell variant) follows the field fills. */
   .ui-select-shell { border: 1px solid transparent; background: var(--color-bg-surface-hover); }
