@@ -48,7 +48,9 @@
   }
 
   const placedSections = $derived(panel.sections.map((section, index) => ({ section, index, placed: placeIn(section.id, section.items) })));
-  const placedMake = $derived(placeIn('make', panel.make));
+  // An image makes three things (Reuse settings, Edit, Adjust): Reuse takes its own row and the other two pair up under it. A video or a take
+  // has Reuse beside its own action.
+  const placedMake = $derived(placeIn('make', panel.make.length > 2 ? panel.make.map((item, index) => (index === 0 ? { ...item, span: true } : item)) : panel.make));
 
   /** The grid-column of an item in the 8-column sideways grid: its half, then its place in its pair. */
   function sideways(half: number, slot: 0 | 1 | null): string | undefined {

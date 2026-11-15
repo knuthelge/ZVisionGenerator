@@ -92,6 +92,22 @@ describe('AssetPanelMenu', () => {
       expect(item('extend')?.getAttribute('title')).toBe('blocked');
     });
 
+    it('gives an image\'s Reuse its own row, with Edit and Adjust paired under it, and a video\'s Reuse its pair', () => {
+      const on = { ...handlers(), onadjust: vi.fn() };
+      mountPanel({ handlers: on });
+      const row = (id: string) => item(id)?.dataset.row;
+
+      expect(row('reuse')).not.toBe(row('edit'));
+      expect(row('edit')).toBe(row('adjust'));
+      expect(order().slice(1, 5)).toEqual(['reuse', 'edit', 'adjust', 'reference-image']);
+
+      document.body.innerHTML = '';
+      const clip = { ...image, media_type: 'video' as const, extend: { available: true, reason: null } };
+      mountPanel({ asset: clip, panel: assetPanel(clip, { ...on, onextend: vi.fn() }) });
+      expect(row('reuse')).toBe(row('extend'));
+      expect(item('adjust')).toBeNull();
+    });
+
     it('opens on Reuse settings', () => {
       mountPanel({ onview: vi.fn() });
 

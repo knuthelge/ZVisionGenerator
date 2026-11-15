@@ -1568,4 +1568,24 @@ describe('AssetViewer chrome', () => {
     expect(viewer().dataset.details).toBe('true');
     expect(document.querySelector('.viewer-dock[data-dock="rail"]')).not.toBeNull();
   });
+
+  it('puts Adjust right after Edit in the toolbar and the tablet dock, and not in the phone dock', () => {
+    mountViewer();
+    expect(actions('.vb-actions').slice(0, 3)).toEqual(['reuse', 'edit', 'adjust']);
+    document.body.innerHTML = '';
+
+    touch.coarse = true;
+    mountViewer();
+    expect(actions('.viewer-dock').slice(0, 3)).toEqual(['reuse', 'edit', 'adjust']);
+    document.body.innerHTML = '';
+
+    touch.compact = true;
+    mountViewer();
+    expect(actions('.viewer-dock')).toEqual(['reuse', 'edit', 'download', 'more']);
+  });
+
+  it('offers no Adjust for a video', () => {
+    mountViewer({ assets: [makeAsset({ media_type: 'video', filename: 'clip.mp4', file_path: '/out/clip.mp4' })] });
+    expect(document.querySelector('[data-action="adjust"]')).toBeNull();
+  });
 });

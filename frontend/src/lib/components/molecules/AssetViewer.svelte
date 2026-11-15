@@ -1047,7 +1047,7 @@
     <div class="viewer-foot" use:dockHeight={'--viewer-foot'}>
       <!-- A finger gets the toolbar's actions in a dock under the picture: the full list on a tablet, four slots on a phone, a rail on the right when a phone is held sideways. -->
       {#if acts && (chrome === 'dock' || chrome === 'phone' || chrome === 'rail')}
-        <div class="viewer-dock ui-tool-row" class:ui-tool-row-four={chrome !== 'dock'} data-dock={chrome} role="toolbar" aria-label="Actions">
+        <div class="viewer-dock ui-tool-row" class:ui-tool-row-four={chrome !== 'dock'} class:ui-tool-row-wrap={chrome === 'dock'} data-dock={chrome} role="toolbar" aria-label="Actions">
           {#if chrome === 'dock'}
             {#each acts.make as act (act.id)}
               <ViewerButton {act} variant="cell" expanded={expandedOf(act)} onact={onAct} />
@@ -1233,27 +1233,26 @@
 
   /* The label steps, measured on the bar's own width (the window minus the viewer's 48px inset and the bar's 24px of padding):
      Details, then the File group, then the Make group after Reuse, then Reuse's second word, then two rows. Delete keeps its word. */
-  @container viewer-bar (max-width: 1257px) {
-    .viewer-bar[data-bar='toolbar'] .vb-title { --name-w: 180px; }
+  @container viewer-bar (max-width: 1344px) {
+    .viewer-bar[data-bar='toolbar'] .vb-title { --name-w: 150px; }
     .viewer-bar[data-bar='toolbar'] .vb-details-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .viewer-bar[data-bar='toolbar'] .vb-details { width: var(--spacing-control); padding: 0; }
   }
-  @container viewer-bar (max-width: 1141px) {
+  @container viewer-bar (max-width: 1199px) {
     .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='file'] .vb-label) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='file']:not([data-menu])) { width: var(--spacing-control); padding: 0; }
     .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='file'][data-menu]) { padding: 0 var(--sp-6); }
   }
-  @container viewer-bar (max-width: 930px) {
+  @container viewer-bar (max-width: 987px) {
     .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='make'] .vb-label) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='make']:not([data-menu])) { width: var(--spacing-control); padding: 0; }
     .viewer-bar[data-bar='toolbar'] .vb-actions :global([data-group='make'][data-menu]) { padding: 0 var(--sp-6); }
   }
-  @container viewer-bar (max-width: 782px) {
-    .viewer-bar[data-bar='toolbar'] .vb-title { --name-w: 160px; }
+  @container viewer-bar (max-width: 787px) {
     .viewer-bar[data-bar='toolbar'] .vb-actions :global(.vb-tail) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   }
   /* Two rows: the name, Details, ? and ✕ (still at the top right), then the actions. */
-  @container viewer-bar (max-width: 709px) {
+  @container viewer-bar (max-width: 737px) {
     .viewer-bar[data-bar='toolbar'] .vb { flex-wrap: wrap; row-gap: var(--sp-6); }
     .viewer-bar[data-bar='toolbar'] .vb-title { --name-w: 200px; }
     .viewer-bar[data-bar='toolbar'] .vb-head { order: 0; flex: 1 1 0; }

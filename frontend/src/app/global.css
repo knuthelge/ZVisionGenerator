@@ -605,6 +605,9 @@
   .ui-tool-row { --tool-min: 70px; display: flex; flex: none; align-items: stretch; gap: var(--sp-4); padding: var(--sp-6) var(--sp-8) var(--sp-8); }
   .ui-tool-row > .ui-tool { flex: 0 1 96px; min-width: var(--tool-min); height: 56px; }
   .ui-tool-row-bar { --tool-min: 66px; }
+  /* A tablet's full dock holds nine cells for an image, so a cell may shrink to 62px and its label wraps to two balanced lines. */
+  .ui-tool-row-wrap { --tool-min: 62px; }
+  .ui-tool-row-wrap .ui-tool-label { text-wrap: balance; }
   /* A phone's dock: four slots that share the width. */
   .ui-tool-row-four > .ui-tool { flex: 1 1 0; min-width: 0; }
   .ui-tool-spacer { flex: 1 0 12px; min-width: 12px; }
