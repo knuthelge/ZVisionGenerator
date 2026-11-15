@@ -122,13 +122,17 @@ ziv-model = "zvisiongenerator.converters.convert_checkpoint:main"
 
 [tool.hatch.version]
 source = "vcs"
-raw-options = { version_scheme = "no-guess-dev" }
+
+[tool.hatch.version.raw-options]
+version_scheme = "no-guess-dev"
+# Read only v* tags, so a launcher-v* tag never becomes the app version.
+scm.git.describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--abbrev=40", "--match", "v[0-9]*"]
 
 [tool.hatch.build.hooks.vcs]
 version-file = "zvisiongenerator/_version.py"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["scripts/docs_demo"]
+exclude = ["scripts/docs_demo", "/launcher"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["zvisiongenerator", "packages/ltx_core_mlx", "packages/ltx_pipelines_mlx", "packages/minimax_h3_mlx", "packages/seedvr2_torch", "packages/moss_image", "packages/birefnet", "packages/yue2", "packages/stable_audio_3", "packages/qwen_tts", "packages/faster_qwen3_tts"]
