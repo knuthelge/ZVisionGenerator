@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - **Sliders, checkboxes and path boxes are finger-sized on touch screens.** The larger touch sizes were being overridden by the desktop ones.
+- **Copying works when the Web UI is opened over plain HTTP from another machine.** **Copy prompt**, the Job log's **Copy error** and the Discover panel's copy button had no clipboard to use on a plain-HTTP address; they now copy there too.
 
 ## [0.15.0] - 2026-11-15
 

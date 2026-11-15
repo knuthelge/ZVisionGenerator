@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { copyText, selectElementText } from './clipboard';
 
@@ -8,6 +8,13 @@ function stubClipboard(writeText: unknown, secure = true): void {
 }
 
 describe('copyText', () => {
+  const execCommand = vi.fn();
+
+  beforeEach(() => {
+    execCommand.mockReset().mockReturnValue(true);
+    Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true });
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
@@ -20,20 +27,80 @@ describe('copyText', () => {
     expect(writeText).toHaveBeenCalledWith('boom');
   });
 
-  it('resolves false when the page is not a secure context', async () => {
+  it('copies through a hidden text field where the page is not a secure context, without the Clipboard API', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     stubClipboard(writeText, false);
-    expect(await copyText('boom')).toBe(false);
+    let copied = '';
+    execCommand.mockImplementation(() => {
+      copied = (document.activeElement as HTMLTextAreaElement).value;
+      return true;
+    });
+
+    expect(await copyText('boom')).toBe(true);
+
     expect(writeText).not.toHaveBeenCalled();
+    expect(copied).toBe('boom');
+    expect(document.querySelector('textarea')).toBeNull();
   });
 
-  it('resolves false when the browser has no clipboard', async () => {
+  it('copies through the text field when the browser has no clipboard, and when the write is refused', async () => {
     stubClipboard(undefined);
-    expect(await copyText('boom')).toBe(false);
+    expect(await copyText('boom')).toBe(true);
+    stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));
+    expect(await copyText('boom')).toBe(true);
+    expect(execCommand).toHaveBeenCalledTimes(2);
   });
 
-  it('resolves false when the write is refused', async () => {
+  it('gives the focus back to what had it, and leaves no text field behind', async () => {
+    stubClipboard(undefined, false);
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    button.focus();
+
+    await copyText('boom');
+
+    expect(document.activeElement).toBe(button);
+    expect(document.querySelector('textarea')).toBeNull();
+    button.remove();
+  });
+
+  it('selects the whole text with a range, for iOS Safari', async () => {
+    stubClipboard(undefined, false);
+    const setRange = vi.spyOn(HTMLTextAreaElement.prototype, 'setSelectionRange');
+
+    await copyText('boom');
+
+    expect(setRange).toHaveBeenCalledWith(0, 4);
+    setRange.mockRestore();
+  });
+
+  it('puts the text field inside the open dialog, so its focus trap leaves it alone, and not in the body', async () => {
+    stubClipboard(undefined, false);
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    const button = document.createElement('button');
+    dialog.appendChild(button);
+    document.body.appendChild(dialog);
+    button.focus();
+    let parent: Element | null = null;
+    execCommand.mockImplementation(() => {
+      parent = document.activeElement?.parentElement ?? null;
+      return true;
+    });
+
+    await copyText('boom');
+
+    expect(parent).toBe(dialog);
+    expect(dialog.querySelector('textarea')).toBeNull();
+    expect(document.activeElement).toBe(button);
+    dialog.remove();
+  });
+
+  it('resolves false only when both ways fail', async () => {
     stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));
+    execCommand.mockReturnValue(false);
+    expect(await copyText('boom')).toBe(false);
+    execCommand.mockImplementation(() => { throw new Error('blocked'); });
     expect(await copyText('boom')).toBe(false);
   });
 });
