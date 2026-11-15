@@ -235,6 +235,21 @@ describe('AssetViewer', () => {
     expect(counter()).toContain('3 of 4');
   });
 
+  it('keeps the full image shown when the open file is updated in place, as a star does', () => {
+    const props = reactiveProps({ assets: [makeAsset(), assetB], currentId: 'out/asset-a.png', open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+    page = mountComponent(AssetViewer, props);
+    flushSync(() => { document.querySelector('[data-testid="viewer-image"]')!.dispatchEvent(new Event('load')); });
+    expect(document.querySelector('.viewer-standin')).toBeNull();
+
+    props.assets = [makeAsset({ starred: true }), assetB];
+    flushSync();
+    expect(document.querySelector('.viewer-standin')).toBeNull();
+
+    props.currentId = assetB.id;
+    flushSync();
+    expect(document.querySelector('.viewer-standin')).not.toBeNull();
+  });
+
   it('shows a video with its still as the poster until it plays', () => {
     const clip = makeAsset({ id: 'out/clip.mp4', url: '/media/out/clip.mp4', thumbnail_url: '/thumbs/out/clip.mp4', filename: 'clip.mp4', media_type: 'video' });
     mountViewer({ assets: [clip], currentId: clip.id });

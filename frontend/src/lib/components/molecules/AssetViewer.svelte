@@ -325,8 +325,11 @@
     return () => { window.removeEventListener('resize', measureGap); flight = null; phase = 'open'; chromeHidden = false; drag = null; helpOpen = false; popup = null; };
   });
 
+  // The stand-in thumbnail shows until the image's own load event, so the flag resets only when the source changes: a new
+  // asset object for the same file (a star, a move) fires no new load and must keep the full image shown.
+  const mediaUrl = $derived(asset?.url);
   $effect(() => {
-    void asset?.id;
+    void mediaUrl;
     mediaLoaded = false;
   });
 
