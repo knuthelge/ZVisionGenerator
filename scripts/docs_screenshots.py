@@ -60,10 +60,15 @@ def _delete_new_outputs(url: str, before: set[str]) -> None:
     """Delete the outputs made since *before* through the app, so the hero stays the newest image."""
     with urllib.request.urlopen(f"{url}/api/gallery?page=1") as response:
         assets = json.load(response).get("assets", [])
-    for asset in assets:
-        if asset["id"] not in before:
-            request = urllib.request.Request(f"{url}/api/gallery/{asset['id']}", method="DELETE", headers={"Origin": url})
-            urllib.request.urlopen(request).read()
+    new_ids = [asset["id"] for asset in assets if asset["id"] not in before]
+    if not new_ids:
+        return
+    body = json.dumps({"asset_ids": new_ids}).encode()
+    request = urllib.request.Request(f"{url}/api/gallery/delete", data=body, method="POST", headers={"Origin": url, "Content-Type": "application/json"})
+    with urllib.request.urlopen(request) as response:
+        failed = json.load(response).get("failed", [])
+    if failed:
+        raise RuntimeError(f"Could not delete the shot's outputs: {failed}")
 
 
 def _output_ids(url: str) -> set[str]:
