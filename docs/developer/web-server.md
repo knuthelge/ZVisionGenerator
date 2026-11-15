@@ -10,6 +10,8 @@ The active job is the claimed one or, between jobs, the head of the queue; every
 
 **Download lane.** Downloads started from the Models page take a second path: `DownloadLane` (`web/download_lane.py`) runs them one at a time on its own thread, never touching the job executor, so generation jobs are admitted while it downloads. Deleting a model or a Hugging Face download is refused with a 409 while a download touches its repo or folder. It also installs LoRAs. See [Model downloads](downloads.md).
 
+**Job inputs.** A job's context records the files it starts from as a role, a name and a kind (`web/job_inputs.py`), never a path, so snapshots carry the records as they are. An upload is named as its sender named it; an image saved under its hash, which Reuse and Load settings send back as a path, is shown as "Uploaded image". `tests/web/test_job_inputs.py` pins this.
+
 **Job log and recent prompts.** `WebRunner` writes finished jobs to the job log, and `_generate_from_form` records the prompt of an accepted job. Both live in the [app database](app-database.md#job-log) and never fail the job.
 
 ## Discover LoRAs

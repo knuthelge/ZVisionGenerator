@@ -95,6 +95,8 @@ def public_job_snapshot(
         "height": context.get("height"),
         "settings": context.get("settings", {}),
         "notices": list(context.get("notices", ())),
+        # What the job starts from, by name: ``[{role, name, kind}]``; never a filesystem path.
+        "inputs": [dict(entry) for entry in context.get("inputs", ())],
         # The project the job saves into, or None.
         "save_project": context.get("save_project"),
     }

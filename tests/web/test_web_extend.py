@@ -431,6 +431,8 @@ def test_extend_submission_sets_the_args_the_workflow_reads(monkeypatch, tmp_pat
     assert job["context"]["job_type"] == "Extend video"
     assert job["context"]["meta"] == "512x256 · +48 frames · 8 steps"
     assert job["context"]["settings"]["source_video"] == str(clip.path)
+    # The card names the clip and previews the frame the next one continues from.
+    assert job["context"]["inputs"] == [{"role": "source", "name": "clip.mp4", "kind": "video"}]
     assert response.json()["workflow"] == "extend"
 
 

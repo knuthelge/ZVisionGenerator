@@ -74,7 +74,7 @@ The desktop launcher, in `launcher/`, sits outside the Python package: it is a s
 | Background removal | `matte_room.py` | `backends/matte/`, `processing/matte.py` | `tests/image/test_matte*.py`, `tests/backends/test_matte_chain.py` |
 | Settings saved in outputs, Reuse | `utils/provenance.py` | `web/gallery.py` | `tests/common/test_provenance.py` |
 | Web API routes | `web/server.py` | `web/*.py`, one module per concern | `tests/web/` |
-| Job queue, events, Stop | `web/web_runner.py` | `web/job_contract.py`, `core/progress_events.py` | `tests/web/test_web_runner.py` |
+| Job queue, events, Stop | `web/web_runner.py` | `web/job_contract.py`, `web/job_inputs.py`, `core/progress_events.py` | `tests/web/test_web_runner.py`, `tests/web/test_job_inputs.py` |
 | Gallery, job log, LoRA index, stars | `utils/app_db.py` | `web/gallery_index.py`, `web/asset_records.py`, `web/job_log.py`, `web/lora_index.py` | `tests/common/test_app_db.py`, `tests/web/test_web_gallery_index.py`, `tests/web/test_web_asset_records.py` |
 | A Web UI page | `frontend/src/features/<page>/` | `frontend/src/lib/` | `*.test.ts` beside the source |
 | Desktop launcher, see [Desktop launcher](launcher.md) | `launcher/src-tauri/src/` | `frontend/src/launcher/` | Rust tests beside each module, `launcher/contract/snapshot_cases.json`, `*.test.ts` beside the source |

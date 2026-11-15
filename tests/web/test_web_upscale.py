@@ -111,6 +111,11 @@ def _source(**overrides):
     return UpscaleSource(**file, settings=RecordedSettings(**settings))
 
 
+def _source_input(path, kind):
+    """The record a gallery upscale keeps of its source, which the job card shows as the job's ``source`` input."""
+    return {"role": "source", "name": path.name, "kind": kind}
+
+
 def _write_png(path, size=(832, 1216), config=None):
     info = PngInfo()
     if config is not None:
@@ -471,6 +476,7 @@ def test_upscale_route_queues_job(upscale_client):
     assert submitted["config"] is upscale_client.web_config.app_config
     assert submitted["context"]["workflow"] == "upscale"
     assert submitted["context"]["settings"] == {}
+    assert submitted["context"]["inputs"] == [_source_input(upscale_client.root / "set" / "portrait.png", "image")]
     assert submitted["context"]["meta"].startswith("2× creative → 1664×2432")
     assert submitted["context"]["save_project"] == "set"
     assert payload["queue_position"] is None
@@ -556,6 +562,7 @@ def test_upscale_route_queues_a_seedvr2_job(upscale_client):
     assert submitted["context"]["model"] == "SeedVR2 7B q8"
     assert submitted["context"]["meta"] == "2× → 1664×2432"
     assert submitted["context"]["settings"] == {}
+    assert submitted["context"]["inputs"] == [_source_input(upscale_client.root / "set" / "portrait.png", "image")]
     assert submitted["context"]["save_project"] == "set"
 
 
@@ -919,6 +926,7 @@ def test_video_upscale_route_queues_the_job(video_upscale_client):
     assert Path(request.output_dir) == video_upscale_client.root
     assert (submitted["context"]["media_type"], payload["upscale_method"]) == ("video", "seedvr2")
     assert submitted["context"]["settings"] == {}
+    assert submitted["context"]["inputs"] == [_source_input(video_upscale_client.root / "clip.mp4", "video")]
     assert submitted["context"]["save_project"] is None
     assert video_upscale_client.image_submitted == []
 
@@ -1250,6 +1258,7 @@ def test_ltx_video_upscale_route_queues_the_ltx_job(ltx_upscale_client):
     assert (payload["model"], payload["model_label"], payload["upscale_method"]) == ("ltx-4", "LTX-2.3 4-bit", "ltx")
     request = ltx_upscale_client.submitted[0]["request"]
     assert (request.model_name, request.steps, request.seed) == ("ltx-4", 2, 5)
+    assert ltx_upscale_client.submitted[0]["context"]["inputs"] == [_source_input(ltx_upscale_client.root / "clip.mp4", "video")]
 
 
 @pytest.mark.parametrize(

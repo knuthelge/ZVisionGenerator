@@ -122,6 +122,7 @@ from zvisiongenerator.utils.audio_writers import FillResult, NoChangeError
 from zvisiongenerator.web.audio_enhance import AUDIO_MODE, audio_done_frame, audio_text_frame, run_audio_enhance, validate_audio_enhance_body
 from zvisiongenerator.web.audio_models import find_audio_model, runnable_audio_models
 from zvisiongenerator.web.audio_job import AudioFields, audio_request_from_fields
+from zvisiongenerator.web.job_inputs import job_input
 from zvisiongenerator.web.edit_job import EDIT_MASK_FIELD, EDIT_SOURCE_FIELD, EDIT_WORKFLOW, read_job_paint
 from zvisiongenerator.web.planned_upload import PlannedUpload, planned_form, planned_upload_path
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
@@ -1070,6 +1071,7 @@ def _job_response(job_id: str, context: dict[str, Any], supported_controls: tupl
             "notices": list(context.get("notices", ())),
             "queue_position": queue_position,
             "save_project": context.get("save_project"),
+            "inputs": [dict(entry) for entry in context.get("inputs", ())],
             **({"media_type": context["media_type"]} if "media_type" in context else {}),
             **({"upscale_method": context["upscale_method"]} if "upscale_method" in context else {}),
         }
@@ -1091,6 +1093,7 @@ def _public_job_context(
     output_dir: str,
     save_dir: str,
     uploads: dict[str, str | list[str] | None],
+    inputs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Build the public context a job carries from submission on (shown in snapshots and the queue).
 
@@ -1100,6 +1103,7 @@ def _public_job_context(
     ``None``) is carried as ``save_project``, apart from the recorded settings, because an Extend saves beside its source.
     ``uploads`` maps each path setting (``image_path``, ``end_image_path``) to the file the job uses for it, and
     ``reference_path`` to the list of every reference file in order.
+    ``inputs`` are the records (see ``job_inputs.job_input``) of the files the job starts from, shown by name.
     """
     return {
         "workflow": workflow,
@@ -1115,7 +1119,31 @@ def _public_job_context(
         "output_dir": output_dir,
         "save_project": folder_project(Path(output_dir), save_dir),
         "settings": _submitted_settings(form, uploads=uploads),
+        "inputs": list(inputs or ()),
     }
+
+
+def _sent_file_name(form: Any, path_key: str) -> str | None:
+    """Return the file name a sender gave the upload of *path_key*, or None when the form carries no upload for it."""
+    upload = form.get(_upload_field(path_key))
+    return str(upload.filename) if _is_uploaded_file(upload) else None
+
+
+def _path_inputs(form: Any, role: str, path_key: str, path: str | None) -> list[dict[str, str]]:
+    """Return the input record of the file a path field names (``[]`` when the job has none), under the name its upload had."""
+    if not path:
+        return []
+    return [job_input(role, path, "image", name=_sent_file_name(form, path_key))]
+
+
+def _reference_inputs(form: Any, paths: list[str]) -> list[dict[str, str]]:
+    """Return one input record per reference file, in order; an uploaded one keeps the name its sender gave it.
+
+    The names are read like ``_resolve_reference_images`` reads the values: an upload names its file, a typed path is
+    named by the file itself, and a blank value is skipped.
+    """
+    names = [str(value.filename) if _is_uploaded_file(value) else None for value in _form_values(form, REFERENCE_FIELD) if _is_uploaded_file(value) or (isinstance(value, str) and value.strip())]
+    return [job_input("reference", path, "image", name=names[index] if index < len(names) else None) for index, path in enumerate(paths)]
 
 
 def _submitted_settings(form: Any, *, uploads: dict[str, str | list[str] | None]) -> dict[str, str | list[str]]:
@@ -1315,6 +1343,7 @@ def _parse_upscale_body(body: Any) -> ParsedUpscale:
         # The upscale saves beside its source, so it lands in the source's project.
         "save_project": folder_project(Path(web_config.output_dir), Path(source.path).parent),
         "settings": {},
+        "inputs": [job_input("source", source.path, "image")],
     }
     workflow = build_seedvr2_upscale_workflow(transparent=plan.request.transparent) if use_seedvr2 else build_upscale_workflow(sharpen=plan.request.sharpen, transparent=plan.request.transparent)
     return ParsedUpscale(request=plan.request, model_ref=plan.model_ref, config=web_config.app_config, context=context, workflow=workflow)
@@ -1363,6 +1392,7 @@ def _parse_video_upscale(source_path: Path, factor: int, method: str) -> ParsedU
         # The upscale saves beside its source, so it lands in the source's project.
         "save_project": folder_project(Path(web_config.output_dir), Path(source.path).parent),
         "settings": {},
+        "inputs": [job_input("source", source.path, "video")],
     }
     return ParsedUpscale(request=plan.request, model_ref=None, config=web_config.app_config, context=context, workflow=None)
 
@@ -1392,6 +1422,7 @@ def _parse_ltx_video_upscale(source: ExtendSource, recorded_config: dict[str, An
         # The upscale saves beside its source, so it lands in the source's project.
         "save_project": folder_project(Path(web_config.output_dir), Path(source.path).parent),
         "settings": {},
+        "inputs": [job_input("source", source.path, "video")],
     }
     return ParsedUpscale(request=request, model_ref=None, config=web_config.app_config, context=context, workflow=None)
 
@@ -1738,6 +1769,7 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         output_dir=output_dir,
         save_dir=save_dir,
         uploads={"image_path": args.image_path, "reference_path": args.reference_paths},
+        inputs=[*_path_inputs(form, "source", "image_path", args.image_path), *_reference_inputs(form, args.reference_paths)],
     )
     return ParsedJob(
         request=request,
@@ -1839,6 +1871,7 @@ def _parse_edit_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         output_dir=output_dir,
         save_dir=save_dir,
         uploads={EDIT_SOURCE_FIELD: source_path},
+        inputs=_path_inputs(form, "source", EDIT_SOURCE_FIELD, source_path),
     )
     # The runner reads these fields of an edit's arguments; enhancement stays off, since the prompt the backend encoded before the run must be the prompt the edit sends.
     args = argparse.Namespace(
@@ -2060,6 +2093,12 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         output_dir=output_dir,
         save_dir=save_dir,
         uploads={"image_path": image_path, "end_image_path": end_image_path, "audio_track_path": audio_track.path if audio_track is not None else None},
+        inputs=[
+            *_path_inputs(form, "start", "image_path", image_path),
+            *_path_inputs(form, "end", "end_image_path", end_image_path),
+            # The next clip continues from the source's last frame.
+            *([job_input("source", source.path, "video")] if source is not None else []),
+        ],
     )
     return ParsedJob(
         request=request,
