@@ -20,6 +20,7 @@
   import type { FramePoint } from '$lib/state/framePoint';
   import { runFrameGrab } from '$lib/state/frameGrab.svelte';
   import { heldUploads } from '$lib/state/heldUploads.svelte';
+  import { withAdjustedCopy, type PinnedCopy } from '$lib/state/adjustState';
   import { requestReference } from '$lib/state/pendingReference.svelte';
   import { startUpscale } from '$lib/state/upscale';
   import type { GalleryAsset, MoveResult, RemovedAsset, UpscaleFactor, UpscaleMethod, WorkspaceContext } from '$lib/types';
@@ -69,6 +70,12 @@
   let selectedAsset = $state<GalleryAsset | null>(null);
   let lightboxOpen = $state(false);
   let viewerTrigger = $state<HTMLElement | null>(null);
+  // A tile's Adjust opens the viewer with the editor already on its picture.
+  let adjustOnOpen = $state(false);
+  // A copy the viewer shows although the loaded list may not hold it (an oldest-first page that stops short of its source, a
+  // starred list): it sits beside its source until the viewer closes.
+  let pinnedCopy = $state.raw<PinnedCopy | null>(null);
+  const viewerAssets = $derived(withAdjustedCopy(assets, pinnedCopy));
 
   const selectedCount = $derived(selected.size);
   // The selection's files that no delete holds: every one, loaded or not.
@@ -182,6 +189,8 @@
   function clearActiveAsset(): void {
     selectedAsset = null;
     lightboxOpen = false;
+    adjustOnOpen = false;
+    pinnedCopy = null;
   }
 
   async function loadPageOne(
@@ -219,7 +228,7 @@
       shownQuery = { filter, sort, starred };
 
       if (selectedAsset) {
-        const refreshedActive = assets.find((asset) => asset.id === selectedAsset!.id) ?? null;
+        const refreshedActive = viewerAssets.find((asset) => asset.id === selectedAsset!.id) ?? null;
         if (refreshedActive) {
           selectedAsset = refreshedActive;
         } else {
@@ -495,13 +504,23 @@
 
   /**
    * Star or unstar a file from a tile, its menu or the viewer. In the starred view an unstarred file leaves the list at
-   * once, and the viewer, when it showed that file, steps to its neighbour.
+   * once, and the viewer, when it showed that file, steps to its neighbour. A starred pinned copy joins that view: the
+   * store drops the starred list, since the copy's place in it is only the server's to say, so the list loaded stays as it
+   * was while the viewer is open and the view reloads once it closes.
    */
   async function starAsset(asset: GalleryAsset, starred: boolean): Promise<void> {
-    const activeIndex = selectedAsset ? Math.max(0, assets.findIndex((item) => item.id === selectedAsset!.id)) : 0;
+    const activeIndex = selectedAsset ? Math.max(0, viewerAssets.findIndex((item) => item.id === selectedAsset!.id)) : 0;
     const viewerShowing = selectedAsset?.id === asset.id;
+    const listBefore = { ...view, assets: [...view.assets] };
+    const query = shownQuery;
     if (!(await starAndReconcile(asset, starred))) return;
-    if (starredOnly && !starred) {
+    // The viewer reads the pin, not the store, for a copy the loaded list does not hold; a pin the starred view no longer admits goes.
+    if (pinnedCopy?.asset.id === asset.id) pinnedCopy = starredOnly && !starred ? null : { ...pinnedCopy, asset: { ...pinnedCopy.asset, starred } };
+    if (!starredOnly) return;
+    if (starred) {
+      galleryStore.setView(query, listBefore);
+      afterListShrank(activeIndex, false, true);
+    } else {
       // The file left this view, so it leaves the selection too: a bulk action must not act on what the view no longer shows.
       if (selected.has(asset.id)) selected = withToggled(selected, asset.id);
       afterListShrank(activeIndex, viewerShowing, true);
@@ -530,7 +549,7 @@
     movesPending += 1;
     try {
       // The position the viewer steps from if its file leaves: read before the move changes the list.
-      const activeIndex = selectedAsset ? Math.max(0, assets.findIndex((asset) => asset.id === selectedAsset!.id)) : 0;
+      const activeIndex = selectedAsset ? Math.max(0, viewerAssets.findIndex((asset) => asset.id === selectedAsset!.id)) : 0;
       // A move started while another runs waits its turn. A file that left the list or was deleted meanwhile is the
       // server's to answer: it reports that file as failed and moves the rest.
       const result = await moveAndReconcile(movable, project, workspaceMemory.get());
@@ -553,6 +572,8 @@
     selected = new Set(Array.from(selected).filter((id) => !settledIds.has(id)));
     if (moves.length === 0) return;
     const movedFrom = new Set(moves.map((move) => move.from));
+    // A pinned copy that moved has a new ID: the list holds it under that one, or no longer holds it.
+    if (pinnedCopy && movedFrom.has(pinnedCopy.asset.id)) pinnedCopy = null;
 
     // The viewer follows a file that stays under its new ID.
     let viewerLeft = false;
@@ -575,7 +596,7 @@
    */
   function afterListShrank(activeIndex: number, viewerLeft: boolean, refill: boolean): void {
     if (viewerLeft) {
-      const next = assets[Math.min(activeIndex, assets.length - 1)] ?? null;
+      const next = viewerAssets[Math.min(activeIndex, viewerAssets.length - 1)] ?? null;
       if (lightboxOpen && next) selectAsset(next);
       else clearActiveAsset();
     }
@@ -603,10 +624,11 @@
   function reconcileSuccessfulDeletes(targets: readonly RemovedAsset[]): void {
     const newlyDeleted = targets.filter((asset) => !_successfullyDeletedIds.has(asset.id));
     if (newlyDeleted.length === 0) return;
-    const deletedIndex = selectedAsset ? Math.max(0, assets.findIndex((asset) => asset.id === selectedAsset!.id)) : 0;
+    const deletedIndex = selectedAsset ? Math.max(0, viewerAssets.findIndex((asset) => asset.id === selectedAsset!.id)) : 0;
     for (const asset of newlyDeleted) _successfullyDeletedIds.add(asset.id);
 
     const deletedIds = new Set(newlyDeleted.map((asset) => asset.id));
+    if (pinnedCopy && deletedIds.has(pinnedCopy.asset.id)) pinnedCopy = null;
     // The store takes them out of every list and count: this view, the strip, and any other query loaded.
     galleryStore.removeAssets(newlyDeleted);
     jobStore.removeOutputs(deletedIds);
@@ -628,8 +650,9 @@
     selectedAsset = asset;
   }
 
-  function openViewer(asset: GalleryAsset, trigger: HTMLElement): void {
+  function openViewer(asset: GalleryAsset, trigger: HTMLElement | null, adjust = false): void {
     viewerTrigger = trigger;
+    adjustOnOpen = adjust;
     selectAsset(asset);
     lightboxOpen = true;
   }
@@ -646,8 +669,28 @@
   }
 
   function handleViewerNavigate(index: number): void {
-    const target = assets[index];
+    const target = viewerAssets[index];
     if (target) selectAsset(target);
+  }
+
+  /** A tile's Adjust: the viewer opens on that picture with the editor already open. */
+  function adjustAsset(asset: GalleryAsset, trigger?: HTMLElement | null): void {
+    openViewer(asset, trigger ?? null, true);
+  }
+
+  /**
+   * The editor saved. A copy opens in the viewer at once. The store already holds it where the view admits it (first in a
+   * newest-first list), and the pin shows it beside its source where the loaded list does not. A replace keeps the file's
+   * place, and a pinned copy that was replaced takes its new asset.
+   */
+  function adjustedInViewer(saved: GalleryAsset, replaced: boolean, sourceId: string): void {
+    if (replaced) {
+      if (pinnedCopy?.asset.id === saved.id) pinnedCopy = { ...pinnedCopy, asset: saved };
+      if (selectedAsset?.id === saved.id) selectAsset(saved);
+      return;
+    }
+    pinnedCopy = { asset: saved, besideId: sourceId };
+    selectAsset(saved);
   }
 
   // Navigate through the router so the WorkspacePage receives the params on mount.
@@ -943,6 +986,7 @@
               {useAs}
               onextend={extendAsset}
               onedit={editAsset}
+              onadjust={adjustAsset}
               onupscale={upscaleAsset}
               ondelete={deleteSingle}
               onmove={moveSingle}
@@ -1002,8 +1046,10 @@
 />
 
 <AssetViewer
-  {assets}
+  assets={viewerAssets}
   origin={viewerTrigger}
+  {adjustOnOpen}
+  onadjusted={adjustedInViewer}
   currentId={selectedAsset?.id ?? null}
   open={lightboxOpen && selectedAsset !== null}
   setLabel="Gallery"

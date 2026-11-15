@@ -164,6 +164,8 @@
   // The viewer follows its asset by id, not by place: a new output lands at the front of History while it is open.
   let viewerAssetId = $state<string | null>(null);
   let lightboxMode = $state<'history' | 'completed-output'>('history');
+  // A tile's Adjust opens the viewer with the editor already on its picture.
+  let adjustOnOpen = $state(false);
   let completedOutputTrigger = $state<HTMLElement | null>(null);
   let completedOutputJobId = $state<string | null>(null);
   let reaction = $state<MascotReaction | null>(null);
@@ -779,17 +781,39 @@
     addToast('Generation stopped', 'info');
   }
 
-  function openHistoryViewer(asset: GalleryAsset, trigger: HTMLElement): void {
+  function openHistoryViewer(asset: GalleryAsset, trigger: HTMLElement | null, adjust = false): void {
     const index = galleryStore.assets.findIndex((item) => item.id === asset.id);
     if (index < 0) return;
     lightboxMode = 'history';
     viewerAssetId = asset.id;
     completedOutputTrigger = trigger;
+    adjustOnOpen = adjust;
     lightboxOpen = true;
   }
 
-  function openOutputViewer(asset: GalleryAsset, trigger: HTMLElement): void {
-    openCompletedOutputViewer(jobOutputs.findIndex((output) => output.id === asset.id), trigger);
+  function openOutputViewer(asset: GalleryAsset, trigger: HTMLElement | null, adjust = false): void {
+    openCompletedOutputViewer(jobOutputs.findIndex((output) => output.id === asset.id), trigger, adjust);
+  }
+
+  /** Adjust from a Gallery tile (the stage's latest output or the strip): the viewer opens on that picture with the editor open. */
+  function adjustHistoryAsset(asset: GalleryAsset, trigger?: HTMLElement | null): void {
+    openHistoryViewer(asset, trigger ?? null, true);
+  }
+
+  /** Adjust from a tile of the running job's outputs: the viewer opens on "This run" with the editor open. */
+  function adjustOutputAsset(asset: GalleryAsset, trigger?: HTMLElement | null): void {
+    openOutputViewer(asset, trigger ?? null, true);
+  }
+
+  /**
+   * The editor saved. A copy opens in the viewer at once, in History: the store has added it at the front, and "This run"
+   * lists the job's outputs only, so the viewer leaves it. A replace keeps the file's id and place.
+   */
+  function adjustedInViewer(saved: GalleryAsset, replaced: boolean): void {
+    if (replaced) return;
+    lightboxMode = 'history';
+    completedOutputJobId = null;
+    viewerAssetId = saved.id;
   }
 
   /**
@@ -1120,11 +1144,12 @@
     if (moved && viewerAssetId === asset.id) viewerAssetId = moved.asset.id;
   }
 
-  function openCompletedOutputViewer(index: number, trigger: HTMLElement): void {
+  function openCompletedOutputViewer(index: number, trigger: HTMLElement | null, adjust = false): void {
     if (!jobOutputs[index]) return;
     lightboxMode = 'completed-output';
     viewerAssetId = jobOutputs[index].id;
     completedOutputTrigger = trigger;
+    adjustOnOpen = adjust;
     completedOutputJobId = jobStore.current?.job_id ?? null;
     lightboxOpen = true;
   }
@@ -1132,6 +1157,7 @@
   function closeLightbox(): void {
     if (!lightboxOpen) return;
     lightboxOpen = false;
+    adjustOnOpen = false;
     const trigger = completedOutputTrigger?.isConnected ? completedOutputTrigger : null;
     lightboxMode = 'history';
     viewerAssetId = null;
@@ -1947,6 +1973,7 @@
                   onextend={extendAsset}
                   onuseframe={useFrame}
                   onedit={editAsset}
+                  onadjust={adjustOutputAsset}
                   onupscale={upscaleAsset}
                   {useAs}
                   ondelete={deleteWorkspaceAsset}
@@ -2003,6 +2030,7 @@
                       onextend={extendAsset}
                       onuseframe={useFrame}
                       onedit={editAsset}
+                      onadjust={adjustOutputAsset}
                       onupscale={upscaleAsset}
                       {useAs}
                       ondelete={deleteWorkspaceAsset}
@@ -2083,6 +2111,7 @@
               onextend={extendAsset}
               onuseframe={useFrame}
               onedit={editAsset}
+              onadjust={adjustHistoryAsset}
               onupscale={upscaleAsset}
               {useAs}
               ondelete={deleteWorkspaceAsset}
@@ -2141,6 +2170,7 @@
           onuseaudio={useAudio}
           onextend={extendAsset}
           onedit={editAsset}
+          onadjust={adjustHistoryAsset}
           onupscale={upscaleAsset}
           {useAs}
           ondelete={deleteWorkspaceAsset}
@@ -2344,6 +2374,8 @@
 <!-- One viewer for history and completed outputs -->
 <AssetViewer
   assets={lightboxAssets}
+  {adjustOnOpen}
+  onadjusted={adjustedInViewer}
   origin={completedOutputTrigger}
   currentId={viewerAssetId}
   open={lightboxOpen}

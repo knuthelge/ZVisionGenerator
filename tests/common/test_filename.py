@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from zvisiongenerator.utils.filename import edit_output_stem, generate_filename, unique_output_path
+from zvisiongenerator.utils.filename import derived_stem, edit_output_stem, generate_filename, unique_output_path
 
 _NOW = datetime(2026, 10, 4, 14, 3, 22)
 
@@ -47,3 +47,23 @@ def test_unique_output_path_ignores_other_suffixes(tmp_path):
 @pytest.mark.parametrize(("source", "stem"), [("photo.png", "photo_edit"), ("photo_edit.png", "photo_edit"), ("photo_edit_2.png", "photo_edit"), ("/pics/photo_editor.png", "photo_editor_edit")])
 def test_an_edit_is_named_after_its_source_without_stacking_a_second_edit_suffix(source, stem):
     assert edit_output_stem(source) == stem
+
+
+@pytest.mark.parametrize(
+    ("source", "stem"),
+    [
+        ("a.png", "a_adjusted"),
+        ("a_adjusted.png", "a_adjusted"),
+        ("a_adjusted_2.png", "a_adjusted"),
+        ("a_edit.png", "a_edit_adjusted"),
+        ("a_adjusted_x.png", "a_adjusted_x_adjusted"),
+        ("a_adjustedly.png", "a_adjustedly_adjusted"),
+    ],
+)
+def test_a_derived_stem_strips_its_own_tag_and_counter_only(source, stem):
+    assert derived_stem(source, "adjusted") == stem
+
+
+def test_the_tag_is_matched_literally():
+    assert derived_stem("a_x.b.png", "x.b") == "a_x.b"
+    assert derived_stem("a_xAb.png", "x.b") == "a_xAb_x.b"

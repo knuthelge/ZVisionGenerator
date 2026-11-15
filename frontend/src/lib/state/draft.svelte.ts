@@ -3,6 +3,7 @@ import { EXTEND_SIDES, NO_EDIT, NO_EDIT_PAINT, editSourcePatch } from './editSlo
 import { extendPrefillFor } from './extend';
 import { extendCutView, settledExtendFrom } from './extendCut';
 import { downloadStore } from './downloads.svelte';
+import { fileVersions } from './fileVersions.svelte';
 import { heldUploads } from './heldUploads.svelte';
 import { isPrefilledTrack, trackOf, trackPatch, trackSet, trackStartPatch, type TrackTab } from './audioTrack';
 import { imageSupport, lastSlotPatch, startSlotPatch, type SlotValue, type ImageTab } from './imageSlots';
@@ -1124,6 +1125,17 @@ export const draft = {
     _draft = { ...patched, missingReferencePaths: _withoutFlag(patched, replaced) };
     _editEpoch += 1;
     this.saveDraft();
+  },
+
+  /**
+   * Take a file that was rewritten in place (an Adjust that replaced it) as new: the picture URLs built for its path carry
+   * a new version, and an Edit source holding it is set again, which drops its paint and its history as any new image does.
+   * Other slots hold only the path, so the next picture they show is the file as it is. A null or empty path changes nothing.
+   */
+  refreshSlotsHolding(path: string | null | undefined): void {
+    if (!path) return;
+    fileVersions.bump(path);
+    if (_draft.editSourcePath === path) this.setEditSource({ path });
   },
 
   /**

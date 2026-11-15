@@ -125,6 +125,20 @@
   --glass-blur: 16px;
 }
 
+/* Static, so they are always emitted: the Colour mixer builds their names (`--color-band-<band>`), which Tailwind cannot see. */
+@theme static {
+  /* The eight Colour mixer bands. Data colours like the checkerboard: each names a hue, so it is fixed, and none carries text.
+     Each is at least 3:1 against the surface and the dial fills they sit on. */
+  --color-band-red: #f05252;
+  --color-band-orange: #f5893a;
+  --color-band-yellow: #e8c53a;
+  --color-band-green: #4cc76a;
+  --color-band-aqua: #2ec4cf;
+  --color-band-blue: #4f8df5;
+  --color-band-purple: #9a74f2;
+  --color-band-magenta: #e05ad0;
+}
+
 @layer base {
   * {
     scrollbar-width: thin;
@@ -534,6 +548,28 @@
   .ui-range::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--color-primary-main); }
   @media (hover: hover) { .ui-range:hover::-webkit-slider-thumb { background: var(--color-primary-hover); } }
   @media (hover: hover) { .ui-range:hover::-moz-range-thumb { background: var(--color-primary-hover); } }
+  /* A signed range (-100 to +100): the fill runs from the middle to the thumb and a tick marks zero. Set --lo and --hi
+     (percent): for a value v >= 0 they are 50% and 50 + v/2 %, for v < 0 they are 50 + v/2 % and 50%. */
+  .ui-range-centred { background: linear-gradient(var(--color-zinc-500), var(--color-zinc-500)) center / 2px 10px no-repeat; }
+  .ui-range-centred::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, var(--color-zinc-700) var(--lo, 50%), var(--color-primary-main) var(--lo, 50%), var(--color-primary-main) var(--hi, 50%), var(--color-zinc-700) var(--hi, 50%));
+  }
+  .ui-range-centred::-moz-range-track {
+    background: linear-gradient(to right, var(--color-zinc-700) var(--lo, 50%), var(--color-primary-main) var(--lo, 50%), var(--color-primary-main) var(--hi, 50%), var(--color-zinc-700) var(--hi, 50%));
+  }
+  .ui-range-centred::-moz-range-progress { background: transparent; }
+  /* A band's range (-100 to +100): the track is the scale, from the band colour (--band) faded into grey at -100 through the zero
+     tick to the full colour at +100. The thumb stays teal, with a ring so it reads on any band. */
+  .ui-range-hue { background: linear-gradient(var(--color-zinc-500), var(--color-zinc-500)) center / 2px 10px no-repeat; }
+  .ui-range-hue::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, color-mix(in srgb, var(--band) 10%, var(--color-zinc-700)), color-mix(in srgb, var(--band) 45%, var(--color-zinc-700)) 50%, var(--band));
+  }
+  .ui-range-hue::-moz-range-track {
+    background: linear-gradient(to right, color-mix(in srgb, var(--band) 10%, var(--color-zinc-700)), color-mix(in srgb, var(--band) 45%, var(--color-zinc-700)) 50%, var(--band));
+  }
+  .ui-range-hue::-moz-range-progress { background: transparent; }
+  .ui-range-hue::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--color-bg-surface); }
+  .ui-range-hue::-moz-range-thumb { box-shadow: 0 0 0 2px var(--color-bg-surface); }
 
   /* The toolbar select (Select's shell variant) follows the field fills. */
   .ui-select-shell { border: 1px solid transparent; background: var(--color-bg-surface-hover); }

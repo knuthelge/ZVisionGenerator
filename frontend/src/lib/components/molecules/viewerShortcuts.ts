@@ -2,13 +2,16 @@ import { isPlainKey, stepChord, type ChordStep, type ShortcutEntry } from '$lib/
 import type { UpscaleFactor } from '$lib/types';
 
 export type ViewerAction =
-  | 'close' | 'prev' | 'next' | 'first' | 'last' | 'details' | 'reuse' | 'reference' | 'edit'
+  | 'close' | 'prev' | 'next' | 'first' | 'last' | 'details' | 'reuse' | 'reference' | 'edit' | 'adjust'
   | 'download' | 'star' | 'copy' | 'delete' | 'delete-now' | 'help';
 
 type KeyInput = Pick<KeyboardEvent, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey' | 'altKey'>;
 
 /** The keys a video's player takes once it has been clicked; only a video steps by frames. */
 const FRAME_STEP_SHORTCUT: ShortcutEntry = { keys: ['←', '→'], label: 'After a click on a video: step a frame (⇧ for 5), Home / End to the clip\'s start / end, 0 to 9 to jump to that tenth of it' };
+
+/** Adjust opens for an image only. */
+const ADJUST_SHORTCUT: ShortcutEntry = { keys: ['A'], label: 'Adjust' };
 
 /** Shortcuts shown in the viewer's help panel, in display order. */
 export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
@@ -18,6 +21,7 @@ export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
   { keys: ['R'], label: 'Reuse settings' },
   { keys: ['E'], label: 'Use as start image or frame (image), extend (video), or audio track or voice (audio)' },
   { keys: ['M'], label: 'Edit image' },
+  ADJUST_SHORTCUT,
   { keys: ['X → 2'], label: 'Upscale 2×' },
   { keys: ['X → 4'], label: 'Upscale 4×' },
   { keys: ['D'], label: 'Download' },
@@ -30,10 +34,11 @@ export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
   { keys: ['Esc'], label: 'Close' },
 ];
 
-/** The shortcuts the viewer lists for an asset: a take cannot be upscaled or edited, so it has no X chord and no M, and only a video steps by frames. */
+/** The shortcuts the viewer lists for an asset: a take cannot be upscaled, edited or adjusted, so it has no X chord, M or A, a video has no A, and only a video steps by frames. */
 export function viewerShortcutsFor(media: 'image' | 'video' | 'audio'): readonly ShortcutEntry[] {
   return VIEWER_SHORTCUTS.filter((entry) => {
     if (entry === FRAME_STEP_SHORTCUT) return media === 'video';
+    if (entry === ADJUST_SHORTCUT) return media === 'image';
     return media !== 'audio' || (!entry.keys[0].startsWith('X') && entry.keys[0] !== 'M');
   });
 }
@@ -48,6 +53,7 @@ const KEY_ACTIONS: Record<string, ViewerAction> = {
   r: 'reuse',
   e: 'reference',
   m: 'edit',
+  a: 'adjust',
   d: 'download',
   s: 'star',
   c: 'copy',

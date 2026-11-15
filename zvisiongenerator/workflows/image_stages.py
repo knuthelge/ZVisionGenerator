@@ -8,6 +8,7 @@ Stages are pure functions operating on the immutable request and mutable artifac
 
 from __future__ import annotations
 
+import io
 import math
 import os
 import time
@@ -24,6 +25,7 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.processing.edit_region import PAINT_FADE, Plan, extend_canvas, extend_reference, extend_draw_size, grid_size, paste_paint, paste_strip, plan_region
 from zvisiongenerator.processing.matte import on_backdrop
 from zvisiongenerator.utils.alignment import round_to_alignment
+from zvisiongenerator.utils.atomic_write import write_new_file
 from zvisiongenerator.utils.edit_request import image_is_cutout
 from zvisiongenerator.utils.filename import unique_output_path
 from zvisiongenerator.utils.provenance import EXIF_IMAGE_DESCRIPTION, build_image_config_payload, embed_png_config
@@ -587,20 +589,10 @@ def save_image_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArt
     exif = artifacts.image.getexif()
     exif[EXIF_IMAGE_DESCRIPTION] = prompt
 
-    # Create the file exclusively so a name taken since it was chosen (another job, same second) is never overwritten.
+    buffer = io.BytesIO()
+    artifacts.image.save(buffer, format="PNG", pnginfo=metadata, exif=exif.tobytes())
     path = Path(artifacts.filepath)
-    while True:
-        try:
-            handle = open(path, "xb")
-        except FileExistsError:
-            path = unique_output_path(path.parent, artifacts.filename or path.stem, path.suffix)
-            continue
-        try:
-            with handle:
-                artifacts.image.save(handle, format="PNG", pnginfo=metadata, exif=exif.tobytes())
-        except BaseException:
-            path.unlink(missing_ok=True)
-            raise
-        break
+    # Created exclusively, so a name taken since it was chosen (another job, same second) is never overwritten.
+    path = write_new_file(path, buffer.getvalue(), stem=artifacts.filename or path.stem)
     artifacts.filepath = str(path)
     return StageOutcome.success

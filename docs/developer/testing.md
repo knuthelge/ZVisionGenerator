@@ -86,6 +86,7 @@ Some fixtures are read by Python and by Vitest, so the two sides cannot drift. C
 
 - `tests/fixtures/audio_cli_cases.json` and `audio_settings_cases.json`: the audio settings the Web UI form and `ziv audio` accept, and the command the Web UI copies.
 - `tests/fixtures/frame_point_cases.json`: how a time in a clip becomes a frame (`utils/video_point.py` and `frontend/src/lib/state/framePoint.ts`).
+- `tests/fixtures/adjust_cases.json`: pixels with their Adjust result for each light setting and for mixes. `processing/adjust.py` must reproduce them exactly (`tests/image/test_adjust.py`), `frontend/src/lib/state/adjustMath.ts` must match them within one level for the WebGL preview tables (`adjustMath.test.ts`), and its plain per-pixel version matches exactly.
 - `tests/audio/music_mode_cases.json`: the song-or-instrumental rule (`utils/music_mode.py` and `frontend/src/lib/state/musicMode.ts`).
 
 ## End-to-end runs

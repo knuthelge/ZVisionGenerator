@@ -1,5 +1,5 @@
 import { flushSync } from 'svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { draft } from '$lib/state/draft.svelte';
@@ -19,6 +19,9 @@ const galleryApiMocks = vi.hoisted(() => ({
   setStarred: vi.fn<(id: string, starred: boolean) => Promise<{ id: string; starred: boolean }>>(),
   moveAssets: vi.fn<(ids: string[], project: string | null) => Promise<MoveResult>>(),
 }));
+
+const adjustApiMocks = vi.hoisted(() => ({ saveAdjusted: vi.fn<(body: unknown) => Promise<GalleryAsset>>() }));
+vi.mock('$lib/api/adjust', () => adjustApiMocks);
 
 const projectApiMocks = vi.hoisted(() => ({ listProjects: vi.fn(), createProject: vi.fn() }));
 vi.mock('$lib/api/projects', () => projectApiMocks);
@@ -2989,5 +2992,278 @@ describe('GalleryPage pull down to the Workspace', () => {
     await openViewer('a.png');
     pull(120);
     expect(routerMocks.navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe('GalleryPage adjust', () => {
+  const picture = (name: string, overrides: Partial<GalleryAsset> = {}): GalleryAsset =>
+    makeAsset({ id: `out/${name}`, filename: name, url: `/media/out/${name}`, thumbnail_url: `/media/out/${name}`, file_path: `/outputs/${name}`, prompt: `prompt of ${name}`, ...overrides });
+  const [a, b, c] = ['a.png', 'b.png', 'c.png'].map((name) => picture(name));
+  const copy = picture('b_adjusted.png');
+  const clip = makeAsset({ id: 'out/walk.mp4', filename: 'walk.mp4', media_type: 'video', file_path: '/outputs/walk.mp4' });
+  const reply = (assets: GalleryAsset[]): GalleryPageResponse => ({ assets, page: 1, total_pages: 1, total_count: assets.length });
+
+  const editor = (): HTMLElement | null => document.querySelector('[role="dialog"][aria-label^="Adjust "]');
+  const order = (): string[] => Array.from(target.querySelectorAll('.asset-tile')).map((tile) => tile.getAttribute('data-asset-id')!.replace('out/', ''));
+  const shown = (): string | null | undefined => document.querySelector('#asset-viewer-title')?.textContent;
+  const press = (key: string): void => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    flushSync();
+  };
+
+  /** Choose Adjust in a tile's menu. */
+  async function adjustFromTile(filename: string): Promise<void> {
+    target.querySelector<HTMLButtonElement>(`button[aria-label="More actions for ${filename}"]`)!.click();
+    flushSync();
+    document.querySelector<HTMLElement>('[role="menu"] [data-action="adjust"]')!.click();
+    await settle();
+  }
+
+  /** Change a slider in the open editor and press the save button. */
+  async function save(label: string): Promise<void> {
+    const slider = editor()!.querySelector<HTMLInputElement>('input[type="range"]')!;
+    slider.value = '30';
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    Array.from(editor()!.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.trim() === label)!.click();
+    await settle();
+    await settle();
+  }
+
+  async function mountWith(assets: GalleryAsset[]): Promise<void> {
+    galleryApiMocks.getGallery.mockResolvedValue(reply(assets));
+    mountPage();
+    await settle();
+  }
+
+  beforeEach(() => {
+    adjustApiMocks.saveAdjusted.mockReset().mockResolvedValue(copy);
+    vi.stubGlobal('Image', class { src = ''; naturalWidth = 800; naturalHeight = 600; decode = (): Promise<void> => Promise.resolve(); });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('offers Adjust in the menu of an image tile, and not of a video', async () => {
+    await mountWith([a, clip]);
+    target.querySelector<HTMLButtonElement>('button[aria-label="More actions for walk.mp4"]')!.click();
+    flushSync();
+    expect(document.querySelector('[role="menu"] [data-action="adjust"]')).toBeNull();
+    press('Escape');
+    target.querySelector<HTMLButtonElement>('button[aria-label="More actions for a.png"]')!.click();
+    flushSync();
+    expect(document.querySelector('[role="menu"] [data-action="adjust"]')).not.toBeNull();
+  });
+
+  it('opens the viewer on the tile\'s picture with the editor already open on Light & colour', async () => {
+    await mountWith([a, b, c]);
+    await adjustFromTile('b.png');
+    expect(getViewer()).not.toBeNull();
+    expect(shown()).toBe('b.png');
+    expect(editor()!.getAttribute('aria-label')).toBe('Adjust b.png');
+    expect(editor()!.querySelector('h3 > button[aria-expanded="true"]')?.textContent).toContain('Light & colour');
+  });
+
+  it('closes the editor on the first Escape and the viewer on the second', async () => {
+    await mountWith([a, b, c]);
+    await adjustFromTile('b.png');
+
+    press('Escape');
+    await settle();
+    expect(editor()).toBeNull();
+    expect(getViewer()).not.toBeNull();
+    expect(shown()).toBe('b.png');
+
+    press('Escape');
+    await settle();
+    expect(getViewer()).toBeNull();
+  });
+
+  it('opens a plain viewer for a tile opened after an Adjust', async () => {
+    await mountWith([a, b, c]);
+    await adjustFromTile('b.png');
+    press('Escape');
+    press('Escape');
+    await settle();
+
+    await openViewer('c.png');
+    expect(editor()).toBeNull();
+    expect(shown()).toBe('c.png');
+  });
+
+  it('does nothing for A, arrows or Delete while the editor is open', async () => {
+    await mountWith([a, b, c]);
+    await adjustFromTile('b.png');
+    for (const key of ['ArrowRight', 's', 'Delete']) press(key);
+    await settle();
+    expect(shown()).toBe('b.png');
+    expect(galleryApiMocks.setStarred).not.toHaveBeenCalled();
+    expect(galleryApiMocks.deleteAssets).not.toHaveBeenCalled();
+  });
+
+  it('shows the copy first in a newest-first view, with its source behind it', async () => {
+    await mountWith([a, b, c]);
+    await adjustFromTile('b.png');
+    await save('Save as copy');
+
+    expect(adjustApiMocks.saveAdjusted).toHaveBeenCalledOnce();
+    expect(editor()).toBeNull();
+    expect(shown()).toBe('b_adjusted.png');
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('1 of 4');
+    expect(order()).toEqual(['b_adjusted.png', 'a.png', 'b.png', 'c.png']);
+  });
+
+  it('shows the copy right after its source in an oldest-first view', async () => {
+    await mountWith([a, b, c]);
+    pickOption(target.querySelector('[role="combobox"][aria-label="Sort gallery files"]') as HTMLButtonElement, 'oldest');
+    await settle();
+    await adjustFromTile('b.png');
+    await save('Save as copy');
+
+    expect(shown()).toBe('b_adjusted.png');
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 4');
+    expect(order()).toEqual(['a.png', 'b.png', 'b_adjusted.png', 'c.png']);
+  });
+
+  it('shows the copy beside its source in a starred view that does not list it, until the viewer closes', async () => {
+    const [sa, sb, sc] = [a, b, c].map((item) => ({ ...item, starred: true }));
+    galleryApiMocks.getGallery.mockResolvedValue(reply([sa, sb, sc]));
+    mountPage();
+    await settle();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Starred"]')!.click();
+    await settle();
+
+    await adjustFromTile('b.png');
+    await save('Save as copy');
+
+    expect(editor()).toBeNull();
+    expect(shown()).toBe('b_adjusted.png');
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 4');
+    // The grid behind keeps listing starred files only.
+    expect(order()).toEqual(['a.png', 'b.png', 'c.png']);
+
+    // Paging goes through the copy: the next file is the one after the source.
+    press('ArrowRight');
+    await settle();
+    expect(shown()).toBe('c.png');
+
+    press('Escape');
+    await settle();
+    expect(getViewer()).toBeNull();
+    await openViewer('c.png');
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 3');
+  });
+
+  describe('a copy the starred view does not list', () => {
+    const [sa, sb, sc] = [a, b, c].map((item) => ({ ...item, starred: true }));
+    const position = (): string | null | undefined => document.querySelector('.viewer-title small')?.textContent;
+    const starButton = (): HTMLElement => document.querySelector<HTMLElement>('button[data-action="star"]')!;
+    const rowNamed = (label: string): HTMLElement =>
+      Array.from(document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitemradio"]')).find((item) => item.textContent?.trim() === label)!;
+
+    /** The starred view with a, b and c, and a copy of b saved from the viewer, which shows it as 3 of 4. */
+    async function openCopyInStarredView(): Promise<void> {
+      galleryApiMocks.getGallery.mockResolvedValue(reply([sa, sb, sc]));
+      mountPage();
+      await settle();
+      target.querySelector<HTMLButtonElement>('button[aria-label="Starred"]')!.click();
+      await settle();
+      await adjustFromTile('b.png');
+      await save('Save as copy');
+      expect(shown()).toBe('b_adjusted.png');
+      expect(position()).toContain('3 of 4');
+    }
+
+    it('stars the copy in the viewer, keeps the viewer\'s list and the grid, and loads the view again when the viewer closes', async () => {
+      await openCopyInStarredView();
+
+      press('s');
+      await settle();
+      expect(galleryApiMocks.setStarred).toHaveBeenLastCalledWith(copy.id, true);
+      expect(starButton().getAttribute('aria-pressed')).toBe('true');
+      expect(shown()).toBe('b_adjusted.png');
+      expect(position()).toContain('3 of 4');
+      expect(order()).toEqual(['a.png', 'b.png', 'c.png']);
+      expect(target.textContent).not.toContain('No starred files');
+
+      const callsBefore = galleryApiMocks.getGallery.mock.calls.length;
+      galleryApiMocks.getGallery.mockResolvedValue(reply([sa, sb, { ...copy, starred: true }, sc]));
+      press('Escape');
+      await settle();
+      await settle();
+      expect(galleryApiMocks.getGallery.mock.calls.length).toBeGreaterThan(callsBefore);
+      expect(order()).toEqual(['a.png', 'b.png', 'b_adjusted.png', 'c.png']);
+    });
+
+    it('unstars the starred copy again, and the viewer steps to the neighbour instead of staying on a file the view dropped', async () => {
+      await openCopyInStarredView();
+      press('s');
+      await settle();
+      expect(starButton().getAttribute('aria-pressed')).toBe('true');
+
+      press('s');
+      await settle();
+      await settle();
+      expect(galleryApiMocks.setStarred).toHaveBeenLastCalledWith(copy.id, false);
+      expect(shown()).toBe('c.png');
+      expect(position()).toContain('3 of 3');
+    });
+
+    it('steps to the file after the source when the copy is deleted', async () => {
+      await openCopyInStarredView();
+      galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [copy.id], failed: [] } as unknown as DeleteResult);
+
+      press('Delete');
+      await settle();
+      await settle();
+      expect(shown()).toBe('c.png');
+      expect(position()).toContain('3 of 3');
+    });
+
+    it('steps to the file after the source when the copy is moved out of the view, and no longer lists it', async () => {
+      await openCopyInStarredView();
+      const inBus = { ...copy, id: 'Night Bus/b_adjusted.png', project: 'Night Bus', file_path: '/outputs/Night Bus/b_adjusted.png' };
+      galleryApiMocks.moveAssets.mockResolvedValue({ moved: [{ from: copy.id, from_path: copy.file_path ?? '', asset: inBus }], failed: [] });
+
+      document.querySelector<HTMLButtonElement>('button[data-action="move"]')!.click();
+      await settle();
+      rowNamed('Night Bus').click();
+      await settle();
+      await settle();
+      expect(galleryApiMocks.moveAssets).toHaveBeenCalledWith([copy.id], 'Night Bus');
+      expect(shown()).toBe('c.png');
+      expect(position()).toContain('3 of 3');
+    });
+  });
+
+  it('keeps the same asset after Replace, with the fresh URL, and no copy', async () => {
+    localStorage.setItem('ziv-adjust-replace-asked-v1', '1');
+    adjustApiMocks.saveAdjusted.mockResolvedValue({ ...b, url: '/media/out/b.png?v=2' });
+    await mountWith([a, b, c]);
+    await adjustFromTile('b.png');
+    await save('Replace');
+
+    expect(editor()).toBeNull();
+    expect(shown()).toBe('b.png');
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('2 of 3');
+    expect(document.querySelector('[data-testid="viewer-image"]')?.getAttribute('src')).toBe('/media/out/b.png?v=2');
+    expect(order()).toEqual(['a.png', 'b.png', 'c.png']);
+  });
+
+  it('leaves the viewer on a neighbour when a copy opened in it is deleted', async () => {
+    await mountWith([a, b, c]);
+    await adjustFromTile('b.png');
+    await save('Save as copy');
+    expect(shown()).toBe('b_adjusted.png');
+
+    galleryApiMocks.deleteAssets.mockResolvedValue({ deleted: [copy.id], failed: [] } as unknown as DeleteResult);
+    press('Delete');
+    await settle();
+    await settle();
+    expect(shown()).not.toBe('b_adjusted.png');
+    expect(order()).not.toContain('b_adjusted.png');
   });
 });

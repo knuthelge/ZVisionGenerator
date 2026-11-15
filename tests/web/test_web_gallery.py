@@ -21,8 +21,8 @@ from tests._paths import FIXTURES
 from tests.web._helpers import ffprobe_cannot_read_files, make_web_config
 
 from zvisiongenerator.utils import app_db
-from zvisiongenerator.utils.upscale import WORK_DIR_PREFIX
-from zvisiongenerator.utils.provenance import build_video_upscale_payload, embed_png_config
+from zvisiongenerator.utils.upscale import WORK_DIR_PREFIX, upscale_output_size
+from zvisiongenerator.utils.provenance import build_video_upscale_payload, embed_png_config, with_copied_from
 from zvisiongenerator.web import gallery
 from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.gallery import (
@@ -50,9 +50,11 @@ def _no_ffprobe(monkeypatch):
     ffprobe_cannot_read_files(monkeypatch)
 
 
-def _make_png_with_config(path: Path, payload: dict) -> None:
-    """Write a small PNG with an embedded zvisiongenerator.config chunk."""
-    img = Image.new("RGB", (64, 64), color="blue")
+def _make_png_with_config(path: Path, payload: dict, *, size: tuple[int, int] | None = None) -> None:
+    """Write a PNG with an embedded zvisiongenerator.config chunk, *size* pixels large, else as large as the config says it is (64 px a side when it names no size)."""
+    width, height = payload.get("width"), payload.get("height")
+    size = size or ((width, height) if isinstance(width, int) and isinstance(height, int) else (64, 64))
+    img = Image.new("RGB", size, color="blue")
     info = PngInfo()
     embed_png_config(info, payload)
     img.save(path, pnginfo=info)
@@ -1695,3 +1697,141 @@ def test_a_delete_succeeds_and_warns_when_the_stars_cannot_be_updated(tmp_path, 
 
     assert [item.id for item in result.deleted] == ["a.png"]
     assert not (tmp_path / "a.png").exists()
+
+
+# ---------------------------------------------------------------------------
+# Adjusted copies: copied_from, the file's real size, and versioned image URLs
+# ---------------------------------------------------------------------------
+
+_GENERATED = {
+    "schema": "zvisiongenerator.config.v1",
+    "workflow": "txt2img",
+    "prompt": "A red fox curls up in deep snow.",
+    "model": "zit",
+    "seed": 7,
+    "steps": 8,
+    "guidance": 3.5,
+    "width": 512,
+    "height": 768,
+    "ratio": "2:3",
+    "size": "m",
+    "generation": {"transparent": True, "sharpen": 0.6, "contrast": 1.1, "upscale": {"method": "creative", "factor": 2, "denoise": 0.3, "pre_sharpen": 0.4}},
+}
+
+
+def _save_copy(tmp_path: Path, original: Path, config: dict, *, size: tuple[int, int], name: str = "copy.png") -> Path:
+    """Write the copy an adjust would save: *config* plus ``copied_from``, at *size* pixels."""
+    path = tmp_path / name
+    _make_png_with_config(path, with_copied_from(config, original), size=size)
+    return path
+
+
+def _asset_json(tmp_path: Path, name: str, web_config=None) -> dict:
+    return gallery_asset_to_json(_find_asset(list_gallery_assets(str(tmp_path)), name), web_config or make_web_config())
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        _GENERATED,
+        {
+            **_GENERATED,
+            "workflow": "img2img",
+            "image_path": "/in/start.png",
+            "image_strength": 0.6,
+            "source": {"path": "/out/original.png", "width": 512, "height": 768, "workflow": "txt2img"},
+        },
+    ],
+    ids=["generation_with_post_processing", "upscale"],
+)
+def test_reuse_of_a_copy_equals_reuse_of_its_original(tmp_path, monkeypatch, config):
+    original = tmp_path / "original.png"
+    _make_png_with_config(original, config)
+    _save_copy(tmp_path, original, config, size=(300, 500))
+
+    real_menu = gallery._asset_upscale_json
+    for upscale_menu in (lambda *_a: None, real_menu):
+        monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", upscale_menu)
+        assert _asset_json(tmp_path, "copy.png")["reuse_workspace_url"] == _asset_json(tmp_path, "original.png")["reuse_workspace_url"]
+    assert "copied_from" not in _asset_json(tmp_path, "copy.png")["reuse_workspace_url"]
+
+
+def test_a_cropped_copy_reports_its_real_size_and_no_ratio_but_reuses_the_generation_size(tmp_path):
+    original = tmp_path / "original.png"
+    _make_png_with_config(original, _GENERATED)
+    _save_copy(tmp_path, original, _GENERATED, size=(300, 500))
+
+    payload = _asset_json(tmp_path, "copy.png")
+    params = _reuse_params(payload)
+
+    assert (payload["width"], payload["height"], payload["ratio"]) == (300, 500, None)
+    assert (params["width"], params["height"], params["ratio"]) == ("512", "768", "2:3")
+    # The upscale menu starts from the file's real pixels.
+    first = payload["upscale"]["factors"][0]
+    assert (first["width"], first["height"]) == upscale_output_size(300, 500, first["factor"])
+
+
+def test_a_colour_only_copy_keeps_its_ratio(tmp_path):
+    original = tmp_path / "original.png"
+    _make_png_with_config(original, _GENERATED)
+    _save_copy(tmp_path, original, _GENERATED, size=(512, 768))
+
+    payload = _asset_json(tmp_path, "copy.png")
+
+    assert (payload["width"], payload["height"], payload["ratio"]) == (512, 768, "2:3")
+
+
+def test_an_image_whose_file_size_differs_from_its_recorded_size_reports_the_files(tmp_path):
+    _make_png_with_config(tmp_path / "odd.png", _GENERATED, size=(40, 30))
+    asset = _find_asset(list_gallery_assets(str(tmp_path)), "odd.png")
+
+    assert (asset.width, asset.height, asset.recorded_width, asset.recorded_height) == (40, 30, 512, 768)
+
+
+def test_a_copys_source_is_its_original_with_an_id_when_the_original_is_in_the_gallery(tmp_path):
+    original = tmp_path / "original.png"
+    _make_png_with_config(original, _GENERATED)
+    _save_copy(tmp_path, original, _GENERATED, size=(300, 500))
+
+    source = _asset_json(tmp_path, "copy.png")["details"]["source"]
+
+    assert source["id"] == "original.png"
+    assert Path(source["path"]) == original
+    assert _asset_json(tmp_path, "original.png")["details"]["source"] is None
+
+
+def test_a_copys_source_has_no_id_when_the_original_is_gone(tmp_path):
+    _save_copy(tmp_path, tmp_path / "gone.png", _GENERATED, size=(300, 500))
+
+    source = _asset_json(tmp_path, "copy.png")["details"]["source"]
+
+    assert source["id"] is None
+    assert source["path"].endswith("gone.png")
+
+
+def test_a_copy_of_an_upscale_shows_the_original_as_its_source_not_the_upscales_source(tmp_path):
+    upscale = {**_GENERATED, "workflow": "img2img", "source": {"path": "/out/before.png", "width": 512, "height": 768, "workflow": "txt2img"}}
+    original = tmp_path / "original.png"
+    _make_png_with_config(original, upscale)
+    _save_copy(tmp_path, original, upscale, size=(300, 500))
+
+    assert _asset_json(tmp_path, "copy.png")["details"]["source"]["id"] == "original.png"
+    assert _asset_json(tmp_path, "original.png")["details"]["source"]["path"] == "/out/before.png"
+
+
+def test_image_urls_carry_the_modification_time_and_change_when_the_file_is_rewritten(tmp_path):
+    path = tmp_path / "pic.png"
+    _make_png_with_config(path, _GENERATED)
+    _backdate(path)
+    first = _asset_json(tmp_path, "pic.png")
+    stamp = path.stat().st_mtime_ns
+
+    assert first["url"] == f"/media/pic.png?v={stamp}"
+    assert first["thumbnail_url"] == f"/thumbs/pic.png?v={stamp}"
+
+    _make_png_with_config(path, _GENERATED, size=(20, 20))
+    os.utime(path, ns=(stamp + 5_000_000_000, stamp + 5_000_000_000))
+    second = _asset_json(tmp_path, "pic.png")
+
+    assert second["url"] == f"/media/pic.png?v={stamp + 5_000_000_000}"
+    assert second["thumbnail_url"] == f"/thumbs/pic.png?v={stamp + 5_000_000_000}"

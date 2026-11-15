@@ -410,6 +410,11 @@ def embed_png_config(png_info: PngInfo, payload: dict[str, Any]) -> None:
     png_info.add_text(_PNG_CONFIG_KEY, json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
+def with_copied_from(config: dict[str, Any], source_path: str | Path) -> dict[str, Any]:
+    """Return *config* with a top-level ``copied_from`` naming the file a copy was saved from; nothing else changes."""
+    return {**config, "copied_from": _portable_path(str(source_path))}
+
+
 def read_png_config(image_path: str | Path) -> dict[str, Any] | None:
     """Read the zvisiongenerator.config payload from PNG metadata, or None if absent."""
     from PIL import Image as _Image
@@ -468,6 +473,8 @@ class RecordedSettings:
     source: dict[str, Any] | None = None
     # What an edit did: ``{mode, extend}``, where ``extend`` is ``{side, amount}`` when it extended and else absent; None for any other file.
     edit: dict[str, Any] | None = None
+    # The file this one is a saved copy of (an adjusted copy); read like a path, never part of what Reuse regenerates.
+    copied_from: str | None = None
 
 
 def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
@@ -505,6 +512,7 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         source=_source_block(config.get("source")),
         edit=_edit_block(config.get("edit")),
         enhance=_enhance_block(config.get("enhance"), is_video=_is_video_config(config)),
+        copied_from=_local_path(optional_text(config.get("copied_from"))),
     )
 
 

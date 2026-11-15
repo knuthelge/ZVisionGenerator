@@ -42,6 +42,8 @@ export interface AssetActionHandlers {
   onuseframe?: (asset: GalleryAsset, point: FramePoint, target: FrameTarget) => void;
   /** An image becomes the image to edit on the Image tab's Edit kind. */
   onedit?: (asset: GalleryAsset) => void;
+  /** An image opens in the viewer's Adjust editor (crop, rotate, flip, light and colour); a tile passes the element the viewer grows out of. */
+  onadjust?: (asset: GalleryAsset, trigger?: HTMLElement | null) => void;
   /** An audio take becomes the Video tab's audio track or the Speech tab's voice. */
   onuseaudio?: (asset: GalleryAsset, target: AudioUseTarget) => void;
   onupscale?: (asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod) => void;

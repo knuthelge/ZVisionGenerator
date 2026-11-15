@@ -41,3 +41,26 @@ describe('the star shortcut', () => {
     }
   });
 });
+
+describe('the adjust shortcut', () => {
+  const key = (k: string, init: Partial<Parameters<typeof viewerActionFor>[0]> = {}) => viewerActionFor({ key: k, shiftKey: false, metaKey: false, ctrlKey: false, altKey: false, ...init });
+  const rows = (media: 'image' | 'video' | 'audio') => viewerShortcutsFor(media).filter((entry) => entry.keys.includes('A'));
+
+  it('maps A in either case to adjust, and leaves modified A alone', () => {
+    expect(key('a')).toBe('adjust');
+    expect(key('A', { shiftKey: true })).toBe('adjust');
+    expect(key('a', { ctrlKey: true })).toBeNull();
+    expect(key('a', { metaKey: true })).toBeNull();
+    expect(key('a', { altKey: true })).toBeNull();
+  });
+
+  it('lists one A row labelled Adjust for an image, and none for a video or a take', () => {
+    expect(rows('image')).toEqual([{ keys: ['A'], label: 'Adjust' }]);
+    expect(rows('video')).toEqual([]);
+    expect(rows('audio')).toEqual([]);
+  });
+
+  it('keeps the row in the full list of the shortcuts dialog', () => {
+    expect(VIEWER_SHORTCUTS.filter((entry) => entry.keys.includes('A'))).toEqual([{ keys: ['A'], label: 'Adjust' }]);
+  });
+});

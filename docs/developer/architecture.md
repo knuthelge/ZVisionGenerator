@@ -70,6 +70,7 @@ The desktop launcher, in `launcher/`, sits outside the Python package: it is a s
 | LoRAs | `utils/lora.py` | `utils/lora_keys.py`, `utils/lora_family.py`, `utils/lora_files.py` | `tests/common/test_lora_*.py` |
 | Upscaling | `upscale_runner.py` | `workflows/__init__.py`, `workflows/seedvr2_stages.py`, `seedvr2_loader.py` | `tests/image/test_upscale*.py`, `tests/image/test_seedvr2*.py` |
 | Image editing (`--edit`, Edit kind) | `edit_cli.py`, `web/edit_job.py`, `frontend/src/features/workspace/edit/` | `utils/edit_request.py`, `processing/edit_region.py`, `backends/cuda/image/edit.py`, `backends/mac/image_edit.py` | `tests/image/test_edit_*.py`, `tests/web/test_edit_*.py`, `tests/contracts/test_*edit_contract.py` |
+| Adjust (crop, rotate, light and colour of an image) | `web/adjust_api.py`, `frontend/src/lib/components/organisms/adjust/` | `processing/adjust.py`, `processing/reframe.py`, `frontend/src/lib/state/adjustMath.ts`, `frontend/src/lib/state/adjustGeometry.ts` | `tests/image/test_adjust.py`, `tests/image/test_reframe.py`, `tests/web/test_adjust_api.py`, `*.test.ts` beside the source |
 | Background removal | `matte_room.py` | `backends/matte/`, `processing/matte.py` | `tests/image/test_matte*.py`, `tests/backends/test_matte_chain.py` |
 | Settings saved in outputs, Reuse | `utils/provenance.py` | `web/gallery.py` | `tests/common/test_provenance.py` |
 | Web API routes | `web/server.py` | `web/*.py`, one module per concern | `tests/web/` |

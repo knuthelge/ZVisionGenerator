@@ -249,7 +249,7 @@
   .action-menu-name { display: block; font-weight: 600; color: var(--color-text-primary); }
   .action-menu-description { display: block; max-width: 17rem; margin-top: 2px; font-size: var(--text-meta); line-height: 1.4; color: var(--color-text-muted); }
   .action-sheet-body .action-menu-item:has(.action-menu-description) { min-height: 48px; padding: 8px 12px; }
-  .action-sheet-body .action-menu-description { font-size: 12px; }
+  .action-sheet-body .action-menu-description { max-width: none; font-size: 12px; }
   .action-menu-hint { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-meta); color: var(--color-text-muted); }
   /* An enabled item's hint is short ("Video tab, from 0 s"): the menu grows to hold it whole instead of cutting it. */
   .action-menu-item:not([aria-disabled='true']) .action-menu-hint { max-width: none; }

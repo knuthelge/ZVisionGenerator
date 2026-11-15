@@ -37,30 +37,58 @@
     active?: boolean;
     /** Marks the summary as an error (e.g. an image the run needs is gone); it wins over `active`. */
     error?: boolean;
+    /**
+     * Makes the section controlled, for an accordion the parent owns: it is open when this is true and says so through `ontoggle`,
+     * and it keeps no memory of its own. The header is then a heading pinned to the top of its scroll area, the body is a labelled
+     * region, and a closed body is not rendered.
+     */
+    open?: boolean;
+    /** Called when the header is activated on a controlled section. */
+    ontoggle?: () => void;
     children: Snippet;
   }
 
-  let { id, title, summary = '', active = false, error = false, children }: Props = $props();
+  let { id, title, summary = '', active = false, error = false, open: controlledOpen, ontoggle, children }: Props = $props();
 
-  const open = $derived(openState[id] ?? true);
+  const controlled = $derived(controlledOpen !== undefined);
+  const open = $derived(controlledOpen ?? openState[id] ?? true);
   const bodyId = $derived(`inspector-${id}`);
+  const headId = $derived(`inspector-head-${id}`);
+
+  function toggle(): void {
+    if (controlled) ontoggle?.();
+    else setOpen(id, !open);
+  }
 </script>
 
-<section class="inspector-section" data-section={id}>
+{#snippet head()}
   <button
     type="button"
+    id={controlled ? headId : undefined}
     class="inspector-head"
     aria-expanded={open}
     aria-controls={bodyId}
-    onclick={() => setOpen(id, !open)}
+    aria-label={controlled && summary ? `${title}, ${summary}` : undefined}
+    onclick={toggle}
   >
     <Icon name="chevright" size={12} class="inspector-chev" />
     <span>{title}</span>
     {#if summary}<span class="inspector-summary" class:active={active && !error} class:error data-tone={error ? 'error' : active ? 'active' : 'muted'}>{summary}</span>{/if}
   </button>
-  <div id={bodyId} class="inspector-body" hidden={!open}>
-    {@render children()}
-  </div>
+{/snippet}
+
+<section class="inspector-section" data-section={id} data-controlled={controlled ? '' : undefined}>
+  {#if controlled}
+    <h3 class="inspector-heading">{@render head()}</h3>
+    <div id={bodyId} class="inspector-body" role="region" aria-labelledby={headId} hidden={!open}>
+      {#if open}{@render children()}{/if}
+    </div>
+  {:else}
+    {@render head()}
+    <div id={bodyId} class="inspector-body" hidden={!open}>
+      {@render children()}
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -100,5 +128,16 @@
   .inspector-summary.active { color: var(--color-primary-main); }
   .inspector-summary.error { color: var(--color-error); }
   .inspector-body { padding-block: 4px 6px; }
+  /* A controlled section is a panel: the header is pinned while the body scrolls under it, with the panel's own gutter, and the
+     body is the caller's. */
+  .inspector-heading { position: sticky; top: 0; z-index: 2; margin: 0; }
+  .inspector-section[data-controlled]:not(:first-child) .inspector-head { box-shadow: 0 -1px 0 var(--color-border-subtle); }
+  [data-controlled] .inspector-head { min-height: var(--spacing-row); padding: 0 16px; color: var(--color-text-secondary); }
+  [data-controlled] .inspector-head[aria-expanded='true'] { color: var(--color-text-primary); }
+  [data-controlled] .inspector-head :global(.inspector-chev) { color: var(--color-text-muted); }
+  [data-controlled] .inspector-summary { color: var(--color-text-muted); }
+  [data-controlled] .inspector-summary.active { color: var(--color-primary-main); }
+  [data-controlled] .inspector-body { padding: 0; }
+  @media (prefers-reduced-motion: reduce) { .inspector-head :global(.inspector-chev) { transition: none; } }
   .inspector-body[hidden] { display: none; }
 </style>

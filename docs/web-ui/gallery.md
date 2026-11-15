@@ -38,9 +38,17 @@ Clicking a tile grows it into the viewer. On a computer or iPad the viewer is a 
 
 ![The viewer with the Details panel open, showing how the prompt was enhanced](../assets/screenshots/viewer-details.webp)
 
-The toolbar offers **Reuse settings**, **Use as**, **Extend** (videos), **Edit** (images), **Upscale**, **Move**, **Star**, **Download**, **Delete** and **Details**, described below. **Delete** asks first. The keys are in [Keyboard shortcuts](shortcuts.md#viewer).
+The toolbar offers **Reuse settings**, **Use as**, **Extend** (videos), **Edit** and **Adjust** (images), **Upscale**, **Move**, **Star**, **Download**, **Delete** and **Details**, described below. **Delete** asks first. The keys are in [Keyboard shortcuts](shortcuts.md#viewer).
 
 **Edit** (++m++) opens an image in **Image** on its **Edit** kind, with an empty prompt and no paint. What to do next is in [Edit a picture](../guides/images.md#edit), and the screen is described in [Edit an image](workspace.md#edit-an-image).
+
+**Adjust** (++a++) crops, rotates, flips and corrects an image without a model; see [Adjust](#adjust). It is also in an image's **⋯** menu.
+
+### Adjust { #adjust }
+
+**Adjust** opens a full-screen layer over the viewer; the steps are in [Adjust a picture](../guides/images.md#adjust). On a computer or a tablet held sideways the controls are a side panel with three sections, **Crop**, **Light & colour** and **Colour mixer**, one open at a time; the crop frame shows while **Crop** is open. A tablet held upright and a phone use three tabs instead. Hold **Compare**, ++m++ or the picture to see the original while you hold; a tap on **Compare** toggles it. **Replace** is PNG-only and asks once. If a save fails, the layer stays open with your changes; see [Troubleshooting](../reference/troubleshooting.md#images).
+
+After **Save as copy** the viewer opens the new copy, in History when you are in the Workspace. After **Replace** the new pixels show in place.
 
 ### The player
 
@@ -63,7 +71,7 @@ What each one does is in [Use a frame of a video](../guides/video.md#a-frame-of-
 
 ## Details
 
-**Details** shows how the file was made, starting with its **Project**. The fields are in [Output files](../reference/data-folder.md#output-files). **Enhanced with** shows how an enhanced prompt was made, with **Your prompt** under it, and **Made from** names the image an edit or an upscale was made from. **Reuse notice** lists what **Reuse settings** would have to change, such as an original model that isn't set up here (the default model is used instead).
+**Details** shows how the file was made, starting with its **Project**. The fields are in [Output files](../reference/data-folder.md#output-files). **Enhanced with** shows how an enhanced prompt was made, with **Your prompt** under it, and **Made from** names the image an edit, an upscale or an adjusted copy was made from. **Dimensions** is the size of the file itself, so it changes after an adjusted crop; **Ratio** is hidden for a cropped or rotated picture. **Reuse notice** lists what **Reuse settings** would have to change, such as an original model that isn't set up here (the default model is used instead).
 
 ### Audio takes { #audio }
 
@@ -80,6 +88,7 @@ An audio file without this app's settings, such as one you copied into the outpu
 - Post-processing, the upscale settings and **Strength** come back too. For an image upscaled in the viewer, only **Transparent** does.
 - For an enhanced prompt, **Prompt** gets what you typed, **Enhanced** gets the rewrite, and the enhance options come back too.
 - For a video, Scene and Action are filled. A video that was itself an extension comes back with its source.
+- An adjusted copy comes back with its original's settings and size. The adjustment isn't part of them.
 - An edit comes back on the **Edit** kind with the same image, prompt and settings. The paint isn't saved, so the Workspace says *Paint the area again*.
 - For audio, it opens the **Audio** tab on the take's kind with the settings it was made with. A setting the take did not set, such as a song made without a Tempo, comes back on **Auto**.
 

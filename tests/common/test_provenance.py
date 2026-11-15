@@ -34,6 +34,7 @@ from zvisiongenerator.utils.provenance import (
     optional_text,
     read_png_config,
     recorded_settings,
+    with_copied_from,
 )
 
 
@@ -837,6 +838,17 @@ class TestHomePathsArePortable:
 
         assert payload["audio_track_path"] == "~/voice.mp3"
         assert recorded_settings(payload).audio_track_path == str(Path("/home/me")) + "/voice.mp3"
+
+    def test_copied_from_is_recorded_with_tilde_and_read_back_expanded(self, monkeypatch):
+        self._home(monkeypatch)
+        config = {"workflow": "txt2img", "prompt": "p"}
+
+        copied = with_copied_from(config, "/home/me/out/a.png")
+
+        assert copied == {"workflow": "txt2img", "prompt": "p", "copied_from": "~/out/a.png"}
+        assert config == {"workflow": "txt2img", "prompt": "p"}
+        assert recorded_settings(copied).copied_from == str(Path("/home/me")) + "/out/a.png"
+        assert recorded_settings(config).copied_from is None
 
     def test_recorded_settings_expand_tilde_paths(self, monkeypatch):
         self._home(monkeypatch)

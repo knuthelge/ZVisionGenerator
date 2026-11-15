@@ -153,6 +153,40 @@ export const galleryStore = {
   },
 
   /**
+   * Show an adjusted copy of a file, saved next to it: first in every newest-first list and the recent list, and right
+   * after its source in any other order (a list that has not loaded the source is left alone, as the copy sits somewhere
+   * only the server knows). A list whose filter, star or project does not admit the copy, or that already holds it, is
+   * skipped. Each list that admits the copy counts it, and no list is dropped, so an oldest-first list keeps its pages.
+   */
+  addCopy(asset: GalleryAsset, sourceId: string): void {
+    const pick = projectPick.current;
+    if (!_recent.some((item) => item.id === asset.id)) _recent = [asset, ..._recent];
+    if (!inProject(asset, pick)) return;
+    for (const key of Object.keys(_views)) {
+      const view = _views[key];
+      const { filter, sort, starred } = parseQueryKey(key);
+      if (!viewAdmits(filter, starred, asset) || view.assets.some((item) => item.id === asset.id)) continue;
+      const totalCount = view.totalCount === null ? null : view.totalCount + 1;
+      if (sort === 'newest') {
+        _views[key] = { ...view, assets: [asset, ...view.assets], totalCount };
+        continue;
+      }
+      const at = view.assets.findIndex((item) => item.id === sourceId);
+      _views[key] = { ...view, assets: at < 0 ? view.assets : [...view.assets.slice(0, at + 1), asset, ...view.assets.slice(at + 1)], totalCount };
+    }
+  },
+
+  /** Show a file after an adjustment replaced it: the new asset takes the old one's place, by ID, in every list and the recent list. */
+  replaceAsset(asset: GalleryAsset): void {
+    const swap = (item: GalleryAsset): GalleryAsset => (item.id === asset.id ? asset : item);
+    if (_recent.some((item) => item.id === asset.id)) _recent = _recent.map(swap);
+    for (const key of Object.keys(_views)) {
+      const view = _views[key];
+      if (view.assets.some((item) => item.id === asset.id)) _views[key] = { ...view, assets: view.assets.map(swap) };
+    }
+  },
+
+  /**
    * Take deleted assets out of every list, and out of each list's count. A list drops the count of every removed file
    * its view admits (media filter and, in a starred list, the star), whether or not it had loaded that file.
    */

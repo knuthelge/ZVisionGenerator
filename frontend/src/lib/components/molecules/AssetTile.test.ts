@@ -799,4 +799,35 @@ describe('AssetTile star', () => {
       expect(target.querySelector('[data-testid="starred-mark"]')).toBeNull();
     });
   });
+
+  describe('Adjust', () => {
+    function openMenu(asset: GalleryAsset): void {
+      (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+      flushSync();
+    }
+
+    it('lists Adjust for an image and calls onadjust with the asset and the tile\'s menu button', () => {
+      const onadjust = vi.fn();
+      const asset = makeAsset();
+      mountTile({ asset, onadjust });
+      openMenu(asset);
+      expect(menuActions()).toContain('adjust');
+
+      (document.querySelector('[role="menu"] [data-action="adjust"]') as HTMLElement).click();
+      expect(onadjust).toHaveBeenCalledWith(asset, target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`));
+    });
+
+    it('lists no Adjust for a video, or without a handler', () => {
+      const video = makeAsset({ id: 'out/a.mp4', filename: 'a.mp4', media_type: 'video', file_path: '/outputs/out/a.mp4' });
+      mountTile({ asset: video, onadjust: vi.fn() });
+      openMenu(video);
+      expect(menuActions()).not.toContain('adjust');
+      page.unmount();
+
+      const image = makeAsset();
+      mountTile({ asset: image });
+      openMenu(image);
+      expect(menuActions()).not.toContain('adjust');
+    });
+  });
 });

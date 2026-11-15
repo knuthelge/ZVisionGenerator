@@ -1385,4 +1385,51 @@ describe('jobStore review before upscaling', () => {
       expect(jobStore.current?.review).toBeNull();
     });
   });
+
+  describe('a replaced output', () => {
+    const output = (id: string, url = `/media/${id}`) => ({ id, url, thumbnail_url: '', filename: id.split('/').pop() as string, created_at: '', project: null, workflow: 'txt2img', prompt: 'P', model: 'zit', media_type: 'image', reuse_workspace_url: '' });
+
+    it('shows the file as it is now, and keeps doing so when the server lists the old one again', () => {
+      jobStore.startJob({ job_id: 'job-replaced', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 2, created_at: '' });
+      const source = lastEventSource();
+      const made = output('a.png');
+      const other = output('b.png');
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: made, run_index: 1 });
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: other, run_index: 2 });
+
+      const replaced = { ...made, url: '/media/a.png?v=9', width: 640 };
+      jobStore.replaceOutput(replaced as never);
+      expect(jobStore.current?.outputs).toEqual([replaced, other]);
+
+      source.emit('job_completed', { type: 'job_completed', job_id: 'job-replaced', total_runs: 2, outputs: [made, other] });
+      expect(jobStore.current?.outputs).toEqual([replaced, other]);
+    });
+
+    it('does not hide an output that arrives after the replacement, and a replaced file stays one entry', () => {
+      jobStore.startJob({ job_id: 'job-later', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 3, created_at: '' });
+      const source = lastEventSource();
+      const made = output('a.png');
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: made, run_index: 1 });
+      const replaced = { ...made, url: '/media/a.png?v=3' };
+      jobStore.replaceOutput(replaced as never);
+
+      const later = output('c.png');
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: later, run_index: 2 });
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: made, run_index: 1 });
+
+      expect(jobStore.current?.outputs).toEqual([replaced, later]);
+    });
+
+    it('ignores a file that is not an output of the job, and is forgotten with the job', () => {
+      jobStore.startJob({ job_id: 'job-one', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+      lastEventSource().emit('generation_finished', { type: 'generation_finished', status: 'success', asset: output('a.png'), run_index: 1 });
+      jobStore.replaceOutput(output('z.png', '/media/z.png?v=2') as never);
+      expect(jobStore.current?.outputs.map((item) => item.id)).toEqual(['a.png']);
+
+      jobStore.replaceOutput(output('a.png', '/media/a.png?v=2') as never);
+      jobStore.startJob({ job_id: 'job-two', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+      lastEventSource().emit('generation_finished', { type: 'generation_finished', status: 'success', asset: output('a.png'), run_index: 1 });
+      expect(jobStore.current?.outputs[0].url).toBe('/media/a.png');
+    });
+  });
 });

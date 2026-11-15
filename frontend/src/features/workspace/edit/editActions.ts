@@ -1,4 +1,5 @@
 import { draft } from '$lib/state/draft.svelte';
+import { fileVersions } from '$lib/state/fileVersions.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { imageEdit } from './editStore.svelte';
 import { readPicture, sourceOfFile, sourceOfPath, type EditSource } from './editSource';
@@ -34,14 +35,14 @@ export function clearSource(): void {
 
 /**
  * Bring the shown image in line with the draft's: after a reload, a Reuse, an Edit from the Gallery, a Reset, a delete or a move
- * the draft holds the truth and the store only draws it. Nothing changes while they agree.
+ * the draft holds the truth and the store only draws it. Nothing changes while they agree: the same file at the same version.
  */
 export function followDraft(): void {
   const { editSourcePath: path, editSourceUpload: marker } = draft.state;
   const file = heldUploads.editSource;
   const shown = imageEdit.source;
   if (path) {
-    if (shown?.path !== path) showSource(sourceOfPath(path));
+    if (shown?.path !== path || shown.version !== fileVersions.of(path)) showSource(sourceOfPath(path));
   } else if (marker !== null && file !== null) {
     if (shown?.file !== file) showSource(sourceOfFile(file));
   } else if (shown !== null) {

@@ -80,6 +80,7 @@ A held key moves the handle without asking; the point is set when the key lifts.
 | ++r++ | Reuse settings |
 | ++e++ | Use as (image or audio) or Extend (video) |
 | ++m++ | [Edit an image](workspace.md#edit-an-image) |
+| ++a++ | [Adjust an image](gallery.md#adjust) |
 | ++x++ then ++2++ / ++4++ | Plain upscale 2× / 4× of an image (a creative upscale where the plain one isn't offered); ++x++ then ++2++ upscales a video where its **Upscale** menu offers one |
 | ++s++ | Star or unstar the file |
 | ++d++ | Download |
@@ -90,6 +91,17 @@ A held key moves the handle without asking; the point is set when the key lifts.
 | ++esc++ | Close the shortcut list, then the viewer |
 
 Which videos offer **Upscale** is in [Upscaling a finished video](../concepts/upscaling.md#upscaling-an-existing-video).
+
+## Adjust
+
+These work in the [Adjust](gallery.md#adjust) layer.
+
+| Key | Action |
+|---|---|
+| ++m++ (hold) | Show the original while the key is down |
+| ++esc++ | Cancel (asks first if you changed anything) |
+| Arrow keys | Move the focused crop box |
+| ++shift++ with an arrow | Move it ten times as far |
 
 ## Painter
 

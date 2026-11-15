@@ -145,6 +145,7 @@ from zvisiongenerator.web.gallery import (
     build_gallery_page_json,
     delete_gallery_assets,
     filter_and_sort_assets,
+    gallery_asset_for_output_path,
     gallery_asset_to_json,
     list_gallery_assets,
     move_gallery_assets,
@@ -180,6 +181,7 @@ from zvisiongenerator.web import browse_media
 from zvisiongenerator.web.upload_folders import UPLOADS_FOLDER
 from zvisiongenerator.web.video_frame_api import frame_response
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware, is_cross_site_fetch
+from zvisiongenerator.web.adjust_api import adjust_json_request, save_adjusted
 from zvisiongenerator.web.upscale_api import plan_ltx_video_upscale, plan_seedvr2_upscale, plan_upscale, plan_video_upscale, upscale_json_request, upscale_size_label, video_upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
 from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
@@ -1160,6 +1162,43 @@ async def upscale(request: Request) -> JSONResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
     return await run_in_threadpool(_upscale_from_body, body)
+
+
+@app.post("/api/adjust")
+async def api_adjust(request: Request) -> dict[str, Any]:
+    """Save a gallery image rotated, flipped, cropped and colour-adjusted, as a copy or over a PNG original; answers with the saved asset."""
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
+    return await run_in_threadpool(_adjust_from_body, body)
+
+
+def _adjust_from_body(body: Any) -> dict[str, Any]:
+    """Validate an Adjust body, save the picture and describe the saved asset; blocking, so it runs in the thread pool."""
+    try:
+        adjust = adjust_json_request(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    root = _media_output_root()
+    path = resolve_output_asset_path(root, adjust.asset_id)
+    if path is None:
+        raise HTTPException(status_code=422, detail="The file must be inside the output folder.")
+    unknown = HTTPException(status_code=404, detail=f"Unknown image: {adjust.asset_id}")
+    if path.suffix.lower() not in IMAGE_EXTENSIONS or not path.is_file():
+        raise unknown
+    try:
+        saved = save_adjusted(path, adjust)
+    except FileNotFoundError as exc:
+        raise unknown from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save {path.name}: {exc.strerror or type(exc).__name__}") from exc
+    asset = gallery_asset_for_output_path(str(root), str(saved))
+    if asset is None:
+        raise HTTPException(status_code=500, detail=f"Could not save {path.name}: the saved file is not listed.")
+    return {"asset": gallery_asset_to_json(asset, load_web_config())}
 
 
 @app.post("/api/upscale/plan")

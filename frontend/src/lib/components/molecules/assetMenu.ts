@@ -2,6 +2,7 @@ import {
   AUDIO_TRACK_HINT, SAVE_VOICE_HINT, VOICE_HINT, canEdit, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, canUseFrame, plainUpscaleMethod, upscaleFactors, voiceTooLongReason,
   type AssetActionHandlers, type MenuLead, type ReferenceTarget, type UseAsState,
 } from '$lib/state/assetActions';
+import { canAdjust } from '$lib/state/adjustState';
 import type { FramePoint } from '$lib/state/framePoint';
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 import type { ActionMenuEntry } from './ActionMenu.svelte';
@@ -34,7 +35,7 @@ export function assetMenuEntries(
   lead: MenuLead | null = null
 ): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
-  const { onreuse, onreference, onextend, onedit, onuseframe, onupscale, onuseaudio, ondelete, onstar, onlead } = handlers;
+  const { onreuse, onreference, onextend, onedit, onadjust, onuseframe, onupscale, onuseaudio, ondelete, onstar, onlead } = handlers;
   if (lead) {
     entries.push(
       { kind: 'item', id: lead, label: lead === 'select' ? 'Select' : 'View', onselect: () => onlead?.(lead) },
@@ -66,10 +67,13 @@ export function assetMenuEntries(
   // frame it continues from there, and a frame too early says why it can't.
   const extend = extendEntry(asset, point, onextend);
   if (extend) entries.push(extend, { kind: 'separator' });
-  // An image can be edited: its paint and prompt change part of it, or give it more room.
-  if (onedit && canEdit(asset)) {
-    entries.push({ kind: 'item', id: 'edit', label: 'Edit', icon: 'edit', onselect: () => onedit(asset) }, { kind: 'separator' });
-  }
+  // An image can be edited: its paint and prompt change part of it, or give it more room. It can also be adjusted: cropped,
+  // rotated, flipped, or changed in light and colour.
+  const editable = Boolean(onedit && canEdit(asset));
+  const adjustable = Boolean(onadjust && canAdjust(asset));
+  if (editable) entries.push({ kind: 'item', id: 'edit', label: 'Edit', icon: 'edit', onselect: () => onedit?.(asset) });
+  if (adjustable) entries.push({ kind: 'item', id: 'adjust', label: 'Adjust', icon: 'sliders', onselect: () => onadjust?.(asset) });
+  if (editable || adjustable) entries.push({ kind: 'separator' });
   const upscaleItems = onupscale ? upscaleEntries(asset, onupscale) : [];
   if (upscaleItems.length > 0) {
     entries.push({ kind: 'heading', label: 'Upscale' }, ...upscaleItems, { kind: 'separator' });

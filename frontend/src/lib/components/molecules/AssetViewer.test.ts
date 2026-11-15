@@ -1,5 +1,5 @@
 import { flushSync } from 'svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GalleryAsset } from '$lib/types';
 
@@ -21,6 +21,8 @@ vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
     }),
   };
 });
+const adjustApi = vi.hoisted(() => ({ saveAdjusted: vi.fn() }));
+vi.mock('$lib/api/adjust', () => adjustApi);
 const projectApi = vi.hoisted(() => ({ listProjects: vi.fn(), createProject: vi.fn() }));
 vi.mock('$lib/api/projects', () => projectApi);
 
@@ -927,5 +929,363 @@ describe('AssetViewer star', () => {
     expect(items).toContain('star');
     expect(items).not.toContain('select');
     expect(items).not.toContain('view');
+  });
+});
+
+describe('AssetViewer adjust', () => {
+  const adjustButton = (): HTMLButtonElement | null => document.querySelector('[data-action="adjust"]');
+  const editor = (): HTMLElement | null => document.querySelector('[data-layout="side"][role="dialog"]');
+  const picture = makeAsset({ file_path: '/out/a.png' });
+
+  /** A picture that loads at once, as the editor needs one to show. */
+  class FakeImage {
+    src = '';
+    naturalWidth = 800;
+    naturalHeight = 600;
+    decode(): Promise<void> {
+      return Promise.resolve();
+    }
+  }
+
+  function press(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    document.dispatchEvent(event);
+    flushSync();
+    return event;
+  }
+
+  async function mountViewer(props: Record<string, unknown> = {}): Promise<void> {
+    const assets = (props.assets as GalleryAsset[] | undefined) ?? [picture, assetB];
+    mountComponent(AssetViewer, { assets, currentId: assets[0].id, open: true, onclose: vi.fn(), onnavigate: vi.fn(), ...props });
+    await settle();
+  }
+
+  async function openEditor(props: Record<string, unknown> = {}): Promise<void> {
+    await mountViewer(props);
+    press('a');
+    await settle();
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    touch.compact = false;
+    touch.coarse = false;
+    toasts.splice(0, toasts.length);
+    adjustApi.saveAdjusted.mockReset();
+    vi.stubGlobal('Image', FakeImage);
+    // jsdom has no WebGL2.
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  describe('entry points', () => {
+    it('has a labelled Adjust button after Edit in the toolbar, with no handler from the page', async () => {
+      await mountViewer({ onedit: vi.fn() });
+      const button = adjustButton()!;
+      expect(button.textContent?.trim()).toBe('Adjust');
+      expect(button.title).toBe('Adjust (A)');
+      const actions = Array.from(document.querySelectorAll('.viewer-bar [data-action]')).map((el) => el.getAttribute('data-action'));
+      expect(actions.indexOf('adjust')).toBe(actions.indexOf('edit') + 1);
+    });
+
+    it('opens the editor from the toolbar button', async () => {
+      await mountViewer();
+      adjustButton()!.click();
+      await settle();
+      expect(editor()).not.toBeNull();
+    });
+
+    it('opens the editor with A', async () => {
+      await openEditor();
+      expect(editor()).not.toBeNull();
+      expect(editor()!.getAttribute('aria-label')).toBe('Adjust asset-a.png');
+    });
+
+    it('lists Adjust in the actions menu on a phone, with no toolbar button', async () => {
+      touch.compact = true;
+      await mountViewer();
+      expect(adjustButton()).toBeNull();
+      document.querySelector<HTMLButtonElement>('button[data-action="more"]')!.click();
+      await settle();
+      const item = document.querySelector<HTMLElement>('[role="menu"] [data-action="adjust"]')!;
+      expect(item.textContent?.trim()).toBe('Adjust');
+      item.click();
+      await settle();
+      expect(editor()).not.toBeNull();
+    });
+
+    it('offers nothing for a video or an audio take: no button, no menu item, A does nothing', async () => {
+      for (const asset of [makeAsset({ media_type: 'video', file_path: '/out/a.mp4' }), makeAsset({ media_type: 'audio', file_path: '/out/a.flac' })]) {
+        await mountViewer({ assets: [asset] });
+        expect(adjustButton()).toBeNull();
+        const event = press('a');
+        await settle();
+        expect(event.defaultPrevented).toBe(false);
+        expect(editor()).toBeNull();
+
+        press('?', { shiftKey: true });
+        expect(Array.from(document.querySelectorAll('#asset-viewer-shortcuts dd')).map((label) => label.textContent)).not.toContain('Adjust');
+        document.querySelector('[data-testid="asset-viewer"]')!.remove();
+      }
+      touch.compact = true;
+      await mountViewer({ assets: [makeAsset({ media_type: 'video', file_path: '/out/a.mp4' })] });
+      document.querySelector<HTMLButtonElement>('button[data-action="more"]')!.click();
+      await settle();
+      expect(document.querySelector('[role="menu"] [data-action="adjust"]')).toBeNull();
+    });
+
+    it('offers nothing for an image without a file', async () => {
+      await mountViewer({ assets: [makeAsset({ file_path: undefined })] });
+      expect(adjustButton()).toBeNull();
+      press('a');
+      await settle();
+      expect(editor()).toBeNull();
+    });
+
+    it('lists the A row in the shortcuts of an image', async () => {
+      await mountViewer();
+      press('?', { shiftKey: true });
+      const row = Array.from(document.querySelectorAll('#asset-viewer-shortcuts dl > div')).find((item) => item.querySelector('dd')?.textContent === 'Adjust');
+      expect(row?.querySelector('dt')?.textContent).toBe('A');
+    });
+
+    it('leaves Ctrl+A and typing in a field alone', async () => {
+      await mountViewer();
+      press('a', { ctrlKey: true });
+      const input = document.createElement('input');
+      document.body.appendChild(input);
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+      await settle();
+      expect(editor()).toBeNull();
+      input.remove();
+    });
+  });
+
+  describe('with the editor open', () => {
+    it('is a modal dialog that owns its drags, above the viewer', async () => {
+      await openEditor();
+      const root = editor()!;
+      expect(root.getAttribute('aria-modal')).toBe('true');
+      expect(root.hasAttribute('data-own-drag')).toBe(true);
+      expect(document.querySelector('[data-testid="asset-viewer"]')!.contains(root)).toBe(true);
+    });
+
+    it('takes no viewer key: no paging, star, delete or close, and no menu opens', async () => {
+      const handlers = { onnavigate: vi.fn(), onstar: vi.fn(), ondelete: vi.fn(), onclose: vi.fn(), onreuse: vi.fn(), onedit: vi.fn() };
+      await openEditor(handlers);
+      for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End', 's', 'Delete', 'Backspace', 'r', 'm', 'i', 'e']) press(key);
+      await settle();
+      expect(handlers.onnavigate).not.toHaveBeenCalled();
+      expect(handlers.onstar).not.toHaveBeenCalled();
+      expect(handlers.ondelete).not.toHaveBeenCalled();
+      expect(handlers.onclose).not.toHaveBeenCalled();
+      expect(handlers.onreuse).not.toHaveBeenCalled();
+      expect(handlers.onedit).not.toHaveBeenCalled();
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      expect(document.querySelector('#asset-viewer-details')).toBeNull();
+      expect(editor()).not.toBeNull();
+    });
+
+    it('does not page, close, or open the actions menu for a swipe, a pull or a long press on the editor', async () => {
+      vi.useFakeTimers();
+      try {
+        const handlers = { onnavigate: vi.fn(), onclose: vi.fn() };
+        touch.coarse = true;
+        await openEditor(handlers);
+        const root = editor()!;
+        const touchEvent = (type: string, x: number, y: number): void => {
+          const event = new Event(type, { bubbles: true, cancelable: true });
+          const point = { clientX: x, clientY: y, target: root };
+          Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [point] });
+          Object.defineProperty(event, 'changedTouches', { value: [point] });
+          root.dispatchEvent(event);
+        };
+        touchEvent('touchstart', 300, 300);
+        touchEvent('touchmove', 40, 300);
+        touchEvent('touchend', 40, 300);
+        touchEvent('touchstart', 300, 100);
+        touchEvent('touchmove', 300, 600);
+        touchEvent('touchend', 300, 600);
+        root.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
+        root.dispatchEvent(Object.assign(new MouseEvent('pointerdown', { bubbles: true, clientX: 50, clientY: 50 }), { pointerType: 'touch', pointerId: 1 }));
+        vi.advanceTimersByTime(1500);
+        flushSync();
+        expect(handlers.onnavigate).not.toHaveBeenCalled();
+        expect(handlers.onclose).not.toHaveBeenCalled();
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not close for a click on the backdrop in the gutter', async () => {
+      const onclose = vi.fn();
+      await openEditor({ onclose });
+      document.querySelector<HTMLButtonElement>('.viewer-backdrop')!.click();
+      expect(onclose).not.toHaveBeenCalled();
+      expect(editor()).not.toBeNull();
+    });
+
+    it('makes the viewer underneath inert', async () => {
+      await openEditor();
+      const inert = (selector: string): boolean => (document.querySelector(selector) as HTMLElement & { inert: boolean }).inert;
+      expect(inert('.viewer-panel')).toBe(true);
+      expect(inert('.viewer-backdrop')).toBe(true);
+      press('Escape');
+      await settle();
+      expect(inert('.viewer-panel')).toBe(false);
+    });
+
+    it('closes only the editor on Escape, then the viewer on the next, with one layer at a time', async () => {
+      const onclose = vi.fn();
+      await openEditor({ onclose });
+      press('Escape');
+      await settle();
+      expect(editor()).toBeNull();
+      expect(onclose).not.toHaveBeenCalled();
+      expect(document.querySelector('[data-testid="asset-viewer"]')).not.toBeNull();
+
+      press('Escape');
+      expect(onclose).toHaveBeenCalledOnce();
+    });
+
+    it('takes the viewer keys back and focuses Adjust when the editor closes', async () => {
+      const onnavigate = vi.fn();
+      await openEditor({ onnavigate });
+      press('Escape');
+      await settle();
+      expect(document.activeElement).toBe(adjustButton());
+      press('ArrowRight');
+      expect(onnavigate).toHaveBeenCalledWith(1);
+    });
+
+    it('closes with the viewer, leaving no layer behind', async () => {
+      const props = reactiveProps({ assets: [picture, assetB], currentId: picture.id, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+      mountComponent(AssetViewer, props);
+      await settle();
+      press('a');
+      await settle();
+      expect(escapeLayerOpen()).toBe(true);
+      props.open = false;
+      await settle();
+      expect(escapeLayerOpen()).toBe(false);
+      props.open = true;
+      await settle();
+      expect(editor()).toBeNull();
+    });
+
+    it('closes when the viewer moves to another asset', async () => {
+      const props = reactiveProps({ assets: [picture, assetB], currentId: picture.id, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+      mountComponent(AssetViewer, props);
+      await settle();
+      press('a');
+      await settle();
+      expect(editor()).not.toBeNull();
+      props.assets = [assetB];
+      await settle();
+      expect(editor()).toBeNull();
+    });
+  });
+
+  describe('opened from a tile', () => {
+    it('opens with the editor already on the shown picture, and Escape closes the editor before the viewer', async () => {
+      const onclose = vi.fn();
+      await mountViewer({ adjustOnOpen: true, onclose });
+      expect(editor()).not.toBeNull();
+      expect(editor()!.getAttribute('aria-label')).toBe('Adjust asset-a.png');
+
+      press('Escape');
+      await settle();
+      expect(editor()).toBeNull();
+      expect(onclose).not.toHaveBeenCalled();
+
+      press('Escape');
+      expect(onclose).toHaveBeenCalledOnce();
+    });
+
+    it('does not open on a video, and does not fly the thumbnail under the editor', async () => {
+      await mountViewer({ adjustOnOpen: true, assets: [makeAsset({ media_type: 'video', file_path: '/out/a.mp4' })] });
+      expect(editor()).toBeNull();
+      await mountViewer({ adjustOnOpen: true });
+      expect(document.querySelector('[data-testid="viewer-flight"]')).toBeNull();
+    });
+  });
+
+  describe('saving', () => {
+    const copy = makeAsset({ id: 'out/asset-a_adjusted.png', filename: 'asset-a_adjusted.png', file_path: '/out/a_adjusted.png' });
+
+    async function save(label: string): Promise<void> {
+      const slider = document.querySelector<HTMLInputElement>('input[type="range"]')!;
+      slider.value = '20';
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      const found = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find((item) => item.textContent?.trim() === label)!;
+      found.click();
+      await settle();
+      await settle();
+    }
+
+    it('reports a copy with the id of the asset that was adjusted, and closes the editor', async () => {
+      adjustApi.saveAdjusted.mockResolvedValue(copy);
+      const onadjusted = vi.fn();
+      await openEditor({ onadjusted });
+      await save('Save as copy');
+      expect(onadjusted).toHaveBeenCalledWith(copy, false, picture.id);
+      expect(editor()).toBeNull();
+    });
+
+    it('reports a replace as the same asset with a fresh URL', async () => {
+      localStorage.setItem('ziv-adjust-replace-asked-v1', '1');
+      const replaced = makeAsset({ file_path: '/out/a.png', url: '/media/out/asset-a.png?v=2' });
+      adjustApi.saveAdjusted.mockResolvedValue(replaced);
+      const onadjusted = vi.fn();
+      await openEditor({ onadjusted });
+      await save('Replace');
+      expect(onadjusted).toHaveBeenCalledWith(replaced, true, picture.id);
+      expect(editor()).toBeNull();
+    });
+
+    it('shows the copy when the list follows it, and the editor does not reopen', async () => {
+      adjustApi.saveAdjusted.mockResolvedValue(copy);
+      const props = reactiveProps({
+        assets: [picture, assetB] as GalleryAsset[],
+        currentId: picture.id as string | null,
+        open: true,
+        onclose: vi.fn(),
+        onnavigate: vi.fn(),
+        onadjusted: (saved: GalleryAsset) => {
+          props.assets = [picture, saved, assetB];
+          props.currentId = saved.id;
+        },
+      });
+      mountComponent(AssetViewer, props);
+      await settle();
+      press('a');
+      await settle();
+      await save('Save as copy');
+      expect(editor()).toBeNull();
+      expect(document.querySelector('#asset-viewer-title')!.textContent).toBe('asset-a_adjusted.png');
+      expect(props.onclose).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('made from', () => {
+    it('opens the original from a copy when it is in the list', async () => {
+      const copy = makeAsset({
+        id: 'out/asset-a_adjusted.png',
+        filename: 'asset-a_adjusted.png',
+        file_path: '/out/asset-a_adjusted.png',
+        details: { source: { path: '/outputs/out/asset-a.png', width: null, height: null, id: picture.id } },
+      });
+      const onnavigate = vi.fn();
+      await mountViewer({ assets: [copy, picture], onnavigate });
+      press('i');
+      flushSync(() => document.querySelector<HTMLButtonElement>('[data-testid="viewer-source"] button')!.click());
+      expect(onnavigate).toHaveBeenCalledWith(1);
+    });
   });
 });

@@ -307,6 +307,14 @@ The model family has no negative prompt, so yours was left out.
 
 This model has no negative prompt, so yours was left out; the message may name what to use instead.
 
+### "… can't be adjusted: …"
+
+[Adjust](../guides/images.md#adjust) refused the picture, and said why after the colon. A pixel format it doesn't support (a 16-bit or floating-point image) and a file it can't read as an image are the usual reasons; the file may be damaged or not an image at all. Nothing was saved. Open the picture in another app and export it as a plain PNG or JPEG, then adjust that.
+
+### "Could not save …: …"
+
+The file couldn't be written, and the reason follows the colon: a full disk, a folder you can't write to, or, on Windows, a file another app has open. The original is untouched. Free space, fix the permissions or close the other app, then save again; Adjust stays open with your changes. See [Output files](data-folder.md#output-files).
+
 ## Video { #video }
 
 ### "Add a first frame. A last frame needs one." { #add-a-first-frame }

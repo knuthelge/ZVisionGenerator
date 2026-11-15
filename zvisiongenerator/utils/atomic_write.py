@@ -7,6 +7,8 @@ from pathlib import Path
 import stat
 import uuid
 
+from zvisiongenerator.utils.filename import unique_output_path
+
 
 def write_text_atomic(path: Path, text: str) -> None:
     """Atomically replace *path* with *text* as UTF-8, with the care of :func:`write_bytes_atomic`.
@@ -40,3 +42,33 @@ def write_bytes_atomic(path: Path, data: bytes) -> None:
         temp_path.replace(target)
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+def write_new_file(path: Path, data: bytes, *, stem: str) -> Path:
+    """Write *data* to a file that did not exist, moving to the next free counter name when *path* is taken.
+
+    The file is created exclusively, so a name taken since it was chosen (another job, same second) is never
+    overwritten: on a clash the path becomes ``unique_output_path(path.parent, stem, path.suffix)`` and the create
+    is retried. A partial file is removed when the write fails, and the error is re-raised.
+
+    Args:
+        path: Preferred location; its directory must exist.
+        data: Bytes to write.
+        stem: File stem the counter names are built from.
+
+    Returns:
+        The path that was written.
+    """
+    while True:
+        try:
+            handle = open(path, "xb")
+        except FileExistsError:
+            path = unique_output_path(path.parent, stem, path.suffix)
+            continue
+        try:
+            with handle:
+                handle.write(data)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        return path

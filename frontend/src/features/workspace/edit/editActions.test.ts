@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
+import { fileVersions } from '$lib/state/fileVersions.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { memoryUploadStore } from '$lib/state/uploadStore';
 import { makeAsset } from '../../../test-utils/workspace';
@@ -132,5 +133,28 @@ describe('following the draft', () => {
     const shown = imageEdit.source;
     followDraft();
     expect(imageEdit.source).toBe(shown);
+  });
+
+  it('builds the source again when the file at the same path was rewritten, and then stops', () => {
+    chooseSource(sourceOfPath('/out/rewritten/a.png'));
+    const shown = imageEdit.source;
+    expect(shown?.version).toBe(0);
+
+    draft.refreshSlotsHolding('/out/rewritten/a.png');
+    followDraft();
+
+    expect(imageEdit.source).not.toBe(shown);
+    expect(imageEdit.source).toMatchObject({ path: '/out/rewritten/a.png', version: fileVersions.of('/out/rewritten/a.png') });
+    const rebuilt = imageEdit.source;
+    followDraft();
+    expect(imageEdit.source).toBe(rebuilt);
+  });
+
+  it('records the version of the file a gallery image or a path stands for', () => {
+    fileVersions.bump('/out/rewritten/v.png');
+    expect(sourceOfPath('/out/rewritten/v.png').version).toBe(1);
+    expect(sourceOfAsset(makeAsset({ file_path: '/out/rewritten/v.png' })).version).toBe(1);
+    expect(sourceOfAsset(makeAsset({ file_path: undefined })).version).toBe(0);
+    expect(sourceOfFile(new File(['x'], 'p.png')).version).toBe(0);
   });
 });

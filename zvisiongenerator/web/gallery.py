@@ -135,6 +135,13 @@ class GalleryAsset:
     audio: dict[str, Any] = field(default_factory=dict)
     # Whether the user starred the file; read from the stars store per request, never from the facts.
     starred: bool = False
+    # The file an adjusted copy was saved from, as ``{path, width, height, workflow, id}``; never read by Reuse.
+    copied_from: dict[str, Any] | None = None
+    # The generation size an image recorded; ``width``/``height`` are the file's real pixels, which a crop makes differ.
+    recorded_width: int | None = None
+    recorded_height: int | None = None
+    # The file's modification time in nanoseconds; images carry it as ``?v=`` so a rewritten file is fetched again.
+    mtime_ns: int = 0
 
 
 def list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
@@ -380,10 +387,13 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
                 reuse_params["ratio"] = asset.ratio
             if asset.size is not None:
                 reuse_params["size"] = asset.size
-            if asset.width is not None:
-                reuse_params["width"] = str(asset.width)
-            if asset.height is not None:
-                reuse_params["height"] = str(asset.height)
+            # Reuse regenerates at the recorded size, not at the real pixels a crop left.
+            reuse_width = asset.recorded_width if asset.recorded_width is not None else asset.width
+            reuse_height = asset.recorded_height if asset.recorded_height is not None else asset.height
+            if reuse_width is not None:
+                reuse_params["width"] = str(reuse_width)
+            if reuse_height is not None:
+                reuse_params["height"] = str(reuse_height)
             if asset.frame_count is not None and workflow_mode(resolved_workflow) == "video":
                 reuse_params["frames"] = str(asset.frame_count)
         if asset.audio_track_path is not None and workflow_mode(resolved_workflow) == "video":
@@ -413,7 +423,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "project": asset_project(asset.id),
         "starred": asset.starred,
         "url": asset.media_url,
-        "thumbnail_url": f"/thumbs/{quote(asset.id, safe='/')}",
+        "thumbnail_url": _image_versioned_url(f"/thumbs/{quote(asset.id, safe='/')}", asset.kind, asset.mtime_ns),
         "filename": asset.name,
         "created_at": created_at,
         "workflow": requested_workflow,
@@ -422,7 +432,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "model": asset.model_label,
         "width": asset.width,
         "height": asset.height,
-        "ratio": asset.ratio,
+        "ratio": None if _size_differs_from_recorded(asset) else asset.ratio,
         "size": asset.size,
         "frame_count": asset.frame_count,
         "source_video": asset.source_video,
@@ -456,6 +466,13 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "upscale": _asset_upscale_json(asset, web_config, resolved_model) if asset.kind == "image" else _video_upscale_json(asset, web_config, requested_model),
         "extend": _asset_extend_json(asset) if asset.kind == "video" and video_extend else None,
     }
+
+
+def _size_differs_from_recorded(asset: GalleryAsset) -> bool:
+    """Return whether an image's real pixel size differs from the generation size it recorded, so its recorded ratio no longer describes it."""
+    if asset.kind != "image" or asset.recorded_width is None or asset.recorded_height is None:
+        return False
+    return (asset.width, asset.height) != (asset.recorded_width, asset.recorded_height)
 
 
 def _asset_enhance_json(asset: GalleryAsset) -> dict[str, Any] | None:
@@ -844,7 +861,7 @@ def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any], s
         modified_at=file.mtime,
         modified_label=_format_age(file.mtime),
         path_label=asset_id,
-        media_url=f"/media/{quote(asset_id, safe='/')}",
+        media_url=_image_versioned_url(f"/media/{quote(asset_id, safe='/')}", kind, file.mtime_ns),
         detail_url="",
         reuse_workspace_url="",
         reuse_settings_url="",
@@ -888,7 +905,16 @@ def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any], s
         upscaled=metadata["upscaled"],
         audio={**metadata["audio"], "bytes": file.size} if metadata["audio"] else metadata["audio"],
         starred=asset_id in starred,
+        copied_from=_source_with_asset_id(root, {"path": metadata["copied_from"], "width": None, "height": None, "workflow": None}) if metadata["copied_from"] else None,
+        recorded_width=metadata["recorded_width"],
+        recorded_height=metadata["recorded_height"],
+        mtime_ns=file.mtime_ns,
     )
+
+
+def _image_versioned_url(url: str, kind: str, mtime_ns: int) -> str:
+    """Return *url* with the file's modification time as ``?v=`` for an image, so a rewritten file is not served from cache."""
+    return f"{url}?v={mtime_ns}" if kind == "image" else url
 
 
 def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[str, Any]:
@@ -908,14 +934,22 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
     else:
         prompt = _coerce_text(prompt or asset_path.stem.replace("_", " "))
     video_metadata = facts.get("video") or {}
-    width = recorded.width or optional_int(image_metadata.get("width") or filename_metadata.get("width")) or optional_int(video_metadata.get("width"))
-    height = recorded.height or optional_int(image_metadata.get("height") or filename_metadata.get("height")) or optional_int(video_metadata.get("height"))
+    if kind == "image":
+        # The file's real pixels come first: a copy that was cropped no longer has the size it was generated at.
+        width = optional_int(image_metadata.get("width")) or recorded.width or optional_int(filename_metadata.get("width"))
+        height = optional_int(image_metadata.get("height")) or recorded.height or optional_int(filename_metadata.get("height"))
+    else:
+        width = recorded.width or optional_int(image_metadata.get("width") or filename_metadata.get("width")) or optional_int(video_metadata.get("width"))
+        height = recorded.height or optional_int(image_metadata.get("height") or filename_metadata.get("height")) or optional_int(video_metadata.get("height"))
 
     return {
         "prompt": prompt,
         "model_label": _coerce_text(recorded.model),
         "width": width,
         "height": height,
+        "recorded_width": recorded.width,
+        "recorded_height": recorded.height,
+        "copied_from": recorded.copied_from,
         "seed": recorded.seed,
         "steps": recorded.steps,
         "guidance": recorded.guidance,
@@ -968,7 +1002,7 @@ def _asset_details_json(asset: GalleryAsset) -> dict[str, Any]:
         "model_family": asset.model_family,
         "image_strength": asset.image_strength,
         "generation": dict(asset.generation),
-        "source": dict(asset.source) if asset.source is not None else None,
+        "source": dict(asset.copied_from) if asset.copied_from else (dict(asset.source) if asset.source is not None else None),
     }
 
 

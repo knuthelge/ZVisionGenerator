@@ -58,7 +58,9 @@ def _write_png_with_config(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     info = PngInfo()
     embed_png_config(info, payload)
-    Image.new("RGB", (8, 8), "teal").save(path, pnginfo=info)
+    width, height = payload.get("width"), payload.get("height")
+    size = (width, height) if isinstance(width, int) and isinstance(height, int) else (8, 8)
+    Image.new("RGB", size, "teal").save(path, pnginfo=info)
 
 
 def _png_upload_bytes() -> io.BytesIO:
@@ -1047,6 +1049,7 @@ def test_gallery_asset_id_contract_serves_and_deletes_relative_assets(monkeypatc
     sidecar_path.write_text(json.dumps({"prompt": "ignored relative asset", "workflow": "txt2img", "model": "zit"}), encoding="utf-8")
 
     asset_id = "nested/asset one.png"
+    mtime_ns = asset_path.stat().st_mtime_ns
     with TestClient(web_server.app) as client:
         gallery_response = client.get("/api/gallery")
         media_response = client.get(f"/media/{quote(asset_id, safe='/')}")
@@ -1059,8 +1062,9 @@ def test_gallery_asset_id_contract_serves_and_deletes_relative_assets(monkeypatc
     listed_asset = payload["assets"][0]
     assert listed_asset["id"] == asset_id
     assert "path" not in listed_asset
-    assert listed_asset["url"] == "/media/nested/asset%20one.png"
-    assert listed_asset["thumbnail_url"] == "/thumbs/nested/asset%20one.png"
+    version = f"?v={mtime_ns}"
+    assert listed_asset["url"] == f"/media/nested/asset%20one.png{version}"
+    assert listed_asset["thumbnail_url"] == f"/thumbs/nested/asset%20one.png{version}"
     assert not listed_asset["id"].startswith("/")
 
     assert media_response.status_code == 200
@@ -1068,6 +1072,27 @@ def test_gallery_asset_id_contract_serves_and_deletes_relative_assets(monkeypatc
     assert [item["id"] for item in delete_response.json()["deleted"]] == [asset_id]
     assert not asset_path.exists()
     assert sidecar_path.exists()
+
+
+def test_the_versioned_image_urls_the_gallery_lists_are_served(monkeypatch, tmp_path):
+    """The ``?v=`` a listed image URL carries must not change what ``/media`` and ``/thumbs`` serve."""
+    web_config = make_web_config()
+    web_config.output_dir = str(tmp_path)
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    monkeypatch.setattr(web_server, "_media_output_root", lambda: tmp_path.resolve())
+    write_png(tmp_path / "pic one.png")
+
+    with TestClient(web_server.app) as client:
+        listed = client.get("/api/gallery").json()["assets"][0]
+        media = client.get(listed["url"])
+        plain = client.get("/media/pic%20one.png")
+        thumb = client.get(listed["thumbnail_url"])
+
+    assert "?v=" in listed["url"] and "?v=" in listed["thumbnail_url"]
+    assert media.status_code == 200
+    assert media.content == plain.content
+    assert thumb.status_code == 200
+    assert thumb.headers["content-type"] == "image/webp"
 
 
 def test_gallery_assets_without_model_metadata_do_not_reuse_media_kind_as_model(monkeypatch, tmp_path):
@@ -2405,7 +2430,7 @@ class TestGalleryMove:
         body = response.json()
         assert body["failed"] == []
         assert [(item["from"], item["asset"]["id"], item["asset"]["project"]) for item in body["moved"]] == [("A/1.png", "B/1.png", "B"), ("A/sub/2.png", "B/2.png", "B")]
-        assert body["moved"][0]["asset"]["url"] == "/media/B/1.png"
+        assert body["moved"][0]["asset"]["url"] == f"/media/B/1.png?v={(env.root / 'B' / '1.png').stat().st_mtime_ns}"
         assert (env.root / "B" / "1.png").is_file() and not (env.root / "A" / "1.png").exists()
 
     def test_the_inventory_scan_behind_the_moved_assets_runs_off_the_event_loop(self, env, monkeypatch):

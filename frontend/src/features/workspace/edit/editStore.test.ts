@@ -9,7 +9,7 @@ import { openKind } from '../../../test-utils/draftKind';
 
 let nextId = 100;
 const source = (overrides: Partial<EditSource> = {}): EditSource => ({
-  id: nextId++, name: 'scene.png', path: '/out/scene.png', file: null, url: '/media/scene.png', thumbUrl: '/thumbs/scene.png', width: 800, height: 800, cutout: null, ...overrides,
+  id: nextId++, name: 'scene.png', path: '/out/scene.png', file: null, version: 0, url: '/media/scene.png', thumbUrl: '/thumbs/scene.png', width: 800, height: 800, cutout: null, ...overrides,
 });
 const dab = (x = 400, y = 400, size = 200, erase = false): Stroke => ({ erase, size, points: [x, y] });
 

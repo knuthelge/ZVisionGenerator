@@ -850,7 +850,7 @@ class TestWebRunner:
             assert snapshot["status"] == "completed"
             assert snapshot["outputs"] == snapshot["last_event"]["outputs"]
             assert snapshot["outputs"][0]["id"] == "result.png"
-            assert snapshot["outputs"][0]["url"] == "/media/result.png"
+            assert snapshot["outputs"][0]["url"] == f"/media/result.png?v={output_path.stat().st_mtime_ns}"
             assert snapshot["outputs"][0]["media_type"] == "image"
             assert snapshot["result_path"] == str(output_path)
 

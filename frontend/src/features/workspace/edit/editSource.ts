@@ -1,4 +1,5 @@
 import { browseMediaUrl, browsePreviewUrl } from '$lib/api/browse';
+import { fileVersions } from '$lib/state/fileVersions.svelte';
 import { fileName } from '$lib/components/molecules/assetDetails';
 import type { GalleryAsset } from '$lib/types';
 import { detectCutout } from './paintCanvas';
@@ -11,6 +12,8 @@ export interface EditSource {
   /** The file's path on the server's machine; null for a file uploaded from this device. */
   path: string | null;
   file: File | null;
+  /** How often the file at `path` was rewritten from this page when the source was made; a later count means the picture shown is out of date. 0 for an upload. */
+  version: number;
   /** The picture the painter draws, at its full size. */
   url: string;
   /** A small picture for the section's thumbnail. */
@@ -31,6 +34,7 @@ export function sourceOfPath(path: string): EditSource {
     name: fileName(path),
     path,
     file: null,
+    version: fileVersions.of(path),
     url: browseMediaUrl('reference_image', path),
     thumbUrl: browsePreviewUrl('reference_image', path),
     width: null,
@@ -42,7 +46,7 @@ export function sourceOfPath(path: string): EditSource {
 /** A file chosen from this device. */
 export function sourceOfFile(file: File): EditSource {
   const url = URL.createObjectURL(file);
-  return { id: _nextId++, name: file.name, path: null, file, url, thumbUrl: url, width: null, height: null, cutout: null };
+  return { id: _nextId++, name: file.name, path: null, file, version: 0, url, thumbUrl: url, width: null, height: null, cutout: null };
 }
 
 /**
@@ -56,6 +60,7 @@ export function sourceOfAsset(asset: GalleryAsset): EditSource {
     name: asset.filename,
     path: asset.file_path ?? null,
     file: null,
+    version: asset.file_path ? fileVersions.of(asset.file_path) : 0,
     url: asset.url,
     thumbUrl: asset.thumbnail_url || asset.url,
     width: null,

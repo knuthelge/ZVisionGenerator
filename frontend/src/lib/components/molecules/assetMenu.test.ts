@@ -339,3 +339,31 @@ describe('assetMenuEntries for a paused video frame', () => {
     expect(item(entries, 'extend')).toMatchObject({ label: 'Extend', disabled: true, hint: 'Upscaled videos can\'t be extended' });
   });
 });
+
+describe('assetMenuEntries adjust', () => {
+  const picture = (overrides: Partial<GalleryAsset> = {}): GalleryAsset => ({ ...makeAsset(undefined), file_path: '/outputs/out/a.png', ...overrides });
+  const ids = (entries: ReturnType<typeof assetMenuEntries>) => entries.map((entry) => (entry.kind === 'item' ? entry.id : entry.kind));
+
+  it('offers Adjust after Edit for an image with a file, and runs it on the asset', () => {
+    const onadjust = vi.fn();
+    const asset = picture();
+    const entries = assetMenuEntries(asset, { onedit: vi.fn(), onadjust });
+    expect(ids(entries).slice(0, 3)).toEqual(['edit', 'adjust', 'separator']);
+    const item = entries.find((entry) => entry.kind === 'item' && entry.id === 'adjust');
+    expect(item).toMatchObject({ label: 'Adjust', icon: 'sliders' });
+    if (item?.kind === 'item') item.onselect?.();
+    expect(onadjust).toHaveBeenCalledWith(asset);
+  });
+
+  it('offers Adjust without Edit, and not without a handler', () => {
+    expect(ids(assetMenuEntries(picture(), { onadjust: vi.fn() }))).toContain('adjust');
+    expect(ids(assetMenuEntries(picture(), { onedit: vi.fn() }))).not.toContain('adjust');
+  });
+
+  it('offers no Adjust for a video, an audio take, or an image without a file', () => {
+    const handlers = { onedit: vi.fn(), onadjust: vi.fn() };
+    expect(ids(assetMenuEntries(picture({ media_type: 'video', file_path: '/outputs/a.mp4' }), handlers))).not.toContain('adjust');
+    expect(ids(assetMenuEntries(makeAudioAsset(), handlers))).not.toContain('adjust');
+    expect(ids(assetMenuEntries(picture({ file_path: undefined }), handlers))).not.toContain('adjust');
+  });
+});

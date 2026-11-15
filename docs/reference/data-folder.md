@@ -94,7 +94,9 @@ This is where your pictures are saved, and your videos and audio. The Web UI sav
 
 Files can sit in a [project](../concepts/projects.md): a folder directly under the output folder. The Web UI saves into the project you have picked, and files at the top of the output folder are in no project.
 
-Files are named after the prompt set and the time: `portrait_2026-10-04_14-03-22.png`. When a name is taken, `_2`, `_3`… is added, so nothing is overwritten. An inline prompt's set is `prompt`. Videos follow the same pattern.
+Files are named after the prompt set and the time: `portrait_2026-10-04_14-03-22.png`. When a name is taken, `_2`, `_3`… is added, so nothing is overwritten, except where you ask for it: **Replace** in [Adjust](../guides/images.md#adjust) overwrites a PNG and leaves its recorded settings unchanged. An inline prompt's set is `prompt`. Videos follow the same pattern.
+
+A copy saved by Adjust is `<name>_adjusted.png` beside the original (a repeat gives `_adjusted_2`, not `_adjusted_adjusted`). It keeps the original's settings, so **Reuse settings** works as on the original, and adds `copied_from`, the path of the file it was made from, written as `~/…` inside your home folder. The Web UI shows it as **Made from**.
 
 Audio takes are lossless FLAC files named after their kind, such as `music_2026-10-04_14-03-22.flac`, `speech_…` and `sound_…`. A take keeps its settings inside the file for **Reuse settings**, but not the speaker's consent. A take made from a recording records the recording and its transcript, and one made in a saved voice shows the voice by name while that voice exists.
 

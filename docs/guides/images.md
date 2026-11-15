@@ -105,6 +105,19 @@ An edit uses the prompt, the model, **Quant**, LoRAs, **Steps**, **Seed** and **
 
 An edit is saved as `<name>_edit.png`, with a counter when that name exists. In the Web UI it goes beside the original when that is a picture in the output folder, and into the chosen [project](../concepts/projects.md) (the output folder when none is chosen) when the picture was uploaded or lives elsewhere. The file records the picture it was made from, shown as **Made from** in the viewer, but not the paint. **Reuse settings** on an edit returns to **Edit** with the same image, prompt and settings, and asks you to paint again.
 
+## Adjust a picture { #adjust }
+
+Adjust crops, rotates, flips and corrects the light and colour of a picture in the viewer. It uses no model and starts no job, so it is instant and never changes what is in the picture. It is not [Edit](#edit), which redraws parts of a picture with a model, and not [Post-processing](#sharpen-and-adjust-contrast-and-saturation), which runs while an image is generated and uses its own maths, so the same numbers look slightly different.
+
+1. **Open it** with ++a++ in the viewer, or **Adjust** in a tile's **⋯** menu.
+2. **Set the colour.** **Vibrance** strengthens muted colours and leaves strong ones, skin included, nearly as they are; below 0 it mutes the muted colours first. The **Colour mixer** changes the strength of one colour family wherever it occurs. It pushes muted tones harder than vivid ones, never clips or shifts hue, and never tints a pure grey. **Orange** covers skin. **Saturation** at -100 still gives black and white whatever the mixer says. Double-click a slider to reset it.
+3. **Compare.** Hold **Compare**, ++m++ or, on a touch screen, the picture to see the original while you hold. Outside **Crop** the comparison keeps your crop, so only the colours differ.
+4. **Save.** **Save as copy** keeps the original. **Replace** overwrites it, can't be undone, and asks the first time. Only a PNG can be replaced; a JPEG or WebP is saved as a PNG copy. A cut-out keeps its transparency.
+
+Changes stack: a copy or a replaced file is adjusted from its current pixels.
+
+The copy is saved as `<name>_adjusted.png`, with a counter when that name exists, beside the original. It is recorded as **Made from** the original and keeps the original's generation settings, so **Reuse settings** gives the original's settings and size, not the adjusted pixels.
+
 ## Get a larger image { #upscale-while-generating }
 
 Set **Upscale** to 2× or 4× and the image is made at a smaller size, enlarged and refined, so it keeps the size you picked. It is faster than making the large image directly. Turn on **Review** to see each small render first and approve or discard it before the enlarging.

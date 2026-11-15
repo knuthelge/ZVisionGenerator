@@ -60,6 +60,7 @@
     onextend,
     onuseframe,
     onedit,
+    onadjust,
     onupscale,
     onuseaudio,
     ondelete,
@@ -97,7 +98,7 @@
   // Only a tile that can start Select mode has a lead: Select outside the mode, View inside it.
   const lead = $derived(onstartselect ? (selectMode ? 'view' : 'select') : null);
   const starred = $derived(asset.starred === true);
-  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onuseframe, onupscale, onuseaudio, ondelete, onstar, onlead: onLead }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined, point, lead));
+  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onadjust: onadjust ? (picked) => onadjust(picked, moreButton) : undefined, onuseframe, onupscale, onuseaudio, ondelete, onstar, onlead: onLead }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined, point, lead));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   const thumbnail = $derived(asset.thumbnail_url || asset.url);

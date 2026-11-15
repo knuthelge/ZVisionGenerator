@@ -1,4 +1,5 @@
 import { api } from './client';
+import { fileVersions } from '$lib/state/fileVersions.svelte';
 import type { BrowseInfo, BrowseListing, BrowsePlaces, BrowsePurposeName } from '$lib/types';
 
 /** List one host folder for *purpose*; an empty path opens at the purpose's own place. */
@@ -21,9 +22,17 @@ function browseParams(purpose: BrowsePurposeName, path: string): URLSearchParams
   return new URLSearchParams({ purpose, path });
 }
 
+/** The params of a picture URL: those of the file, plus `v` once the file was rewritten from this page, so a cached older picture is not reused. */
+function pictureParams(purpose: BrowsePurposeName, path: string): URLSearchParams {
+  const params = browseParams(purpose, path);
+  const version = fileVersions.of(path);
+  if (version > 0) params.set('v', String(version));
+  return params;
+}
+
 /** Return the URL of the WebP preview of an image or video; `frame: 'last'` asks for a video's last frame instead of the one 10% in, `at` for the frame the second lies in (on the clip's own clock; not with `frame`), and `size: 'large'` for the larger picture the preview pane shows. */
 export function browsePreviewUrl(purpose: BrowsePurposeName, path: string, options: { frame?: 'last'; at?: number; size?: 'large' } = {}): string {
-  const params = browseParams(purpose, path);
+  const params = pictureParams(purpose, path);
   if (options.frame) params.set('frame', options.frame);
   if (options.at !== undefined) params.set('at', String(options.at));
   if (options.size) params.set('size', options.size);
@@ -32,7 +41,7 @@ export function browsePreviewUrl(purpose: BrowsePurposeName, path: string, optio
 
 /** Return the URL of an audio or video file itself, for a player. */
 export function browseMediaUrl(purpose: BrowsePurposeName, path: string): string {
-  return `/api/browse/media?${browseParams(purpose, path)}`;
+  return `/api/browse/media?${pictureParams(purpose, path)}`;
 }
 
 /** Return the URL of the contact sheet of a video: one JPEG of evenly spaced frames. */

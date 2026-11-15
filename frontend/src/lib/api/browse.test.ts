@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { fileVersions } from '$lib/state/fileVersions.svelte';
 import { browseInfo, browseMediaUrl, browsePreviewUrl, browseSpriteUrl } from './browse';
 
 afterEach(() => {
@@ -48,6 +49,23 @@ describe('browse media URLs', () => {
     expect(url).not.toContain('#');
     expect(query(url).pathname).toBe('/api/browse/media');
     expect(query(url).params.get('path')).toBe('C:\\Users\\me\\a&b #1.wav');
+  });
+});
+
+describe('browse picture URLs of a rewritten file', () => {
+  it('carry a version once the file was rewritten, for the preview and the media URL, and only for that file', () => {
+    const path = '/rewritten/fox.png';
+    const other = '/rewritten/owl.png';
+    const before = browsePreviewUrl('reference_image', path);
+    const otherBefore = browsePreviewUrl('reference_image', other);
+    expect(query(before).params.has('v')).toBe(false);
+
+    fileVersions.bump(path);
+
+    expect(query(browsePreviewUrl('reference_image', path)).params.get('v')).toBe('1');
+    expect(query(browseMediaUrl('reference_image', path)).params.get('v')).toBe('1');
+    expect(query(browsePreviewUrl('reference_image', path, { size: 'large' })).params.get('v')).toBe('1');
+    expect(browsePreviewUrl('reference_image', other)).toBe(otherBefore);
   });
 });
 

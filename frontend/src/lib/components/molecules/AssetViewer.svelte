@@ -20,7 +20,9 @@
 
 <script lang="ts">
   import { Icon, ShortcutList, Waveform } from '$lib/components/atoms';
+  import AdjustEditor from '$lib/components/organisms/adjust/AdjustEditor.svelte';
   import { inMenu, isPlainKey, isTyping } from '$lib/keyboard';
+  import { canAdjust } from '$lib/state/adjustState';
   import { canEdit, canExtend, canUseAsAudioTrack, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
   import { takeWords, wordBlocks } from '$lib/state/audioAsset';
   import { audioPeaks } from '$lib/state/audioPeaks.svelte';
@@ -44,8 +46,8 @@
   import { hold } from '$lib/actions/hold';
   import { FIT, actualPixelsScale, clampPan, settleZoom, zoomAt, type Zoom } from './viewerZoom';
 
-  interface Props extends Omit<AssetActionHandlers, 'onpreview' | 'onlead'> {
-    assets: GalleryAsset[];
+  interface Props extends Omit<AssetActionHandlers, 'onpreview' | 'onlead' | 'onadjust'> {
+    assets: readonly GalleryAsset[];
     /** The id of the open asset: the viewer follows it, so assets landing before or after it never move the view. */
     currentId: string | null;
     open: boolean;
@@ -62,6 +64,10 @@
     onnearend?: () => void;
     onclose: () => void;
     onnavigate: (index: number) => void;
+    /** Opens with the Adjust editor already on the shown image (a tile's Adjust item); read when the viewer opens. */
+    adjustOnOpen?: boolean;
+    /** Called after the editor saved: the saved asset, whether it replaced the original, and the id of the asset that was adjusted. */
+    onadjusted?: (saved: GalleryAsset, replaced: boolean, sourceId: string) => void;
     /** The tile that opened the viewer: the image grows out of it and shrinks back into it. */
     origin?: HTMLElement | null;
   }
@@ -78,6 +84,8 @@
     onnearend,
     onclose,
     onnavigate,
+    adjustOnOpen = false,
+    onadjusted,
     origin = null,
     onreuse,
     onreference,
@@ -162,7 +170,44 @@
   const showExtend = $derived(Boolean(onextend && asset?.media_type === 'video' && asset.extend));
   // An image offers Edit beside Use as; the button is absent without the handler.
   const showEdit = $derived(Boolean(onedit && asset && canEdit(asset)));
+  // An image offers Adjust beside Edit.
+  const showAdjust = $derived(Boolean(asset && canAdjust(asset)));
   const extendBlocked = $derived(asset ? extendReason(asset) : null);
+
+  // The Adjust editor is a layer of its own over the viewer. While it is open the viewer has no escape layer and no key
+  // listeners, and its panel is inert, so no key, tap or gesture reaches the viewer's actions.
+  let adjusting = $state(false);
+  // The asset the editor was opened on: the editor closes when the viewer moves to another (it left the list).
+  let adjustedId: string | null = null;
+  let adjustButton = $state<HTMLButtonElement | null>(null);
+  // Set while the editor is open: when it closes, focus goes back to where Adjust is.
+  let returnFocus = false;
+
+  /** Open the Adjust editor on the shown image; false for anything else. */
+  function startAdjust(): boolean {
+    if (!asset || !canAdjust(asset)) return false;
+    adjustedId = asset.id;
+    returnFocus = true;
+    helpOpen = false;
+    adjusting = true;
+    return true;
+  }
+
+  // The editor starts open when the viewer opens on a tile's Adjust, and never outlives the viewer.
+  $effect(() => {
+    if (!open) {
+      adjusting = false;
+      return;
+    }
+    untrack(() => {
+      if (adjustOnOpen) startAdjust();
+    });
+  });
+
+  $effect(() => {
+    const id = asset?.id ?? null;
+    if (untrack(() => adjusting) && id !== adjustedId) adjusting = false;
+  });
 
   // The frame the shown video is paused on, which the player reports; null while it plays, at its start, or for anything but a video.
   let point = $state<FramePoint | null>(null);
@@ -176,7 +221,7 @@
   let moreButton = $state<HTMLButtonElement | null>(null);
   const moreItems = $derived.by<ActionMenuEntry[]>(() => {
     if (!asset) return [];
-    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onupscale, onuseaudio, ondelete, onstar }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined);
+    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onedit, onadjust: () => void startAdjust(), onupscale, onuseaudio, ondelete, onstar }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined);
     const copyable = copyableText(asset);
     if (!copyable) return entries;
     const copy: ActionMenuEntry = { kind: 'item', id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(copyable) };
@@ -292,7 +337,7 @@
       measureGap();
       const shown = asset;
       // A video has no still to fly (its thumbnail is the video itself), so it fades in and out instead.
-      const from = reduceMotion() || shown?.media_type === 'video' || shown?.media_type === 'audio' ? null : originRect();
+      const from = reduceMotion() || adjustOnOpen || shown?.media_type === 'video' || shown?.media_type === 'audio' ? null : originRect();
       const stage = from ? stageContentRect() : null;
       if (!shown || !from || !stage) { phase = 'open'; return; }
       phase = 'opening';
@@ -316,7 +361,7 @@
 
   /** Close the viewer: the image shrinks back into its own tile first, while that tile is on screen. */
   function close(): void {
-    if (phase === 'closing') return;
+    if (phase === 'closing' || adjusting) return;
     const to = reduceMotion() || phase === 'opening' || asset?.media_type === 'video' || asset?.media_type === 'audio' ? null : shownTileRect();
     const from = to && asset ? mediaRect() : null;
     if (!to || !from || !asset) { onclose(); return; }
@@ -637,6 +682,8 @@
         return true;
       case 'edit':
         return runEdit();
+      case 'adjust':
+        return startAdjust();
       case 'copy': {
         const text = copyableText(asset);
         if (!text) return false;
@@ -670,8 +717,10 @@
   }
 
   $effect(() => {
-    if (!open) return;
-    queueMicrotask(() => closeButton?.focus());
+    if (!open || adjusting) return;
+    const back = returnFocus ? (adjustButton ?? moreButton) : null;
+    returnFocus = false;
+    queueMicrotask(() => (back ?? closeButton)?.focus());
     // On the overlay stack like every layer: Escape closes it, innermost first (the shortcut list before it).
     const release = pushEscapeLayer(close);
     // When X began waiting for its 2 or 4. Only that completing key is the viewer's; every other digit reaches the player and jumps.
@@ -743,8 +792,8 @@
     style:--pull={drag?.axis === 'y' ? pullBackdropOpacity(drag.offset) : undefined}
   >
     <!-- On a desktop or a tablet the viewer is a panel over the page; a click on the backdrop closes it. -->
-    <button type="button" class="viewer-backdrop" aria-label="Close viewer" tabindex="-1" onclick={close}></button>
-    <div class="viewer-panel">
+    <button type="button" class="viewer-backdrop" aria-label="Close viewer" tabindex="-1" inert={adjusting} onclick={close}></button>
+    <div class="viewer-panel" inert={adjusting}>
     <div class="viewer-bar">
       <div class="viewer-title">
         <b id="asset-viewer-title" class="truncate">{asset.filename}</b>
@@ -798,6 +847,16 @@
           title="Edit this image (M)"
           onclick={() => onedit?.(asset)}
         ><Icon name="edit" size={14} /><span class="viewer-btn-label">Edit</span></button>
+      {/if}
+      {#if showAdjust}
+        <button
+          type="button"
+          bind:this={adjustButton}
+          class="viewer-btn ui-btn"
+          data-action="adjust"
+          title="Adjust (A)"
+          onclick={() => void startAdjust()}
+        ><Icon name="sliders" size={14} /><span class="viewer-btn-label">Adjust</span></button>
       {/if}
       {#if upscaleItems.length > 0}
         <button
@@ -1116,6 +1175,11 @@
       label="Upscale"
       onclose={() => { upscaleOpen = false; }}
     />
+    {#if adjusting}
+      {#key asset.id}
+        <AdjustEditor {asset} onclose={() => { adjusting = false; }} onsaved={(saved, replaced) => onadjusted?.(saved, replaced, adjustedId ?? asset.id)} />
+      {/key}
+    {/if}
   </div>
 {/if}
 

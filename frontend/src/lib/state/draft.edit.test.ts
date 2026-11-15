@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { makeEditContext } from '../../test-utils/workspace';
+import { browsePreviewUrl } from '$lib/api/browse';
 import { draft, slotPaths } from './draft.svelte';
+import { fileVersions } from './fileVersions.svelte';
 import { heldUploads } from './heldUploads.svelte';
 import { memoryUploadStore } from './uploadStore';
 import { modelsOf } from './workflowModels';
@@ -505,5 +507,57 @@ describe('a recorded model that Edit cannot use', () => {
     prefill({ workflow: 'txt2img', model: 'flux-lite', lora: 'detail:0.8' }, 'flux-lite');
 
     expect(draft.state).toMatchObject({ workflow: 'txt2img', model: 'flux-lite', loraString: 'detail:0.8' });
+  });
+});
+
+describe('refreshing the slots that hold a rewritten file', () => {
+  beforeEach(() => {
+    freshEditDraft();
+  });
+
+  it('sets an Edit source with that path again, which drops its paint and starts the history over', () => {
+    paintedEdit('/out/rw/a.png');
+    const epoch = draft.editEpoch;
+
+    draft.refreshSlotsHolding('/out/rw/a.png');
+
+    expect(draft.state).toMatchObject({ editSourcePath: '/out/rw/a.png', ...NO_PAINT });
+    expect(heldUploads.editMask).toBeNull();
+    expect(draft.editEpoch).toBe(epoch + 1);
+  });
+
+  it('bumps the version of that path only, so only its preview URL changes', () => {
+    draft.setEditSource({ path: '/out/rw/b.png' });
+    const other = browsePreviewUrl('reference_image', '/out/rw/other.png');
+    const own = browsePreviewUrl('reference_image', '/out/rw/b.png');
+
+    draft.refreshSlotsHolding('/out/rw/b.png');
+
+    expect(browsePreviewUrl('reference_image', '/out/rw/b.png')).not.toBe(own);
+    expect(browsePreviewUrl('reference_image', '/out/rw/other.png')).toBe(other);
+    expect(fileVersions.of('/out/rw/b.png')).toBe(1);
+    expect(fileVersions.of('/out/rw/other.png')).toBe(0);
+  });
+
+  it('leaves an Edit source with another path, and its paint, alone', () => {
+    paintedEdit('/out/rw/c.png');
+    const epoch = draft.editEpoch;
+
+    draft.refreshSlotsHolding('/out/rw/d.png');
+
+    expect(draft.state.editSourcePath).toBe('/out/rw/c.png');
+    expect(draft.state.editMaskUpload).not.toBeNull();
+    expect(heldUploads.editMask).not.toBeNull();
+    expect(draft.editEpoch).toBe(epoch);
+  });
+
+  it('changes nothing for a missing path', () => {
+    paintedEdit('/out/rw/e.png');
+    const epoch = draft.editEpoch;
+    draft.refreshSlotsHolding(null);
+    draft.refreshSlotsHolding(undefined);
+    draft.refreshSlotsHolding('');
+    expect(draft.editEpoch).toBe(epoch);
+    expect(heldUploads.editMask).not.toBeNull();
   });
 });

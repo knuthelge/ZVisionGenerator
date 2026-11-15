@@ -196,11 +196,16 @@ const _movedOutputs = new Map<string, GalleryAsset>();
 // star the output was made with, so every later list it sends is read through this.
 const _starredOutputs = new Map<string, boolean>();
 
-/** Drop duplicate outputs and outputs the user deleted, show a moved output as the asset it now is, and carry the user's stars. */
+// Outputs the user adjusted with Replace during this job, by the ID they have now. The server's record of the job keeps
+// the output as it was made (its old picture URL and size), so every later list it sends is read through this.
+const _replacedOutputs = new Map<string, GalleryAsset>();
+
+/** Drop duplicate outputs and outputs the user deleted, show a moved output as the asset it now is, show a replaced one as the file it now is, and carry the user's stars. */
 function dedupeOutputs(outputs: GalleryAsset[]): GalleryAsset[] {
   const seen = new Set<string>();
   return outputs.flatMap((output) => {
-    const moved = _movedOutputs.get(output.id) ?? output;
+    const current = _movedOutputs.get(output.id) ?? output;
+    const moved = _replacedOutputs.get(current.id) ?? current;
     if (seen.has(moved.id) || _removedOutputIds.has(moved.id)) return [];
     seen.add(moved.id);
     const starred = _starredOutputs.get(moved.id);
@@ -546,6 +551,7 @@ function followActive(active: JobSnapshot | null): void {
   _removedOutputIds.clear();
   _movedOutputs.clear();
   _starredOutputs.clear();
+  _replacedOutputs.clear();
   connectSnapshot(active);
 }
 
@@ -675,6 +681,17 @@ export const jobStore = {
     if (_job) _job = { ..._job, outputs: dedupeOutputs(_job.outputs) };
   },
 
+  /**
+   * Show the current job's output as the file it is after an adjustment replaced it (same ID, new picture and size), and
+   * keep doing so for the outputs the server sends later. An asset that is not an output of the job changes nothing.
+   */
+  replaceOutput(asset: GalleryAsset): void {
+    if (!_job) return;
+    if (!_job.outputs.some((output) => output.id === asset.id)) return;
+    _replacedOutputs.set(asset.id, asset);
+    _job = { ..._job, outputs: dedupeOutputs(_job.outputs) };
+  },
+
   /** Take the response of a submit: follow the job when it is the active one, otherwise add it to the queue. */
   jobSubmitted(ctx: JobContext): void {
     if (ctx.queue_position) {
@@ -753,6 +770,7 @@ export const jobStore = {
     _removedOutputIds.clear();
     _movedOutputs.clear();
     _starredOutputs.clear();
+    _replacedOutputs.clear();
     _job = makeInitialJobState(ctx);
     _previewEventFloor = 0;
     _lastEventId = 0;

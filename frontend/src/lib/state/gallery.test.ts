@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryAsset, GalleryPage } from '$lib/types';
+import type { GalleryQuery } from './gallery.svelte';
 
 const getGallery = vi.fn<(page?: number, filter?: string, sort?: string, project?: string | null) => Promise<GalleryPage>>();
 vi.mock('$lib/api/gallery', () => ({
@@ -463,6 +464,105 @@ describe('galleryStore starred lists', () => {
       store.setView(starredAll, view([star(5)], 4));
       store.setStarred('unknown', false);
       expect(store.view(starredAll).totalCount).toBeNull();
+    });
+  });
+});
+
+describe('galleryStore adjusted copies and replaced files', () => {
+  const newest = { filter: 'all' as const, sort: 'newest' as const, starred: false };
+  const oldest = { filter: 'all' as const, sort: 'oldest' as const, starred: false };
+  const images = { filter: 'image' as const, sort: 'newest' as const, starred: false };
+  const videos = { filter: 'video' as const, sort: 'newest' as const, starred: false };
+  const starred = { filter: 'all' as const, sort: 'newest' as const, starred: true };
+  const view = (assets: GalleryAsset[], totalCount: number | null = assets.length) => ({ assets, page: 1, totalPages: 1, totalCount });
+  const idsOf = (query: GalleryQuery): string[] => store.view(query).assets.map((item) => item.id);
+
+  describe('addCopy', () => {
+    it('puts the copy first in a newest-first list and right after its source in an oldest-first one', () => {
+      store.setView(newest, view([asset(3), asset(2), asset(1)], 3));
+      store.setView(oldest, view([asset(1), asset(2), asset(3)], 3));
+
+      store.addCopy(asset(9), 'a2');
+
+      expect(idsOf(newest)).toEqual(['a9', 'a3', 'a2', 'a1']);
+      expect(idsOf(oldest)).toEqual(['a1', 'a2', 'a9', 'a3']);
+      expect(store.view(newest).totalCount).toBe(4);
+      expect(store.view(oldest).totalCount).toBe(4);
+    });
+
+    it('keeps an oldest-first list whose source is not loaded: its assets stay, and it is not dropped', () => {
+      store.setView(oldest, { assets: [asset(1), asset(2)], page: 1, totalPages: 3, totalCount: 6 });
+
+      store.addCopy(asset(9), 'a5');
+
+      expect(idsOf(oldest)).toEqual(['a1', 'a2']);
+      expect(store.view(oldest)).toMatchObject({ page: 1, totalPages: 3, totalCount: 7 });
+    });
+
+    it('skips a list whose filter or star does not admit the copy and a list that already holds it', () => {
+      store.setView(videos, view([asset(1, 'video')], 4));
+      store.setView(starred, view([{ ...asset(1), starred: true }], 2));
+      store.setView(images, view([asset(9), asset(1)], 2));
+
+      store.addCopy(asset(9), 'a1');
+
+      expect(idsOf(videos)).toEqual(['a1']);
+      expect(store.view(videos).totalCount).toBe(4);
+      expect(idsOf(starred)).toEqual(['a1']);
+      expect(store.view(starred).totalCount).toBe(2);
+      expect(idsOf(images)).toEqual(['a9', 'a1']);
+      expect(store.view(images).totalCount).toBe(2);
+    });
+
+    it('leaves an unknown count unknown, and creates no list', () => {
+      store.setView(newest, view([asset(1)], null));
+      store.addCopy(asset(9), 'a1');
+      expect(store.view(newest).totalCount).toBeNull();
+      expect(store.view(videos).assets).toEqual([]);
+    });
+
+    it('leaves the lists of another project alone', () => {
+      pickProject('A');
+      store.setView(newest, view([asset(1, 'image', 'A')], 1));
+      store.addCopy(asset(9, 'image', 'B'), 'a1');
+      expect(idsOf(newest)).toEqual(['a1']);
+      expect(store.view(newest).totalCount).toBe(1);
+    });
+
+    it('goes first in the recent list, and only once', async () => {
+      pickProject('A');
+      serve(3);
+      await store.refresh();
+      store.addCopy(asset(9, 'image', 'A'), 'a1');
+      store.addCopy(asset(9, 'image', 'A'), 'a1');
+      expect(store.allRecent.map((item) => item.id)).toEqual(['a9', 'a0', 'a1', 'a2']);
+    });
+  });
+
+  describe('replaceAsset', () => {
+    it('swaps the file by ID in every list and the recent list, keeping its place', async () => {
+      pickProject('A');
+      serve(3);
+      await store.refresh();
+      store.setView(oldest, view([asset(1), asset(2), asset(0)]));
+      const replaced = { ...asset(1), url: '/media/a1?v=2' } as GalleryAsset;
+
+      store.replaceAsset(replaced);
+
+      expect(store.assets.map((item) => item.id)).toEqual(['a0', 'a1', 'a2']);
+      expect(store.assets[1]).toEqual(replaced);
+      expect(store.view(oldest).assets[0]).toEqual(replaced);
+      expect(store.allRecent[1]).toEqual(replaced);
+      expect(store.assets[0].url).toBeUndefined();
+    });
+
+    it('changes nothing for a file no list holds, and does not touch other files', () => {
+      store.setView(newest, view([asset(1), asset(2)]));
+      const before = store.view(newest);
+      store.replaceAsset(asset(7));
+      expect(store.view(newest)).toBe(before);
+      store.replaceAsset({ ...asset(2), url: 'x' } as GalleryAsset);
+      expect(store.view(newest).assets.map((item) => item.url)).toEqual([undefined, 'x']);
     });
   });
 });

@@ -99,6 +99,17 @@ The code is in `features/workspace/edit/`. The draft's `edit…` fields belong t
 
 `features/workspace/edit/editForm.ts` builds an Edit submit from the draft, not from `new FormData(form)`, which would carry the New form's fields; it sends the fields in [Edit jobs](web-server.md#edit-jobs). A cut-out's transparency is read in the background when the picture is chosen, and an unknown one counts as opaque until it is known.
 
+## Adjust in the viewer
+
+Adjust is a layer inside the viewer (`components/organisms/adjust/AdjustEditor.svelte`, mounted by `AssetViewer.svelte` keyed on the asset), not a route or a job. It registers its own escape layer, and the viewer's key and escape effects return early while `adjusting`, so one Esc is never handled twice. The viewer's panel and backdrop are `inert` and its `close()` is guarded while the layer is open, and focus returns to the control that opened it.
+
+- **The preview does no maths of its own.** `lib/state/adjustMath.ts` builds the lookup tables and the shader in `adjustGl.ts` only looks them up and mixes. Vibrance and the Colour mixer are per-pixel uniforms with no table. The same functions drive the unit tests against `tests/fixtures/adjust_cases.json`, so a rule changes in `adjustMath.ts`, in `processing/adjust.py` and in that fixture, never in GLSL. The image is uploaded premultiplied, so a cut-out keeps its edge. The context uses `preserveDrawingBuffer: true` because WebKit does not present the first draw after a canvas resize. Without WebGL 2 the layer shows a notice and saving still works, because the server does the real work.
+- **The side panel's sections are controlled.** The three `InspectorSection`s take `open` and `ontoggle` and keep no state of their own; the open section is one value, saved under a versioned key, and the crop frame follows it.
+- **One tree for every layout.** The structure follows only `layout.mode` and `layout.short`; a touch screen changes sizes, never structure. The picture is mounted once, so turning a device does not reload it.
+- **A save is one busy state.** While a request runs the controls are `inert` and the buttons `aria-busy`. `lib/state/adjust.ts` (`adjustAndReconcile`) sends the request and updates the stores; the editor only calls `onsaved` and `onclose`. A failed save changes no store and offers no retry action, because a retry would update the stores behind the open editor; the layer stays open so the user saves again.
+- **A copy opens in a list that holds it.** `galleryStore.addCopy` inserts the copy into the lists. The Workspace then switches its viewer to History, because "This run" lists the job's outputs only. The Gallery page also pins the copy (`withAdjustedCopy`) so its viewer can show it in a list that does not admit it, such as Starred.
+- **A replaced file keeps its path, so its pixels need a new URL.** The server adds `?v=<mtime>` to image URLs, `lib/state/fileVersions.svelte.ts` holds the version of each path the browser has replaced, and `draft.refreshSlotsHolding(path)` rebuilds any start-image, reference or Edit source slot that holds that file, so none of them keeps sending the old bytes.
+
 ## Audio in the Web UI
 
 An audio take plays in `MediaPlayer` with `kind="audio"` on the stage, in the viewer and in the file browser's preview. The waveform is the timeline, a `role="slider"` with a canvas inside, drawn from the take's peaks. A gallery listing sends `peaks: null`; `audioPeaks.ensure(asset)` fetches them once per asset. A take never autoplays.

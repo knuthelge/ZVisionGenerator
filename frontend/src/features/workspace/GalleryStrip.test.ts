@@ -117,3 +117,16 @@ describe('GalleryStrip Use as menu', () => {
     expect(onreference).toHaveBeenCalledWith(expect.objectContaining({ id: 'a.png' }), 'video');
   });
 });
+
+describe('GalleryStrip Adjust', () => {
+  it('passes onadjust to its tiles, whose menus then list Adjust', () => {
+    const onadjust = vi.fn();
+    render({ assets: [{ ...makeAsset('a.png'), file_path: '/outputs/a.png' }], onadjust });
+
+    (target.querySelector('button[aria-label="More actions for a.png"]') as HTMLButtonElement).click();
+    flushSync();
+    (document.querySelector('[role="menu"] [data-action="adjust"]') as HTMLElement).click();
+    expect(onadjust).toHaveBeenCalledOnce();
+    expect(onadjust.mock.calls[0][0].id).toBe('a.png');
+  });
+});
