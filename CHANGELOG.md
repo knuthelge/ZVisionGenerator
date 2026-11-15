@@ -16,6 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **On a computer, a click on a tile always opens the viewer.** Picking files goes through Select mode.
 - **Loading spinners are a faint ring with a turning arc** everywhere in the app.
 
+### Fixed
+- **Windows installs take only PyTorch from PyTorch's CUDA index.** Install with `uv tool install z-vision-generator --torch-backend cu132` (uv 0.11.29 or newer) and update with `uv tool install --upgrade z-vision-generator --torch-backend cu132`, because `uv tool upgrade` would bring back a PyTorch without CUDA. See [Install](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install).
+
 ## [0.14.0] - 2026-11-12
 
 0.14.0 adds audio: songs, speech and sound effects, made in a new Audio tab or with `ziv-audio`. You can also edit images you already have, extend a video from any frame, and keep your work in projects. Every built-in model now shows its licence.

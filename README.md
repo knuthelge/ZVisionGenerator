@@ -26,10 +26,10 @@ uv tool install z-vision-generator
 ziv ui
 ```
 
-On Windows, add PyTorch's CUDA index to the install command, because PyPI's PyTorch for Windows has no CUDA:
+On Windows, add `--torch-backend cu132` to the install command, because PyPI's PyTorch for Windows has no CUDA (it needs uv 0.11.29 or newer):
 
 ```bash
-uv tool install z-vision-generator --index https://download.pytorch.org/whl/cu132 --index-strategy unsafe-best-match
+uv tool install z-vision-generator --torch-backend cu132
 ```
 
 Video and audio need [ffmpeg](https://ffmpeg.org/). The Web UI opens in your browser and offers to download an image model picked for your machine. Steps for each system: [Install](https://knuthelge.github.io/ZVisionGenerator/get-started/install/).
