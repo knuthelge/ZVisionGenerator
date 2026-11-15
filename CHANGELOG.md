@@ -6,18 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-15
+
+0.15.0 adds a desktop launcher, so you can install and start the app without a terminal, and brings Select mode and stars to the Gallery.
+
 ### Added
+
+#### Install
+- **Install without a terminal.** A desktop launcher for macOS, Windows and Linux installs the app and ffmpeg, starts it in your browser and offers updates. It installs its own copy beside a terminal install and shares your data and models. Its first builds are unsigned, so your system warns you the first time you open it. See [Install with the launcher](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install-with-the-launcher).
+
+#### Gallery
 - **Select mode on every screen.** Pick files in the Gallery to move, download or delete them, including every match of the filter, not only the tiles you have scrolled to. See [Select, move, download and delete](https://knuthelge.github.io/ZVisionGenerator/web-ui/gallery/#select-move-download-and-delete).
 - **Download a selection as a zip.** **Download** in Select mode saves the picked files as one uncompressed zip, with their folders kept.
 - **Star the files you want to find again.** Star from a tile or the viewer, in the Gallery and the Workspace, and show starred files only with the **★** toggle. See [Stars](https://knuthelge.github.io/ZVisionGenerator/web-ui/gallery/#stars).
 - **Pull down in the Gallery to go back to the Workspace.** On a phone, drag down from the top of the grid, as swiping up on the Workspace preview opens the Gallery.
-- **Install without a terminal.** A desktop launcher for macOS, Windows and Linux installs the app and ffmpeg, starts it in your browser and offers updates. It installs its own copy beside a terminal install and shares your data and models. Its first builds are unsigned, so your system warns you the first time you open it. See [Install with the launcher](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install-with-the-launcher).
+- **New Gallery shortcuts.** **S** stars the focused file, **Shift**-click picks a run in Select mode, and **Alt+3** focuses the first file. See [Shortcuts](https://knuthelge.github.io/ZVisionGenerator/web-ui/shortcuts/).
 
 ### Changed
+
+#### Web UI
 - **On a computer, a click on a tile always opens the viewer.** Picking files goes through Select mode.
 - **Loading spinners are a faint ring with a turning arc** everywhere in the app.
 
 ### Fixed
+
+#### Install
 - **Windows installs take only PyTorch from PyTorch's CUDA index.** Install with `uv tool install z-vision-generator --torch-backend cu132` (uv 0.11.29 or newer) and update with `uv tool install --upgrade z-vision-generator --torch-backend cu132`, because `uv tool upgrade` would bring back a PyTorch without CUDA. See [Install](https://knuthelge.github.io/ZVisionGenerator/get-started/install/#install).
 
 ## [0.14.0] - 2026-11-12
