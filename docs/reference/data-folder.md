@@ -106,12 +106,21 @@ Paths inside your home folder, such as LoRAs, models, start images and reference
 
 ## Hugging Face token
 
-The built-in models download without an account. A **gated** model, one whose page on Hugging Face asks you to accept a license, needs a token from an account that accepted it:
+The built-in models download without an account, but a Hugging Face token helps in two ways:
 
-1. Accept the license on the model's page, signed in to Hugging Face.
-2. Save a token with `hf auth login`, or set [`HF_TOKEN`](../cli/reference.md#hf_token) (`HUGGING_FACE_HUB_TOKEN` works too) before starting the app.
+- **Higher download limits.** Hugging Face allows more downloads per few minutes with a token than without one, so big downloads are less likely to be slowed down or stopped.
+- **Gated models.** A gated model, one whose page on Hugging Face asks you to accept a license, downloads only with a token from an account that accepted it.
 
-The Config page and Models page show whether a token is found and where it comes from. When Hugging Face refuses a download, the app says which model, links to its page, and says whether to accept the license or run `hf auth login`.
+To add one:
+
+1. For a gated model, accept the license on the model's page, signed in to Hugging Face.
+2. [Create a token](https://huggingface.co/settings/tokens) on Hugging Face, choosing the **Read** token type, and add it with **Add token** on the Config page or the Models page. Hugging Face checks it before it's saved.
+
+From a terminal, `uvx hf auth login` saves a token in the same place. Setting [`HF_TOKEN`](../cli/reference.md#hf_token) (`HUGGING_FACE_HUB_TOKEN` works too) before starting the app overrides a saved token.
+
+The Config page and Models page show whether a token is found and where it comes from. When Hugging Face refuses a download, the app says which model, links to its page, and says whether to accept the license or add a token.
+
+The token is saved in the Hugging Face folder (`HF_HOME`, `~/.cache/huggingface` by default). The launcher, started from a desktop menu, doesn't see an `HF_HOME` you set only in a terminal's shell profile.
 
 ## Download speed
 

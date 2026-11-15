@@ -101,7 +101,7 @@ The docs and the error messages assume [uv](https://docs.astral.sh/uv/): `uv too
 The model is gated: its page on Hugging Face asks you to accept a license. The message names the model and links to its page.
 
 1. Accept the license on the model's page, signed in to Hugging Face.
-2. Run `hf auth login`, or set `HF_TOKEN`.
+2. Add a token with **Add token** on the Config page (or run `uvx hf auth login`, or set `HF_TOKEN`).
 
 In the Web UI the message appears as an error when you press **Generate** or **Download**, and no download dialog opens. Each message below says which step is missing. See [Hugging Face token](data-folder.md#hugging-face-token).
 
@@ -115,7 +115,7 @@ No token is set. Do both steps above.
 
 #### "Hugging Face rejected your token: …"
 
-Hugging Face no longer accepts the token. Run `hf auth login` again, or unset `HF_TOKEN` to download without one.
+Hugging Face no longer accepts the token. Replace it on the Config page or with `uvx hf auth login`, or unset `HF_TOKEN` to download without one.
 
 #### "Your Hugging Face token has no access to …"
 
@@ -124,6 +124,26 @@ The token is valid, but its account hasn't accepted this model's license. Accept
 #### "… was not found, or …"
 
 The name is wrong, or the model needs a token. Check the name first; if it is right, do both steps above.
+
+### Adding a token fails { #adding-a-token-fails }
+
+The **Add token** dialog on the Config and Models pages checks the token with Hugging Face before it saves it, and says why when it can't. See [Hugging Face token](data-folder.md#hugging-face-token).
+
+#### "That doesn't look like a Hugging Face token. …"
+
+The paste has spaces, quotes or other characters a token never has. Copy the token again with the copy button on Hugging Face's token page.
+
+#### "Use a token from your personal account, not an organization's."
+
+Organization tokens can't download models. Create a token in your own account's settings.
+
+#### "Hugging Face doesn't accept this token."
+
+The token is mistyped, revoked or expired. Create a new one and paste it.
+
+#### "Couldn't check the token with Hugging Face. …"
+
+Hugging Face didn't answer, or answered with an error. Check the internet connection and try again in a minute.
 
 ### Hugging Face can't be reached { #hugging-face-cant-be-reached }
 

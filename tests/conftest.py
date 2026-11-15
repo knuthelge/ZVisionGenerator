@@ -47,10 +47,14 @@ def _no_web_download_planning(request, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_hugging_face_token(monkeypatch):
-    """Keep every test from seeing the real Hugging Face token (env or ``hf auth login`` file); tests that need one inject it."""
+    """Keep every test from seeing or overwriting the real Hugging Face token (env or token file); tests that need one inject it."""
     import huggingface_hub
 
+    def _no_login(**_kwargs) -> None:
+        raise AssertionError("a test reached huggingface_hub.login, which would overwrite the real token file; mock it")
+
     monkeypatch.setattr(huggingface_hub, "get_token", lambda: None)
+    monkeypatch.setattr(huggingface_hub, "login", _no_login)
     for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_OIDC_RESOURCE"):
         monkeypatch.delenv(name, raising=False)
 

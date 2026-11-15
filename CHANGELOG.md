@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - **Adjust a picture without a model.** **Adjust** in the viewer (key `A`) crops, rotates and flips an image and corrects its light and colour with seven sliders, Vibrance among them, and a Colour mixer that sets the saturation of eight colour families, with a live preview and a **Compare** against the original. **Save as copy** keeps the original and links the copy back to it; **Replace** overwrites a PNG. See [Adjust a picture](https://knuthelge.github.io/ZVisionGenerator/guides/images/#adjust).
+- **Add a Hugging Face token in the app.** **Add token** on the Config and Models pages saves a token after Hugging Face checks it, for higher download limits (big downloads are less likely to be slowed down) and gated models, with no terminal and no restart. From a terminal, the messages now say `uvx hf auth login`, which works without installing anything else. See [Hugging Face token](https://knuthelge.github.io/ZVisionGenerator/reference/data-folder/#hugging-face-token).
 
 ### Fixed
 - **Sliders, checkboxes and path boxes are finger-sized on touch screens.** The larger touch sizes were being overridden by the desktop ones.

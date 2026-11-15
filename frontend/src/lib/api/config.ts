@@ -10,3 +10,8 @@ export function getConfig(): Promise<AppConfig> {
 export function updateConfig(config: WritableConfigPatch): Promise<AppConfig> {
   return api.post<AppConfig>('/api/config', config);
 }
+
+/** Check a Hugging Face token with Hugging Face and save it on the server's computer; answers where the token now comes from. */
+export function saveHfToken(token: string): Promise<{ huggingface_token_source: string | null }> {
+  return api.post<{ huggingface_token_source: string | null }>('/api/huggingface/token', { token });
+}

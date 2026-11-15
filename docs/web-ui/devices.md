@@ -15,7 +15,7 @@ ziv ui --host local
 It prints this computer's network address, for example `http://192.168.1.20:8080/`. Open that address on the other device. When Windows Firewall or macOS asks whether to allow incoming connections, allow it. If the other device still can't reach it, see [Another device can't reach the Web UI](../reference/troubleshooting.md#another-device-cant-reach-the-web-ui).
 
 !!! warning "Your network only"
-    `--host local` makes the Web UI reachable by every device on your network, with no login. Anyone who can open it can browse this computer's folders and view and play its pictures, videos and audio. Use it on a network you trust.
+    `--host local` makes the Web UI reachable by every device on your network, with no login. Anyone who can open it can browse this computer's folders, view and play its pictures, videos and audio, and replace its Hugging Face token. Use it on a network you trust.
 
 The server only answers requests addressed to an IP address, `localhost`, the `--host` value, or this computer's name (bare and with `.local`), and refuses changes requested by other websites. To reach it under another name, list that name in `ZIV_UI_ALLOWED_HOSTS`:
 

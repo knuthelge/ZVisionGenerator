@@ -5,7 +5,7 @@
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import type { AppConfig, WritableConfigField, WritableConfigValue } from '$lib/types';
   import { Button, Icon, Input } from '$lib/components/atoms';
-  import { Alert, FormField, KeyValueList, Panel, PathField, Select, type KeyValueItem } from '$lib/components/molecules';
+  import { Alert, FormField, HfTokenDialog, KeyValueList, Panel, PathField, Select, hfTokenItem, type KeyValueItem } from '$lib/components/molecules';
   import { AdminPageShell } from '$lib/components/organisms';
   import { configMemory } from '$lib/state/pageMemory';
 
@@ -25,6 +25,7 @@
   let saveStatus = $state<{ tone: 'success' | 'error'; message: string } | null>(null);
   let saving = $state(false);
   let formValues = $state<Record<string, string>>({});
+  let tokenDialogOpen = $state(false);
 
   onMount(async () => {
     // Pages remember: the config a previous visit loaded shows at once; the fresh one replaces it.
@@ -190,15 +191,20 @@
     }
   }
 
-  /** Read-only folders and the Hugging Face token, which only the server's environment or `hf auth login` can change. */
+  /** Read-only folders, and the Hugging Face token with its button to add one. */
   function locationItems(c: AppConfig): KeyValueItem[] {
     return [
       { label: 'Model cache', value: c.ui.model_cache_dir ?? '(runtime-only)', mono: true, hint: 'Set when the app starts; not editable here.' },
       { label: 'LoRAs folder', value: c.ui.loras_dir ?? '(runtime-only)', mono: true, hint: 'Inside the current data folder.' },
-      c.ui.huggingface_token_configured
-        ? { label: 'Hugging Face token', value: 'Available', tone: 'success', hint: c.ui.huggingface_token_source ? `From ${c.ui.huggingface_token_source}.` : undefined }
-        : { label: 'Hugging Face token', value: 'Not set', tone: 'muted', hint: 'Run hf auth login (or set HF_TOKEN) to download gated models.' },
+      hfTokenItem(c.ui.huggingface_token_source, () => { tokenDialogOpen = true; }),
     ];
+  }
+
+  /** Show the token the server now finds, without reloading the form and losing unsaved edits. */
+  function applyTokenSource(source: string | null): void {
+    if (!config) return;
+    config.ui.huggingface_token_source = source;
+    configMemory.set(config);
   }
 
   function handleReset(): void {
@@ -280,3 +286,5 @@
     </form>
   {/if}
 </AdminPageShell>
+
+<HfTokenDialog open={tokenDialogOpen} onclose={() => { tokenDialogOpen = false; }} onsaved={applyTokenSource} />

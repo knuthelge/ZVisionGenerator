@@ -7,7 +7,7 @@ import huggingface_hub
 import pytest
 from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError, RevisionNotFoundError
 
-from zvisiongenerator.downloads.hub_access import LOGIN_SOURCE, describe_refusal, refusal_message, token_source
+from zvisiongenerator.downloads.hub_access import SAVED_SOURCE, describe_refusal, refusal_message, save_token, token_source
 
 _REPO = "owner/repo"
 _LINK = f"https://huggingface.co/{_REPO}"
@@ -42,7 +42,7 @@ def test_refusal_without_token_is_one_line_with_link_and_login(kind, wrapped):
     assert message is not None
     assert "\n" not in message
     assert _LINK in message
-    assert "hf auth login" in message
+    assert "uvx hf auth login" in message
 
 
 @pytest.mark.parametrize("kind", ["gated", "not_found", "http_403"])
@@ -114,9 +114,9 @@ def test_token_source_names_the_environment_variable_holding_the_token():
     assert token_source(read_token=lambda: "tok", environ={"HUGGING_FACE_HUB_TOKEN": "tok"}) == "HUGGING_FACE_HUB_TOKEN"
 
 
-def test_token_source_is_login_for_a_saved_token():
-    assert token_source(read_token=lambda: "tok", environ={}) == LOGIN_SOURCE
-    assert LOGIN_SOURCE == "hf auth login"
+def test_token_source_is_saved_for_a_saved_token():
+    assert token_source(read_token=lambda: "tok", environ={}) == SAVED_SOURCE
+    assert SAVED_SOURCE == "saved"
 
 
 def test_token_source_is_none_without_a_token():
@@ -135,7 +135,7 @@ def test_token_source_reads_hub_token_by_default(monkeypatch):
     monkeypatch.setattr(huggingface_hub, "get_token", lambda: "saved")
     monkeypatch.setenv("HF_TOKEN", "other")
 
-    assert token_source() == LOGIN_SOURCE
+    assert token_source() == SAVED_SOURCE
 
     monkeypatch.setenv("HF_TOKEN", "saved")
 
@@ -161,3 +161,46 @@ def test_describe_refusal_of_a_non_refusal_never_reads_the_token(monkeypatch):
 
     assert describe_refusal(ValueError("bad"), _REPO) is None
     assert describe_refusal(_error(HfHubHTTPError, 500), _REPO) is None
+
+
+def _login_raising(exc: BaseException):
+    def login(**_kwargs) -> None:
+        raise exc
+
+    return login
+
+
+def test_save_token_trims_and_saves_without_git_credentials():
+    calls = []
+
+    save_token("  hf_abc\n", login=lambda **kwargs: calls.append(kwargs))
+
+    assert calls == [{"token": "hf_abc", "add_to_git_credential": False}]
+
+
+@pytest.mark.parametrize("token", ["", "  \n", "hf_ab\u200bcd", "hf_ab cd", "\u201chf_abcd\u201d", "api_org_abcd"])
+def test_save_token_refuses_a_paste_that_is_no_personal_token_without_asking_the_hub(token):
+    def login(**_kwargs) -> None:
+        raise AssertionError("login must not be called")
+
+    with pytest.raises(ValueError):
+        save_token(token, login=login)
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (_error(HfHubHTTPError, 401), ValueError),
+        (ValueError("JSON decode error"), RuntimeError),
+        (PermissionError("token file"), RuntimeError),
+        (_error(HfHubHTTPError, 500), RuntimeError),
+        (httpx.ConnectError("unreachable"), RuntimeError),
+        (httpx.LocalProtocolError("Illegal header value b'Bearer hf_secret_value'"), RuntimeError),
+    ],
+)
+def test_save_token_errors_never_quote_the_token(exc, expected):
+    with pytest.raises(expected) as raised:
+        save_token("hf_secret_value", login=_login_raising(exc))
+
+    assert "hf_secret_value" not in str(raised.value)
+    assert raised.value.__cause__ is None

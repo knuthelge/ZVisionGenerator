@@ -279,7 +279,7 @@ Extra host names the Web UI answers to, comma-separated, such as `studio.local,g
 
 ### `HF_TOKEN`
 
-Hugging Face token for gated models. `HUGGING_FACE_HUB_TOKEN` works the same, and so does a token saved with `hf auth login`. See [Hugging Face token](../reference/data-folder.md#hugging-face-token).
+Hugging Face token, for higher download limits and gated models. `HUGGING_FACE_HUB_TOKEN` works the same, and so does a token saved on the Config page or with `uvx hf auth login`; `HF_TOKEN` wins over a saved one. See [Hugging Face token](../reference/data-folder.md#hugging-face-token).
 
 ### `HF_HOME`
 

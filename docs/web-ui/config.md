@@ -20,10 +20,10 @@ The settings are saved to `config.yaml` in the data folder, which also holds set
 
 ## Folders and access
 
-These are shown for reference and can't be changed here:
+These are shown for reference; only the token can be changed here:
 
 - **Model cache**: where Hugging Face downloads go, `~/.cache/huggingface/hub` unless `HF_HOME` or `HUGGINGFACE_HUB_CACHE` says otherwise when the app starts.
 - **LoRAs folder**: `loras` in the data folder.
-- **Hugging Face token**: whether a token was found, and where it comes from. Gated models need it. See [Hugging Face token](../reference/data-folder.md#hugging-face-token).
+- **Hugging Face token**: whether a token was found, and where it comes from. A token gives higher download limits and access to gated models. **Add token** (or **Replace token**) opens a dialog to paste one; there's no button when the token comes from `HF_TOKEN`. See [Hugging Face token](../reference/data-folder.md#hugging-face-token).
 
 The [Models page](models.md#folders-and-access) has a panel of its own, with the **Models folder** (`models` in the data folder) in place of the **Model cache**.

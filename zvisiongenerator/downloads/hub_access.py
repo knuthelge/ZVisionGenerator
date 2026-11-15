@@ -1,4 +1,4 @@
-"""Hugging Face access: where the token comes from and one actionable line for a Hub refusal."""
+"""Hugging Face access: where the token comes from, saving one, and one actionable line for a Hub refusal."""
 
 from __future__ import annotations
 
@@ -6,9 +6,13 @@ import os
 from collections.abc import Callable, Mapping
 
 TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
-LOGIN_SOURCE = "hf auth login"
+SAVED_SOURCE = "saved"
 _HUB_ROOT = "https://huggingface.co"
-_LOGIN_HINT = f"run `{LOGIN_SOURCE}`"
+_TOKEN_STEPS = "add a token on the Web UI's Config page or run `uvx hf auth login`"
+_REJECTED_TOKEN = "Hugging Face doesn't accept this token."
+_NOT_A_TOKEN = "That doesn't look like a Hugging Face token. Copy it again from Hugging Face."
+_ORGANISATION_TOKEN = "Use a token from your personal account, not an organization's."
+_UNCHECKED = "Couldn't check the token with Hugging Face. Try again in a minute."
 
 
 def token_source(*, read_token: Callable[[], str | None] | None = None, environ: Mapping[str, str] | None = None) -> str | None:
@@ -19,7 +23,7 @@ def token_source(*, read_token: Callable[[], str | None] | None = None, environ:
         environ: The environment to match the token against; defaults to ``os.environ``.
 
     Returns:
-        The environment variable holding the token, ``"hf auth login"`` for a saved token, or ``None``.
+        The environment variable holding the token, ``"saved"`` for a token saved on this computer, or ``None``.
         A token reader that raises (for example an unavailable OIDC token) counts as no token.
     """
     try:
@@ -34,7 +38,7 @@ def token_source(*, read_token: Callable[[], str | None] | None = None, environ:
     for name in TOKEN_ENV_VARS:
         if env.get(name) == token:
             return name
-    return LOGIN_SOURCE
+    return SAVED_SOURCE
 
 
 def refusal_message(exc: BaseException, *, token_present: bool, repo_id: str | None = None) -> str | None:
@@ -58,7 +62,7 @@ def refusal_message(exc: BaseException, *, token_present: bool, repo_id: str | N
     link = f"{_HUB_ROOT}/{repo}" if repo else _HUB_ROOT
     license_step = f"accept its license at {link}"
     if kind == "unauthorized" and token_present:
-        return f"Hugging Face rejected your token: {_LOGIN_HINT} again or unset HF_TOKEN."
+        return "Hugging Face rejected your token: replace it on the Web UI's Config page or run `uvx hf auth login` again, or unset HF_TOKEN."
     if kind == "forbidden" and token_present:
         return f"Your Hugging Face token has no access to {target}: {license_step} with that account."
     if kind == "gated" and token_present:
@@ -66,8 +70,39 @@ def refusal_message(exc: BaseException, *, token_present: bool, repo_id: str | N
     if kind == "not_found" and token_present:
         return f"{subject} was not found, or your Hugging Face token has no access to it: check the name, or {license_step}."
     if kind == "not_found":
-        return f"{subject} was not found, or it needs a Hugging Face token: check the name, or {license_step}, then {_LOGIN_HINT}."
-    return f"{subject} needs a Hugging Face token: {license_step}, then {_LOGIN_HINT}."
+        return f"{subject} was not found, or it needs a Hugging Face token: check the name, or {license_step}, then {_TOKEN_STEPS}."
+    return f"{subject} needs a Hugging Face token: {license_step}, then {_TOKEN_STEPS}."
+
+
+def save_token(token: str, *, login: Callable[..., object] | None = None) -> None:
+    """Check *token* with Hugging Face and save it where every Hub call reads it.
+
+    Args:
+        token: The pasted token; surrounding whitespace is dropped.
+        login: Validates and saves like ``huggingface_hub.login``; defaults to it.
+
+    Raises:
+        ValueError: The paste is empty or not a token, the token belongs to an organisation, or Hugging Face rejects it.
+        RuntimeError: The token could not be checked or saved. Messages are fixed text and never contain the token.
+    """
+    token = token.strip()
+    if not token:
+        raise ValueError("Paste a token.")
+    if not token.isascii() or not token.isprintable() or any(char.isspace() for char in token):
+        raise ValueError(_NOT_A_TOKEN)
+    if token.startswith("api_org"):
+        raise ValueError(_ORGANISATION_TOKEN)
+    from huggingface_hub.errors import HfHubHTTPError
+
+    if login is None:
+        from huggingface_hub import login
+    try:
+        login(token=token, add_to_git_credential=False)
+    except HfHubHTTPError as exc:
+        status = getattr(exc.response, "status_code", None)
+        raise (ValueError(_REJECTED_TOKEN) if status == 401 else RuntimeError(_UNCHECKED)) from None
+    except Exception:  # noqa: BLE001 - transport errors can quote the token, so only fixed text leaves
+        raise RuntimeError(_UNCHECKED) from None
 
 
 def describe_refusal(exc: BaseException, repo_id: str | None = None) -> str | None:

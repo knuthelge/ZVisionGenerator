@@ -65,7 +65,6 @@ function makeConfig(): AppConfig {
       ],
       model_cache_dir: '/cache/models',
       loras_dir: '/tmp/loras',
-      huggingface_token_configured: false,
       huggingface_token_source: null,
       default_image_size: 'm',
     },
@@ -126,18 +125,24 @@ describe('ConfigPage', () => {
     toastMocks.addToast.mockReset();
   });
 
-  it('names where a configured Hugging Face token comes from', async () => {
+  it.each([
+    [null, true],
+    ['saved', true],
+    ['HF_TOKEN', false],
+  ])('offers the token dialog for a %s token: %s', async (source, offered) => {
     const config = makeConfig();
-    config.ui.huggingface_token_configured = true;
-    config.ui.huggingface_token_source = 'hf auth login';
+    config.ui.huggingface_token_source = source;
     configApiMocks.getConfig.mockResolvedValue(config);
 
     mountPage();
     await settle();
 
-    const text = target.textContent ?? '';
-    expect(text).toContain('Available');
-    expect(text).toContain('hf auth login');
+    const button = target.querySelector<HTMLButtonElement>('[data-action="hf-token"]');
+    expect(button !== null).toBe(offered);
+    if (!button) return;
+    button.click();
+    await settle();
+    expect(document.querySelector('#hft-token')).not.toBeNull();
   });
 
   it('renders editable controls only for backend-declared writable schema fields', async () => {

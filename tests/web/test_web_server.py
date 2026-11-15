@@ -159,16 +159,16 @@ class TestHuggingFaceTokenPayload:
     def test_no_token_is_not_configured(self, monkeypatch):
         ui, models = self._payloads(monkeypatch)
 
-        assert (ui["huggingface_token_configured"], ui["huggingface_token_source"]) == (False, None)
-        assert (models["huggingface_configured"], models["huggingface_token_source"]) == (False, None)
+        assert ui["huggingface_token_source"] is None
+        assert models["huggingface_token_source"] is None
 
-    def test_a_saved_token_is_configured_with_the_login_source(self, monkeypatch):
+    def test_a_saved_token_is_configured_as_saved(self, monkeypatch):
         monkeypatch.setattr(huggingface_hub, "get_token", lambda: "saved")
 
         ui, models = self._payloads(monkeypatch)
 
-        assert (ui["huggingface_token_configured"], ui["huggingface_token_source"]) == (True, "hf auth login")
-        assert (models["huggingface_configured"], models["huggingface_token_source"]) == (True, "hf auth login")
+        assert ui["huggingface_token_source"] == "saved"
+        assert models["huggingface_token_source"] == "saved"
 
     def test_an_environment_token_names_its_variable(self, monkeypatch):
         monkeypatch.setattr(huggingface_hub, "get_token", lambda: "from-env")
@@ -186,8 +186,8 @@ class TestHuggingFaceTokenPayload:
 
         ui, models = self._payloads(monkeypatch)
 
-        assert ui["huggingface_token_configured"] is False
-        assert models["huggingface_configured"] is False
+        assert ui["huggingface_token_source"] is None
+        assert models["huggingface_token_source"] is None
 
 
 def test_workspace_route_can_skip_history_asset_serialization(monkeypatch):

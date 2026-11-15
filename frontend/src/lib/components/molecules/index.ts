@@ -22,6 +22,7 @@ export { default as ToastContainer } from './ToastContainer.svelte';
 export { default as Modal } from './Modal.svelte';
 export { default as ConsentTick } from './ConsentTick.svelte';
 export { default as SaveVoiceDialog } from './SaveVoiceDialog.svelte';
+export { default as HfTokenDialog, hfTokenItem } from './HfTokenDialog.svelte';
 export { default as VoicePlay } from './VoicePlay.svelte';
 export { default as Sheet } from './Sheet.svelte';
 export { default as JobCard } from './JobCard.svelte';

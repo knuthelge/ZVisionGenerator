@@ -11,12 +11,13 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import type { AudioModelEntry, BackgroundRemovalEntry, ConversionStatus, DownloadItem, EnhancerModelEntry, CheckpointInspection, ModelDeleteInfo, ModelInventory, ModelLicence, ModelOperationResult, ModelStatusFields } from '$lib/types';
   import { Badge, Button, Icon, Input, StepProgress, Tooltip } from '$lib/components/atoms';
-  import { Alert, ConfirmDialog, EmptyState, FormField, KeyValueList, LicenceMark, ModelStatusBadges, Panel, PathField, Select } from '$lib/components/molecules';
+  import { Alert, ConfirmDialog, EmptyState, FormField, HfTokenDialog, KeyValueList, LicenceMark, ModelStatusBadges, Panel, PathField, Select, hfTokenItem } from '$lib/components/molecules';
   import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
   import { inventoryMemory } from '$lib/state/pageMemory';
 
   let inventory = $state<ModelInventory | null>(null);
+  let tokenDialogOpen = $state(false);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let notice = $state<{ tone: 'success' | 'error'; message: string } | null>(null);
@@ -563,9 +564,7 @@
         <KeyValueList items={[
           { label: 'Models folder', value: inventory.models_dir || '—', mono: true },
           { label: 'LoRAs folder', value: inventory.loras_dir || '—', mono: true },
-          inventory.huggingface_configured
-            ? { label: 'Hugging Face token', value: 'Available', tone: 'success', hint: inventory.huggingface_token_source ? `From ${inventory.huggingface_token_source}.` : undefined }
-            : { label: 'Hugging Face token', value: 'Not set', tone: 'muted', hint: 'Run hf auth login (or set HF_TOKEN) to download gated models.' },
+          hfTokenItem(inventory.huggingface_token_source, () => { tokenDialogOpen = true; }),
         ]} />
       </Panel>
 
@@ -1055,8 +1054,8 @@
             <Input id="import-hf-name" type="text" name="name" placeholder="my-hf-lora" />
           </FormField>
 
-          {#if !inventory.huggingface_configured}
-            <Alert tone="warning">Run <span class="font-mono">hf auth login</span> (or set <span class="font-mono">HF_TOKEN</span>) to download gated models.</Alert>
+          {#if !inventory.huggingface_token_source}
+            <Alert tone="warning">Add a Hugging Face token above for higher download limits and gated models.</Alert>
           {/if}
 
           {@render submitRow('Download LoRA', false)}
@@ -1066,6 +1065,16 @@
     </div>
   {/if}
 </AdminPageShell>
+
+<HfTokenDialog
+  open={tokenDialogOpen}
+  onclose={() => { tokenDialogOpen = false; }}
+  onsaved={(source) => {
+    if (!inventory) return;
+    inventory.huggingface_token_source = source;
+    inventoryMemory.set(inventory);
+  }}
+/>
 
 <ConfirmDialog
   bind:open={deleteOpen}

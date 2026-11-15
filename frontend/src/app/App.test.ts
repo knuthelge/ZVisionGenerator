@@ -63,7 +63,6 @@ function makeConfig(startupView: AppConfig['ui']['startup_view'] = 'config'): Ap
       image_size_labels: [{ value: 'm', label: 'Medium' }],
       model_cache_dir: '/tmp/models',
       loras_dir: '/tmp/loras',
-      huggingface_token_configured: false,
       huggingface_token_source: null,
       default_image_size: 'm',
     },

@@ -6,7 +6,7 @@ The **Models** page (++g++ ++m++) lists every model and LoRA the app can use, wi
 
 ## Folders and access
 
-A panel at the top shows the **Models folder**, the **LoRAs folder** and whether a **Hugging Face token** was found, which gated models need. The [Config page](config.md#folders-and-access) has a similar panel, which shows the **Model cache** instead of the **Models folder**.
+A panel at the top shows the **Models folder**, the **LoRAs folder** and whether a **Hugging Face token** was found (it gives higher download limits and access to gated models), with the same **Add token** button as the Config page. The [Config page](config.md#folders-and-access) has a similar panel, which shows the **Model cache** instead of the **Models folder**.
 
 ## The tables
 

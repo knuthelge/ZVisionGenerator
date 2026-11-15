@@ -59,7 +59,6 @@ function makeInventory(): ModelInventory {
     image_models: [],
     video_models: [],
     loras: [],
-    huggingface_configured: false,
     huggingface_token_source: null,
   };
 }

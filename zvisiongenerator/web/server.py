@@ -53,6 +53,7 @@ from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, Settle
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads.declaration import declared_repo_ids
 from zvisiongenerator.downloads.flights import DownloadFlights
+from zvisiongenerator.downloads.hub_access import save_token as save_hub_token
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
 from zvisiongenerator.utils.model_metadata import alias_map, model_display_name
 from zvisiongenerator.utils import app_db
@@ -3008,6 +3009,20 @@ async def api_save_config(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     web_config = await run_in_threadpool(load_web_config)
     return build_api_config_response(web_config)
+
+
+@app.post("/api/huggingface/token")
+async def api_save_huggingface_token(request: Request) -> dict[str, str | None]:
+    """Check a pasted Hugging Face token and save it where every download reads it; never echo the token."""
+    payload = await request.json()
+    token = payload.get("token") if isinstance(payload, dict) else None
+    try:
+        await run_in_threadpool(save_hub_token, token if isinstance(token, str) else "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    return {"huggingface_token_source": hub_token_source()}
 
 
 @app.post("/api/first-run/skip")

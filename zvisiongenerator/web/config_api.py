@@ -30,7 +30,6 @@ def build_api_config_response(web_config: WebUiConfig) -> dict[str, Any]:
             "video_model_options": list(web_config.video_model_options),
             "model_cache_dir": config_view["model_cache_dir"],
             "loras_dir": config_view["lora_dir"],
-            "huggingface_token_configured": config_view["huggingface_token_configured"],
             "huggingface_token_source": config_view["huggingface_token_source"],
             "image_size_labels": config_view["image_size_labels"],
             "default_image_size": config_view["default_image_size"],
@@ -50,7 +49,6 @@ def build_config_view(web_config: WebUiConfig) -> dict[str, Any]:
         "image_size_labels": image_size_labels,
         "model_cache_dir": model_cache_dir,
         "lora_dir": web_config.loras_dir,
-        "huggingface_token_configured": source is not None,
         "huggingface_token_source": source,
         "default_image_size": default_size,
     }
