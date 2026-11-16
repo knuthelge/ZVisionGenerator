@@ -152,6 +152,7 @@ def video_model_downloaded(
     config: dict[str, Any],
     model_name: str | None,
     platform_key: str,
+    references: bool = False,
     target_present: Callable[[DownloadTarget], bool] | None = None,
 ) -> bool:
     """Return whether every download of the video model's plan on this platform is on disk, judged without the network.
@@ -165,6 +166,7 @@ def video_model_downloaded(
         config: The app config.
         model_name: The name the model is picked by (``ltx-4``).
         platform_key: The platform whose declared files apply (``sys.platform``).
+        references: Whether the job has reference images, which plans an H3 model's reference files instead of its own.
         target_present: Tells whether one target is fully on disk; defaults to the offline cache check.
 
     Raises:
@@ -176,7 +178,7 @@ def video_model_downloaded(
         from zvisiongenerator.downloads.presence import target_present_offline
 
         target_present = target_present_offline
-    plan = video_plan(model_ref, family=family, config=config, model_name=model_name, platform_key=platform_key, upscale=False)
+    plan = video_plan(model_ref, family=family, config=config, model_name=model_name, platform_key=platform_key, upscale=False, references=references)
     return plan is not None and all(target_present(target) for target in plan)
 
 

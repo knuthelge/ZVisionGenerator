@@ -99,7 +99,7 @@ MiniMax H3 takes up to two [references](images.md#references) in **Images** on *
 - **Extend** in the Web UI keeps its own references, apart from **New**'s, and fills them with the clip's own; remove one you don't want. On the command line, pass `--reference` again on each Extend.
 - **A big camera move in the default 2 s Extend can cut to a new shot,** so give it a longer Extend, for example 4 s.
 - **A clip with references always uses MiniMax H3's own reference model,** so a fine-tune's look doesn't carry over, but its LoRAs do.
-- **The first job with references downloads about 17 GB on top of MiniMax H3** and builds a copy of the model; later jobs reuse it. See [MiniMax H3](../reference/models.md#minimax-h3).
+- **The first job with references downloads about 17 GB on top of MiniMax H3** and builds a copy of the model, which needs disk space of its own; later jobs reuse it. See [MiniMax H3](../reference/models.md#minimax-h3).
 
 ## Add sound or an audio track { #sound }
 

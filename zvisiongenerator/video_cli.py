@@ -203,27 +203,32 @@ def _load_extend_source(parser: argparse.ArgumentParser, path: str) -> ExtendSou
         parser.error(str(e))
 
 
-def _model_available_locally(model: str, config: dict[str, Any]) -> bool:
-    """Return whether every download the model's plan needs on this platform is on disk."""
+def _model_available_locally(model: str, config: dict[str, Any], *, references: bool) -> bool:
+    """Return whether the model's downloads on this platform are on disk: its own plan, or with *references*, the plan of a job with reference images."""
     aliases = alias_map(config)
     name = canonical_model_name(model, aliases=aliases, platform_key=sys.platform)
     try:
         resolved = resolve_model_path(name, aliases=aliases, platform_key=sys.platform)
         family = detect_video_model(resolved).family
-        return family != "unknown" and video_model_downloaded(resolved, family=family, config=config, model_name=name, platform_key=sys.platform)
+        if family == "unknown":
+            return False
+        plans = (False, True) if references else (False,)
+        return any(video_model_downloaded(resolved, family=family, config=config, model_name=name, platform_key=sys.platform, references=plan) for plan in plans)
     except ValueError:
         return False
 
 
-def _extend_model(model: str | None, source: ExtendSource, config: dict[str, Any]) -> str:
+def _extend_model(model: str | None, source: ExtendSource, config: dict[str, Any], *, references: bool) -> str:
     """Return the model for an extension: the one given, else the source's when available locally, else the configured default.
+
+    The source's model counts as available when its own files are on disk or, with *references*, when its reference files are; a download still missing is fetched when the job runs.
 
     Raises:
         ValueError: If no model is given and neither the source nor the config names one.
     """
     if model is not None:
         return model
-    if source.model and _model_available_locally(source.model, config):
+    if source.model and _model_available_locally(source.model, config, references=references):
         return source.model
     if source.model:
         warnings.warn(f"The model this video was made with ({source.model}) is not available locally; using the configured default model.", stacklevel=2)
@@ -436,7 +441,7 @@ def main(*, prog: str = "ziv-video") -> None:
         if inline_run:
             args.prompt = _extend_prompt(args.prompt, source)
         try:
-            args.model = _extend_model(args.model, source, config)
+            args.model = _extend_model(args.model, source, config, references=bool(args.reference_paths))
         except ValueError as e:
             parser.error(str(e))
         args.lora = _extend_lora(args.lora, source)

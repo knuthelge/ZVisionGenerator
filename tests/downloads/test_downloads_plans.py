@@ -502,6 +502,31 @@ class TestVideoModelDownloaded:
 
         assert not video_model_downloaded("o/a", family="ltx", config=self._CONFIG, model_name="ltx", platform_key="linux", target_present=lambda target: target.repo_id == "o/a")
 
+    @pytest.mark.parametrize("references", [False, True])
+    def test_references_reach_the_plan(self, monkeypatch, references):
+        seen = {}
+
+        def _video_plan(*_args, **kwargs):
+            seen.update(kwargs)
+            return ()
+
+        monkeypatch.setattr("zvisiongenerator.downloads.plans.video_plan", _video_plan)
+
+        assert video_model_downloaded("o/a", family="h3", config=self._CONFIG, model_name="h3", platform_key="linux", references=references, target_present=lambda target: True)
+        assert seen["references"] is references
+
+    def test_a_job_without_references_plans_the_plain_model_by_default(self, monkeypatch):
+        seen = {}
+
+        def _video_plan(*_args, **kwargs):
+            seen.update(kwargs)
+            return ()
+
+        monkeypatch.setattr("zvisiongenerator.downloads.plans.video_plan", _video_plan)
+
+        video_model_downloaded("o/a", family="h3", config=self._CONFIG, model_name="h3", platform_key="linux", target_present=lambda target: True)
+        assert seen["references"] is False
+
     def test_a_plan_that_cannot_be_made_is_not_downloaded(self, monkeypatch):
         self._plan(monkeypatch, None)
 

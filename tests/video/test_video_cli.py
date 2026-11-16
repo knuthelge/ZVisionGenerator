@@ -835,6 +835,63 @@ class TestVideoCliExtend:
         assert captured["args"].model == "ltx-8"
         assert any("(h3)" in message and "not available locally" in message for message in captured["warnings"])
 
+    def _plans_present(self, monkeypatch, *, plain, reference):
+        from zvisiongenerator.downloads import DownloadTarget
+
+        plain_plan = (DownloadTarget("org/h3", "rev1", ()),)
+        reference_plan = (DownloadTarget("org/h3-ref", "rev2", ()),)
+        monkeypatch.setattr("zvisiongenerator.downloads.plans.video_plan", lambda *_args, **kwargs: reference_plan if kwargs.get("references") else plain_plan)
+        present = {"org/h3"} if plain else set()
+        present |= {"org/h3-ref"} if reference else set()
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: target.repo_id in present)
+
+    def _png(self, tmp_path):
+        from PIL import Image
+
+        path = tmp_path / "p.png"
+        Image.new("RGB", (8, 8)).save(path)
+        return str(path)
+
+    def _extend_h3_source(self, monkeypatch, tmp_path, argv):
+        h3_info = make_ltx_info(family="h3", backend="h3", frame_alignment=17)
+        ltx_info = make_ltx_info()
+        return self._main(
+            monkeypatch,
+            tmp_path,
+            ["--extend", "clip.mp4", *argv],
+            source=self._source(model="h3"),
+            local_models=None,
+            detect=lambda model: ltx_info if model == "ltx-8" else h3_info,
+            config=_H3_CONFIG,
+            resolve=_h3_repo,
+        )
+
+    def test_a_source_model_with_only_its_reference_downloads_is_kept_for_references(self, monkeypatch, tmp_path):
+        self._plans_present(monkeypatch, plain=False, reference=True)
+        captured = self._extend_h3_source(monkeypatch, tmp_path, ["--reference", self._png(tmp_path)])
+        assert captured["args"].model_name == "h3"
+        assert not any("not available locally" in message for message in captured["warnings"])
+
+    def test_a_source_model_with_only_its_reference_downloads_falls_back_without_references(self, monkeypatch, tmp_path):
+        self._plans_present(monkeypatch, plain=False, reference=True)
+        captured = self._extend_h3_source(monkeypatch, tmp_path, [])
+        assert captured["args"].model == "ltx-8"
+        assert any("(h3)" in message and "not available locally" in message for message in captured["warnings"])
+
+    def test_a_source_model_with_only_its_plain_downloads_is_kept_for_references(self, monkeypatch, tmp_path):
+        self._plans_present(monkeypatch, plain=True, reference=False)
+        captured = self._extend_h3_source(monkeypatch, tmp_path, ["--reference", self._png(tmp_path)])
+        assert captured["args"].model_name == "h3"
+        assert not any("not available locally" in message for message in captured["warnings"])
+
+    def test_a_source_model_with_no_downloads_falls_back_for_references_with_a_warning(self, monkeypatch, tmp_path):
+        self._plans_present(monkeypatch, plain=False, reference=False)
+        warned: list[str] = []
+        monkeypatch.setattr(warnings, "warn", lambda message, *_args, **_kwargs: warned.append(str(message)))
+        with pytest.raises(SystemExit, match="2"):
+            self._extend_h3_source(monkeypatch, tmp_path, ["--reference", self._png(tmp_path)])
+        assert any("(h3)" in message and "not available locally" in message for message in warned)
+
     def test_a_typed_repo_id_of_an_alias_runs_as_that_alias(self, monkeypatch, tmp_path):
         data = packaged_metadata_copy()
         data["models"]["ltx-4"]["downloads"] = [{"ref": "org/ltx-mlx-q4"}]
