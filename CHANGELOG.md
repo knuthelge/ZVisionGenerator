@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - **Sliders, checkboxes and path boxes are finger-sized on touch screens.** The larger touch sizes were being overridden by the desktop ones.
+- **A zoomed image fills the screen once a tap hides the viewer's controls.** It stopped at the edges of the hidden bar, dock and strip, which stayed black; on a tablet the viewer now also reaches the screen's edges.
 - **Moving between files in the viewer no longer freezes on an iPad when a video is shown.** The soft glow of a video's colours around it is gone, since copying its frames for it stalled Safari.
 - **Starring a picture in the viewer no longer blurs it.** The thumbnail stood in for the full image until you moved to another file.
 - **Copying works when the Web UI is opened over plain HTTP from another machine.** **Copy prompt**, the Job log's **Copy error** and the Discover panel's copy button had no clipboard to use on a plain-HTTP address; they now copy there too.

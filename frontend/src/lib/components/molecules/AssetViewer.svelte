@@ -47,7 +47,7 @@
   import { pagerOutcome, pullBackdropOpacity, pullOutcome, pullTransform, type PagerOutcome } from './viewerPager';
   import { lockAxis, releaseVelocity, rubberBand, type PanAxis, type PanSample } from '$lib/actions/pan';
   import { hold } from '$lib/actions/hold';
-  import { FIT, actualPixelsScale, clampPan, settleZoom, zoomAt, type Zoom } from './viewerZoom';
+  import { FIT, actualPixelsScale, clampPan, fitOffset, settleZoom, stageReach, zoomAt, type Cover, type Zoom } from './viewerZoom';
 
   interface Props extends Omit<AssetActionHandlers, 'onpreview' | 'onadjust'> {
     assets: readonly GalleryAsset[];
@@ -215,6 +215,14 @@
   // and a zoomed image pans under one finger. A mouse click shows an image at its real pixels; a drag then pans it.
   const touchLayer = $derived(compact || layout.coarse);
   let stageEl = $state<HTMLDivElement | null>(null);
+  // The stage's whole width, padding included.
+  let stageWidth = $state(0);
+  let barHeight = $state(0);
+  let footHeight = $state(0);
+  let dockWidth = $state(0);
+  // The stage runs under the bar, the foot and a phone's side rail, so a zoomed image fills the screen once a tap hides them;
+  // its padding keeps the fitted image clear of them. A phone held sideways lays its bar over the picture on a scrim, so only its rail covers an edge.
+  const cover = $derived<Cover>({ top: chrome === 'rail' ? 0 : barHeight, right: chrome === 'rail' ? dockWidth : 0, bottom: footHeight });
   let mediaEl = $state<HTMLImageElement | null>(null);
   let zoom = $state<Zoom>(FIT);
   let zoomAnimated = $state(false);
@@ -303,11 +311,7 @@
   // Opening: the thumbnail flies from the tile to where the image will sit.
   $effect(() => {
     if (!open) return;
-    // The neighbours sit a stage padding further out than the track, so they stay clear of its edges at any width.
-    const measureGap = () => { paneGap = Math.max(0, (stageEl?.clientWidth ?? 0) - (trackEl?.clientWidth ?? 0)); };
-    window.addEventListener('resize', measureGap);
     untrack(() => {
-      measureGap();
       const shown = asset;
       // A video has no still to fly (its thumbnail is the video itself), so it fades in and out instead.
       const from = reduceMotion() || adjustOnOpen || shown?.media_type === 'video' || shown?.media_type === 'audio' ? null : originRect();
@@ -319,7 +323,7 @@
         flight = null;
       });
     });
-    return () => { window.removeEventListener('resize', measureGap); flight = null; phase = 'open'; chromeHidden = false; drag = null; helpOpen = false; popup = null; };
+    return () => { flight = null; phase = 'open'; chromeHidden = false; drag = null; helpOpen = false; popup = null; };
   });
 
   // The stand-in thumbnail shows until the image's own load event, so the flag resets only when the source changes: a new
@@ -351,18 +355,26 @@
     actualScale = scale > 1.05 ? scale : null;
   }
 
-  /** A point on screen, from the stage's centre (where the fitted image's centre sits). */
+  /** A point on screen, from the fitted image's centre. */
   function fromCentre(clientX: number, clientY: number): { x: number; y: number } {
     const box = stageEl?.getBoundingClientRect();
-    return box ? { x: clientX - box.left - box.width / 2, y: clientY - box.top - box.height / 2 } : { x: 0, y: 0 };
+    if (!box) return { x: 0, y: 0 };
+    const offset = fitOffset(cover);
+    return { x: clientX - box.left - box.width / 2 - offset.x, y: clientY - box.top - box.height / 2 - offset.y };
   }
 
   function setZoom(next: Zoom, animated: boolean): void {
     zoomAnimated = animated;
     zoom = mediaEl && stageEl
-      ? clampPan(next, { width: mediaEl.clientWidth, height: mediaEl.clientHeight }, { width: stageEl.clientWidth, height: stageEl.clientHeight })
+      ? clampPan(next, { width: mediaEl.clientWidth, height: mediaEl.clientHeight }, stageReach({ width: stageEl.clientWidth, height: stageEl.clientHeight }, cover, chromeHidden))
       : next;
   }
+
+  // Hiding the controls slides a zoomed image out to fill the screen; when they come back they cover its edges, and it stays where it is.
+  $effect(() => {
+    void chromeHidden;
+    untrack(() => { if (zoomed) setZoom(zoom, true); });
+  });
 
   /** Toggle between the fitted image and a closer look at the point (real pixels, or 2× for a small image). */
   function toggleZoomAt(clientX: number, clientY: number, minimum: number): void {
@@ -394,11 +406,13 @@
   let trackEl = $state<HTMLDivElement | null>(null);
   let paneEl = $state<HTMLDivElement | null>(null);
   let settling = $state(false);
-  // The stage's padding: the neighbours sit that much further out, so they stay clear of the stage's edges.
-  let paneGap = $state(0);
   // A tap hides the bar and the strip for a clean look at the image; another brings them back.
   let chromeHidden = $state(false);
-  const paneWidth = () => (trackEl?.clientWidth || stageEl?.clientWidth || window.innerWidth) + paneGap;
+  // The stage's padding: the neighbours sit that much further out, so they stay clear of the stage's edges at any width.
+  // A shown side rail covers its band, so the next file waits just behind it; a hidden one leaves the band open, so the next file waits past it.
+  let trackWidth = $state(0);
+  const paneGap = $derived(Math.max(0, stageWidth - trackWidth - (chromeHidden ? 0 : cover.right)));
+  const paneWidth = () => (trackWidth || window.innerWidth) + paneGap;
   const thumbOf = (item: GalleryAsset) => item.thumbnail_url || item.url;
   /** Whether an image asset has a cut-out background, so its picture sits on a checkerboard. */
   const isTransparent = (item: GalleryAsset) => item.transparent === true && item.media_type !== 'video';
@@ -443,7 +457,6 @@
     const touch = event.touches[0];
     if (!touch || event.touches.length > 1) { gesture = null; return; }
     const at = Date.now();
-    paneGap = Math.max(0, (stageEl?.clientWidth ?? 0) - (trackEl?.clientWidth ?? 0));
     gesture = zoomed
       ? { kind: 'pan', x: touch.clientX, y: touch.clientY, at, from: zoom }
       : { kind: 'swipe', x: touch.clientX, y: touch.clientY, at, axis: null, samples: [{ x: touch.clientX, y: touch.clientY, at }] };
@@ -791,12 +804,15 @@
     data-phase={phase}
     data-flight={flight !== null}
     data-chrome={chromeHidden ? 'hidden' : 'shown'}
+    style:--viewer-cover-top="{cover.top}px"
+    style:--viewer-cover-right="{cover.right}px"
+    style:--viewer-cover-bottom="{cover.bottom}px"
     style:--pull={drag?.axis === 'y' ? pullBackdropOpacity(drag.offset) : undefined}
   >
     <!-- On a desktop or a tablet the viewer is a panel over the page; a click on the backdrop closes it. -->
     <button type="button" class="viewer-backdrop" aria-label="Close viewer" tabindex="-1" inert={adjusting} onclick={close}></button>
     <div class="viewer-panel" inert={adjusting}>
-    <div class="viewer-bar" data-bar={chrome}>
+    <div class="viewer-bar" data-bar={chrome} bind:offsetHeight={barHeight}>
       <div class="vb">
         <div class="vb-head">
           <div class="vb-title">
@@ -874,6 +890,7 @@
       <!-- svelte-ignore a11y_no_static_element_interactions because the swipe and pinch duplicate the arrows, keys and click -->
       <div
         bind:this={stageEl}
+        bind:clientWidth={stageWidth}
         class="viewer-stage"
         data-touch={touchLayer}
         use:hold={{ onhold: () => { contextAt = pressAt; openPopup('more', null); }, ignore: 'button, [data-own-drag]' }}
@@ -895,7 +912,7 @@
           onclick={() => hasPrev && onnavigate(index - 1)}
         ><Icon name="chevleft" size={20} /></button>
         <!-- The pager: the shown asset between its neighbours' thumbnails, which a finger drags into view. -->
-        <div bind:this={trackEl} class="viewer-track" style:--pane-gap="{paneGap}px" style:transform={drag?.axis === 'x' ? `translateX(${drag.offset}px)` : undefined}>
+        <div bind:this={trackEl} bind:clientWidth={trackWidth} class="viewer-track" style:--pane-gap="{paneGap}px" style:transform={drag?.axis === 'x' ? `translateX(${drag.offset}px)` : undefined}>
           {#if touchLayer && hasPrev}
             <div class="viewer-pane viewer-pane-prev" aria-hidden="true">{@render neighbour(assets[index - 1])}</div>
           {/if}
@@ -1042,10 +1059,10 @@
     </div>
 
     <!-- The foot, dock and film strip, publishes its height (`--viewer-foot`) so a toast sits above it, as the Workspace's controls do. -->
-    <div class="viewer-foot" use:dockHeight={'--viewer-foot'}>
+    <div class="viewer-foot" use:dockHeight={'--viewer-foot'} bind:offsetHeight={footHeight}>
       <!-- A finger gets the toolbar's actions in a dock under the picture: the full list on a tablet, four slots on a phone, a rail on the right when a phone is held sideways. -->
       {#if acts && (chrome === 'dock' || chrome === 'phone' || chrome === 'rail')}
-        <div class="viewer-dock ui-tool-row" class:ui-tool-row-four={chrome !== 'dock'} class:ui-tool-row-wrap={chrome === 'dock'} data-dock={chrome} role="toolbar" aria-label="Actions">
+        <div bind:offsetWidth={dockWidth} class="viewer-dock ui-tool-row" class:ui-tool-row-four={chrome !== 'dock'} class:ui-tool-row-wrap={chrome === 'dock'} data-dock={chrome} role="toolbar" aria-label="Actions">
           {#if chrome === 'dock'}
             {#each acts.make as act (act.id)}
               <ViewerButton {act} variant="cell" expanded={expandedOf(act)} onact={onAct} />
@@ -1198,9 +1215,17 @@
   .asset-viewer[data-compact='false'] { padding: 24px; }
   .asset-viewer[data-compact='false'] .viewer-backdrop { background: var(--color-scrim); cursor: default; }
   .asset-viewer[data-compact='false'] .viewer-panel { flex: none; width: 100%; height: 100%; overflow: hidden; border-radius: var(--radius-lg); background: var(--color-bg-base); box-shadow: 0 24px 64px var(--color-scrim); }
+  /* A tap that hides the chrome on a tablet takes the panel to the screen's edges; the stage pads by as much (--viewer-edge), so the image stays put. */
+  @media (min-width: 768px) {
+    .asset-viewer[data-compact='false'][data-chrome='hidden'] { --viewer-edge: 24px; padding: 0; }
+    .asset-viewer[data-compact='false'][data-chrome='hidden'] .viewer-panel { border-radius: 0; box-shadow: none; }
+  }
   .viewer-foot { flex: none; }
   .viewer-bar, .viewer-main, .viewer-film { position: relative; }
-  .viewer-bar, .viewer-film { opacity: var(--pull, 1); transition: opacity 160ms ease; }
+  /* The bar and the strip lie over the stage, which runs under them. */
+  .viewer-bar, .viewer-film { z-index: 3; opacity: var(--pull, 1); transition: opacity 160ms ease; }
+  .viewer-film { background: var(--color-bg-base); }
+  .asset-viewer[data-compact='true'] .viewer-film { background: color-mix(in srgb, var(--color-bg-base) 70%, black); }
   .asset-viewer[data-chrome='hidden'] .viewer-bar, .asset-viewer[data-chrome='hidden'] .viewer-film { opacity: 0; pointer-events: none; }
   /* The bar is the container its label steps are measured in: the actions drop their words by whole groups as it narrows. */
   .viewer-bar { container: viewer-bar / inline-size; flex: none; min-height: 52px; padding: var(--sp-8) var(--sp-12); background: var(--color-bg-surface); }
@@ -1266,7 +1291,7 @@
   .viewer-bar:not([data-bar='toolbar']) .vb-head { flex: 0 1 auto; }
 
   /* The dock hides and fades with the bar and the strip (a tap, a pull), and goes while the details are a sheet over the picture. */
-  .viewer-dock { position: relative; background: var(--color-bg-surface); opacity: var(--pull, 1); transition: opacity 160ms ease; }
+  .viewer-dock { position: relative; z-index: 3; background: var(--color-bg-surface); opacity: var(--pull, 1); transition: opacity 160ms ease; }
   .asset-viewer[data-chrome='hidden'] .viewer-dock { opacity: 0; pointer-events: none; }
   .asset-viewer[data-film='false'] .viewer-dock { padding-bottom: calc(var(--sp-8) + env(safe-area-inset-bottom, 0px)); }
   /* The rail stays beside the details sheet: it is out of the picture's way at the right, and its band is already reserved. */
@@ -1290,18 +1315,28 @@
   .viewer-kbd { padding: 0 4px; border-radius: var(--radius-xs); background: var(--color-bg-surface-hover); font-family: var(--font-mono); font-size: var(--text-meta); line-height: 15px; color: var(--color-text-muted); }
   .viewer-shortcuts { position: absolute; top: 52px; right: 12px; z-index: 3; width: 280px; padding: 12px; }
   .viewer-main { display: flex; flex: 1; min-height: 0; }
-  .viewer-stage { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; padding: 20px 64px; }
+  /* The stage runs under the bar, the foot and a side rail (--viewer-cover-*), and pads by as much, so the fitted image clears them. */
+  .viewer-stage {
+    --stage-pad-y: 20px; --stage-pad-x: 64px;
+    position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center;
+    margin: calc(-1 * var(--viewer-cover-top, 0px)) calc(-1 * var(--viewer-cover-right, 0px)) calc(-1 * var(--viewer-cover-bottom, 0px)) 0;
+    padding:
+      calc(var(--stage-pad-y) + var(--viewer-edge, 0px) + var(--viewer-cover-top, 0px))
+      calc(var(--stage-pad-x) + var(--viewer-edge, 0px) + var(--viewer-cover-right, 0px))
+      calc(var(--stage-pad-y) + var(--viewer-edge, 0px) + var(--viewer-cover-bottom, 0px))
+      calc(var(--stage-pad-x) + var(--viewer-edge, 0px));
+  }
   .viewer-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius-xs); transform-origin: center; user-select: none; }
   /* A finger's hold opens our menu, not iOS's image callout (Copy, Save Image); the whole stage opts out of it. */
   .viewer-stage, .viewer-stage img { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   .viewer-media.zoomable { cursor: zoom-in; }
   .viewer-media.zoomed { position: relative; z-index: 1; cursor: grab; }
   .viewer-media.animated { transition: transform 0.18s ease-out; }
-  /* The stage clips a zoomed image; the bar and the strip stay on top of it. */
+  /* The stage clips a zoomed image at the panel's edges; the bar, the dock and the strip stay on top of it. */
   .viewer-stage { overflow: hidden; }
   /* A finger owns every gesture on the stage, so the browser neither pans nor zooms the page: only the image zooms. */
   .viewer-stage[data-touch='true'] { touch-action: none; }
-  .viewer-nav { position: absolute; top: 50%; z-index: 2; width: var(--spacing-bar); height: var(--spacing-bar); transform: translateY(-50%); }
+  .viewer-nav { position: absolute; top: calc(50% + (var(--viewer-cover-top, 0px) - var(--viewer-cover-bottom, 0px)) / 2); z-index: 2; width: var(--spacing-bar); height: var(--spacing-bar); transform: translateY(-50%); }
   .viewer-nav.prev { left: 14px; }
   .viewer-nav.next { right: 14px; }
   .viewer-details { display: flex; flex: none; flex-direction: column; width: 340px; min-height: 0; background: var(--color-bg-surface); }
@@ -1333,13 +1368,13 @@
   .film-play { position: absolute; right: 2px; bottom: 2px; display: flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: color-mix(in srgb, var(--color-bg-base) 78%, transparent); color: var(--color-text-primary); }
   .viewer-film img { display: block; width: 100%; height: 100%; object-fit: cover; }
   @media (max-width: 767px) {
-    .viewer-stage { padding: 12px 52px; }
+    .viewer-stage { --stage-pad-y: 12px; --stage-pad-x: 52px; }
     .viewer-details { position: absolute; inset: auto 0 0 0; z-index: 3; width: auto; max-height: 50%; }
   }
   /* Phone: no arrows (a swipe moves), the details rise as a sheet. */
   .asset-viewer[data-compact='true'] .viewer-nav { display: none; }
   .viewer-details-scrim { position: absolute; inset: 0; z-index: 2; background: transparent; cursor: default; }
-  .asset-viewer[data-compact='true'] .viewer-stage { padding: 8px 12px; }
+  .asset-viewer[data-compact='true'] .viewer-stage { --stage-pad-y: 8px; --stage-pad-x: 12px; }
   /* The details rise as a half sheet under the image, which moves up to make room; the strip goes meanwhile. */
   .asset-viewer[data-compact='true'] .viewer-main { flex-direction: column; }
   .asset-viewer[data-compact='true'] .viewer-details { position: static; z-index: 3; width: auto; max-height: 50%; flex: none; }

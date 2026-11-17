@@ -94,7 +94,7 @@ Tapping an image grows it out of its tile into the viewer, which fills the scree
 - **Swipe sideways** and the next image follows your finger.
 - **Pull down** and the image shrinks back into its tile.
 - **Swipe up** for its details, which rise as a sheet under the image.
-- **Tap the image** to hide the bar and the strip, and tap again to bring them back. On a video, a tap plays or pauses it instead.
+- **Tap the image** to hide the bar and the strip, and tap again to bring them back. With them hidden, a zoomed image fills the whole screen. On a video, a tap plays or pauses it instead.
 - **Pinch or double-tap** to zoom, and **press and hold** for the image's [file panel](gallery.md#the-file-panel).
 
 **The dock** under the picture holds **Reuse**, the file's own action where it has one (**Edit**, **Extend** or **Audio track**), **Download** and **More**, which opens the whole [file panel](gallery.md#the-file-panel). A tap on the picture hides the dock with the bar and the strip.

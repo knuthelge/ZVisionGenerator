@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FIT, MAX_ZOOM, actualPixelsScale, clampPan, settleZoom, zoomAt } from './viewerZoom';
+import { FIT, MAX_ZOOM, actualPixelsScale, clampPan, fitOffset, settleZoom, stageReach, zoomAt } from './viewerZoom';
 
 describe('zoomAt', () => {
   it('keeps the point under the finger in place', () => {
@@ -20,15 +20,43 @@ describe('zoomAt', () => {
 
 describe('clampPan', () => {
   const media = { width: 400, height: 300 };
-  const stage = { width: 400, height: 600 };
+  const reach = { left: 200, right: 200, top: 300, bottom: 300 };
 
   it('pans only as far as the zoomed image reaches', () => {
     // At 2× the image is 800 wide over a 400 stage: 200 px either way; 600 high over 600: no vertical pan.
-    expect(clampPan({ scale: 2, x: 500, y: 80 }, media, stage)).toEqual({ scale: 2, x: 200, y: 0 });
+    expect(clampPan({ scale: 2, x: 500, y: 80 }, media, reach)).toEqual({ scale: 2, x: 200, y: 0 });
   });
 
-  it('keeps a fitted image centred', () => {
-    expect(clampPan({ scale: 1, x: 40, y: -40 }, media, stage)).toEqual({ scale: 1, x: 0, y: 0 });
+  it('keeps a fitted image in place', () => {
+    expect(clampPan({ scale: 1, x: 40, y: -40 }, media, reach)).toEqual({ scale: 1, x: 0, y: 0 });
+  });
+
+  it('pans a zoomed image to the edges of an off-centre reach', () => {
+    // 1200 high at 4× over a reach from 100 above the fitted centre to 700 below it: its centre moves between 100 and 500.
+    const offCentre = { left: 200, right: 200, top: 100, bottom: 700 };
+    expect(clampPan({ scale: 4, x: 0, y: -1000 }, media, offCentre).y).toBe(100);
+    expect(clampPan({ scale: 4, x: 0, y: 1000 }, media, offCentre).y).toBe(500);
+  });
+});
+
+describe('stageReach', () => {
+  const stage = { width: 400, height: 800 };
+  const cover = { top: 50, right: 0, bottom: 150 };
+
+  it('reaches only the clear part while the controls show', () => {
+    // The fitted image sits centred between the bar and the foot.
+    expect(fitOffset(cover)).toEqual({ x: 0, y: -50 });
+    expect(stageReach(stage, cover, false)).toEqual({ left: 200, right: 200, top: 300, bottom: 300 });
+  });
+
+  it('reaches the whole stage while the controls are hidden', () => {
+    expect(stageReach(stage, cover, true)).toEqual({ left: 200, right: 200, top: 350, bottom: 450 });
+  });
+
+  it('reaches under a side rail only while it is hidden', () => {
+    const rail = { top: 0, right: 80, bottom: 0 };
+    expect(stageReach(stage, rail, false)).toMatchObject({ left: 160, right: 160 });
+    expect(stageReach(stage, rail, true)).toMatchObject({ left: 160, right: 240 });
   });
 });
 
