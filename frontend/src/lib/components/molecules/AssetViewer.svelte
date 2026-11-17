@@ -392,6 +392,8 @@
   let gesture: Gesture | null = null;
   // The finger went down on a video's player, which answers a tap itself: the bar and the strip stay as they are.
   let startedOnPlayer = false;
+  // The finger went down on an arrow: a swipe from there still pages, but its tap is the arrow's click alone.
+  let startedOnNav = false;
   let lastTap: { x: number; y: number; at: number } | null = null;
   let tapTimer: ReturnType<typeof setTimeout> | undefined;
   const DOUBLE_TAP_MS = 300;
@@ -450,6 +452,7 @@
     // The player's own controls take the finger: scrubbing must not step to another asset. Its picture does not: a swipe over it pages.
     if ((event.target as Element).closest('.viewer-details-scrim, [data-own-drag]') || settling || startsInScrollableWords(event.target as Element)) { gesture = null; return; }
     startedOnPlayer = (event.target as Element).closest('[data-media-player]') !== null;
+    startedOnNav = (event.target as Element).closest('.viewer-nav') !== null;
     if (event.touches.length === 2 && isImage) {
       gesture = { kind: 'pinch', ...pinchOf(event.touches), from: zoom };
       return;
@@ -511,7 +514,8 @@
     const now = Date.now();
     if (Math.abs(dx) < TAP_SLOP_PX && Math.abs(dy) < TAP_SLOP_PX && now - current.at < DOUBLE_TAP_MS) {
       drag = null;
-      if (!startedOnPlayer) onTap(touch.clientX, touch.clientY, now);
+      if (startedOnNav) lastTap = null;
+      else if (!startedOnPlayer) onTap(touch.clientX, touch.clientY, now);
       // The player fills the pane, so a tap on its picture is the only way back to a bar and a strip a tap hid on an earlier asset.
       else if (chromeHidden) chromeHidden = false;
       return;

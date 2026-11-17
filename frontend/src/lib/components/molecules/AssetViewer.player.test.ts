@@ -482,6 +482,41 @@ describe('AssetViewer with the media player', () => {
       expect(viewer().getAttribute('data-chrome')).toBe('hidden');
       vi.useRealTimers();
     });
+
+    it('moves to the next file on a tap on an arrow, and neither hides the chrome nor zooms', async () => {
+      touchLayer.coarse = true;
+      vi.useFakeTimers();
+      const onnavigate = vi.fn();
+      mountViewer({ assets: [image, makeAsset({ id: 'out/other.png', filename: 'other.png', media_type: 'image' })], onnavigate });
+      const next = document.querySelector<HTMLButtonElement>('.viewer-nav.next')!;
+
+      for (let i = 0; i < 2; i++) {
+        touch(next, 'touchstart', 100, 100);
+        touch(next, 'touchend', 100, 100);
+        next.click();
+      }
+      await vi.advanceTimersByTimeAsync(400);
+      flushSync();
+
+      expect(onnavigate).toHaveBeenCalledWith(1);
+      expect(viewer().getAttribute('data-chrome')).toBe('shown');
+      expect(document.querySelector('.viewer-media')!.getAttribute('data-zoom')).toBe('1.00');
+      vi.useRealTimers();
+    });
+
+    it('pages on a swipe that starts on an arrow', async () => {
+      touchLayer.coarse = true;
+      const onnavigate = vi.fn();
+      mountViewer({ assets: [image, makeAsset({ id: 'out/other.png', filename: 'other.png', media_type: 'image' })], onnavigate });
+      const next = document.querySelector<HTMLButtonElement>('.viewer-nav.next')!;
+
+      touch(next, 'touchstart', 300, 200);
+      touch(next, 'touchmove', 220, 202);
+      touch(next, 'touchmove', 20, 204);
+      touch(next, 'touchend', 20, 204);
+
+      expect(onnavigate).toHaveBeenCalledWith(1);
+    });
   });
 
   describe('the chrome', () => {
