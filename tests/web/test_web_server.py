@@ -501,6 +501,15 @@ def test_packaged_spa_serves_packaged_logo_asset() -> None:
     assert logo_response.headers["content-type"] == "image/png"
 
 
+def test_spa_entry_point_is_revalidated_on_every_load() -> None:
+    """The SPA page must not be reused from cache, or an installed app keeps loading an old build."""
+    with TestClient(web_server.app) as client:
+        response = client.get("/app")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+
+
 def _public_context(*, runs: int = 1, meta: str = "") -> dict[str, object]:
     return {
         "workflow": "txt2img",

@@ -314,11 +314,11 @@ async def root_redirect() -> RedirectResponse:
 
 @app.get("/app")
 async def spa_root() -> FileResponse:
-    """Serve the Svelte SPA entry point."""
+    """Serve the Svelte SPA entry point, revalidated on every load so a rebuilt UI reaches installed apps."""
     spa_index = Path(__file__).with_name("static") / "app" / "index.html"
     if not spa_index.is_file():
         raise HTTPException(status_code=503, detail="Svelte SPA not built. Run: make frontend-build")
-    return FileResponse(spa_index)
+    return FileResponse(spa_index, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/browse")
