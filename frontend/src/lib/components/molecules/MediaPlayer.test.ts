@@ -1170,7 +1170,6 @@ describe('MediaPlayer', () => {
       expect(timeline().getAttribute('aria-valuetext')).toBe('0:00');
       expect(timeText()).toBe('0:00 | 1:40');
       expect(button('Fullscreen')).toBeNull();
-      expect(target.querySelector('.ambient')).toBeNull();
     });
 
     it('reads a take under a minute in seconds', async () => {
@@ -2257,7 +2256,7 @@ describe('MediaPlayer', () => {
   });
 
   describe('a take in the viewer', () => {
-    it('is a panel-less row above its words: no picture, no ambient light, no fade of its controls', async () => {
+    it('is a panel-less row above its words: no picture, no fade of its controls', async () => {
       const take = await mountAudio();
       vi.useFakeTimers();
 
@@ -2266,245 +2265,11 @@ describe('MediaPlayer', () => {
       flushSync();
 
       expect(target.querySelector('.picture')).toBeNull();
-      expect(target.querySelector('canvas.ambient')).toBeNull();
       expect(root().getAttribute('data-chrome')).toBe('shown');
     });
   });
 
   describe('the screen', () => {
-    it('draws the ambient light only for a video in the viewer', async () => {
-      await mountVideo();
-      expect(target.querySelector('canvas.ambient')).not.toBeNull();
-
-      await mountVideo({ size: 'stage' });
-      expect(target.querySelector('canvas.ambient')).toBeNull();
-    });
-
-    describe('when the picture covers the player', () => {
-      const ambient = (): HTMLCanvasElement => target.querySelector<HTMLCanvasElement>('canvas.ambient')!;
-      const glow = (): HTMLElement => target.querySelector<HTMLElement>('.glow')!;
-      let picture = { width: 1280, height: 720 };
-
-      beforeEach(() => {
-        picture = { width: 1280, height: 720 };
-        vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) { return this.classList.contains('player') ? 1280 : 0; });
-        vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) { return this.classList.contains('player') ? 720 : 0; });
-        vi.spyOn(HTMLVideoElement.prototype, 'videoWidth', 'get').mockImplementation(() => picture.width);
-        vi.spyOn(HTMLVideoElement.prototype, 'videoHeight', 'get').mockImplementation(() => picture.height);
-      });
-
-      it('hides the light and stops painting it', async () => {
-        vi.useFakeTimers();
-        const drawImage = vi.fn();
-        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
-        const video = await mountVideo();
-        Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
-        drawImage.mockClear();
-
-        play(video);
-        vi.advanceTimersByTime(1000);
-
-        expect(glow().hidden).toBe(true);
-        expect(drawImage).not.toHaveBeenCalled();
-      });
-
-      it('shows the light and paints it when the picture leaves bands', async () => {
-        vi.useFakeTimers();
-        picture = { width: 960, height: 720 };
-        const drawImage = vi.fn();
-        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
-        const video = await mountVideo();
-        Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
-        drawImage.mockClear();
-
-        play(video);
-        vi.advanceTimersByTime(1000);
-
-        expect(glow().hidden).toBe(false);
-        expect(drawImage).toHaveBeenCalled();
-      });
-
-      it('draws the picture where it sits and its edges outward into the bands, in a canvas as wide as the player and its reach', async () => {
-        vi.useFakeTimers();
-        picture = { width: 960, height: 720 };
-        const drawImage = vi.fn();
-        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
-        const video = await mountVideo();
-        Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
-        drawImage.mockClear();
-
-        play(video);
-        vi.advanceTimersByTime(20);
-
-        // 1280 x 720 and 104 px of reach on each side: 1488 x 928 CSS pixels in 32 columns of about 46.5 px.
-        expect([ambient().width, ambient().height]).toEqual([32, 20]);
-        const [picture1, left, right, top, bottom, onto] = drawImage.mock.calls;
-        const scratch = left[0];
-        // The picture is read once, into a scratch canvas of the light's own few pixels, and the bands are drawn outward from that copy.
-        expect(picture1).toEqual([video, 6, 3, 21, 15]);
-        expect(scratch).toBeInstanceOf(HTMLCanvasElement);
-        expect(scratch).not.toBe(ambient());
-        // The left band is the picture's first column, the right band its last, then the top and bottom rows of what is drawn.
-        expect(left).toEqual([scratch, 6, 3, 1, 15, 0, 3, 6, 15]);
-        expect(right).toEqual([scratch, 26, 3, 1, 15, 27, 3, 5, 15]);
-        expect(top).toEqual([scratch, 0, 3, 32, 1, 0, 0, 32, 3]);
-        expect(bottom).toEqual([scratch, 0, 17, 32, 1, 0, 18, 32, 2]);
-        // The finished light is laid over the last one.
-        expect(onto).toEqual([scratch, 0, 0]);
-      });
-
-      it('reaches past the player by its reach, so the soft edge of the canvas is out of view', async () => {
-        await mountVideo();
-
-        expect(ambient().style.getPropertyValue('--ambient-reach')).toBe('104px');
-      });
-
-      it('lays a soft mask round the picture\'s box on the light, and none while it is hidden', async () => {
-        picture = { width: 960, height: 720 };
-        await mountVideo({ pane: { width: 1408, height: 760 } });
-        expect(glow().style.maskImage).toMatch(/^url\("data:image\/svg\+xml,/);
-
-        picture = { width: 1280, height: 720 };
-        await mountVideo();
-
-        expect(glow().hidden).toBe(true);
-        expect(glow().style.maskImage).toBe('none');
-      });
-
-      describe('while the clip plays', () => {
-        beforeEach(() => { media = installFakeMedia({ frameCallbacks: true }); });
-
-        /** A canvas context that records how much of each new picture the light takes in. */
-        function recordingContext(): { drawImage: ReturnType<typeof vi.fn>; shares: number[] } {
-          const shares: number[] = [];
-          const drawImage = vi.fn();
-          const context = { drawImage, set globalAlpha(value: number) { shares.push(value); } } as unknown as CanvasRenderingContext2D;
-          vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
-          return { drawImage, shares };
-        }
-
-        it('repaints with each picture the video shows, and not on a timer', async () => {
-          picture = { width: 960, height: 720 };
-          const { drawImage } = recordingContext();
-          const video = await mountVideo();
-          Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
-          play(video);
-          vi.useFakeTimers();
-          drawImage.mockClear();
-
-          vi.advanceTimersByTime(1000);
-          expect(drawImage).not.toHaveBeenCalled();
-
-          media.present(video, 0.5);
-          expect(drawImage).toHaveBeenCalled();
-          drawImage.mockClear();
-          media.present(video, 0.54);
-          expect(drawImage).toHaveBeenCalled();
-        });
-
-        it('takes in about a third of each new picture, so the colours glide rather than step', async () => {
-          picture = { width: 960, height: 720 };
-          const { shares } = recordingContext();
-          const video = await mountVideo();
-          Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
-          play(video);
-          shares.length = 0;
-
-          media.present(video, 0.5);
-
-          expect(shares).toContain(0.3);
-        });
-
-        it('paints a seek or a pause whole at once, so the light matches the picture', async () => {
-          picture = { width: 960, height: 720 };
-          const { shares } = recordingContext();
-          const video = await mountVideo();
-          Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
-          shares.length = 0;
-
-          video.dispatchEvent(new Event('canplay'));
-          flushSync();
-
-          expect(shares).toContain(1);
-        });
-      });
-
-      it('follows the picture when its shape changes', async () => {
-        const video = await mountVideo();
-        expect(glow().hidden).toBe(true);
-
-        picture = { width: 960, height: 720 };
-        video.dispatchEvent(new Event('resize'));
-        flushSync();
-        expect(glow().hidden).toBe(false);
-
-        picture = { width: 1280, height: 720 };
-        video.dispatchEvent(new Event('resize'));
-        flushSync();
-        expect(glow().hidden).toBe(true);
-      });
-
-      it('keeps the light off for a sliver of a pixel or two', async () => {
-        picture = { width: 1278, height: 720 };
-        await mountVideo();
-
-        expect(glow().hidden).toBe(true);
-      });
-
-      it('fills the viewer\'s pane, padding and all, rather than the player\'s own box', async () => {
-        await mountVideo({ pane: { width: 1408, height: 760 } });
-
-        // The pane is 64 px wider on each side and 20 px taller above and below.
-        expect([glow().style.left, glow().style.top, glow().style.width, glow().style.height]).toEqual(['-64px', '-20px', '1408px', '760px']);
-        // The picture fills the player, but the pane's padding is a band, so the light shows.
-        expect(glow().hidden).toBe(false);
-      });
-
-      it('hides the light only when the picture covers the whole pane', async () => {
-        await mountVideo({ pane: { width: 1280, height: 720 } });
-
-        expect(glow().hidden).toBe(true);
-      });
-
-      it('lights a clip smaller than the player all round, shown at its own size', async () => {
-        picture = { width: 640, height: 360 };
-        await mountVideo();
-
-        expect(glow().hidden).toBe(false);
-      });
-
-      it('fills the player itself in fullscreen, where the pane is not the player\'s surround', async () => {
-        const video = await mountVideo({ pane: { width: 1408, height: 760 } });
-        Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => root() });
-        document.dispatchEvent(new Event('fullscreenchange'));
-        flushSync();
-
-        expect([glow().style.left, glow().style.top, glow().style.width, glow().style.height]).toEqual(['0px', '0px', '1280px', '720px']);
-        void video;
-        Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => null });
-      });
-    });
-
-    it('repaints the ambient light only while the video plays', async () => {
-      vi.useFakeTimers();
-      vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) { return this.classList.contains('player') ? 1280 : 0; });
-      vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) { return this.classList.contains('player') ? 720 : 0; });
-      vi.spyOn(HTMLVideoElement.prototype, 'videoWidth', 'get').mockImplementation(() => 960);
-      vi.spyOn(HTMLVideoElement.prototype, 'videoHeight', 'get').mockImplementation(() => 720);
-      const drawImage = vi.fn();
-      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
-      const video = await mountVideo();
-      Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
-      drawImage.mockClear();
-
-      vi.advanceTimersByTime(1000);
-      expect(drawImage).not.toHaveBeenCalled();
-
-      play(video);
-      vi.advanceTimersByTime(1000);
-      expect(drawImage).toHaveBeenCalled();
-    });
-
     it('is a group named for the file', async () => {
       await mountVideo();
 

@@ -7,16 +7,6 @@
   const SPINNER_MS = 400;
   /** How long a seek is in flight before the loupe shows what the playhead is going to. */
   const SLOW_SEEK_MS = 150;
-  /** How much of each new picture the ambient light takes in while a video plays, so its colours glide rather than step. */
-  const AMBIENT_BLEND = 0.3;
-  /** The ambient light's width in pixels; its height follows the pane's shape. */
-  const AMBIENT_COLUMNS = 32;
-  /** How far the ambient light reaches past the pane, in CSS pixels, so its soft edge is never in view. */
-  const AMBIENT_REACH = 104;
-  /** How far the ambient light spreads past the picture, at most, in CSS pixels. */
-  const GLOW_REACH = 160;
-  /** The softening of the ambient light, in its own pixels (one is about a thirty-second of the pane's width). */
-  const AMBIENT_SOFTEN = 1.4;
   /** How long a viewer's video stays on its metadata before the browser may load the rest, so a clip paged past never downloads. */
   const WARM_MS = 300;
   /** The big Play's sizes, largest first, in CSS pixels; a picture with no room for any gets the smallest. */
@@ -50,7 +40,7 @@
   import { claimPlayback, releasePlayback } from '$lib/state/nowPlaying';
   import { videoFacts } from '$lib/state/videoFacts.svelte';
   import { spriteTile, videoSprite } from '$lib/state/videoSprite.svelte';
-  import { ambientRegion, glowMask, glowShows, glowSpread, leavesBands, shownPicture, type Box } from './mediaAmbient';
+  import { shownPicture } from './mediaPicture';
   import { FRAME_BUSY_LABEL } from './frameMenu';
   import { navigatesByKey, playerKeyCommand, type KeyTarget, type PlayerCommand } from './mediaKeys';
   import { hasOpenModal, isPlainKey, isTyping, isUnfocusedTarget } from '$lib/keyboard';
@@ -85,15 +75,13 @@
     size: 'viewer' | 'stage' | 'pane';
     /** The rows of the paused frame's menu, built by the caller; without any the time stays a plain readout. A row marked `busy` puts a spinner on the time. */
     actions?: readonly ActionMenuItem[];
-    /** The pane the viewer's player sits in, padding included, which its ambient light fills; without it the light fills the player. */
-    pane?: Box;
     /** The clip's own size, from the gallery's data: the picture and its controls are laid out from the first paint, not when the file has been read. */
     naturalSize?: { width: number; height: number } | null;
     /** Called with the frame a paused video is on, or `null` when nothing is selected. */
     onpoint?: (point: FramePoint | null) => void;
   }
 
-  let { src, kind, label, poster, filePath, peaks = [], duration = null, muted, size, actions = [], pane, naturalSize = null, onpoint }: Props = $props();
+  let { src, kind, label, poster, filePath, peaks = [], duration = null, muted, size, actions = [], naturalSize = null, onpoint }: Props = $props();
 
   const isVideo = $derived(kind === 'video');
   // Only a video outside the file browser's pane fades its chrome; the pane and a take's panel are plain rows.
@@ -103,13 +91,12 @@
   let root = $state<HTMLDivElement | null>(null);
   let video = $state<HTMLVideoElement | null>(null);
   let audio = $state<HTMLAudioElement | null>(null);
-  let ambient = $state<HTMLCanvasElement | null>(null);
   let timeline = $state<HTMLDivElement | null>(null);
   let timeEl = $state<HTMLElement | null>(null);
   let canvas = $state<HTMLCanvasElement | null>(null);
   let trackWidth = $state(0);
   let trackHeight = $state(0);
-  // The player's own size and the video's picture, which say whether the picture leaves bands for the ambient light.
+  // The player's own size and the video's picture, which place the picture in it.
   let stageWidth = $state(0);
   let stageHeight = $state(0);
   let pictureWidth = $state(0);
@@ -273,7 +260,6 @@
     }
     target = null;
     settleSlow();
-    paintAmbient();
   }
 
   function timeForFraction(at: number): number {
@@ -387,17 +373,11 @@
     },
     onseeked: landed,
     ontimeupdate: sync,
-    onloadedmetadata() {
-      sync();
-      paintAmbient();
-    },
+    onloadedmetadata: sync,
     ondurationchange: sync,
     onloadeddata: sync,
     onresize: sync,
-    oncanplay() {
-      sync();
-      paintAmbient();
-    },
+    oncanplay: sync,
     onplaying() {
       sync();
       clearWaiting();
@@ -754,105 +734,11 @@
     if (playing) requestDraw();
   });
 
-  // --- Ambient light: the picture's colours, a few pixels across, softened behind it. ---
-
-  // The light fills the viewer's pane, padding and all, and is drawn only where the picture leaves a band; with none, it is neither drawn nor shown.
-  const lightPane = $derived<Box>(!pane || fullscreen ? { width: stageWidth, height: stageHeight } : pane);
   // A clip shows no larger than its own size, except in fullscreen and in the file browser's pane, which fill what they have.
   // The clip's size: the file's once read, the gallery's until then, so nothing moves when the file arrives.
   const knownWidth = $derived(pictureWidth || naturalSize?.width || 0);
   const knownHeight = $derived(pictureHeight || naturalSize?.height || 0);
   const shown = $derived(shownPicture({ width: stageWidth, height: stageHeight }, { width: knownWidth, height: knownHeight }, fullscreen || size === 'pane'));
-  const banded = $derived(viewer && isVideo && leavesBands(lightPane, shown));
-
-  // The light is laid out like the pane with the picture in it, and its bands are the picture's own edges drawn outward.
-  const region = $derived(ambientRegion(lightPane, shown, AMBIENT_REACH, AMBIENT_COLUMNS));
-  // Where the pane lies, from the player's own corner: the padding is the same on both sides.
-  const glowBox = $derived({ left: (stageWidth - lightPane.width) / 2, top: (stageHeight - lightPane.height) / 2, width: lightPane.width, height: lightPane.height });
-  // How far the light spreads past the picture, and the soft mask that shapes it.
-  const spread = $derived(glowSpread(lightPane, shown, GLOW_REACH));
-  const lit = $derived(banded && glowShows(spread));
-  const glowMaskImage = $derived(lit ? glowMask(lightPane, shown, spread) : 'none');
-
-  // The light is built on a scratch canvas of the same tiny size, then laid over the last light: at once after a seek or a pause, a share at a time while the video plays.
-  // The picture is read once per paint, already shrunk to the light's few pixels (off the main thread where the browser can), and its edges are drawn outward from that copy, never from the full frame.
-  let scratch: HTMLCanvasElement | null = null;
-  let reading = false;
-
-  function lightFrom(source: CanvasImageSource, share: number): void {
-    if (!ambient || !region) return;
-    const ctx = ambient.getContext('2d');
-    if (!ctx) return;
-    const { columns, rows, picture } = region;
-    scratch ??= document.createElement('canvas');
-    if (scratch.width !== columns || scratch.height !== rows) {
-      scratch.width = columns;
-      scratch.height = rows;
-    }
-    const work = scratch.getContext('2d');
-    if (!work) return;
-    const right = picture.x + picture.width;
-    const bottom = picture.y + picture.height;
-    work.drawImage(source, picture.x, picture.y, picture.width, picture.height);
-    work.drawImage(scratch, picture.x, picture.y, 1, picture.height, 0, picture.y, picture.x, picture.height);
-    work.drawImage(scratch, right - 1, picture.y, 1, picture.height, right, picture.y, columns - right, picture.height);
-    work.drawImage(scratch, 0, picture.y, columns, 1, 0, 0, columns, picture.y);
-    work.drawImage(scratch, 0, bottom - 1, columns, 1, 0, bottom, columns, rows - bottom);
-    // The softness is drawn into the light's few pixels and the browser's smooth upscaling does the rest: a CSS blur over a layer this size costs a playing video frames.
-    ctx.globalAlpha = share;
-    ctx.filter = `blur(${AMBIENT_SOFTEN}px)`;
-    ctx.drawImage(scratch, 0, 0);
-    ctx.filter = 'none';
-    ctx.globalAlpha = 1;
-  }
-
-  function paintAmbient(share = 1): void {
-    const el = video;
-    const at = region;
-    if (!lit || !ambient || !el || el.readyState < 2 || !at || reading) return;
-    const width = Math.max(1, at.picture.width);
-    const height = Math.max(1, at.picture.height);
-    if (typeof createImageBitmap !== 'function') {
-      try { lightFrom(el, share); } catch { /* A frame that cannot be read leaves the last light. */ }
-      return;
-    }
-    reading = true;
-    createImageBitmap(el, { resizeWidth: width, resizeHeight: height, resizeQuality: 'low' })
-      .then((bitmap) => {
-        if (!gone) lightFrom(bitmap, share);
-        bitmap.close();
-      })
-      .catch(() => { /* A frame that cannot be read leaves the last light. */ })
-      .finally(() => { reading = false; });
-  }
-
-  // While the video plays the light follows each picture it shows, eased in over a few frames; a browser without the per-picture report follows the screen's frames.
-  $effect(() => {
-    const el = video;
-    if (!lit || reduced || !playing || !el) return;
-    let handle = 0;
-    let frameHandle = 0;
-    const perPicture = typeof el.requestVideoFrameCallback === 'function';
-    const step = (): void => {
-      if (document.visibilityState === 'visible') paintAmbient(AMBIENT_BLEND);
-      schedule();
-    };
-    const schedule = (): void => {
-      if (perPicture) handle = el.requestVideoFrameCallback(step);
-      else frameHandle = requestAnimationFrame(step);
-    };
-    schedule();
-    return () => {
-      if (perPicture) el.cancelVideoFrameCallback(handle);
-      else cancelAnimationFrame(frameHandle);
-    };
-  });
-
-  // The light is out of date when it comes back after a resize or fullscreen: paint it once as it shows.
-  $effect(() => {
-    void region;
-    if (lit) paintAmbient();
-  });
 
   // --- Facts, contact sheet, volume, screen ---
 
@@ -1126,11 +1012,6 @@
   onkeyup={onKeyup}
 >
   {#if isVideo}
-    {#if viewer}
-      <div class="glow" hidden={!lit} style:left="{glowBox.left}px" style:top="{glowBox.top}px" style:width="{glowBox.width}px" style:height="{glowBox.height}px" style:mask-image={glowMaskImage} style:-webkit-mask-image={glowMaskImage} aria-hidden="true">
-        <canvas bind:this={ambient} class="ambient" width={region?.columns ?? AMBIENT_COLUMNS} height={region?.rows ?? 18} style:--ambient-reach="{AMBIENT_REACH}px"></canvas>
-      </div>
-    {/if}
     <!-- svelte-ignore a11y_media_has_caption because generated videos have no caption tracks -->
     <!-- svelte-ignore a11y_click_events_have_key_events because the keys belong to the timeline, which has the focus -->
     <video
@@ -1266,15 +1147,9 @@
   .player { --safe-bottom: 0px; --row-gap: 8px; --ctl-h: 36px; position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; color: var(--color-text-primary); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   @media (pointer: coarse) { .player { --ctl-h: 48px; } }
   .player[data-kind='video'][data-size='viewer'] { position: absolute; inset: 0; }
-  /* The viewer's stage clips the light, so the player lets it out. */
-  .player[data-kind='video'][data-size='viewer']:not(:fullscreen) { overflow: visible; }
   .player:fullscreen { --safe-bottom: env(safe-area-inset-bottom, 0px); background: var(--color-viewer-void); }
 
   /* The picture. */
-  /* The light is the picture's edges drawn outward behind the picture and the controls. Its mask is a softly blurred rounded box round the picture, so it is strongest at the picture's edge, fades out with no line where it ends, and rounds the corners. */
-  .glow { position: absolute; z-index: 0; overflow: hidden; pointer-events: none; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: 100% 100%; mask-size: 100% 100%; }
-  /* The canvas reaches past the pane by twice the blur, so the blur's fading edge is outside it. */
-  .ambient { position: absolute; z-index: 0; top: calc(var(--ambient-reach) * -1); left: calc(var(--ambient-reach) * -1); width: calc(100% + var(--ambient-reach) * 2); height: calc(100% + var(--ambient-reach) * 2); opacity: 0.36; pointer-events: none; }
   /* A clip smaller than its player stays at its own size; the file browser's pane and fullscreen fill what they have. */
   .picture { position: relative; z-index: 1; display: block; width: 100%; height: 100%; object-fit: scale-down; cursor: pointer; }
   /* With the clip's size known (from the gallery before the file is read) the picture is laid out where it will be from the first paint; without it, it fades in once read. */

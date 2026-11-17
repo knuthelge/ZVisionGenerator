@@ -215,9 +215,6 @@
   // and a zoomed image pans under one finger. A mouse click shows an image at its real pixels; a drag then pans it.
   const touchLayer = $derived(compact || layout.coarse);
   let stageEl = $state<HTMLDivElement | null>(null);
-  // The stage's whole box, padding included: the pane a video's ambient light fills.
-  let stageWidth = $state(0);
-  let stageHeight = $state(0);
   let mediaEl = $state<HTMLImageElement | null>(null);
   let zoom = $state<Zoom>(FIT);
   let zoomAnimated = $state(false);
@@ -877,8 +874,6 @@
       <!-- svelte-ignore a11y_no_static_element_interactions because the swipe and pinch duplicate the arrows, keys and click -->
       <div
         bind:this={stageEl}
-        bind:clientWidth={stageWidth}
-        bind:clientHeight={stageHeight}
         class="viewer-stage"
         data-touch={touchLayer}
         use:hold={{ onhold: () => { contextAt = pressAt; openPopup('more', null); }, ignore: 'button, [data-own-drag]' }}
@@ -928,7 +923,7 @@
             {/if}
             {#if asset.media_type === 'video'}
               {#key asset.url}
-                <MediaPlayer bind:this={player} kind="video" size="viewer" naturalSize={asset.width && asset.height ? { width: asset.width, height: asset.height } : null} src={asset.url} label={asset.filename} poster={thumbOf(asset)} filePath={asset.file_path} duration={asset.duration} actions={frameActions} pane={{ width: stageWidth, height: stageHeight }} onpoint={(next) => { point = next; }} />
+                <MediaPlayer bind:this={player} kind="video" size="viewer" naturalSize={asset.width && asset.height ? { width: asset.width, height: asset.height } : null} src={asset.url} label={asset.filename} poster={thumbOf(asset)} filePath={asset.file_path} duration={asset.duration} actions={frameActions} onpoint={(next) => { point = next; }} />
               {/key}
             {:else}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions because the zoom is a closer look; the keys and buttons do the rest -->
