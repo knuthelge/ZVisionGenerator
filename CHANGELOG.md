@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - **The Web UI added to a phone's Home Screen picks up an update.** It could keep loading the old version of the app for hours after an update, even when closed and opened again.
+- **`ziv-video` exits with `2` when every clip fails.** A video job that ran out of memory, or failed for another reason, ended with `0` and only a log line, so a script could not tell that no clip was made.
 - **Sliders, checkboxes and path boxes are finger-sized on touch screens.** The larger touch sizes were being overridden by the desktop ones.
 - **A zoomed image fills the screen once a tap hides the viewer's controls.** It stopped at the edges of the hidden bar, dock and strip, which stayed black; on a tablet the viewer now also reaches the screen's edges.
 - **Moving between files in the viewer no longer freezes on an iPad when a video is shown.** The soft glow of a video's colours around it is gone, since copying its frames for it stalled Safari.

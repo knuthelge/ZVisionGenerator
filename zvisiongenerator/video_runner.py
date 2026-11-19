@@ -129,8 +129,8 @@ def run_video_batch(
     plan: JobPlan,
     progress_callback: ProgressCallback | None = None,
     skip_signal: SkipSignal | None = None,
-) -> None:
-    """Run the video batch generation loop.
+) -> str | None:
+    """Run the video batch generation loop and return why it produced nothing, or ``None``.
 
     The controls are those of the image batch; Next and Quit stop the running video at its next step. After a failed
     video Pause is honoured and Repeat dropped; after a Next-stopped video both are dropped.
@@ -151,6 +151,10 @@ def run_video_batch(
         progress_callback: Receives structured progress events.
         skip_signal: Control signal of the job; its queued actions and, with a review, its decisions are honoured.
 
+    Returns:
+        The last failure's message when every attempted video failed and none was saved, else ``None``. A batch with
+        at least one saved, skipped or cancelled video returns ``None``.
+
     Raises:
         ValueError: When *plan* was cancelled or does not match the batch size, or a review is requested without
             *skip_signal*.
@@ -166,7 +170,7 @@ def run_video_batch(
     if total_iterations == 0:
         print("No active prompt sets found. Exiting.")
         _emit_progress(progress_callback, "batch_completed", mode="video", total_iterations=0, completed_iterations=0)
-        return
+        return None
 
     skip = skip_signal or SkipSignal()
     seed_min, seed_max = seed_range(config)
@@ -224,7 +228,7 @@ def run_video_batch(
                         pending_action = pause_until_resumed(skip, progress_callback=progress_callback, mode="video", completed_iterations=completed_iterations, total_iterations=total_iterations)
                     if pending_action == "quit":
                         _emit_cancelled(progress_callback, completed_iterations, total_iterations)
-                        return
+                        return None
 
                     attempt += 1
                     _emit_progress(
@@ -350,7 +354,7 @@ def run_video_batch(
                     except _VideoCancelled:
                         print("\n⏹ Video cancelled.")
                         _emit_cancelled(progress_callback, completed_iterations, total_iterations)
-                        return
+                        return None
                     except (_VideoDiscarded, _VideoSkipped) as stop:
                         next_stopped = isinstance(stop, _VideoSkipped)
                         print("  Video skipped." if next_stopped else "  Small render discarded; skipping the upscale.")
@@ -409,7 +413,7 @@ def run_video_batch(
                             break
                     if action == "quit":
                         _emit_cancelled(progress_callback, completed_iterations, total_iterations)
-                        return
+                        return None
                     if action != "repeat" or next_stopped or outcome is StageOutcome.failed:
                         break
                     repeats += 1
@@ -430,6 +434,7 @@ def run_video_batch(
         total_time=total_time,
         **terminal_extra,
     )
+    return (last_failure or "Video generation failed.") if batch_failed else None
 
 
 def _clock(seconds: float) -> str:

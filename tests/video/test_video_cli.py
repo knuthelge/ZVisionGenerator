@@ -313,6 +313,7 @@ def _run_cli(
     detect=None,
     default_frames=49,
     run_error=None,
+    run_result=None,
 ):
     """Run ``main()`` with heavy steps patched out; return what the batch received plus the backend and memory-check mocks."""
     import zvisiongenerator.video_cli as video_cli
@@ -359,6 +360,7 @@ def _run_cli(
         captured.update(prompts_data=prompts_data, args=args, plan=plan)
         if run_error is not None:
             raise run_error
+        return run_result
 
     monkeypatch.setattr(video_cli, "run_video_batch", _fake_run_video_batch)
     with patch("sys.argv", ["ziv-video", "-o", str(tmp_path / "out"), *argv]):
@@ -1574,3 +1576,18 @@ class TestEstimatedTimeLine:
 
         assert "system memory" in str(caught[0].message)
         assert "ltx" not in str(caught[0].message)
+
+
+class TestVideoCliExitStatus:
+    """``main()`` exits non-zero exactly when the batch reports that every clip failed."""
+
+    _argv = ("-m", "ltx-8", "--prompt", "a dog")
+
+    def test_a_batch_where_every_clip_failed_exits_2_with_the_reason(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            _run_cli(monkeypatch, tmp_path, list(self._argv), backend=MagicMock(), run_result="CUDA out of memory")
+
+        assert "CUDA out of memory" in capsys.readouterr().err
+
+    def test_a_batch_that_produced_a_clip_or_was_stopped_exits_0(self, monkeypatch, tmp_path):
+        _run_cli(monkeypatch, tmp_path, list(self._argv), backend=MagicMock(), run_result=None)

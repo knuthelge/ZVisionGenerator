@@ -695,7 +695,7 @@ def main(*, prog: str = "ziv-video") -> None:
             # Build workflow
             workflow = build_video_workflow(args, enhance=plan.has_rewrites)
 
-            run_video_batch(
+            failure = run_video_batch(
                 backend=backend,
                 model=model,
                 model_info=model_info,
@@ -706,6 +706,10 @@ def main(*, prog: str = "ziv-video") -> None:
                 plan=plan,
                 skip_signal=skip,
             )
+            if failure is not None:
+                # Every clip failed (a runner reports a failure through its progress events, not by raising): exit as the
+                # audio CLI does for a failed generation, so a script or a bench sees that nothing was written.
+                parser.error(failure)
     finally:
         skip.stop()
 

@@ -281,6 +281,29 @@ class TestVideoFailureMessages:
         assert finished["message"] == "Extend produced no video segment."
         assert batch["message"] == "Extend produced no video segment."
 
+    def test_the_batch_returns_the_last_failure_only_when_no_video_succeeded(self):
+        outcomes = iter([StageOutcome.success, StageOutcome.failed])
+
+        def _run(request, artifacts):
+            outcome = next(outcomes)
+            artifacts.failure_message = "boom" if outcome is StageOutcome.failed else None
+            return outcome
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _run
+        args = _make_video_args(runs=2)
+        prompts = {"default": [("a prompt", None)]}
+        config: dict = {}
+        partial = run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
+
+        workflow.run.side_effect = None
+        workflow.run.return_value = StageOutcome.failed
+        args = _make_video_args(runs=1)
+        total = run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
+
+        assert partial is None
+        assert total == "Video generation failed."
+
     def test_batch_failed_carries_the_last_failed_generations_message(self):
         messages = iter(["first reason", "second reason"])
 
