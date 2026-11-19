@@ -18,6 +18,7 @@ import numpy as np
 
 from zvisiongenerator.backends.audio import snapshot_dir
 from zvisiongenerator.backends.audio.build_cancel import stop_while_building
+from zvisiongenerator.backends.audio.yue2_attention import graph_attention
 from zvisiongenerator.backends.audio.yue2_load import load_model, size_checked_weights
 from zvisiongenerator.backends.audio.yue2_mps import folded_decode_attention, semantic_head
 from zvisiongenerator.backends.audio.yue2_score import planned_meter, planned_tempo, reads_as_score, score_header, silence_vocal
@@ -139,7 +140,8 @@ class YuE2Backend:
             self._swap.restore_resident()
         stop = _CancelProbe(cancelled)
         try:
-            return self._take(request, lyrics, kind == INSTRUMENTAL, on_progress, stop)
+            with graph_attention(self._device):
+                return self._take(request, lyrics, kind == INSTRUMENTAL, on_progress, stop)
         except InterruptedError as error:
             if stop.requested:
                 raise AudioCancelled(str(error)) from error

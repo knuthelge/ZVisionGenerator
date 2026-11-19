@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - **The Web UI added to a phone's Home Screen picks up an update.** It could keep loading the old version of the app for hours after an update, even when closed and opened again.
+- **YuE2 music works on Windows and on RTX 20-series cards.** Every take failed at its first token because the PyTorch build or the card has no FlashAttention. YuE2 now uses PyTorch's standard attention there.
 - **`ziv-video` exits with `2` when every clip fails.** A video job that ran out of memory, or failed for another reason, ended with `0` and only a log line, so a script could not tell that no clip was made.
 - **Sliders, checkboxes and path boxes are finger-sized on touch screens.** The larger touch sizes were being overridden by the desktop ones.
 - **A zoomed image fills the screen once a tap hides the viewer's controls.** It stopped at the edges of the hidden bar, dock and strip, which stayed black; on a tablet the viewer now also reaches the screen's edges.
