@@ -10,8 +10,9 @@ that runs unquantized also runs at q8, with half the system memory and half the 
 Both levels can be stored for reuse (see ``utils/stored_quant.py``): NF4 through diffusers' own pre-quantized
 save, FP8 by casting one component at a time and saving it.
 
-The FP8 transformer is built empty and filled one saved tensor at a time, each cast to its storage dtype as it
-is read (see :func:`_stream_fp8_transformer`), so it is never held in memory at full precision.
+The FP8 transformer and text encoder are built empty and filled one saved tensor at a time, each cast to its
+storage dtype as it is read (see :func:`_stream_fp8_transformer` and :func:`_stream_fp8_text_encoder`), so neither
+is ever held in memory at full precision.
 
 A model whose weights are written one tensor at a time (the video transformers) pre-packs its NF4 linear layers
 instead: :func:`pack_nf4` packs each weight on the GPU as it streams past, the copy is saved in the layout
@@ -31,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 from zvisiongenerator.backends.cuda.memory import release_memory
 from zvisiongenerator.utils.file_links import link_tree
 from zvisiongenerator.utils.page_cache import drop_cached_files
-from zvisiongenerator.utils.safetensors_stream import iter_tensors
+from zvisiongenerator.utils.safetensors_stream import iter_tensors, read_header
 
 if TYPE_CHECKING:
     import torch
@@ -52,6 +53,7 @@ __all__ = [
     "place_nf4",
     "save_components",
     "swap_in_linear4bit",
+    "tied_weight_names",
     "write_fp8_copy",
 ]
 
@@ -60,6 +62,9 @@ _FILL_BATCH_BYTES = 512 * 1024**2
 _NF4_BLOCKSIZE = 64
 # What one saved NF4 weight consists of, by name suffix: the packed data and its double-quantized state.
 _NF4_PARTS = frozenset({"", "absmax", "quant_map", "nested_absmax", "nested_quant_map", "quant_state.bitsandbytes__nf4"})
+# File name stems of the saved weights: diffusers' and transformers'.
+_DIFFUSERS_WEIGHTS = "diffusion_pytorch_model"
+_TEXT_ENCODER_WEIGHTS = "model"
 # Text-encoder layers kept in the compute dtype: norms and embeddings (diffusers' defaults cover the rest).
 _TEXT_ENCODER_SKIP_PATTERNS = ("pos_embed", "patch_embed", "norm", "embed", "^proj_in$", "^proj_out$", "lm_head")
 
@@ -118,11 +123,10 @@ def _declare_compute_dtype(component: Any, storage_dtype: torch.dtype, compute_d
 def load_fp8_components(model_path: str, compute_dtype: torch.dtype) -> dict[str, Any]:
     """Load the text encoder and transformer of *model_path*, or of a stored FP8 copy of it, with FP8 weight storage.
 
-    The text encoder loads through transformers in *compute_dtype* and is cast right after (lossless for a stored
-    copy). It loads first, so its full-precision weights are released before the transformer loads.
+    Both stream from their files one tensor at a time (see :func:`_fp8_text_encoder`), so neither is held at full
+    precision. The text encoder loads first.
     """
-    text_encoder = cast_to_fp8(_load_text_encoder(model_path, compute_dtype), compute_dtype)
-    return {"text_encoder": text_encoder, "transformer": load_fp8_transformer(model_path, compute_dtype)}
+    return {"text_encoder": _fp8_text_encoder(model_path, compute_dtype), "transformer": load_fp8_transformer(model_path, compute_dtype)}
 
 
 def load_fp8_transformer(model_path: str, compute_dtype: torch.dtype, *, model_class: type[Any] | None = None, keep_patterns: tuple[str, ...] = ()) -> Any:
@@ -151,7 +155,7 @@ def write_fp8_copy(source: Path, target: Path, compute_dtype: torch.dtype, cance
     target.mkdir(parents=True, exist_ok=True)
     # The components FP8 applies to; the VAE, tokenizer, scheduler and any second text encoder are linked as they are.
     loaders = {
-        "text_encoder": lambda: cast_to_fp8(_load_text_encoder(str(source), compute_dtype), compute_dtype),
+        "text_encoder": lambda: _fp8_text_encoder(str(source), compute_dtype),
         "transformer": lambda: _stream_fp8_transformer(source / "transformer", compute_dtype),
     }
     loaders = {name: load for name, load in loaders.items() if not _is_prequantized(source / name)}
@@ -264,6 +268,94 @@ def _load_text_encoder(model_path: str, dtype: torch.dtype) -> Any:
     return HFAutoModel.from_pretrained(model_path, subfolder="text_encoder", dtype=dtype)
 
 
+def _fp8_text_encoder(model_path: str, compute_dtype: torch.dtype) -> Any:
+    """Load the text encoder of *model_path*, or of a stored FP8 copy of it, with FP8 weight storage.
+
+    It streams from its safetensors files one tensor at a time (see :func:`_stream_fp8_text_encoder`). A text
+    encoder that cannot (other weight formats, or a layout transformers converts while loading) loads through
+    transformers in *compute_dtype* and is cast right after, which is lossless for a stored copy.
+    """
+    model = _stream_fp8_text_encoder(_component_dir(model_path, "text_encoder"), compute_dtype)
+    return model if model is not None else cast_to_fp8(_load_text_encoder(model_path, compute_dtype), compute_dtype)
+
+
+def _stream_fp8_text_encoder(component_dir: Path, compute_dtype: torch.dtype) -> Any | None:
+    """Build the text encoder in *component_dir* with FP8 weight storage, reading one tensor at a time; ``None`` when it cannot stream.
+
+    The model is the one ``AutoModel.from_pretrained`` returns, created empty in *compute_dtype* and prepared with
+    :func:`cast_to_fp8`, which fixes each parameter's storage dtype. Every saved tensor is then renamed as transformers
+    renames it on load, cast to that dtype as it is read and put in place; tensors the model has no place for (the
+    language-model head a base model leaves out) are not read. Weights saved at a precision other than
+    *compute_dtype* are rounded to it before the FP8 cast, as loading through transformers does.
+
+    Returns ``None``, with nothing loaded, when the text encoder is saved quantized or in a format other than
+    safetensors, when transformers would fuse or split saved tensors while loading, or when the files do not cover
+    the model (transformers would initialise the rest at random).
+    """
+    import torch
+    import transformers
+    from accelerate import init_empty_weights
+
+    files = _weight_files(component_dir, _TEXT_ENCODER_WEIGHTS)
+    config = transformers.AutoConfig.from_pretrained(str(component_dir)) if files else None
+    if config is None or getattr(config, "quantization_config", None):
+        return None
+    with init_empty_weights():
+        model = transformers.AutoModel.from_config(config, dtype=compute_dtype)
+    names = _checkpoint_names(model, [name for path in files for name in read_header(path)[1]])
+    tied = tied_weight_names(model)
+    if names is None or model.state_dict().keys() - names.values() - tied:
+        return None
+    cast_to_fp8(model, compute_dtype)
+    fp8_names = {key for key, tensor in model.state_dict().items() if tensor.dtype == torch.float8_e4m3fn}
+    tensors = (item for path in files for item in iter_tensors(path, names.__contains__))
+    fill_weights(model, _rounded_to(((names[name], tensor) for name, tensor in tensors), fp8_names, compute_dtype), str(component_dir), skipped=tied)
+    if tied:
+        model.tie_weights()
+    return model.eval()
+
+
+def _checkpoint_names(model: Any, names: Iterable[str]) -> dict[str, str] | None:
+    """Return the name in *model* of each saved tensor in *names* that it holds, as transformers renames them on load.
+
+    A saved tensor *model* has no place for is left out of the result. Returns ``None`` when transformers would
+    fuse or split saved tensors into the model's (a converter, not a plain rename), which cannot stream tensor by tensor.
+    """
+    from transformers.conversion_mapping import get_model_conversion_mapping
+    from transformers.core_model_loading import WeightConverter, WeightRenaming, rename_source_key
+
+    mapping = get_model_conversion_mapping(model)
+    renamings = [entry for entry in mapping if isinstance(entry, WeightRenaming)]
+    converters = [entry for entry in mapping if isinstance(entry, WeightConverter)]
+    known = model.state_dict()
+    result: dict[str, str] = {}
+    for name in names:
+        renamed, converter = rename_source_key(name, renamings, converters, model.base_model_prefix, known)
+        if renamed not in known and name in known:
+            # The same second look transformers takes: a key that is already the model's own name, apart from the base-model prefix.
+            renamed, converter = rename_source_key(name, [], [], model.base_model_prefix, known)
+        if converter is not None:
+            return None
+        if renamed in known:
+            result[name] = renamed
+    return result
+
+
+def _rounded_to(tensors: Iterable[tuple[str, torch.Tensor]], fp8_names: Collection[str], compute_dtype: torch.dtype) -> Iterator[tuple[str, torch.Tensor]]:
+    """Yield *tensors*, those bound for FP8 storage (*fp8_names*) and saved in neither FP8 nor *compute_dtype* first rounded to *compute_dtype*."""
+    import torch
+
+    for name, tensor in tensors:
+        if name in fp8_names and tensor.is_floating_point() and tensor.dtype not in (torch.float8_e4m3fn, compute_dtype):
+            tensor = tensor.to(compute_dtype)
+        yield name, tensor
+
+
+def tied_weight_names(model: Any) -> set[str]:
+    """Return the names of *model*'s tied weights, which a checkpoint need not store."""
+    return set(getattr(model, "_tied_weights_keys", None) or {})
+
+
 def _component_dir(model_path: str, name: str) -> Path:
     """Return the local folder of component *name* of *model_path*, downloading it for a Hugging Face repo id."""
     local = Path(model_path).expanduser() / name
@@ -372,13 +464,13 @@ def _owned(tensor: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     return tensor.to(dtype) if tensor.dtype != dtype else tensor
 
 
-def _weight_files(component_dir: Path) -> list[Path]:
-    """Return the safetensors files diffusers would load from *component_dir* (the sharded index, else the single file)."""
-    index = component_dir / "diffusion_pytorch_model.safetensors.index.json"
+def _weight_files(component_dir: Path, stem: str = _DIFFUSERS_WEIGHTS) -> list[Path]:
+    """Return the safetensors files named *stem* that diffusers or transformers would load from *component_dir* (the sharded index, else the single file)."""
+    index = component_dir / f"{stem}.safetensors.index.json"
     if index.is_file():
         weight_map = json.loads(index.read_text(encoding="utf-8"))["weight_map"]
         return [component_dir / name for name in sorted(set(weight_map.values()))]
-    single = component_dir / "diffusion_pytorch_model.safetensors"
+    single = component_dir / f"{stem}.safetensors"
     return [single] if single.is_file() else sorted(component_dir.glob("*.safetensors"))
 
 
