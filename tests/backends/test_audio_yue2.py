@@ -566,6 +566,24 @@ class TestGenerate:
 
         assert kit.pipe.calls["semantic"]["sampling"] == {"max_tokens": 9000}
 
+    @pytest.mark.parametrize(("platform", "device"), [("cuda", "cuda"), ("mps", "mps")])
+    def test_the_token_phases_run_inside_the_graph_attention_choice_for_the_device(self, kit, monkeypatch, platform, device):
+        seen: list[tuple[str, str]] = []
+
+        @contextmanager
+        def graph_attention(device):
+            seen.append(("enter", device))
+            yield
+            seen.append(("exit", device))
+
+        monkeypatch.setattr(yue2_module, "graph_attention", graph_attention)
+        backend = _loaded(platform)
+        kit.pipe._record = lambda step, _record=kit.pipe._record: seen.append((step, "")) or _record(step)
+
+        backend.generate(_request(), MagicMock(), _never_cancelled)
+
+        assert seen[0] == ("enter", device) and ("semantic", "") in seen and seen[-1] == ("exit", device)
+
     def test_the_clip_is_stereo_48_khz_float32(self, kit):
         backend = _loaded()
 
