@@ -22,7 +22,18 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends.cuda.quant import cast_to_fp8, empty_diffusers_model, fill_weights, kept_in_compute_dtype, nf4_linear_names, nf4_storage_format, pack_nf4, place_nf4, swap_in_linear4bit
+from zvisiongenerator.backends.cuda.quant import (
+    cast_to_fp8,
+    empty_diffusers_model,
+    fill_weights,
+    kept_in_compute_dtype,
+    nf4_linear_names,
+    nf4_storage_format,
+    pack_nf4,
+    place_nf4,
+    swap_in_linear4bit,
+    tied_weight_names,
+)
 from zvisiongenerator.converters.ltx_checkpoint import CHECKPOINT_PREFIX, CONNECTOR_PREFIXES
 from zvisiongenerator.utils.model_files import ltx2_text_encoder_class
 from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, read_header, shard_files
@@ -311,7 +322,7 @@ def write_text_encoder(source_dir: Path, target: Path) -> None:
         if name in storage:
             writer.add({name: tensor.to(storage[name])})
             written.add(name)
-    _require_coverage(storage.keys() - written - _tied_names(model), str(source_dir / "text_encoder"))
+    _require_coverage(storage.keys() - written - tied_weight_names(model), str(source_dir / "text_encoder"))
     writer.close()
 
 
@@ -319,7 +330,7 @@ def load_text_encoder(source_dir: Path, *, prepared: Path, compute_dtype: torch.
     """Load the Gemma text encoder on the CPU from its *prepared* FP8 copy; *source_dir* (the repo) gives its config."""
     model = cast_to_fp8(_empty_text_encoder(source_dir, compute_dtype), compute_dtype)
     tensors = (item for path in shard_files(prepared, _INDEX_NAME) for item in iter_tensors(path))
-    fill_weights(model, tensors, str(prepared), skipped=_tied_names(model))
+    fill_weights(model, tensors, str(prepared), skipped=tied_weight_names(model))
     model.tie_weights()
     return model.eval()
 
@@ -358,12 +369,6 @@ def _text_encoder_name(name: str, known: set[str], renames: tuple[tuple[str, str
         if name.startswith(old):
             return new + name[len(old) :]
     return name
-
-
-def _tied_names(model: Any) -> set[str]:
-    """Return the names of *model*'s tied weights, which the checkpoint does not store."""
-    tied = getattr(model, "_tied_weights_keys", None) or {}
-    return set(tied)
 
 
 def _require_coverage(missing: set[str], source: str) -> None:

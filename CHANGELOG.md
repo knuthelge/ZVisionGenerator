@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **A redesigned job card and queue.** Blob stands inside a progress ring with one arc for each image and the job's percentage at its foot. A mark replaces the percentage when a job pauses or ends, and a beating dot shows that work is running. The card is never cut off: the queue folds to one line, or the column scrolls. Queued jobs show their kind, runs, model and file.
 - **A new job bar and status pill on a phone.** The bar carries the same ring, the queue length on **⋯**, the project and, once a job ends, what it saved. The status pill shows a small ring in place of the pulsing dot.
 - **The last preview of an ended job is tagged "Last preview"** instead of keeping its live percentage.
+- **Loading an image model at `q8` on Windows and Linux takes less system memory.** The text encoder is converted to 8 bits as it is read from disk instead of being held at full precision first, which saves several GB at load on models such as FLUX.2 [klein] 9B. Images are unchanged.
 
 ### Fixed
 - **The Web UI added to a phone's Home Screen picks up an update.** It could keep loading the old version of the app for hours after an update, even when closed and opened again.
