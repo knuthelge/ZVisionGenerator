@@ -2,6 +2,8 @@
 
 **Status:** Proposed (2026-11-15)
 
+> **Depends on a decision (2026-11-17):** the shipped memory tag removed the Duration note, the Length chip's mark and `POST /api/video/memory-fit`, so the "Make it in N parts" offer needs a new home before this is built.
+
 ## Problem
 
 A MiniMax H3 clip that is too long for the machine gets a **Too large** note under **Duration (s)**, and nothing else. The note only warns and H3 has no length cap, so the job runs out of memory or crawls. The way round it is manual: make a 5 s clip, wait, Extend it, wait, Extend that, and so on. Each Extend is set up again by hand, and each leaves another file in the Gallery that holds the whole video so far.
@@ -10,7 +12,7 @@ The app already has every piece of the loop:
 
 - Extend continues from a clip's last frames and carries the scene and, on H3, the references. Its output is the whole video so far (`join_clips_stage` splices the source and the new part).
 - An Extend can follow an audio track from any point in it (`AudioTrack.start`).
-- On H3 each Extend's window needs about the same memory as a new clip of the same length. The memory and time estimates already exist (`clip_memory_fit` in `utils/model_memory.py`, `utils/h3_memory.py`).
+- On H3 each Extend's window needs about the same memory as a new clip of the same length. The memory and time estimates already exist (`judge` in `utils/memory_verdict.py`, `utils/h3_memory.py`).
 
 What's missing is one job that does the loop.
 

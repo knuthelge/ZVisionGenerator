@@ -2,74 +2,8 @@
 import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { MemoryFit } from '$lib/types';
-
-import ModelStatusBadges, { NOT_DOWNLOADED_TOOLTIP, memoryFitFor, memoryFitTitle } from './ModelStatusBadges.svelte';
-
-const FIT: MemoryFit = {
-  budget_gb: 10.7,
-  by_quantize: {
-    none: { status: 'too_large', required_gb: 20.8 },
-    '8': { status: 'tight', required_gb: 9.5 },
-    '4': { status: 'fits', required_gb: 7.1 }
-  }
-};
-
-describe('memoryFitFor', () => {
-  it('selects the estimate for the chosen quantize level', () => {
-    expect(memoryFitFor(FIT, null)?.status).toBe('too_large');
-    expect(memoryFitFor(FIT, 8)?.status).toBe('tight');
-    expect(memoryFitFor(FIT, 4)?.status).toBe('fits');
-  });
-
-  it('shows nothing rather than another setting when the selected level was not estimated', () => {
-    expect(memoryFitFor({ budget_gb: 10, by_quantize: { none: { status: 'fits', required_gb: 3 } } }, 8)).toBeNull();
-    expect(memoryFitFor(null, null)).toBeNull();
-  });
-
-  it('switches to the all-resident estimate when low memory is off', () => {
-    const video: MemoryFit = {
-      budget_gb: 10.7,
-      by_quantize: { none: { status: 'tight', required_gb: 9.8 } },
-      without_low_memory: { status: 'too_large', required_gb: 16.4 },
-    };
-
-    expect(memoryFitFor(video, null, true)?.status).toBe('tight');
-    expect(memoryFitFor(video, null, false)?.status).toBe('too_large');
-    expect(memoryFitFor(FIT, null, false)?.status).toBe('too_large'); // image models have no low-memory variant
-  });
-});
-
-describe('memoryFitTitle on a discrete GPU', () => {
-  const CUDA_FIT: MemoryFit = {
-    kind: 'discrete',
-    budget_gb: 10,
-    system_budget_gb: 30,
-    by_quantize: {
-      none: { status: 'tight', required_gb: 4.2, system_gb: 33.6 },
-      '8': { status: 'fits', required_gb: 4.2, system_gb: 17.6 }
-    }
-  };
-
-  it('reports the system memory need of the selected level and of each quantized level', () => {
-    const title = memoryFitTitle(CUDA_FIT, CUDA_FIT.by_quantize.none);
-
-    expect(title).toContain('33.6 GB');
-    expect(title).toContain('17.6 GB');
-  });
-});
-
-describe('memoryFitTitle for an audio model on a discrete GPU', () => {
-  // An audio model's fit is the GPU's alone: its estimate has no system-memory part.
-  const AUDIO_FIT: MemoryFit = { kind: 'discrete', budget_gb: 10, by_quantize: { none: { status: 'tight', required_gb: 8.8 } } };
-
-  it('says what the GPU needs and never prints a missing system-memory figure', () => {
-    const title = memoryFitTitle(AUDIO_FIT, AUDIO_FIT.by_quantize.none);
-
-    expect(title.split('\n')[0]).toBe('Needs ~8.8 GB of GPU memory (this GPU has 10 GB).');
-    expect(title).not.toContain('undefined');
-  });
-});
+import { imageMemory } from '../../../test-utils/memory';
+import ModelStatusBadges, { NOT_DOWNLOADED_TOOLTIP } from './ModelStatusBadges.svelte';
 
 describe('ModelStatusBadges', () => {
   let target: HTMLDivElement;
@@ -93,24 +27,38 @@ describe('ModelStatusBadges', () => {
     flushSync();
   }
 
-  it('shows the memory fit for the selected quantize level', () => {
-    render({ downloaded: true, memoryFit: FIT, quantize: 8 });
+  const tag = () => target.querySelector('[data-testid="model-memory"]');
 
-    const fit = target.querySelector('[data-testid="model-memory-fit"]');
-    expect(fit?.querySelector('[data-status]')?.getAttribute('data-status')).toBe('tight');
-    expect(fit?.querySelector('[data-status]')?.textContent?.trim()).toBe('Tight');
-    expect(fit?.querySelector('[role="tooltip"]')?.textContent).toContain('9.5 GB');
+  it('shows the reference job at the selected level as a plain word, with no popover', () => {
+    render({ downloaded: true, memory: imageMemory('none'), level: '8' });
+
+    expect(tag()?.getAttribute('data-status')).toBe('fits');
+    expect(tag()?.textContent?.trim()).toContain('Fits');
+    expect(target.querySelector('[role="tooltip"]')).toBeNull();
     expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
   });
 
+  it('judges the answer\'s own level when none is asked for', () => {
+    render({ memory: imageMemory('4') });
+
+    expect(tag()?.getAttribute('data-status')).toBe('too_large');
+  });
+
   it('flags models that are not downloaded', () => {
-    render({ downloaded: false, memoryFit: null });
+    render({ downloaded: false, memory: null });
 
     const status = target.querySelector('[data-testid="model-download-status"]');
     expect(status?.textContent).toContain('Not downloaded');
     expect(status?.querySelector('[role="tooltip"]')?.textContent).toBe(NOT_DOWNLOADED_TOOLTIP);
     expect(status?.getAttribute('tabindex')).toBe('0');
-    expect(target.querySelector('[data-testid="model-memory-fit"]')).toBeNull();
+    expect(tag()).toBeNull();
+  });
+
+  it('shows the memory of a model that is not downloaded beside its download status', () => {
+    render({ downloaded: false, memory: imageMemory('8'), level: '8' });
+
+    expect(target.querySelector('[data-testid="model-download-status"]')).not.toBeNull();
+    expect(tag()?.getAttribute('data-status')).toBe('fits');
   });
 
   it('shows the download status instead of "Not downloaded" while a download runs', () => {
@@ -127,20 +75,8 @@ describe('ModelStatusBadges', () => {
     expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
   });
 
-  it('right-aligns the tooltip when asked and appends the estimate note', () => {
-    render({ memoryFit: { ...FIT, note: 'Excludes the optional upscale pass.' }, tooltipAlign: 'end' });
-
-    const trigger = target.querySelector('[data-testid="model-memory-fit"]') as HTMLElement;
-    trigger.dispatchEvent(new Event('pointerenter'));
-    flushSync();
-
-    const tooltip = trigger.querySelector('[role="tooltip"]') as HTMLElement;
-    expect(tooltip.style.left).not.toBe('');
-    expect(tooltip.textContent).toContain('Excludes the optional upscale pass.');
-  });
-
   it('renders nothing when status is unknown', () => {
-    render({ downloaded: null, memoryFit: null });
+    render({ downloaded: null, memory: null });
 
     expect(target.textContent?.trim()).toBe('');
   });

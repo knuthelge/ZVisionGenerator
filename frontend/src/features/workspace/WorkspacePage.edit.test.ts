@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { trackLengths } from '$lib/state/audioTrackLength.svelte';
 import { editParams } from '$lib/state/assetActions';
 import { draft } from '$lib/state/draft.svelte';
+import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
@@ -13,7 +14,8 @@ import type { GalleryAsset, JobContext, TabText, WorkspaceContext } from '$lib/t
 
 import { makeAsset, makeEditContext } from '../../test-utils/workspace';
 import { createHost, mockClipboard, mountWorkspacePage, resetWorkspaceTest, settle, submitForm } from '../../test-utils/workspaceHarness';
-import { layoutProbe, workspaceApiMocks } from '../../test-utils/workspaceMocks';
+import { imageMemory } from '../../test-utils/memory';
+import { layoutProbe, memoryApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 import { imageEdit } from './edit/editStore.svelte';
 import { sourceOfPath } from './edit/editSource';
 import { openKind } from '../../test-utils/draftKind';
@@ -42,9 +44,9 @@ vi.mock('$lib/api/extend', async () => {
   return { inspectExtendSource: extendApiMocks.inspectExtendSource };
 });
 
-vi.mock('$lib/api/videoMemory', async () => {
-  const { videoMemoryApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { checkVideoMemoryFit: videoMemoryApiMocks.checkVideoMemoryFit };
+vi.mock('$lib/api/memory', async () => {
+  const { memoryApiMocks } = await import('../../test-utils/workspaceMocks');
+  return { checkMemory: memoryApiMocks.checkMemory };
 });
 
 vi.mock('$lib/api/workspace', async (importOriginal) => {
@@ -159,6 +161,34 @@ async function mountEdit(options: { model?: string; source?: boolean; kind?: 'ne
 const asset = (overrides: Partial<GalleryAsset> = {}): GalleryAsset => makeAsset({
   id: 'out/a.png', url: '/media/out/a.png', thumbnail_url: '/thumbs/a.png', filename: 'a.png', file_path: '/out/a.png', width: 800, height: 600, prompt: 'a fox',
   has_reusable_config: true, reuse_state: { resolved_model: 'klein', requested_model: 'klein' } as GalleryAsset['reuse_state'], lora: '', ...overrides,
+});
+
+describe('the memory check of an edit', () => {
+  const lastRequest = () => memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0];
+  const tag = () => target.querySelector('[data-testid="memory-tag"]');
+  const afterDebounce = () => new Promise<void>((resolve) => setTimeout(resolve, INPUT_DEBOUNCE_MS + 50));
+
+  it('asks for the picture size once it is known, and the tag judges that edit', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(imageMemory('none', { title: 'The title of an edit' }));
+    await mountEdit();
+    imageEdit.setSource({ ...sourceOfPath('/out/a.png'), width: 800, height: 600, cutout: false });
+    await settle();
+    await afterDebounce();
+    await settle();
+
+    expect(lastRequest()).toEqual({ media: 'image', kind: 'edit', model: 'klein', source_width: 800, source_height: 600 });
+    expect(tag()?.querySelector('[data-status]')?.getAttribute('data-status')).toBe('tight');
+    expect(tag()?.querySelector('[data-testid="memory-title"]')?.textContent).toBe('The title of an edit');
+    expect(target.querySelector('[data-testid="edit-memory-note"]')).toBeNull();
+  });
+
+  it('asks nothing while the picture size is unknown', async () => {
+    await mountEdit();
+    await afterDebounce();
+
+    expect(memoryApiMocks.checkMemory).not.toHaveBeenCalled();
+    expect(tag()).toBeNull();
+  });
 });
 
 describe('what Generate sends in Edit', () => {

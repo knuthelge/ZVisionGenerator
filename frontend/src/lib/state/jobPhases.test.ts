@@ -138,6 +138,29 @@ describe('jobPhases', () => {
     expect(state.loadPhase).toBe('loading');
   });
 
+  it('keeps the notices a job has and adds the one a model_loading event carries, never twice', () => {
+    const first = trackJobEvent(job({ phase: 'load', notices: ['original settings unknown'] }), 'model_loading', { note: 'Only 6.1 GB of GPU memory is free. This may run out of memory.' }, 0);
+    const again = trackJobEvent(first, 'model_loading', { note: 'Only 6.1 GB of GPU memory is free. This may run out of memory.' }, 0);
+
+    expect(again.notices).toEqual(['original settings unknown', 'Only 6.1 GB of GPU memory is free. This may run out of memory.']);
+    expect(trackJobEvent(job({ phase: 'load' }), 'model_loading', { mode: 'image' }, 0).notices).toBeUndefined();
+  });
+
+  it('replaces the note of an earlier load with the one a later load gives, and keeps the notice the snapshot already holds', () => {
+    const first = 'Only 7.6 GB of GPU memory is free, so this runs slower.';
+    const second = 'Only 6.1 GB of GPU memory is free. This may run out of memory.';
+    let state = trackJobEvent(job({ phase: 'load', notices: ['original settings unknown'] }), 'model_loading', { note: first }, 0);
+    state = trackJobEvent(state, 'model_loading', { note: second, replaces: first }, 0);
+
+    expect(state.notices).toEqual(['original settings unknown', second]);
+    // A reload: the snapshot holds the newest note, and only the later event is still in the history.
+    const reloaded = trackJobEvent(job({ phase: 'load', notices: ['original settings unknown', second] }), 'model_loading', { note: second, replaces: first }, 0);
+    expect(reloaded.notices).toEqual(['original settings unknown', second]);
+    // A replay from the start: the earlier note comes first and is dropped when the later one replaces it.
+    const replayed = trackJobEvent(trackJobEvent(job({ phase: 'load', notices: ['original settings unknown', second] }), 'model_loading', { note: first }, 0), 'model_loading', { note: second, replaces: first }, 0);
+    expect(replayed.notices).toEqual(['original settings unknown', second]);
+  });
+
   describe('model downloads', () => {
     const progress = { bytes_done: 5, bytes_total: 10, bytes_per_sec: 2, download_eta_secs: 3, repo: 'org/repo', part: 1, parts: 2, shared: false };
     const dlEvent = (role: 'model' | 'enhancer' | 'matte') => ({ ...progress, role, model: 'klein9b' });

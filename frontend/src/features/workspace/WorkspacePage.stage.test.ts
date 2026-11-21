@@ -22,7 +22,8 @@ import { lastEventSource } from '../../test-utils/eventSource';
 import { makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
 import { EMPTY_AUDIO_MATRIX, makeAsset, makeContext, makeGalleryPage, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, fakeDebounceTimers, field, holdInspection, mockClipboard, mountWorkspacePage, openEnhanceRun, resetWorkspaceTest, runEnhance, settle, type, waitDebounce } from '../../test-utils/workspaceHarness';
-import { browseApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, presetApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
+import { singleMemory } from '../../test-utils/memory';
+import { browseApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, memoryApiMocks, presetApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
@@ -48,9 +49,9 @@ vi.mock('$lib/api/extend', async () => {
   return { inspectExtendSource: extendApiMocks.inspectExtendSource };
 });
 
-vi.mock('$lib/api/videoMemory', async () => {
-  const { videoMemoryApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { checkVideoMemoryFit: videoMemoryApiMocks.checkVideoMemoryFit };
+vi.mock('$lib/api/memory', async () => {
+  const { memoryApiMocks } = await import('../../test-utils/workspaceMocks');
+  return { checkMemory: memoryApiMocks.checkMemory };
 });
 
 vi.mock('$lib/api/workspace', async (importOriginal) => {
@@ -1398,12 +1399,13 @@ describe('WorkspacePage extend', () => {
       expect(event.defaultPrevented).toBe(true);
     });
 
-    it('checks the source again when the length changes, so the memory note follows', async () => {
+    it('checks the source again when the length changes, and asks the memory of the extension at the new length', async () => {
       fakeDebounceTimers();
       await mountExtend();
       await chooseSource(sceneSource());
       expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(1);
-      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource({ extend_frames: 72, memory_fit: { status: 'tight', required_gb: 21, budget_gb: 24 } }));
+      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource({ extend_frames: 72 }));
+      memoryApiMocks.checkMemory.mockResolvedValue(singleMemory('tight', { expected_seconds: 300 }));
 
       input('ws-extend-seconds').value = '3';
       input('ws-extend-seconds').dispatchEvent(new Event('change', { bubbles: true }));
@@ -1412,8 +1414,9 @@ describe('WorkspacePage extend', () => {
       await waitDebounce();
 
       expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(2);
-      expect(lastInspect()).toMatchObject({ path: SOURCE, extend_frames: 72 });
-      expect(target.querySelector('[data-testid="extend-memory-note"]')?.getAttribute('data-status')).toBe('tight');
+      expect(lastInspect()).toEqual({ path: SOURCE, extend_frames: 72, model: expect.any(String) });
+      expect(memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0]).toMatchObject({ media: 'video', kind: 'extension', source: SOURCE, extend_frames: 72 });
+      expect(target.querySelector('[data-testid="extend-time-note"]')?.textContent).toBe('About 5 min (estimated).');
     });
 
     it('checks a saved source once on load and leaves the text it was reused with', async () => {
@@ -1478,11 +1481,18 @@ describe('WorkspacePage extend', () => {
       expect(text('[data-testid="extend-total"]')).toBe('5.13 s · 154 frames');
     });
 
-    it('notes a too-large fit without blocking Generate', async () => {
+    it('judges the extension as set up and never blocks Generate, whatever the fit', async () => {
+      fakeDebounceTimers();
+      memoryApiMocks.checkMemory.mockResolvedValue(singleMemory('too_large', { title: 'The title of an extension' }));
       await mountExtend();
-      await chooseSource(sceneSource({ memory_fit: { status: 'too_large', required_gb: 40, budget_gb: 24 } }));
-      expect(target.querySelector('[data-testid="extend-memory-note"]')?.getAttribute('data-status')).toBe('too_large');
-      expect(target.querySelector('[data-testid="extend-memory-note"]')?.closest('[aria-live="polite"]')).not.toBeNull();
+      await chooseSource(sceneSource());
+      await waitDebounce();
+
+      expect(memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0]).toMatchObject({ kind: 'extension', source: SOURCE });
+      const tag = target.querySelector('[data-testid="memory-tag"]');
+      expect(tag?.querySelector('[data-status]')?.getAttribute('data-status')).toBe('too_large');
+      expect(tag?.querySelector('[data-testid="memory-title"]')?.textContent).toBe('The title of an extension');
+      expect(target.querySelector('[data-testid="extend-memory-note"]')).toBeNull();
       expect(button('ws-submit').disabled).toBe(false);
     });
   });

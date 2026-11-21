@@ -6,6 +6,7 @@ import { ApiError } from '$lib/api/client';
 import { lastSaveTarget, recentFiles, rememberRecent } from '$lib/state/promptFileStorage';
 import { draft } from '$lib/state/draft.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
+import { memoryCheck } from '$lib/state/memoryCheck.svelte';
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { jobStore } from '$lib/state/job.svelte';
@@ -26,9 +27,10 @@ import { currentImagesView } from './imagesView';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { lastEventSource } from '../../test-utils/eventSource';
 import { optionLabels, optionValues, pickOption } from '../../test-utils/select';
+import { imageMemory, singleMemory } from '../../test-utils/memory';
 import { jobSnap, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer, withVideoEnhancer } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, choosePrompts, chooseSource, createHost, expectRenderedLabelsToResolveControls, fakeDebounceTimers, field, mockClipboard, mountWorkspacePage, openEnhanceRun, pressKey, resetWorkspaceTest, settle, submitForm, type, waitDebounce } from '../../test-utils/workspaceHarness';
-import { browseApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, modelApiMocks, promptFileApiMocks, recentPromptsApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
+import { browseApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, memoryApiMocks, modelApiMocks, promptFileApiMocks, recentPromptsApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
@@ -54,9 +56,9 @@ vi.mock('$lib/api/extend', async () => {
   return { inspectExtendSource: extendApiMocks.inspectExtendSource };
 });
 
-vi.mock('$lib/api/videoMemory', async () => {
-  const { videoMemoryApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { checkVideoMemoryFit: videoMemoryApiMocks.checkVideoMemoryFit };
+vi.mock('$lib/api/memory', async () => {
+  const { memoryApiMocks } = await import('../../test-utils/workspaceMocks');
+  return { checkMemory: memoryApiMocks.checkMemory };
 });
 
 vi.mock('$lib/api/workspace', async (importOriginal) => {
@@ -603,6 +605,28 @@ describe('WorkspacePage', () => {
       await mountWorkspace(queueContext([jobSnap('job-2', 'queued', { queue_position: 1 })]));
       expect(target.querySelector('[data-testid="strip-queue-count"]')?.textContent).toBe('1');
       expect(target.querySelector('[data-testid="sidebar-strip"] button[type="submit"]')?.getAttribute('aria-label')).toBe('Add to queue');
+    });
+  });
+
+  describe('the memory check of an upscaled image', () => {
+    it('asks again with the upscale factor once Upscale is on, and without it once it is off', async () => {
+      fakeDebounceTimers();
+      memoryApiMocks.checkMemory.mockResolvedValue(imageMemory());
+      await mountWorkspace(makeContext());
+      await waitDebounce();
+      const lastRequest = () => memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0];
+      expect(lastRequest()).not.toHaveProperty('upscale');
+
+      draft.update('upscaleEnabled', true);
+      draft.update('upscaleFactor', 4);
+      await settle();
+      await waitDebounce();
+      expect(lastRequest()).toMatchObject({ media: 'image', kind: 'image', upscale: 4 });
+
+      draft.update('upscaleEnabled', false);
+      await settle();
+      await waitDebounce();
+      expect(lastRequest()).not.toHaveProperty('upscale');
     });
   });
 
@@ -2739,7 +2763,7 @@ describe('WorkspacePage', () => {
     expect(target.querySelector('#ws-upscale-enabled')).not.toBeNull();
   });
 
-  it('shows download and memory-fit status for the selected model and quantize level', async () => {
+  it('shows download status and the memory tag for the selected model and quantize level', async () => {
     const context = makeContext({
       image_models: [
         {
@@ -2747,34 +2771,32 @@ describe('WorkspacePage', () => {
           label: 'zit',
           type: 'image',
           downloaded: true,
-          memory_fit: {
-            budget_gb: 10.7,
-            by_quantize: {
-              none: { status: 'too_large', required_gb: 20.8 },
-              '8': { status: 'tight', required_gb: 9.5 },
-              '4': { status: 'fits', required_gb: 7.1 },
-            },
-          },
+          memory: null,
         },
-        { id: 'flux-lite', label: 'flux-lite', type: 'image', downloaded: false, memory_fit: null },
+        { id: 'flux-lite', label: 'flux-lite', type: 'image', downloaded: false, memory: null },
       ],
     });
+    memoryApiMocks.checkMemory.mockImplementation(async (body: Record<string, unknown>) => (body.model === 'zit' ? imageMemory('none') : null));
+    fakeDebounceTimers();
 
     await mountWorkspace(context);
+    await waitDebounce();
 
-    const fitBadge = () => target.querySelector('[data-testid="model-memory-fit"] [data-status]');
-    expect(fitBadge()?.getAttribute('data-status')).toBe('too_large');
+    const fitBadge = () => target.querySelector('[data-testid="memory-tag"] [data-status]');
+    expect(fitBadge()?.getAttribute('data-status')).toBe('tight');
+    expect(target.querySelector('[data-testid="memory-tag"] [data-testid="memory-title"]')?.textContent).toBe(imageMemory('none').title);
     expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
 
     const quantizeSelect = target.querySelector('[data-testid="quantize-shell"] [role="combobox"]') as HTMLButtonElement;
     pickOption(quantizeSelect, '8');
     await settle();
-    expect(fitBadge()?.getAttribute('data-status')).toBe('tight');
+    expect(fitBadge()?.getAttribute('data-status')).toBe('fits');
 
     const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement;
     expect(optionLabels(modelSelect)).toEqual(['zit', 'flux-lite (not downloaded)']);
     pickOption(modelSelect, 'flux-lite');
     await settle();
+    await waitDebounce();
     expect(target.querySelector('[data-testid="model-download-status"]')?.textContent).toContain('Not downloaded');
     expect(fitBadge()).toBeNull();
   });
@@ -2785,8 +2807,8 @@ describe('WorkspacePage', () => {
     });
     const downloadContext = () => makeContext({
       image_models: [
-        { id: 'zit', label: 'zit', type: 'image', downloaded: true, memory_fit: null },
-        { id: 'flux-lite', label: 'flux-lite', type: 'image', downloaded: false, memory_fit: null },
+        { id: 'zit', label: 'zit', type: 'image', downloaded: true, memory: null },
+        { id: 'flux-lite', label: 'flux-lite', type: 'image', downloaded: false, memory: null },
       ],
     });
 
@@ -2820,8 +2842,8 @@ describe('WorkspacePage', () => {
       modelApiMocks.getDownloads.mockResolvedValue({ items: [lane({ state: 'done' })] });
       workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({
         image_models: [
-          { id: 'zit', label: 'zit', type: 'image', downloaded: true, memory_fit: null },
-          { id: 'flux-lite', label: 'flux-lite', type: 'image', downloaded: true, memory_fit: null },
+          { id: 'zit', label: 'zit', type: 'image', downloaded: true, memory: null },
+          { id: 'flux-lite', label: 'flux-lite', type: 'image', downloaded: true, memory: null },
         ],
       }));
       await downloadStore.refresh();
@@ -2831,6 +2853,28 @@ describe('WorkspacePage', () => {
       const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement;
       expect(optionLabels(modelSelect)).toEqual(['zit', 'flux-lite']);
     });
+  });
+
+  it('asks the memory check again on the same inputs when a model download finishes, keeping the tag shown', async () => {
+    fakeDebounceTimers();
+    memoryApiMocks.checkMemory.mockResolvedValue(imageMemory());
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [{ id: 'd1', kind: 'model', name: 'zit', label: 'zit', state: 'running', message: null, bytes_done: 1, bytes_total: 10 }] });
+    await mountWorkspace(makeContext());
+    await waitDebounce();
+    const asked = memoryApiMocks.checkMemory.mock.calls.length;
+    expect(asked).toBeGreaterThan(0);
+    const body = memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0];
+
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [{ id: 'd1', kind: 'model', name: 'zit', label: 'zit', state: 'done', message: null, bytes_done: 10, bytes_total: 10 }] });
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext());
+    await downloadStore.refresh();
+    await settle();
+    expect(memoryCheck.pending).toBe(false);
+    expect(memoryCheck.answer).not.toBeNull();
+    await waitDebounce();
+
+    expect(memoryApiMocks.checkMemory).toHaveBeenCalledTimes(asked + 1);
+    expect(memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0]).toEqual(body);
   });
 
   it('shows the selected model by its label in the toolbar while the option value stays its id', async () => {
@@ -3352,9 +3396,9 @@ describe('WorkspacePage', () => {
     expect(submitButton?.textContent).not.toContain('Add to queue');
   });
 
-  it('refreshes model download and memory status after a job ends', async () => {
+  it('refreshes model download status after a job ends', async () => {
     const notDownloaded = makeContext({
-      image_models: [{ id: 'zit', label: 'zit', type: 'image', downloaded: false, memory_fit: null }],
+      image_models: [{ id: 'zit', label: 'zit', type: 'image', downloaded: false, memory: null }],
     });
     await mountWorkspace(notDownloaded);
     expect(target.querySelector('[data-testid="model-download-status"]')).not.toBeNull();
@@ -3365,7 +3409,7 @@ describe('WorkspacePage', () => {
         label: 'zit',
         type: 'image',
         downloaded: true,
-        memory_fit: { budget_gb: 10.7, by_quantize: { none: { status: 'fits', required_gb: 7.1 } } },
+        memory: null,
       }],
     }));
     draft.update('prompt', 'Download on first use');
@@ -3378,7 +3422,6 @@ describe('WorkspacePage', () => {
     await settle();
 
     expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
-    expect(target.querySelector('[data-testid="model-memory-fit"] [data-status]')?.getAttribute('data-status')).toBe('fits');
   });
 
   it('adds successful batch outputs to the history pane immediately', async () => {

@@ -10,6 +10,7 @@
   import { ringView, stepKey, type RingView } from '$lib/state/jobRing';
   import { etaLabel, GENERIC_FAILURE_MESSAGE, isActive, isPaused, isVoiceDesignJob, itemNoun, jobControls, jobPhase, jobTone, outcome, stageBars, type JobTone } from '$lib/state/jobView';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import { memoryReadout } from '$lib/state/memoryReadout';
   import { useStepTiming } from '$lib/state/stepClock.svelte';
   import type { ActiveJobState, JobControlAction } from '$lib/types';
   import Alert from './Alert.svelte';
@@ -203,6 +204,9 @@
   /** What the job saved, "3 of 4 saved to the Gallery · 1 not run", as parts that break only between each other. */
   const savedParts = $derived(ended?.saved.split(' · ') ?? []);
 
+  /** The live memory use of an exclusive job while it runs; null before there is a reading and once the job has ended. */
+  const memory = $derived(memoryReadout(job));
+
   // ── Notice ───────────────────────────────────────────
 
   const notice = $derived.by<{ text: string; tone: 'info' | 'warning' | 'error'; icon: IconName } | null>(() => {
@@ -258,6 +262,24 @@
       </div>
     </div>
   </div>
+
+  {#if memory}
+    <!-- Not a live region: it changes every second. The slash is read as "of". -->
+    <p class="memory" data-testid="job-memory">
+      <span class="figures dotline">
+        {#each memory.parts as part, index (part.label)}
+          <span class="part" class:after={index > 0} data-testid="job-memory-part">
+            {' '}<span class="label-word">{part.label}</span>
+            {#if part.unknown}
+              <span class="used" aria-hidden="true">{part.figure}</span><span class="sr-only">in use not known yet, total</span> <span aria-hidden="true">/</span> {part.budget} GB
+            {:else}
+              <span class="used">{part.figure}</span> <span aria-hidden="true">/</span><span class="sr-only">of</span> {part.budget} GB
+            {/if}
+          </span>
+        {/each}
+      </span>
+    </p>
+  {/if}
 
   <!-- Two regions, always mounted so a screen reader hears a notice when it appears, with no height of their own while empty.
        Each notice is announced through one of them: errors assertively, everything else politely. -->
@@ -317,6 +339,14 @@
   .foot { display: flex; align-items: center; min-height: var(--spacing-control-sm); }
   .saved { display: flex; align-items: flex-start; gap: 6px; font-size: var(--text-ui); line-height: 16px; color: var(--color-text-secondary); }
   .saved :global(svg) { flex: none; margin-top: 2px; color: var(--color-text-muted); }
+
+  /* The memory band under the hero, its left edge on the kicker's; one line, breaking only between GPU and RAM. */
+  .memory { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; min-width: 0; padding: 0 14px 12px; font-size: var(--text-ui); line-height: 18px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+  .touch .memory { padding: 4px 12px 10px; }
+  .figures { min-width: 0; }
+  .label-word { font-weight: 500; color: var(--color-text-secondary); }
+  /* Plain figures: the verdict belongs before the job, in the toolbar's tag, not on the running card. */
+  .used { font-weight: 600; color: var(--color-text-primary); }
 
   /* The notice sits under the hero and never moves it. */
   .notice { padding: 0 12px 12px; }

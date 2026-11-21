@@ -78,6 +78,13 @@ describe('SettingsStrip', () => {
     expect(onall).toHaveBeenCalledOnce();
   });
 
+  it('marks All with a warning that names the memory tag, only when asked', () => {
+    app = flushSync(() => mount(SettingsStrip, { target, props: { chips, activeKey: null, changedCount: 0, memoryWarn: true, onopen: vi.fn(), onall: vi.fn() } }));
+    const all = target.querySelector('button[aria-label="All settings"]') as HTMLElement;
+    expect(all.classList.contains('warn')).toBe(true);
+    expect(document.getElementById(all.getAttribute('aria-describedby')!)?.textContent).toContain('memory');
+  });
+
   it('marks the open chip expanded', () => {
     app = flushSync(() => mount(SettingsStrip, { target, props: { chips, activeKey: 'seed', changedCount: 0, onopen: vi.fn(), onall: vi.fn() } }));
     expect((target.querySelector('[data-chip="seed"]') as HTMLElement).getAttribute('aria-expanded')).toBe('true');

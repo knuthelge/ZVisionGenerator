@@ -164,6 +164,7 @@ On a fork, push the branch and open a pull request against `main` instead. Never
 
 - **Vendored packages.** Everything under `packages/` is a copy of upstream code. Never edit them by hand; see [Vendored packages](vendored.md).
 - **The built Web UI is committed.** After any change in `frontend/`, run `make frontend-build` and commit the rebuilt files in `zvisiongenerator/web/static/app/`. `make check` fails when they are out of date.
+- **The memory verdict is calibrated from measured runs.** Run the [memory bench](memory-bench.md) after changing a constant of it or the CUDA image loader's placement, adding a model or a path, or when a library changes how much memory a job takes.
 - **User-facing changes** get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs. See [Writing docs](docs.md).
 - **Releases** are cut by the maintainer. Never push a `v*` tag: it publishes to PyPI. See [Releasing](releasing.md).
 

@@ -213,6 +213,19 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.message).toContain('q8');
   });
 
+  it('adds the note of a model_loading event to the job\'s notices once, with the load kept as it was', () => {
+    jobStore.startJob({ job_id: 'note', workflow: 'txt2img', prompt: 'a fox', model: 'atlas', runs: 1, created_at: '' });
+    const source = lastEventSource();
+    source.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'atlas' });
+    const note = 'Only 7.6 GB of GPU memory is free, so this runs slower.';
+
+    source.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'atlas', note });
+    source.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'atlas', note });
+
+    expect(jobStore.current?.notices).toEqual([note]);
+    expect(jobStore.current?.phase).toBe('load');
+  });
+
   it('describes a SeedVR2 download and a copy that replaces it differently from a plain saved copy', () => {
     jobStore.startJob({ job_id: 'seedvr2', workflow: 'upscale', prompt: '', model: 'SeedVR2 7B q8', runs: 1, created_at: '' });
     const source = lastEventSource();

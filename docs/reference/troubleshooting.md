@@ -225,6 +225,14 @@ The memory check can pass and the PC can still crawl. The check estimates the mo
 
 The first run of a video model prepares it for your graphics card and reads tens of gigabytes; the PC can feel slow until that ends. See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
 
+### Windows: a large image model crashes the first time it loads
+
+A large unquantized image model, such as `klein9b` with no quant, can crash the first time it loads, while Windows is still growing its page file. Windows may first show "Your system is low on virtual memory".
+
+- Run the job again. It usually works once the page file has grown.
+- Or set a larger fixed page file in Windows' virtual-memory settings.
+- Or use `q8`, which needs far less system memory. See [Quantization](../concepts/memory.md#quantization).
+
 ### macOS: the Mac slows down or beachballs
 
 The CPU and GPU share one pool of memory, and a job that needs too much of it makes macOS compress or swap other memory, so the Mac slows down, the spinning beachball appears and the apps freeze. The memory check doesn't stop it: on a Mac it only warns. See [what **Tight** and **Too large** mean on a Mac](../concepts/memory.md#what-fits).
@@ -275,7 +283,7 @@ To fit the job, take a choice that **Fits** (`--quantize`, `--low-memory`), use 
 
 ### "Only … GB of GPU memory is free" { #gpu-memory-is-free }
 
-Windows and Linux. Other programs hold GPU memory, so an image model has less free than the tag assumed. The job runs, slower than on a card with all its memory free, and the message adds that it may run out of memory when even that isn't enough. Close other programs that use the GPU.
+Windows and Linux. Other programs hold GPU memory, so an image model has less free than the tag assumed. The job runs, slower than on a card with all its memory free (a model that would sit on the card may take turns with system memory instead), and the message adds that it may run out of memory when even that isn't enough. Close other programs that use the GPU.
 
 ### "MiniMax H3 ran out of GPU memory at …"
 

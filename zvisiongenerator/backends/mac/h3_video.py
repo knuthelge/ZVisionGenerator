@@ -456,8 +456,8 @@ def _slot_shapes() -> dict[_Slot, tuple[int, int]]:
 def _process_limits(mx: Any) -> Iterator[None]:
     """Put the MLX cache and memory limits the fork's low-memory mode sets in place, and restore the previous ones after.
 
-    The fork sets them process-wide and never restores them, which would leave a web server's later image jobs with no buffer
-    cache and a 16 GB ceiling. The staged image modes run under the same limits.
+    The fork sets them process-wide and never restores them, which would leave a web server's later jobs under its 16 GB
+    ceiling. The buffer cache is 0 here whatever the process policy is. The staged image modes run under the same limits.
     """
     previous_cache = mx.set_cache_limit(0)
     previous_memory = mx.set_memory_limit(int(MEMORY_LIMIT_GB * 1e9))

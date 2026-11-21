@@ -221,29 +221,6 @@ export interface ExtendProblem {
   message: string;
 }
 
-/** How a clip or an extension window fits this machine's memory; null where the server cannot tell. */
-export interface ClipMemoryFit {
-  status: string;
-  required_gb: number;
-  budget_gb: number;
-  /** `discrete` on a CUDA GPU; absent (unified memory) on Apple Silicon. */
-  kind?: MemoryKind;
-  /** Discrete GPUs only: the memory the figures are about, whichever is closer to its limit. */
-  resource?: 'gpu' | 'system';
-  /** MiniMax H3 on a discrete GPU only: the model family, whose advice differs from LTX's. */
-  family?: 'h3';
-  /** MiniMax H3 only: the estimated generation time, in seconds. */
-  expected_seconds?: number;
-}
-
-/** What `POST /api/video/memory-fit` reports: the size and length a video job would use, and how that clip fits memory. */
-export interface VideoMemoryFitInfo {
-  memory_fit: ClipMemoryFit | null;
-  width: number;
-  height: number;
-  frames: number;
-}
-
 /**
  * What `POST /api/extend/source` reports about a video chosen for extending.
  *
@@ -280,7 +257,6 @@ export interface ExtendSourceInfo {
   /** The new frames, snapped to a multiple of 8 (a 2 s default when none was requested); null when the frame rate is unknown. */
   extend_frames: number | null;
   window_frames: number | null;
-  memory_fit: ClipMemoryFit | null;
   /** The project folder the source sits in; null when it sits at the top of the output folder or outside it. */
   output_folder: string | null;
 }
@@ -366,34 +342,68 @@ export interface AssetUpscale {
 
 export type MemoryFitStatus = 'fits' | 'tight' | 'too_large';
 
-export interface MemoryFitEstimate {
-  status: MemoryFitStatus;
-  /** GPU memory needed (unified memory on Apple Silicon). */
-  required_gb: number;
-  /** Discrete GPUs only: system memory needed for the weights that stream to the GPU. */
-  system_gb?: number;
-}
-
 /** `unified`: Apple Silicon, one memory pool. `discrete`: a CUDA GPU with its own memory, fed from system memory. */
 export type MemoryKind = 'unified' | 'discrete';
 
-/** Estimated memory need per quantize level (`none`, `4`, `8`) against this machine's GPU budget. */
-export interface MemoryFit {
-  kind?: MemoryKind;
-  budget_gb: number;
-  /** Discrete GPUs only: this machine's system memory. */
-  system_budget_gb?: number;
-  by_quantize: Record<string, MemoryFitEstimate>;
-  /** LTX MLX video only: the estimate when low-memory mode is off and every component stays loaded. */
-  without_low_memory?: MemoryFitEstimate;
-  /** Caveat to show with the estimate, e.g. the clip a video estimate is for. */
-  note?: string;
+/** A job's newest memory reading, from a `memory_usage` event or the job snapshot: plain figures, with no verdict. `unified`: one pool (Apple Silicon). `discrete`: GPU memory and system memory, each over the total it is measured against; `gpu_gb` is null until this process has started CUDA, because the card's use cannot be read before then. */
+export type MemoryReading =
+  | { kind: 'unified'; used_gb: number; budget_gb: number }
+  | { kind: 'discrete'; gpu_gb: number | null; gpu_budget_gb: number; system_gb: number; system_budget_gb: number };
+
+/** What a job's memory answer varies: the Quant levels (image), Low memory on or off (LTX), or nothing (MiniMax H3, audio, a model stored at one level). */
+export type MemoryControl = 'quantize' | 'low_memory' | null;
+
+/** One level of the job: what it needs at that level. */
+export interface MemoryRow {
+  /** `none`, `8`, `4` for Quant; `on`, `off` for Low memory; `only` for a model with one way to load. */
+  key: string;
+  status: MemoryFitStatus;
+  /** GPU memory needed; on a Mac, the one memory figure. */
+  gpu_gb: number;
+  /** RAM needed; null on a Mac, for audio on Windows and Linux, and where it was not measured. */
+  ram_gb: number | null;
+  /** The status as a word: `Fits`, `Tight` or `Too large`. */
+  word: string;
+  /** The level's name as its control shows it (`None`, `q8`, `q4`, `On`, `Off`); empty for a model with one level. */
+  label: string;
+  /** What the status means for this computer, as one sentence. */
+  sentence: string;
+  /** What was judged at this level, small and muted (`1152×1728 · q4 · 3 references`); empty when there is nothing to name. */
+  details: string;
+}
+
+/**
+ * How a job fits this machine's memory, as `POST /api/memory` answers it; a model row of `/api/workspace` and `/api/models` carries
+ * the same shape as `memory` for its reference job. Every word comes from the server (`web/memory_api.py`): the client lays them out and words nothing.
+ */
+export interface JobMemory {
+  kind: MemoryKind;
+  /** `ram_gb` is null on a Mac. */
+  budget: { gpu_gb: number; ram_gb: number | null };
+  control: MemoryControl;
+  /** The key of the row the job as set up falls on. */
+  current: string;
+  /** One row per choice of the control, best quality first; one for a model with no choice. */
+  rows: MemoryRow[];
+  /** What the answer is about: `Memory for this image`, or `Memory at 5 s · 768×448` for a listed model's reference job. */
+  title: string;
+  /** The title of the level column (`Quant`, `Low memory`); null for a model with no choice. */
+  control_title: string | null;
+  /** The small heading over the table of levels; null for a model with no choice. */
+  table_heading: string | null;
+  /** The size of the model's download as the model metadata words it (`35 GB`), when it is not downloaded. */
+  download_size_label: string | null;
+  /** MiniMax H3 only: the estimated generation time, in seconds. */
+  expected_seconds: number | null;
+  /** Present when the job was judged on something other than what was asked (a LoRA that is not available). */
+  notes?: string[];
 }
 
 /** Local availability fields shared by every model listing; `null` means unknown. */
 export interface ModelStatusFields {
   downloaded?: boolean | null;
-  memory_fit?: MemoryFit | null;
+  /** The memory of the model's reference job (a 1024×1024 image, a 5 s clip at 768×448, an audio model's measured peak); null where it cannot be judged. */
+  memory?: JobMemory | null;
 }
 
 /**
@@ -1607,6 +1617,8 @@ export interface JobSnapshot extends JobContext {
   started_at?: number | null;
   /** The render waiting for approve or discard before its upscale; null otherwise. */
   review?: JobReview | null;
+  /** The newest live memory reading; null before the first sample or when the job is not measured. */
+  memory?: MemoryReading | null;
 }
 
 /** The active generation job and the queued ones, oldest first; a job is never in both. */
@@ -1634,6 +1646,8 @@ export interface ActiveJobState extends JobContext {
   previewUrl: string | null;
   /** The render under review (shown as `previewUrl`); the job waits for approve or discard while this is set. */
   review?: JobReview | null;
+  /** The newest live memory reading; null before the first sample or when the job is not measured. */
+  memory?: MemoryReading | null;
   /** Auto-enhanced prompt of the current generation, when the job enhances prompts. */
   enhancedPrompt?: string;
   /** Outcome of auto enhancement for the current generation, planned before the model loaded. */
@@ -1845,6 +1859,14 @@ export interface JobDownload extends DownloadProgressFields {
   model: string;
 }
 
+/** A live memory reading of the running job. Not a progress event: it never changes the step, ETA or phase. */
+export interface MemoryUsageEvent {
+  type: 'memory_usage';
+  job_id: string;
+  event_id?: number;
+  memory: MemoryReading;
+}
+
 export type SSEEvent =
   | StepEvent
   | AudioProgressEvent
@@ -1856,7 +1878,8 @@ export type SSEEvent =
   | JobCancelledEvent
   | ProgressTextEvent
   | JobPausedEvent
-  | JobResumedEvent;
+  | JobResumedEvent
+  | MemoryUsageEvent;
 
 // NOTE: batch_completed is NOT a terminal event (see multi-run guard in sse.ts)
 export type SSETerminalEvent = 'job_completed' | 'job_failed' | 'job_cancelled';

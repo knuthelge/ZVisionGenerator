@@ -9,6 +9,8 @@
     activeKey: ChipKey | null;
     /** Settings that differ from the defaults, shown on All. */
     changedCount: number;
+    /** The memory tag, which sits in All settings on a phone, judges the job Tight or Too large: All carries the warning. */
+    memoryWarn?: boolean;
     /** The context is still loading: the chips are placeholders and nothing opens. */
     pending?: boolean;
     /** The open tab: when it changes, the row scrolls back to its first chip, as the new tab's chips begin there. */
@@ -17,7 +19,7 @@
     onall: () => void;
   }
 
-  let { chips, activeKey, changedCount, pending = false, tab = '', onopen, onall }: Props = $props();
+  let { chips, activeKey, changedCount, memoryWarn = false, pending = false, tab = '', onopen, onall }: Props = $props();
 
   let scroller = $state<HTMLDivElement | null>(null);
 
@@ -75,8 +77,9 @@
       </button>
     {/each}
   </div>
-  <button type="button" class="setchip setchip-all" aria-label="All settings" disabled={pending} onclick={onall}>
+  <button type="button" class="setchip setchip-all" class:warn={memoryWarn} aria-label="All settings" aria-describedby={memoryWarn ? 'settings-all-memory' : undefined} disabled={pending} onclick={onall}>
     <Icon name="sliders" size={14} />All{#if changedCount > 0}<span class="setchip-n">{changedCount}</span>{/if}
+    {#if memoryWarn}<Icon name="alert" size={12} class="setchip-warn" /><span id="settings-all-memory" class="sr-only">The memory tag says this job is Tight or Too large for this computer.</span>{/if}
   </button>
 </div>
 

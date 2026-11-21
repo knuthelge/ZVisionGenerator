@@ -1,0 +1,114 @@
+# Cases for the audio bench (python -m bench.memory run --media audio). Each case runs in a fresh process through ziv-audio.
+#
+# A case names a `model` and a `kind` (sound, music or speech); `seconds` sets the length for a model that takes one. An audio estimate is the
+# model's measured peak per platform, so a case needs only the model. These are a start: add a case for each model and kind.
+#
+# The `-max` and `-long` cases run the longest take the app allows: `seconds` at the model's `max_seconds`, `prompt_repeat: N` reads the prompt N times
+# over (a long text), `lyrics` are a song's (long enough to reach YuE2's cap), and `voice_text` follows a recording that the bench first makes with the
+# model's own built-in voice reading that text (a speech take of the app needs no consent). Qwen3-TTS VoiceDesign has no command line, so no case drives it.
+
+defaults:
+  seed: 51207733
+prompt: A short, bright chime followed by soft rain on a window.
+
+families:
+  sa3:
+    - { id: sa3-sound, model: sa3, kind: sound, seconds: 10 }
+    - { id: sa3-sound-max, model: sa3, kind: sound, seconds: 380 }
+    - { id: sa3-music-max, model: sa3, kind: music, seconds: 380, prompt: Calm instrumental piano with a slow tempo. }
+  yue2:
+    - { id: yue2-music, model: yue2, kind: music, prompt: Calm instrumental piano with a slow tempo. }
+    - id: yue2-song-max
+      model: yue2
+      kind: music
+      prompt: Upbeat pop with bright synths and a steady beat.
+      lyrics: |
+        [verse]
+        Morning light on the window pane
+        Footsteps down the quiet lane
+        Every street is waking slow
+        Somewhere a radio hums low
+        [chorus]
+        We keep on moving, we keep on moving
+        Under the sky the whole day through
+        We keep on moving, we keep on moving
+        Every road leads back to you
+        [verse]
+        Rain on the roofs and the river wide
+        Lanterns swaying side by side
+        Stories told in the evening air
+        Nobody hurries, nobody cares
+        [chorus]
+        We keep on moving, we keep on moving
+        Under the sky the whole day through
+        We keep on moving, we keep on moving
+        Every road leads back to you
+        [verse]
+        Summer comes with a golden haze
+        Dust on the fields in the long warm days
+        Songs from a porch and a distant train
+        Slow and easy, again and again
+        [chorus]
+        We keep on moving, we keep on moving
+        Under the sky the whole day through
+        We keep on moving, we keep on moving
+        Every road leads back to you
+        [bridge]
+        And when the lights go down tonight
+        We will hold the quiet tight
+        Waiting for the dawn to climb
+        One more verse and one more time
+        [verse]
+        Autumn leaves on the garden wall
+        Smoke from a chimney, the first cold fall
+        Windows glowing along the street
+        Footsteps keeping a steady beat
+        [chorus]
+        We keep on moving, we keep on moving
+        Under the sky the whole day through
+        We keep on moving, we keep on moving
+        Every road leads back to you
+        [verse]
+        Winter stars over the frozen lake
+        Breath in the air for the song we make
+        Snow on the hills and a candle lit
+        Everything gentle, everything fit
+        [chorus]
+        We keep on moving, we keep on moving
+        Under the sky the whole day through
+        We keep on moving, we keep on moving
+        Every road leads back to you
+        [verse]
+        Morning again and the town is bright
+        Bakers and bells in the early light
+        Over the bridge and along the shore
+        Everyone singing and wanting more
+        [chorus]
+        We keep on moving, we keep on moving
+        Under the sky the whole day through
+        We keep on moving, we keep on moving
+        Every road leads back to you
+        [bridge]
+        And when the lights go down tonight
+        We will hold the quiet tight
+        Waiting for the dawn to climb
+        One more verse and one more time
+        [chorus]
+        We keep on moving, we keep on moving
+        Under the sky the whole day through
+        We keep on moving, we keep on moving
+        Every road leads back to you
+        [outro]
+        Every road leads back to you
+  qwen3_tts:
+    - { id: qwen3-speech, model: qwen3_tts, kind: speech, prompt: "Good morning, this is a short test of the voice." }
+    - id: qwen3-speech-long
+      model: qwen3_tts
+      kind: speech
+      prompt: The quick brown fox jumps over the lazy dog while the morning light spreads across the quiet valley below.
+      prompt_repeat: 32
+    - id: qwen3-speech-clone
+      model: qwen3_tts
+      kind: speech
+      prompt: Good morning, this is a short test of a cloned voice.
+      voice_text: On a quiet morning the harbour wakes slowly, boats rock against the pier, and a gull calls from the roof while the first light touches the water.

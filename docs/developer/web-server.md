@@ -25,7 +25,7 @@ The Discover routes serve the curated list ([The curated LoRA list](curated-lora
 - **A name is known before Use is pressed.** A repository detail answers each file's `save_as` (a slug of the repository name, numbered when taken on disk or by a running download), so a taken name never surprises the user.
 - **Refusals come before any bytes move**: 409 for a curated name held by a different file or download, 403 before the opt-in, 404 for an unknown id or file, 422 for a bad value or a refused repository, 502 or 503 when Hugging Face cannot answer.
 - **Installed LoRAs** carry their trigger, its source and, for a Hugging Face download, the facts it kept, so the Installed tab describes a file offline. Deleting a LoRA also deletes its source row, and is refused with a 409 while a job runs or is queued, because the job may be loading the file. See [LoRA sources](app-database.md#lora-sources).
-- The memory estimate for a MiniMax H3 job counts a LoRA that is still downloading at the size its download expects, instead of refusing the missing file.
+- The memory answer counts a LoRA that is still downloading at the size its download expects.
 
 ## Video upscale jobs
 
@@ -129,6 +129,14 @@ Adjust (`POST /api/adjust` in `web/server.py`; the work is in `web/adjust_api.py
 Presets are a Web UI feature; the CLI does not know them. A preset is one YAML file, `<data dir>/presets/<mode>/<slug>.yaml` (`mode` is `image` or `video`), with `name`, `model` (or null) and `settings`; the folder decides the mode. `web/presets.py` owns the format, the slug rules and the store (writes under one lock with `write_text_atomic`). The `settings` keys are the Workspace form field names; unknown keys are ignored on read and write, and prompt, seed, images and the workflow are never stored. Names and slugs are unique within a mode.
 
 On the frontend, `draft.applyPreset` applies a preset the same way in every workflow: keys outside the preset are untouched and the capability gates re-run, so the new model clears what it cannot use. A mode switch, Reset, and an extend or reuse that loads a source's settings clear the applied preset.
+
+## Memory
+
+`web/memory_api.py` answers "does this job fit?" for every medium: it builds a `MemoryJob`, resolves the weights (`utils/weight_totals`, never the network) and calls `utils/memory_verdict.judge` once per row. `POST /api/memory` and the `memory` of each `/api/workspace` and `/api/models` row share it.
+
+- **`null` is a fact, not an error.** It means no memory budget, unresolvable weights or no estimate for the family. A bad field is a 422.
+- **A missing LoRA counts as 0 bytes**, and the answer's `notes` say so.
+- **Live readings.** A `memory_usage` event updates the record's `memory` only; it is never `last_event` and never changes the job's status.
 
 ## Model inventory
 

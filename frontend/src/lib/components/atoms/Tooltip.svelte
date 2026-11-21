@@ -2,27 +2,35 @@
   import type { Snippet } from 'svelte';
 
   interface Props {
-    text: string;
+    /** Plain text; ignored when `content` is given. */
+    text?: string;
+    /** Laid-out content in place of the text, such as the memory estimate. It takes pointer events while open, so a tap on it (touch has no hover to leave) lands on it and not on the control beneath: its click closes it, and is stopped there so nothing under or around it sees that click. */
+    content?: Snippet;
     /** Preferred side; the tooltip flips when that side lacks room in the viewport. */
     placement?: 'top' | 'bottom';
     /** Which edge of the trigger the tooltip lines up with; it is always kept inside the viewport. */
     align?: 'start' | 'end';
     /** Make the trigger a tab stop. Turn off when the tooltip only repeats nearby text (e.g. per-row names). */
     focusable?: boolean;
+    /** The content has controls to use: it stays open while the pointer is over it and while focus is inside it, and a tap on it does not close it. Escape inside it returns focus to the trigger. */
+    interactive?: boolean;
     testId?: string;
     class?: string;
     children?: Snippet;
   }
 
-  let { text, placement = 'top', align = 'start', focusable = true, testId, class: extraClass = '', children }: Props = $props();
+  let { text = '', content, placement = 'top', align = 'start', focusable = true, interactive = false, testId, class: extraClass = '', children }: Props = $props();
 
   const GAP_PX = 6;
   const EDGE_PX = 8;
+  // Interactive content sits a gap away from its trigger: the pointer gets this long to cross it.
+  const LEAVE_DELAY_MS = 150;
   const id = $props.id();
   let trigger = $state<HTMLSpanElement>();
   let bubble = $state<HTMLSpanElement>();
   let open = $state(false);
   let position = $state('');
+  let leaveTimer: ReturnType<typeof setTimeout> | undefined;
 
   // Fixed to the viewport, so no `overflow: hidden` container (cards, tables) can clip it.
   function place(): void {
@@ -42,11 +50,13 @@
   }
 
   function show(): void {
-    place();
+    clearTimeout(leaveTimer);
+    if (!open) place();
     open = true;
   }
 
   function hide(): void {
+    clearTimeout(leaveTimer);
     open = false;
   }
 
@@ -57,20 +67,51 @@
   }
 
   function handlePointerLeave(event: PointerEvent): void {
-    if (event.pointerType !== 'touch') hide();
+    if (event.pointerType === 'touch') return;
+    if (interactive) leaveTimer = setTimeout(hide, LEAVE_DELAY_MS);
+    else hide();
   }
 
+  // Focus moving from the trigger into the content, or between its controls, keeps it open.
+  function handleFocusOut(event: FocusEvent): void {
+    if (event.relatedTarget instanceof Node && trigger?.contains(event.relatedTarget)) return;
+    hide();
+  }
+
+  // A pointerdown inside the bubble is left alone, so it stays open and takes the click that follows (see `handleBubbleClick`).
   function handlePointerDown(event: PointerEvent): void {
     if (event.pointerType !== 'touch') return;
+    if (event.target instanceof Node && bubble?.contains(event.target)) return;
     if (open) hide();
     else show();
   }
 
+  // A tap on non-interactive content closes it. Closing on the click, not on the pointerdown, keeps the bubble in place until the click has
+  // landed on it; the click is swallowed so the tap never reaches the control beneath (a Download or Delete button on a row).
+  function handleBubbleClick(event: MouseEvent): void {
+    if (interactive) return;
+    event.preventDefault();
+    event.stopPropagation();
+    hide();
+  }
+
+  // Escape closes the tooltip; with focus inside its content, focus goes back to the trigger first, so it is not lost to the page.
+  // Focusing the trigger shows the tooltip again, so it closes after.
   function handleKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') hide();
+    if (event.key !== 'Escape') return;
+    if (bubble?.contains(document.activeElement)) trigger?.focus();
+    hide();
   }
 
   // A fixed tooltip would drift from its trigger when any ancestor scrolls, so close it instead.
+  $effect(() => () => clearTimeout(leaveTimer));
+
+  // A listener of its own, not Svelte's delegated one, so that stopping the click here stops it for every listener on the way up.
+  $effect(() => {
+    bubble?.addEventListener('click', handleBubbleClick);
+    return () => bubble?.removeEventListener('click', handleBubbleClick);
+  });
+
   $effect(() => {
     if (!open) return;
     window.addEventListener('scroll', hide, true);
@@ -93,16 +134,24 @@
   onpointerleave={handlePointerLeave}
   onpointerdown={handlePointerDown}
   onfocus={show}
-  onblur={hide}
+  onblur={interactive ? undefined : hide}
+  onfocusout={interactive ? handleFocusOut : undefined}
   onkeydown={handleKeydown}
 >
   {@render children?.()}
   <span
     bind:this={bubble}
-    role="tooltip"
+    role={interactive ? 'group' : 'tooltip'}
     {id}
-    style={position}
+    style="{position}{content ? ` pointer-events: ${open ? 'auto' : 'none'};` : ''}"
     data-open={open ? 'true' : 'false'}
-    class="ui-overlay pointer-events-none fixed z-50 w-max max-w-64 whitespace-pre-line rounded-sm px-2 py-1 text-meta font-normal normal-case tracking-normal transition-opacity duration-100 {open ? 'opacity-100' : 'opacity-0'}"
-  >{text}</span>
+    class="ui-overlay {content ? 'tip-content' : 'pointer-events-none'} fixed z-50 w-max text-meta font-normal normal-case tracking-normal transition-opacity duration-100 {content ? 'tip-rich' : 'max-w-64 whitespace-pre-line rounded-sm px-2 py-1'} {open ? 'opacity-100' : 'opacity-0'}"
+  >{#if content}{@render content()}{:else}{text}{/if}</span>
 </span>
+
+<style>
+  /* Rich content brings its own padding; it may be as wide as a phone allows. */
+  .tip-rich { max-width: min(352px, calc(100vw - 16px)); padding: 0; border-radius: var(--radius-md); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 10%, transparent); }
+  /* Laid-out content takes the pointer (set inline) and the tab key only while it is open. */
+  .tip-content[data-open='false'] { visibility: hidden; transition: opacity 100ms, visibility 0s linear 100ms; }
+</style>

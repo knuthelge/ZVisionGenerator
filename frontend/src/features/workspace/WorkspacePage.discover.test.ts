@@ -9,8 +9,8 @@ import { toasts } from '$lib/state/toasts.svelte';
 import type { DownloadItem, LoraInfo, CuratedEntry, WorkspaceContext } from '$lib/types';
 
 import { makeContext, makeIdeogramDefaults, makeImageDefaults, withEnhancer } from '../../test-utils/workspace';
-import { createHost, fakeDebounceTimers, field, mountWorkspacePage, pressKey, resetWorkspaceTest, settle, type } from '../../test-utils/workspaceHarness';
-import { discoverApiMocks, layoutProbe, modelApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
+import { createHost, fakeDebounceTimers, field, mountWorkspacePage, pressKey, resetWorkspaceTest, settle, type, waitDebounce } from '../../test-utils/workspaceHarness';
+import { discoverApiMocks, layoutProbe, memoryApiMocks, modelApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
@@ -26,7 +26,7 @@ vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
 });
 vi.mock('$lib/api/config', async (importOriginal) => ({ ...(await importOriginal<typeof import('$lib/api/config')>()), updateConfig: (await import('../../test-utils/workspaceMocks')).configApiMocks.updateConfig }));
 vi.mock('$lib/api/extend', async () => ({ inspectExtendSource: (await import('../../test-utils/workspaceMocks')).extendApiMocks.inspectExtendSource }));
-vi.mock('$lib/api/videoMemory', async () => ({ checkVideoMemoryFit: (await import('../../test-utils/workspaceMocks')).videoMemoryApiMocks.checkVideoMemoryFit }));
+vi.mock('$lib/api/memory', async () => ({ checkMemory: (await import('../../test-utils/workspaceMocks')).memoryApiMocks.checkMemory }));
 vi.mock('$lib/api/workspace', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/workspace')>();
   const { workspaceApiMocks: mocks } = await import('../../test-utils/workspaceMocks');
@@ -278,6 +278,26 @@ describe('Generate waits for a LoRA download', () => {
     expect(submit().disabled).toBe(false);
     expect((target.querySelector('.lora-chip') as HTMLElement).dataset.download).toBeUndefined();
     expect(draft.state.loraString).toBe('style:0.8');
+  });
+
+  it('asks the memory check again once the LoRA list gains the downloaded file, and not for a re-read of the same list', async () => {
+    fakeDebounceTimers();
+    memoryApiMocks.checkMemory.mockResolvedValue(null);
+    await withDownload('done');
+    await waitDebounce();
+    const asked = memoryApiMocks.checkMemory.mock.calls.length;
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(zimageContext([]));
+    await vi.advanceTimersByTimeAsync(10_000);
+    await settle();
+    expect(memoryApiMocks.checkMemory).toHaveBeenCalledTimes(asked);
+
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(zimageContext([lora('style')]));
+    await vi.advanceTimersByTimeAsync(10_000);
+    await settle();
+    await waitDebounce();
+
+    expect(memoryApiMocks.checkMemory).toHaveBeenCalledTimes(asked + 1);
+    vi.useRealTimers();
   });
 
   it('stops blocking Generate on a finished download whose file never shows up, after a bounded wait', async () => {

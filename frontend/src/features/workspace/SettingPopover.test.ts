@@ -7,12 +7,18 @@ import { downloadStore } from '$lib/state/downloads.svelte';
 import { sceneSource } from '$lib/state/extend.fixtures';
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
+import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
+import { memoryCheck } from '$lib/state/memoryCheck.svelte';
 import { memoryUploadStore } from '$lib/state/uploadStore';
-import type { GalleryAsset, ModelOption, WorkspaceContext } from '$lib/types';
+import type { GalleryAsset, JobMemory, ModelOption, WorkspaceContext } from '$lib/types';
 import { FLUX_LICENCE, MATTE_LICENCE, makeContext, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
+import { imageMemory, singleMemory } from '../../test-utils/memory';
 import { currentAudioTrackView } from './audioTrackView';
 import { currentImagesView } from './imagesView';
 import SettingPopover from './SettingPopover.svelte';
+
+const memoryApi = vi.hoisted(() => ({ checkMemory: vi.fn() }));
+vi.mock('$lib/api/memory', () => ({ checkMemory: memoryApi.checkMemory }));
 
 const trackApi = vi.hoisted(() => ({ inspectAudioTrack: vi.fn() }));
 vi.mock('$lib/api/audioTrack', () => ({ inspectAudioTrack: trackApi.inspectAudioTrack }));
@@ -640,5 +646,68 @@ describe('SettingPopover kind list', () => {
 
     expect(draft.state.workflow).toBe('txt2vid');
     expect(onclose).toHaveBeenCalledOnce();
+  });
+});
+
+describe('SettingPopover memory', () => {
+  const sizeContext = (): WorkspaceContext => makeContext({ image_model_defaults: { zit: makeImageDefaults() } });
+
+  async function open(workflow: 'txt2img' | 'txt2vid' | 'extend', key: string, answer: JobMemory | null): Promise<void> {
+    vi.useFakeTimers();
+    draft.patch({ model: 'zit', workflow });
+    memoryApi.checkMemory.mockResolvedValue(answer);
+    memoryCheck.watch({ media: workflow === 'txt2img' ? 'image' : 'video', kind: workflow === 'txt2img' ? 'image' : workflow === 'extend' ? 'extension' : 'clip', model: 'zit' });
+    await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS);
+    const context = sizeContext();
+    app = flushSync(() => mount(SettingPopover, {
+      target,
+      props: { key, context, get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, busy: false, models: [], quantizeOptions: null, lastSeed: null, onModelChange: vi.fn(), onclose: vi.fn() },
+    }));
+  }
+
+  afterEach(() => {
+    memoryCheck.watch(null);
+    vi.useRealTimers();
+  });
+
+  it('shows the estimated time of a clip on its length popover, from the memory answer', async () => {
+    await open('txt2vid', 'seconds', singleMemory('fits', { expected_seconds: 720 }));
+
+    expect(target.textContent).toContain('About 12 min (estimated).');
+  });
+
+  it('shows the estimated time of an extension on its length popover', async () => {
+    await open('extend', 'extendSeconds', singleMemory('fits', { expected_seconds: 300 }));
+
+    expect(target.textContent).toContain('About 5 min (estimated).');
+  });
+
+  it.each([['seconds', 'txt2vid'], ['extendSeconds', 'extend'], ['size', 'txt2img']] as const)('carries no memory note on the %s popover, whatever the fit', async (key, workflow) => {
+    await open(workflow, key, imageMemory('4'));
+
+    expect(target.querySelector('[data-testid$="memory-note"]')).toBeNull();
+    expect(target.textContent).not.toContain('GB');
+  });
+
+  it('hides the estimated time while a change of model awaits its answer, and shows the new one after', async () => {
+    await open('txt2vid', 'seconds', singleMemory('fits', { expected_seconds: 720 }));
+    expect(target.textContent).toContain('About 12 min (estimated).');
+    memoryApi.checkMemory.mockResolvedValue(singleMemory('fits', { expected_seconds: 300 }));
+
+    memoryCheck.watch({ media: 'video', kind: 'clip', model: 'ltx-8' });
+    flushSync();
+
+    expect(memoryCheck.pending).toBe(true);
+    expect(target.textContent).not.toContain('estimated');
+    await vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS);
+    flushSync();
+
+    expect(target.textContent).toContain('About 5 min (estimated).');
+  });
+
+  it('shows no time line without an estimate', async () => {
+    await open('txt2vid', 'seconds', singleMemory('fits'));
+
+    expect(target.textContent).not.toContain('estimated');
   });
 });

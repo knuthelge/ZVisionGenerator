@@ -1,7 +1,7 @@
 // @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
 import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
 import { createRawSnippet } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Tooltip from './Tooltip.svelte';
 
@@ -28,7 +28,7 @@ describe('Tooltip', () => {
     component = mount(Tooltip, { target, props: { text: 'Helpful text', children: label, ...props } });
     flushSync();
     const trigger = target.firstElementChild as HTMLElement;
-    return { trigger, bubble: trigger.querySelector('[role="tooltip"]') as HTMLElement };
+    return { trigger, bubble: trigger.querySelector('[data-open]') as HTMLElement };
   }
 
   function placeTrigger(trigger: HTMLElement, rect: Partial<DOMRect>): void {
@@ -104,9 +104,7 @@ describe('Tooltip', () => {
   it('toggles on tap for touch, ignoring the pointerleave that follows', () => {
     const { trigger, bubble } = render({});
     const touch = (type: string) => {
-      const event = new Event(type, { bubbles: true }) as Event & { pointerType: string };
-      Object.defineProperty(event, 'pointerType', { value: 'touch' });
-      trigger.dispatchEvent(event);
+      trigger.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'touch' }));
       flushSync();
     };
 
@@ -129,5 +127,186 @@ describe('Tooltip', () => {
     flushSync();
 
     expect(bubble.dataset.open).toBe('false');
+  });
+
+  describe('interactive', () => {
+    const inside = createRawSnippet(() => ({ render: () => '<button type="button" data-testid="inner">Pick</button>' }));
+    const touch = (target: Element, type: string) => {
+      target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'touch' }));
+      flushSync();
+    };
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('stays open while the pointer crosses from the trigger to the content, and closes once it has left both', () => {
+      vi.useFakeTimers();
+      const { trigger, bubble } = render({ interactive: true, content: inside });
+
+      trigger.dispatchEvent(new Event('pointerenter'));
+      flushSync();
+      trigger.dispatchEvent(new Event('pointerleave'));
+      vi.advanceTimersByTime(50);
+      trigger.dispatchEvent(new Event('pointerenter'));
+      vi.advanceTimersByTime(500);
+      flushSync();
+      expect(bubble.dataset.open).toBe('true');
+
+      trigger.dispatchEvent(new Event('pointerleave'));
+      vi.advanceTimersByTime(500);
+      flushSync();
+      expect(bubble.dataset.open).toBe('false');
+    });
+
+    it('closes at once on leave when it is not interactive', () => {
+      const { trigger, bubble } = render({});
+
+      trigger.dispatchEvent(new Event('pointerenter'));
+      flushSync();
+      trigger.dispatchEvent(new Event('pointerleave'));
+      flushSync();
+
+      expect(bubble.dataset.open).toBe('false');
+    });
+
+    it('stays open while focus moves into its content, and closes when focus leaves the trigger and the content', () => {
+      const { trigger, bubble } = render({ interactive: true, content: inside });
+      const inner = bubble.querySelector('[data-testid="inner"]') as HTMLElement;
+
+      trigger.dispatchEvent(new FocusEvent('focus'));
+      flushSync();
+      trigger.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: inner }));
+      flushSync();
+      expect(bubble.dataset.open).toBe('true');
+
+      inner.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body }));
+      flushSync();
+      expect(bubble.dataset.open).toBe('false');
+    });
+
+    it('does not close on a tap inside the content, but a tap on the trigger still toggles it', () => {
+      const { trigger, bubble } = render({ interactive: true, content: inside });
+      const inner = bubble.querySelector('[data-testid="inner"]') as HTMLElement;
+
+      touch(trigger, 'pointerdown');
+      expect(bubble.dataset.open).toBe('true');
+      touch(inner, 'pointerdown');
+      expect(bubble.dataset.open).toBe('true');
+      touch(trigger, 'pointerdown');
+      expect(bubble.dataset.open).toBe('false');
+    });
+
+    it('ignores a pointerdown inside non-interactive content, and closes on the click that follows, which goes no further', () => {
+      const { trigger, bubble } = render({ content: inside });
+      const beneath = vi.fn();
+      target.addEventListener('click', beneath);
+
+      touch(trigger, 'pointerdown');
+      expect(bubble.dataset.open).toBe('true');
+      touch(bubble, 'pointerdown');
+      expect(bubble.dataset.open).toBe('true');
+
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      bubble.dispatchEvent(click);
+      flushSync();
+
+      expect(bubble.dataset.open).toBe('false');
+      expect(click.defaultPrevented).toBe(true);
+      expect(beneath).not.toHaveBeenCalled();
+      target.removeEventListener('click', beneath);
+    });
+
+    it('leaves a click inside interactive content alone: it is not closed, stopped or prevented', () => {
+      const { trigger, bubble } = render({ interactive: true, content: inside });
+      const inner = bubble.querySelector('[data-testid="inner"]') as HTMLElement;
+      const beneath = vi.fn();
+      target.addEventListener('click', beneath);
+
+      touch(trigger, 'pointerdown');
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      inner.dispatchEvent(click);
+      flushSync();
+
+      expect(bubble.dataset.open).toBe('true');
+      expect(click.defaultPrevented).toBe(false);
+      expect(beneath).toHaveBeenCalledOnce();
+      target.removeEventListener('click', beneath);
+    });
+
+    it('is not a tooltip around controls: interactive content is a group, plain content a tooltip', () => {
+      expect(render({ interactive: true, content: inside }).bubble.getAttribute('role')).toBe('group');
+      unmount(component!);
+      component = null;
+      expect(render({ content: inside }).bubble.getAttribute('role')).toBe('tooltip');
+    });
+  });
+
+  describe('laid-out content', () => {
+    const inside = createRawSnippet(() => ({ render: () => '<button type="button" data-testid="inner">Pick</button>' }));
+    const pointerEvents = (bubble: HTMLElement) => getComputedStyle(bubble).pointerEvents;
+
+    it('takes pointer events while open, so a tap lands on it and not on the control beneath, and none while closed', () => {
+      const { trigger, bubble } = render({ content: inside });
+      expect(pointerEvents(bubble)).toBe('none');
+
+      trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+      flushSync();
+      expect(pointerEvents(bubble)).toBe('auto');
+
+      bubble.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+      flushSync();
+      expect(bubble.dataset.open).toBe('true');
+      expect(pointerEvents(bubble)).toBe('auto');
+
+      bubble.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      flushSync();
+      expect(bubble.dataset.open).toBe('false');
+      expect(pointerEvents(bubble)).toBe('none');
+    });
+
+    it('does the same when it is interactive', () => {
+      const { trigger, bubble } = render({ content: inside, interactive: true });
+      expect(pointerEvents(bubble)).toBe('none');
+
+      trigger.dispatchEvent(new FocusEvent('focus'));
+      flushSync();
+
+      expect(pointerEvents(bubble)).toBe('auto');
+    });
+
+    it('leaves a text tooltip out of the way of the pointer', () => {
+      const { bubble } = render({});
+
+      expect(bubble.classList.contains('pointer-events-none')).toBe(true);
+    });
+
+    it('moves focus back to the trigger before it closes on Escape pressed inside it', () => {
+      const { trigger, bubble } = render({ content: inside, interactive: true });
+      const inner = bubble.querySelector('[data-testid="inner"]') as HTMLElement;
+      trigger.dispatchEvent(new FocusEvent('focus'));
+      flushSync();
+      inner.focus();
+      expect(document.activeElement).toBe(inner);
+
+      inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      flushSync();
+
+      expect(document.activeElement).toBe(trigger);
+      expect(bubble.dataset.open).toBe('false');
+    });
+
+    it('leaves focus where it is when Escape is pressed on the trigger', () => {
+      const { trigger, bubble } = render({ content: inside, interactive: true });
+      trigger.focus();
+      flushSync();
+      expect(bubble.dataset.open).toBe('true');
+
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      flushSync();
+
+      expect(document.activeElement).toBe(trigger);
+      expect(bubble.dataset.open).toBe('false');
+    });
   });
 });

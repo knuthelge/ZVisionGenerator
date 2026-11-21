@@ -1,6 +1,6 @@
 # Memory and quantization
 
-Memory is what usually limits which models you can run. The app estimates what fits before a job starts, shows it as badges and notes, and lets you trade a little quality for a lot of memory with quantization.
+Memory is what usually limits which models you can run. The app judges what fits before a job starts, tells you in one tag, and lets you trade a little quality for a lot of memory with quantization.
 
 ## What fits
 
@@ -10,9 +10,9 @@ How much a model needs depends on where it lives:
 
 === "macOS"
 
-    The CPU and GPU share one pool of memory. macOS recommends how much of it the GPU should use; a model above that makes macOS compress or swap other memory, and well beyond it the whole system swaps heavily.
+    The CPU and GPU share one pool of memory. A job reads **Tight** from about three quarters of the Mac's memory, where macOS starts to compress or swap other memory, and **Too large** beyond all of it, where the whole system swaps heavily.
 
-    On a 16 GB Mac, Z-Image Turbo and FLUX.2 Klein need `q8` or `q4`.
+    On a 16 GB Mac, Z-Image Turbo and FLUX.2 Klein 4B need `q8` or `q4`, and Klein 9B needs `q4`.
 
 === "Windows"
 
@@ -22,40 +22,47 @@ How much a model needs depends on where it lives:
 
     A model can live in the GPU's memory or in system memory. Unquantized and at `q8`, the model stays in system memory and moves to the GPU piece by piece, so it needs only about 4 GB of GPU memory, but enough system memory to hold it. At `q4` the whole model sits on the GPU.
 
-## The memory badges { #the-memory-badges }
+## The memory tag { #the-memory-tag }
 
-The model picker and the Models page show whether a downloaded model fits this machine. The badge follows the quant you pick, so you can see whether `q8` or `q4` brings a model within reach. Hover it for the estimate. The Web UI gives a model's memory back to the system after each job.
+A tag beside **Model** and **Quant** on the Image, Video and Audio tabs, on each model in the picker and on the Models page, says whether the job as you set it up fits this computer. It never blocks **Generate**.
 
-- **Fits:** the model runs comfortably.
-- **Tight:** it runs, but slowly or with little left for other apps. On a Mac, macOS compresses or swaps other memory. On Windows and Linux, an image model streams part of itself from disk, and LTX and MiniMax H3 run with a [warning](#the-memory-check).
-- **Too large:** expect heavy swapping that can make a Mac unresponsive, or an out-of-memory error. On Windows and Linux, LTX and MiniMax H3 can also be [refused](#the-memory-check). Try a lower quant.
+- **Fits:** the job runs comfortably.
+- **Tight:** it runs, but slowly or with little left over. On a Mac, macOS compresses or swaps other memory. On Windows and Linux it may run slowly or stop with an out-of-memory error.
+- **Too large:** expect heavy swapping or an out-of-memory error. On Windows and Linux, LTX and MiniMax H3 can also be [refused](#the-memory-check).
 
-## The Duration note { #video }
+Hover, focus or tap the tag for the details: what was judged, what the status means for this computer, and the job at every **Quant** (or **Low memory** on and off) with the memory each needs. In the Workspace, click a row to choose it. A model that isn't downloaded is judged too. In the picker and on the Models page the tag judges a typical job: a 1024×1024 image, or a 5 s clip at 768×448.
 
-For video, a note under **Duration (s)** says **Tight** or **Too large** and which memory it is about. It checks the size and length of a new clip, or the window an extension generates (about the last second plus the new frames, whatever the source's length), and stays hidden while the clip fits. The badge on a video model is the estimate for a 5 s clip at 768×448.
-
-The note only warns; it never blocks **Generate**. To fit a clip, make it shorter, use a smaller size and keep **Low memory** on, or [switch to the smaller model](#switch-to-the-smaller-model). `ziv-video` prints the same estimate as one warning and carries on.
+When it says **Tight** or **Too large**, pick a row that **Fits**, make the picture smaller or the clip shorter, use fewer reference images, or [switch to the smaller model](#switch-to-the-smaller-model). On Windows and Linux, `q4` can read **Tight** where `q8` fits; see [Quantization](#quantization).
 
 ## The memory check { #the-memory-check }
 
-Before and while a job loads, the app compares what it needs with the machine.
+Before a job loads, the app compares what it needs with the machine.
 
 - **macOS:** nothing is refused. A job that doesn't fit runs slowly while macOS swaps, or stops with an out-of-memory error. See [the Mac slows down or beachballs](../reference/troubleshooting.md#macos-the-mac-slows-down-or-beachballs).
-- **Windows and Linux:** LTX and MiniMax H3 are refused when their parts need more than the machine's total system memory, and warn above about 80% of it.
+- **Windows and Linux:** LTX and MiniMax H3 are refused when the job is **Too large** for the machine's total system memory. A **Tight** job loads.
     - **LTX** (`ltx-4`, `ltx-8`, `ltx25-4`, converted models): refused before the model loads, when even loading its parts one after the other needs more than total system memory: [*LTX at … needs about … GB of system memory; this machine has … GB*](../reference/troubleshooting.md#ltx-needs-more-system-memory).
     - **MiniMax H3** (`h3`): refused before the model loads, when the weights and your LoRAs need more than total system memory: [*MiniMax H3 needs about … GB of system memory; this machine has … GB.*](../reference/troubleshooting.md#h3-needs-more-system-memory)
 
   A job the check lets through can still crawl when other programs hold memory. See [the PC crawls or freezes during a job](../reference/troubleshooting.md#windows-the-pc-crawls-or-freezes-during-a-job) on Windows. On Linux distributions that run `systemd-oomd`, such as Ubuntu, it can close the terminal or editor that started it: see [the terminal or editor closes while a model loads](../reference/troubleshooting.md#linux-the-terminal-or-editor-closes-while-a-model-loads).
 
-On every platform, the video clip check is separate and only warns: a `ziv-video` warning and the [Duration note](#video). **Image models** have no check. **Audio** warns before it starts when the model is tight or too large, and an out-of-memory error names the model and says what to close.
+`ziv-image`, `ziv-video` and `ziv-audio` print the tag's sentence once, before anything downloads, when a job is **Tight** or **Too large**, and carry on: see [*Memory for this …*](../reference/troubleshooting.md#memory-for-this). Image models and audio are never refused.
 
 The estimates don't count memory used by other apps, or by an image model that is still loaded, so a job the check allows can still be slow on a busy machine.
+
+## Memory while a job runs { #memory-while-a-job-runs }
+
+While an image, video or audio job runs in the Web UI, the foot of its card shows the memory in use on the whole machine, other programs included.
+
+- **macOS:** `Memory 18.2 / 32 GB`.
+- **Windows and Linux:** `GPU 7 / 11 GB · RAM 20 / 32 GB`. The GPU is measured against the card's usable memory, a little under its total. A job that streams its weights can read close to full, and the GPU reads `—` where the driver's reading isn't available.
+
+Close what you don't need before a large job. The command-line tools show no live figure.
 
 ## Switch to the smaller model { #switch-to-the-smaller-model }
 
 The Video tab starts on **LTX-2.3 8-bit** (`ltx-8`), the model that comes closest to the full LTX-2.3. **LTX-2.3 4-bit** (`ltx-4`) is the same model stored at 4 bits instead of 8, so it needs less memory and is the one to switch to when the clip doesn't fit.
 
-Pick it under **Model**, or pass `-m ltx-4` to `ziv-video`. Switch when the model's badge or the note under **Duration (s)** says **Tight** or **Too large**, or when a job is refused for lack of system memory. `ltx-8` is for a Mac with 32 GB or more; on a Mac with 16 GB, the estimate points to `ltx-4`. On Windows and Linux with 32 GB of system memory or less, use `ltx-4` or **LTX-2.5 4-bit** (`ltx25-4`), and on a card with 8 to 12 GB start with `ltx-4`. What each model needs is in [Models](../reference/models.md#video-models).
+Pick it under **Model**, or pass `-m ltx-4` to `ziv-video`. Switch when the tag says **Tight** or **Too large**, or when a job is refused for lack of system memory. `ltx-4` needs less system memory on Windows and Linux (about 20 GB against 24 GB for a 5 s clip) and less memory on a Mac with 32 GB. It saves nothing on a Mac with 24 GB or less, or on a card's GPU memory, where a shorter or smaller clip with **Low memory** on helps. **LTX-2.5 4-bit** (`ltx25-4`) needs about as much as `ltx-4`. What each model needs is in [Models](../reference/models.md#video-models).
 
 For images, the same step is a smaller model or a lower [quant](#quantization): FLUX.2 Klein 4B, or `q8` and `q4`.
 
@@ -71,8 +78,8 @@ Quantization stores a model's weights in fewer bits. It cuts the memory a model 
 
 On macOS both levels use mflux's quantization. On Windows and Linux, `q8` is FP8 and `q4` is NF4:
 
-- **Unquantized and `q8`** keep the model in system memory and move it to the GPU piece by piece. `q8` halves the system memory a model needs, which makes large models much faster on machines that can't hold them unquantized.
-- **`q4`** keeps the whole model on the GPU, so the GPU must hold it at 4 bits.
+- **Unquantized and `q8`** keep the model in system memory and move it to the GPU piece by piece, so `q8` needs less GPU memory than `q4` and more system memory. `q8` halves the system memory a model needs, which makes large models much faster on machines that can't hold them unquantized.
+- **`q4`** keeps the model on the GPU at 4 bits. On a card that is short of memory, such as Klein 9B on a 10 to 12 GB card, it runs slower instead of running out of memory.
 - **MOSS-Image** keeps its text encoder in 4 bits (NF4) at every level, because it is larger than its transformer. The level you pick sets the transformer: `q4` on the GPU, `q8` and unquantized streamed from system memory.
 
 Video uses the same idea through its models: `ltx-4` and `ltx-8` are LTX-2.3 at 4 and 8 bits, and `ltx25-4` is LTX-2.5 at 4 bits. On Windows and Linux, each LTX model and MiniMax H3 prepare a stored copy of their weights on the first run; see [Stored copies](#stored-quants).

@@ -4,7 +4,7 @@ import { expect, vi } from 'vitest';
 
 import WorkspacePage from '../features/workspace/WorkspacePage.svelte';
 import { firstRun } from '../features/workspace/firstRun.svelte';
-import { clipMemory } from '$lib/state/clipMemory.svelte';
+import { memoryCheck } from '$lib/state/memoryCheck.svelte';
 import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
 import { downloadStore } from '$lib/state/downloads.svelte';
 import { draft } from '$lib/state/draft.svelte';
@@ -22,7 +22,7 @@ import type { WorkspaceContext } from '$lib/types';
 import { makeGalleryPage } from './workspace';
 import {
   browseApiMocks, configApiMocks, discoverApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, modelApiMocks,
-  EMPTY_JOB_PLAN, presetApiMocks, promptFileApiMocks, recentPromptsApiMocks, videoMemoryApiMocks, voiceApiMocks, workspaceApiMocks,
+  EMPTY_JOB_PLAN, memoryApiMocks, presetApiMocks, promptFileApiMocks, recentPromptsApiMocks, voiceApiMocks, workspaceApiMocks,
 } from './workspaceMocks';
 
 // The timer that is real while a test fakes the debounce timers.
@@ -39,7 +39,7 @@ export function resetWorkspaceTest(): void {
   heldUploads.useStore(memoryUploadStore());
   workspaceMemory.forget();
   extendInspection.reset();
-  clipMemory.reset();
+  memoryCheck.watch(null);
   galleryStore.reset();
   jobStore.clearJob();
   downloadStore.reset();
@@ -65,7 +65,7 @@ export function resetWorkspaceTest(): void {
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.planGenerate, workspaceApiMocks.getJobSnapshot,
     galleryApiMocks.getGallery, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.checkReferencePaths, workspaceApiMocks.listJobs, browseApiMocks.listDirectory, browseApiMocks.browsePlaces,
     promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, promptFileApiMocks.appendPromptEntry, promptFileApiMocks.createPromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
-    videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAssets, galleryApiMocks.moveAssets, galleryApiMocks.setStarred,
+    memoryApiMocks.checkMemory, galleryApiMocks.deleteAssets, galleryApiMocks.moveAssets, galleryApiMocks.setStarred,
   ]) mock.mockReset();
   recentPromptsApiMocks.getRecentPrompts.mockReset();
   recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [] });

@@ -46,7 +46,7 @@
     mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobPreview, LicenceMark, ModelStatusBadges, ReviewStage, SaveVoiceDialog, Segmented, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobPreview, LicenceMark, MemoryTag, ModelStatusBadges, ReviewStage, SaveVoiceDialog, Segmented, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { compactUi } from '$lib/state/compactUi.svelte';
   import { failureToastText, isReviewing, isVoiceDesignJob } from '$lib/state/jobView';
   import { first, jobSettingsPrefill } from '$lib/state/jobSettings';
@@ -55,10 +55,12 @@
   import { presetsStore } from '$lib/state/presets.svelte';
   import { extendGuard, finalizeSceneFields, type ExtendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
-  import { clipMemory } from '$lib/state/clipMemory.svelte';
+  import { memoryCheck } from '$lib/state/memoryCheck.svelte';
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
-  import { clipMemoryRequest } from '$lib/state/memoryFit';
+  import { currentRow, lowMemoryLevelKey, quantLevelKey } from '$lib/state/memoryEstimate';
+  import { clipMemoryRequest, extensionMemoryRequest, imageMemoryRequest } from '$lib/state/memoryRequest';
   import { referenceListOf, referencePathsKey, sentReferenceCount } from '$lib/state/references';
+  import { referenceSizes } from '$lib/state/referenceSizes.svelte';
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames, type LoraChip } from '$lib/state/loras';
   import { chipDownload, failureText, waitText } from '$lib/state/loraDownloads';
   import { waitForListing } from '$lib/state/loraListing';
@@ -436,6 +438,33 @@
       : false
   );
 
+  // What the memory tag judges: the job as set up, as the server answered it; nothing while there is no answer (an incomplete size, a failed or
+  // empty reply). After a change of model or of kind of job the previous answer stays, dimmed, until the reply for the new one arrives
+  // (`tagPending`). An audio model's verdict does not depend on the form, so the model's own is the job's and is never pending.
+  const tagMemory = $derived(isAudio ? (selectedModel?.memory ?? null) : memoryCheck.answer);
+  const tagPending = $derived(!isAudio && memoryCheck.pending);
+  // Both kinds of answer carry a row for every level of Quant (or Low memory), so the tag reads the level the form holds right away, and the
+  // answer's own current level is the fallback for a model stored at one level.
+  const tagLevel = $derived(supportsQuantize ? quantLevelKey(draft.state.quantize) : visibleControls.has('low_memory') ? lowMemoryLevelKey(draft.state.lowMemory) : null);
+
+  // The tag's verdict is not a Fit: on the phone, where the tag sits in All settings, the All button carries the warning. Not while the
+  // verdict is the previous model's (`tagPending`).
+  const memoryWarn = $derived(!tagPending && tagMemory !== null && currentRow(tagMemory, tagLevel).status !== 'fits');
+
+  // The rows the tag may offer for choosing: the levels of the control this form shows, in the answer's own control. Quant's rows only where the
+  // Quant control is shown, and only the levels it offers; Low memory's only where that toggle is visible.
+  const tagSelectable = $derived<string[]>(
+    tagMemory?.control === 'quantize' && supportsQuantize ? ['none', ...quantizeOptions.map(String)]
+      : tagMemory?.control === 'low_memory' && pageCaps.showLowMemory ? ['on', 'off']
+      : [],
+  );
+
+  // Choosing a row sets the same field the Quant selector or Low memory toggle does, so presets and the changed marks follow as they do there.
+  function selectMemoryLevel(key: string): void {
+    if (tagMemory?.control === 'quantize') draft.update('quantize', key === 'none' ? null : Number(key));
+    else if (tagMemory?.control === 'low_memory') draft.update('lowMemory', key === 'on');
+  }
+
   // The settings preset the form started from, once the list knows it, and whether the form has moved off it.
   const activePreset = $derived(appliedPreset(presetsStore.list, draft.state));
   // The form's preset settings as one string: it only changes when a preset setting does, so typing the prompt leaves `presetChanged` alone.
@@ -490,7 +519,6 @@
     const presets = (caps.isImageMode ? context.image_size_dimensions : (context.video_size_dimensions ?? {}))[s.ratio]?.[s.size] ?? [s.width, s.height];
     const timing = videoTimingFor(context, s.model);
     const sourceFps = draft.extendSource?.fps ?? null;
-    const memoryStatus = s.workflow === 'extend' ? draft.extendSource?.memory_fit?.status : clipMemory.fit?.status;
     return settingsChips({
       caps,
       state: s,
@@ -507,7 +535,6 @@
       sourceName: s.extendSourcePath ? fileName(s.extendSourcePath) : null,
       images: images?.visible ? imagesSummary(images) : null,
       track: audioTrack?.visible ? audioTrack : null,
-      memoryWarn: memoryStatus === 'tight' || memoryStatus === 'too_large',
       presetName: activePreset?.name ?? null,
       presetSlug: activePreset?.slug ?? null,
       presetChanged,
@@ -727,6 +754,8 @@
   // Only the latest refresh applies, so a slow older response cannot overwrite newer status.
   let modelStatusRequest = 0;
   function refreshModelStatus(): void {
+    // The memory tag's answer names what is still to download, so it is asked again on the same inputs.
+    memoryCheck.refresh();
     const request = ++modelStatusRequest;
     getWorkspaceCoreContext()
       .then((fresh) => {
@@ -1214,18 +1243,50 @@
     return () => clearTimeout(timer);
   });
 
-  // The memory note of a Text to Video or Image to Video clip follows its model, size, length and memory settings.
-  // An extension is checked with its source instead, so it, like an image workflow, has nothing to ask here.
+  // The memory tag follows the job the tab would submit: an image or edit (its model, quant, size, references, LoRAs and picture),
+  // a Text to Video or Image to Video clip (its model, size, length, upscale and Low memory), or an extension (its source and length).
+  // Switching tabs changes the kind of job, which leaves the other tab's answer in place, dimmed, until the new job's answer arrives.
   $effect(() => {
     const state = draft.state;
     if (!authorityReady || context === null) {
-      clipMemory.watch(null);
+      memoryCheck.watch(null);
       return;
     }
     const caps = workspaceCapabilities(context, state);
+    const referenceRows = currentImagesView(context).references?.rows ?? [];
+    const references = sentReferenceCount(referenceRows);
+    if (caps.isImageMode) {
+      const { mode, width, height, painted, extension } = currentEditFacts();
+      // An image is judged on the real size of each reference picture: the browser measures the uploads, the server the files it holds. Until every upload has
+      // been measured the tag shows its answer as not current.
+      const pictures = caps.isEdit ? { sizes: [], paths: [], ready: true } : referenceSizes.of(referenceRows);
+      if (!pictures.ready) {
+        memoryCheck.hold();
+        return;
+      }
+      memoryCheck.watch(imageMemoryRequest(state, { quantize: supportsQuantize, referenceSizes: pictures.sizes, referencePaths: pictures.paths, upscale: caps.showImageUpscale, edit: caps.isEdit ? { mode, width, height, painted: painted > 0, extension } : null }));
+      return;
+    }
+    if (caps.isAudio) {
+      memoryCheck.watch(null);
+      return;
+    }
+    const steps = stepOptionsFor(context, state.model) !== null;
+    if (state.workflow === 'extend') {
+      memoryCheck.watch(extensionMemoryRequest(state, { lowMemory: caps.showLowMemory, steps, references }));
+      return;
+    }
     const { frameRule } = videoTimingFor(context, state.model);
-    const references = sentReferenceCount(currentImagesView(context).references?.rows ?? []);
-    clipMemory.watch(clipMemoryRequest(state, { frameRule, lowMemory: caps.showLowMemory, upscale: caps.showVideoUpscale, steps: stepOptionsFor(context, state.model) !== null, review: caps.showVideoUpscaleReview, references }));
+    memoryCheck.watch(clipMemoryRequest(state, { frameRule, lowMemory: caps.showLowMemory, upscale: caps.showVideoUpscale, steps, review: caps.showVideoUpscaleReview, references }));
+  });
+
+  // A LoRA added, removed or listed after a download changes what the server says about the job (a missing file is not counted in
+  // its memory), so the tag asks again. A re-read that lists the same files changes nothing. The first run only records the list.
+  let _shownLoras: string | null = null;
+  $effect(() => {
+    const listed = loraOptions.map((lora) => `${lora.name}\n${lora.path}`).join('\n');
+    if (_shownLoras !== null && listed !== _shownLoras) untrack(() => memoryCheck.refresh());
+    _shownLoras = listed;
   });
 
   /**
@@ -1270,7 +1331,7 @@
     void voicesStore.load();
     void voicesStore.loadDesign();
     extendInspection.reset();
-    clipMemory.reset();
+    memoryCheck.watch(null);
 
     let cancelled = false;
     let historyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1383,7 +1444,7 @@
       clearInterval(drowsyTimer);
       activityEvents.forEach((type) => document.removeEventListener(type, markActive));
       cancelled = true;
-      clipMemory.reset();
+      memoryCheck.watch(null);
       stopDownloadSync();
       stopDownloaded();
       listingStopped = true;
@@ -1786,14 +1847,14 @@
       {/if}
 
       <!-- Model selector -->
-      <div class="flex items-center gap-2 min-w-0 {stacked ? 'flex-nowrap' : 'flex-wrap'}">
+      <div class="flex items-center gap-2 min-w-0 flex-wrap">
         <label class="ui-label {stacked || (tall && (showVideoKind || isImageMode)) ? 'sr-only' : ''}" for="ws-model">Model</label>
         <Select
           id="ws-model"
           name="model"
           testId="model-shell"
           variant="shell"
-          class={stacked ? 'min-w-0 flex-1' : 'w-48'}
+          class={stacked ? 'min-w-40 flex-1' : 'w-48'}
           value={draft.state.model}
           options={modelOptions}
           disabled={!authorityReady || currentModels.length === 0}
@@ -1833,12 +1894,15 @@
           <ModelStatusBadges
             downloaded={selectedModel.downloaded}
             downloadStatus={downloadStatusText(downloadStore.activeModel(selectedModel))}
-            memoryFit={selectedModel.memory_fit}
-            quantize={supportsQuantize ? draft.state.quantize : null}
-            lowMemory={isAudio || !visibleControls.has('low_memory') || draft.state.lowMemory}
             size="control"
             tooltipPlacement="bottom"
           />
+          <!-- The tag judges the job as set up, and is absent while there is no answer. After a change of model or of kind of job it keeps
+               the previous verdict, dimmed and not choosable, until the server has answered. On the phone it sits on this row of All settings, and a
+               tap opens its popover. -->
+          {#if tagMemory}
+            <MemoryTag memory={tagMemory} level={tagLevel} size="control" align={stacked ? 'end' : 'start'} onselect={selectMemoryLevel} selectable={tagSelectable} pending={tagPending} testId="memory-tag" />
+          {/if}
         {/if}
       </div>
 
@@ -2221,7 +2285,7 @@
         {/if}
         {#if context}<PresetMenu {context} applied={activePreset} changed={presetChanged} button={false} bind:open={presetMenuOpen} />{/if}
         {#if isEdit}<ImageToEditCard />{/if}
-        <SettingsStrip {chips} tab={workspaceTab(draft.state.workflow)} activeKey={activeChip} {changedCount} pending={controlsPending} onopen={toggleChip} onall={() => { activeChip = null; sheetOpen = true; }} />
+        <SettingsStrip {chips} tab={workspaceTab(draft.state.workflow)} activeKey={activeChip} {changedCount} pending={controlsPending} {memoryWarn} onopen={toggleChip} onall={() => { activeChip = null; sheetOpen = true; }} />
         <div class="composer" class:expanded={composerOpen} data-testid="composer">
           {#if block.failures.length > 0}
             {@const failedItem = chipDownload(block.failures[0].name, loraOptions, downloadStore.items, downloadStore.unlisted)}

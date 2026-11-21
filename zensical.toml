@@ -85,6 +85,7 @@ nav = [
       { "Vendored packages" = "developer/vendored.md" },
       { "Curated LoRA list" = "developer/curated-loras.md" },
       { "Prompt-enhancer bench" = "developer/enhancer-bench.md" },
+      { "Memory bench" = "developer/memory-bench.md" },
       { "Releasing" = "developer/releasing.md" },
     ] },
   ] },

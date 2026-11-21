@@ -44,6 +44,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 
 import { DOWNLOADABLE_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
 import ModelsPage from './ModelsPage.svelte';
+import { imageMemory, singleMemory } from '../../test-utils/memory';
 import { FLUX_LICENCE, GEMMA_LICENCE, LTX_LICENCE, MATTE_LICENCE } from '../../test-utils/workspace';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { mountComponent, settle } from '../../test-utils/mount';
@@ -487,11 +488,11 @@ describe('ModelsPage Browse buttons', () => {
           label: 'zit',
           family: 'zimage',
           downloaded: true,
-          memory_fit: { budget_gb: 10.7, by_quantize: { none: { status: 'too_large', required_gb: 20.8 }, '8': { status: 'fits', required_gb: 8.1 } } },
+          memory: imageMemory('4'),
         },
-        { download_needed: true, name: 'klein4b', label: 'klein4b', family: 'flux2_klein', downloaded: false, memory_fit: null },
+        { download_needed: true, name: 'klein4b', label: 'klein4b', family: 'flux2_klein', downloaded: false, memory: null },
       ],
-      video_models: [{ download_needed: false, name: 'ltx-4', label: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, memory_fit: null }],
+      video_models: [{ download_needed: false, name: 'ltx-4', label: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, memory: null }],
     });
     mountModels();
     await settle();
@@ -501,9 +502,13 @@ describe('ModelsPage Browse buttons', () => {
     );
     expect(names).toEqual({ zit: 'true', klein4b: 'false', 'ltx-4': 'true' });
 
-    const fits = Array.from(target.querySelectorAll('[data-testid="model-memory-fit"]'));
+    const fits = Array.from(target.querySelectorAll('[data-testid="model-memory-tag"]'));
     expect(fits.map((el) => el.querySelector('[data-status]')?.getAttribute('data-status'))).toEqual(['too_large']);
-    expect(fits[0].querySelector('[role="tooltip"]')?.textContent).toContain('q8');
+    // The popover is the reference job's: its title, the sentence, and the other quants.
+    expect(fits[0].querySelector('[data-testid="memory-title"]')?.textContent).toBe(imageMemory('4').title);
+    expect(fits[0].querySelector('[data-testid="memory-sentence"]')?.textContent).toBe(imageMemory('4').rows[2].sentence);
+    expect(Array.from(fits[0].querySelectorAll('[data-testid="memory-row"]')).map((row) => row.getAttribute('data-key'))).toEqual(['none', '8', '4']);
+    expect(fits[0].querySelector('[data-testid="memory-row"][data-current]')?.getAttribute('data-key')).toBe('4');
 
     const klein = Array.from(target.querySelectorAll('[data-testid="model-name"]')).find((el) => el.textContent === 'klein4b');
     const kleinTooltip = klein?.parentElement?.querySelector('[role="tooltip"]')?.textContent ?? '';
@@ -624,7 +629,7 @@ describe('ModelsPage Browse buttons', () => {
       size_label: '7b',
       source: 'seedvr2',
       stored_quant: null,
-      memory_fit: null,
+      memory: null,
       download_size_label: '17.0 GB',
     };
 
@@ -643,7 +648,7 @@ describe('ModelsPage Browse buttons', () => {
       expect(disk).toHaveLength(1);
       expect(disk[0].textContent).toContain('9.3 GB');
       expect(Array.from(target.querySelectorAll('[data-testid="delete-button"]')).map((el) => el.getAttribute('aria-label'))).toEqual(['Delete seedvr2-7b@q8']);
-      expect(target.querySelector('[data-testid="model-memory-fit"]')).toBeNull();
+      expect(target.querySelector('[data-testid="model-memory-tag"]')).toBeNull();
     });
 
     it('confirms with the re-download size instead of the installed-model line and deletes by name', async () => {
@@ -1113,10 +1118,9 @@ describe('ModelsPage downloads', () => {
 
   describe('audio models panel', () => {
     const YUE_LICENCE = { name: 'CC BY-NC 4.0', supplier: 'M-A-P', summary: 'Non-commercial, credit required', url: 'https://example.org/yue2/LICENSE', url_label: 'Licence', attribution: null };
-    const gpuFit = { kind: 'discrete' as const, budget_gb: 10, by_quantize: { none: { status: 'tight' as const, required_gb: 8.8 } } };
-    const yue2: AudioModelEntry = { name: 'yue2', label: 'YuE2 3B', kinds: ['music'], downloaded: false, download_needed: true, memory_fit: gpuFit, delete: null, disk_size_label: null, licences: [YUE_LICENCE] };
-    const qwen: AudioModelEntry = { name: 'qwen3_tts', label: 'Qwen3-TTS 1.7B', kinds: ['speech'], downloaded: true, download_needed: false, memory_fit: null, delete: { kind: 'huggingface', repo_id: 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice', linked_by: [], stored_quants: [], source_repos: [] }, disk_size_label: '9.1 GB' };
-    const sa3: AudioModelEntry = { name: 'sa3', label: 'Stable Audio 3 Medium', kinds: ['sound'], downloaded: true, download_needed: false, memory_fit: null, delete: { kind: 'huggingface', repo_id: 'Comfy-Org/stable-audio-3', linked_by: [], stored_quants: [], source_repos: [] }, disk_size_label: '5.4 GB' };
+    const yue2: AudioModelEntry = { name: 'yue2', label: 'YuE2 3B', kinds: ['music'], downloaded: false, download_needed: true, memory: singleMemory('tight'), delete: null, disk_size_label: null, licences: [YUE_LICENCE] };
+    const qwen: AudioModelEntry = { name: 'qwen3_tts', label: 'Qwen3-TTS 1.7B', kinds: ['speech'], downloaded: true, download_needed: false, memory: null, delete: { kind: 'huggingface', repo_id: 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice', linked_by: [], stored_quants: [], source_repos: [] }, disk_size_label: '9.1 GB' };
+    const sa3: AudioModelEntry = { name: 'sa3', label: 'Stable Audio 3 Medium', kinds: ['sound'], downloaded: true, download_needed: false, memory: null, delete: { kind: 'huggingface', repo_id: 'Comfy-Org/stable-audio-3', linked_by: [], stored_quants: [], source_repos: [] }, disk_size_label: '5.4 GB' };
     const rows = () => Array.from(target.querySelectorAll<HTMLElement>('[data-testid="audio-row"]'));
     const row = (name: string) => rows().find((item) => item.dataset.model === name)!;
     const audioPlan = (overrides: Partial<RowDownloadPlan> = {}) => plan({ label: 'YuE2 3B', parts: [{ label: 'YuE2 3B', model: 'yue2', bytes: 7e9 }], total_bytes: 7e9, licences: [{ ...YUE_LICENCE, model: 'yue2' }], ...overrides });
@@ -1139,7 +1143,8 @@ describe('ModelsPage downloads', () => {
         ['Qwen3-TTS 1.7B', 'Speech', '9.1 GB'],
         ['Stable Audio 3 Medium', 'Sound', '5.4 GB'],
       ]);
-      expect(row('yue2').querySelector('[data-testid="model-memory-fit"]')?.textContent).toContain('Tight');
+      expect(row('yue2').querySelector('[data-testid="model-memory-tag"]')?.textContent).toContain('Tight');
+      expect(row('qwen3_tts').querySelector('[data-testid="model-memory-tag"]')).toBeNull();
     });
 
     it('lists every kind of a model in its kind cell, in the model\'s order', async () => {

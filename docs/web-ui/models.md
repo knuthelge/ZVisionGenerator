@@ -26,7 +26,7 @@ Under a built-in model's name is its alias, such as `klein9b` under FLUX.2 Klein
 
 **Other downloads** lists models in the Hugging Face cache that no model, enhancer or converted model uses, for example one another tool downloaded or one left behind by a model you deleted. **Unused cache files** appears when the cache holds files no download links to any more, left behind by deletes outside the app.
 
-**Size** is the disk the model uses: for a built-in model its Hugging Face download, for a converted model its own folder without the base-model files it links to. Quantized copies count with their model. **Memory** is the badge from the Workspace; see [The memory badges](../concepts/memory.md#the-memory-badges).
+**Size** is the disk the model uses: for a built-in model its Hugging Face download, for a converted model its own folder without the base-model files it links to. Quantized copies count with their model. **Memory** is the tag from the Workspace, for a typical job; see [The memory tag](../concepts/memory.md#the-memory-tag).
 
 ## Names and aliases { #names-and-aliases }
 

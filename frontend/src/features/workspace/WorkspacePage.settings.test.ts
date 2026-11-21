@@ -9,14 +9,15 @@ import { downloadStore } from '$lib/state/downloads.svelte';
 import { workspaceMemory } from '$lib/state/pageMemory';
 import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
-import type { SettingsPreset, JobContext, WorkspaceContext, GalleryAsset } from '$lib/types';
+import type { SettingsPreset, JobContext, JobMemory, WorkspaceContext, GalleryAsset } from '$lib/types';
 
 import WorkspacePage from './WorkspacePage.svelte';
 import { placesFor } from '../../test-utils/pathBrowser';
 import { pickOption } from '../../test-utils/select';
-import { FLUX_LICENCE, MATTE_LICENCE, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer, EMPTY_AUDIO_MATRIX } from '../../test-utils/workspace';
+import { FLUX_LICENCE, MATTE_LICENCE, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, makeExtendModelsContext, withEnhancer, EMPTY_AUDIO_MATRIX } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, dragFiles, fakeDebounceTimers, mountWorkspacePage, pressKey, resetWorkspaceTest, settle, waitDebounce } from '../../test-utils/workspaceHarness';
-import { browseApiMocks, configApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, modelApiMocks, presetApiMocks, videoMemoryApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
+import { browseApiMocks, configApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, modelApiMocks, presetApiMocks, memoryApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
+import { imageMemory, memoryRow, singleMemory } from '../../test-utils/memory';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
@@ -42,9 +43,21 @@ vi.mock('$lib/api/extend', async () => {
   return { inspectExtendSource: extendApiMocks.inspectExtendSource };
 });
 
-vi.mock('$lib/api/videoMemory', async () => {
-  const { videoMemoryApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { checkVideoMemoryFit: videoMemoryApiMocks.checkVideoMemoryFit };
+// jsdom decodes no pictures: every upload reads as 800×600, which the memory check judges at its real size, and a file on the server is sent by its path.
+const pictureReads = vi.hoisted(() => ({ ready: true }));
+vi.mock('$lib/state/referenceSizes.svelte', () => ({
+  referenceSizes: {
+    of: (rows: readonly { path: string; file: File | null }[]) => ({
+      sizes: rows.filter((row) => row.file).map(() => ({ width: 800, height: 600 })),
+      paths: rows.filter((row) => !row.file && row.path !== '').map((row) => row.path),
+      ready: pictureReads.ready,
+    }),
+  },
+}));
+
+vi.mock('$lib/api/memory', async () => {
+  const { memoryApiMocks } = await import('../../test-utils/workspaceMocks');
+  return { checkMemory: memoryApiMocks.checkMemory };
 });
 
 vi.mock('$lib/api/workspace', async (importOriginal) => {
@@ -120,10 +133,11 @@ async function mountWorkspace(context: WorkspaceContext): Promise<void> {
   app = await mountWorkspacePage(context, target);
 }
 
-describe('WorkspacePage clip memory note', () => {
-  const fit = (status: string, required_gb = 21) => ({ memory_fit: { status, required_gb, budget_gb: 24 }, width: 704, height: 448, frames: 49 });
-  const note = () => target.querySelector('[data-testid="clip-memory-note"]');
-  const lastRequest = () => videoMemoryApiMocks.checkVideoMemoryFit.mock.calls.at(-1)?.[0];
+describe('WorkspacePage clip memory tag', () => {
+  const answer = (status: 'fits' | 'tight' | 'too_large', overrides: Parameters<typeof singleMemory>[1] = {}) => singleMemory(status, overrides);
+  const tag = () => target.querySelector('[data-testid="memory-tag"]');
+  const status = () => tag()?.querySelector('[data-status]')?.getAttribute('data-status');
+  const lastRequest = () => memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0];
 
   async function mountVideo(workflow: 'txt2vid' | 'img2vid' | 'extend' = 'txt2vid'): Promise<void> {
     const context = makeContext();
@@ -136,50 +150,209 @@ describe('WorkspacePage clip memory note', () => {
     await waitDebounce();
   }
 
-
-  it('notes a tight clip under Duration without blocking Generate', async () => {
-    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('tight'));
+  it.each(['fits', 'tight', 'too_large'] as const)('shows the clip as %s in the tag without blocking Generate', async (fit) => {
+    memoryApiMocks.checkMemory.mockResolvedValue(answer(fit));
 
     await mountVideo();
 
-    expect(note()?.getAttribute('data-status')).toBe('tight');
-    expect(note()?.closest('[aria-live="polite"]')).not.toBeNull();
+    expect(status()).toBe(fit);
+    expect(tag()?.querySelector('[data-testid="memory-title"]')?.textContent).toBe(answer(fit).title);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('asks again when the length changes, and follows the answer', async () => {
-    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('fits'));
+  it('shows the estimated time under Duration, from the same answer', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('fits', { expected_seconds: 780 }));
+
     await mountVideo();
-    expect(note()).toBeNull();
-    expect(lastRequest()).toEqual({ model: 'ltx-8', ratio: expect.any(String), size: expect.any(String), frames: draft.state.frameCount, low_memory: draft.state.lowMemory, upscale: null });
-    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('tight'));
+
+    expect(target.querySelector('[data-testid="clip-time-note"]')?.textContent).toBe('About 13 min (estimated).');
+    expect(target.querySelector('[data-testid="clip-memory-note"]')).toBeNull();
+  });
+
+  it('hides the estimated time while a change of model awaits its answer, and shows the new one after', async () => {
+    const context = makeExtendModelsContext();
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+    draft.update('workflow', 'txt2vid');
+    draft.update('model', 'ltx-8');
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('fits', { expected_seconds: 780 }));
+    fakeDebounceTimers();
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    await waitDebounce();
+    expect(target.querySelector('[data-testid="clip-time-note"]')?.textContent).toBe('About 13 min (estimated).');
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('fits', { expected_seconds: 300 }));
+
+    draft.update('model', 'h3');
+    await settle();
+
+    expect(tag()?.querySelector('[data-status]')?.getAttribute('aria-busy')).toBe('true');
+    expect(target.querySelector('[data-testid="clip-time-note"]')).toBeNull();
+    await waitDebounce();
+
+    expect(target.querySelector('[data-testid="clip-time-note"]')?.textContent).toBe('About 5 min (estimated).');
+  });
+
+  it('carries the warning mark on the All settings button of the phone only once the answer for the model is in', async () => {
+    layoutProbe.compact = true;
+    const context = makeExtendModelsContext();
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+    draft.update('workflow', 'txt2vid');
+    draft.update('model', 'ltx-8');
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('fits'));
+    fakeDebounceTimers();
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    await waitDebounce();
+    const mark = () => target.querySelector('[aria-label="All settings"] .setchip-warn');
+    expect(mark()).toBeNull();
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('too_large'));
+
+    draft.update('model', 'h3');
+    await settle();
+    await waitDebounce();
+    expect(mark()).not.toBeNull();
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('fits'));
+
+    draft.update('model', 'ltx-8');
+    await settle();
+    // Still the previous model's verdict (too large) while the reply is awaited: no mark for it.
+    expect(mark()).toBeNull();
+    await waitDebounce();
+
+    expect(mark()).toBeNull();
+  });
+
+  it('asks again when the length changes, and follows the answer', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('fits'));
+    await mountVideo();
+    expect(status()).toBe('fits');
+    expect(lastRequest()).toEqual({ media: 'video', kind: 'clip', model: 'ltx-8', ratio: expect.any(String), size: expect.any(String), frames: draft.state.frameCount, low_memory: draft.state.lowMemory, upscale: null });
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('tight'));
 
     draft.update('frameCount', 241);
     await settle();
-    expect(videoMemoryApiMocks.checkVideoMemoryFit).toHaveBeenCalledTimes(1);
+    expect(memoryApiMocks.checkMemory).toHaveBeenCalledTimes(1);
     await waitDebounce();
 
     expect(lastRequest()).toMatchObject({ frames: 241 });
-    expect(note()?.getAttribute('data-status')).toBe('tight');
+    expect(status()).toBe('tight');
   });
 
-  it('drops the note at once when the workflow leaves video', async () => {
-    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('tight'));
-    await mountVideo();
-    expect(note()).not.toBeNull();
+  it('shows no tag while there is no answer, even for a model whose reference clip is judged', async () => {
+    const reference = singleMemory('too_large');
+    const context = makeContext({ video_models: [{ id: 'ltx-8', label: 'LTX 8', type: 'video', downloaded: true, memory: reference }] });
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+    memoryApiMocks.checkMemory.mockResolvedValue(null);
+    draft.update('workflow', 'txt2vid');
+    fakeDebounceTimers();
 
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    await waitDebounce();
+
+    expect(tag()).toBeNull();
+  });
+
+  it('shows the note of an answer under its sentence in the popover', async () => {
+    const note = "LoRA style.safetensors isn't available, so it isn't counted.";
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext());
+    memoryApiMocks.checkMemory.mockResolvedValue(singleMemory('fits', { notes: [note] }));
+    draft.update('workflow', 'txt2vid');
+    fakeDebounceTimers();
+
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    await waitDebounce();
+
+    expect(tag()?.querySelector('[data-testid="memory-note"]')?.textContent).toBe(note);
+  });
+
+  it('follows Low memory at once from the answer\'s rows, with no new request', async () => {
+    const lowMemory = (current: 'on' | 'off') => singleMemory('fits', {
+      control: 'low_memory',
+      control_title: 'Low memory',
+      current,
+      rows: [memoryRow('on', 'tight', 6, 20), memoryRow('off', 'too_large', 14, 25)],
+    });
+    memoryApiMocks.checkMemory.mockResolvedValue(lowMemory('on'));
+    draft.update('lowMemory', true);
+    await mountVideo();
+    const asked = memoryApiMocks.checkMemory.mock.calls.length;
+    expect(status()).toBe('tight');
+
+    draft.update('lowMemory', false);
+    await settle();
+
+    expect(status()).toBe('too_large');
+    expect(tag()?.querySelector('[data-testid="memory-judged"]')?.textContent).toBe(lowMemory('on').rows[1].details);
+    await waitDebounce();
+    expect(memoryApiMocks.checkMemory.mock.calls.length).toBe(asked);
+  });
+
+  it('chooses Low memory from a row of the tag: the form changes, the tag follows, and nothing is asked again', async () => {
+    const lowMemory = (current: 'on' | 'off') => singleMemory('fits', {
+      control: 'low_memory',
+      control_title: 'Low memory',
+      current,
+      rows: [memoryRow('on', 'tight', 6, 20), memoryRow('off', 'too_large', 14, 25)],
+    });
+    const row = (key: string) => tag()!.querySelector<HTMLElement>(`[data-testid="memory-row"][data-key="${key}"]`)!;
+    memoryApiMocks.checkMemory.mockResolvedValue(lowMemory('on'));
+    draft.update('lowMemory', true);
+    await mountVideo();
+    const asked = memoryApiMocks.checkMemory.mock.calls.length;
+    expect(row('on').getAttribute('aria-pressed')).toBe('true');
+
+    row('off').click();
+    await settle();
+
+    expect(draft.state.lowMemory).toBe(false);
+    expect(status()).toBe('too_large');
+    expect(row('off').getAttribute('aria-pressed')).toBe('true');
+    row('on').click();
+    await settle();
+    expect(draft.state.lowMemory).toBe(true);
+    expect(status()).toBe('tight');
+    await waitDebounce();
+    expect(memoryApiMocks.checkMemory.mock.calls.length).toBe(asked);
+  });
+
+  it('offers no Low memory row when the model hides the control', async () => {
+    const context = makeContext({ video_model_defaults: { 'ltx-8': makeVideoDefaults({ hidden_controls: ['low_memory'] }) } });
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+    memoryApiMocks.checkMemory.mockResolvedValue(singleMemory('fits', { control: 'low_memory', current: 'on', rows: [memoryRow('on', 'tight', 6, 20), memoryRow('off', 'too_large', 14, 25)] }));
+    draft.update('workflow', 'txt2vid');
+    fakeDebounceTimers();
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    await waitDebounce();
+
+    expect(tag()?.querySelectorAll('[data-testid="memory-row"]')).toHaveLength(2);
+    expect(tag()?.querySelector('button[data-testid="memory-row"]')).toBeNull();
+  });
+
+  it('keeps the clip\'s answer, dimmed, when the workflow leaves video, until the image\'s answer arrives', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('too_large'));
+    await mountVideo();
+    expect(status()).toBe('too_large');
+    expect(tag()?.querySelector('[data-status]')?.hasAttribute('aria-busy')).toBe(false);
+
+    memoryApiMocks.checkMemory.mockResolvedValue(null);
     draft.update('workflow', 'txt2img');
     await settle();
 
-    expect(note()).toBeNull();
-  });
+    expect(tag()?.querySelector('[data-testid="memory-title"]')?.textContent).toBe(answer('too_large').title);
+    expect(tag()?.querySelector('[data-status]')?.getAttribute('aria-busy')).toBe('true');
+    await waitDebounce();
 
+    expect(tag()).toBeNull();
+  });
 
   describe('first-run dialog', () => {
     const firstRunContext = (overrides: Partial<WorkspaceContext> = {}) => makeContext({
       image_models: [
-        { id: 'zit', label: 'Z-Image Turbo', type: 'image', downloaded: false, memory_fit: null, download_size_label: '33 GB' },
-        { id: 'klein4b', label: 'FLUX.2 Klein 4B', type: 'image', downloaded: false, memory_fit: null, download_size_label: '16 GB' },
+        { id: 'zit', label: 'Z-Image Turbo', type: 'image', downloaded: false, memory: null, download_size_label: '33 GB' },
+        { id: 'klein4b', label: 'FLUX.2 Klein 4B', type: 'image', downloaded: false, memory: null, download_size_label: '16 GB' },
       ],
       current_image_model: 'zit',
       image_model_defaults: { zit: makeImageDefaults({}), klein4b: makeImageDefaults({ steps: 4 }) },
@@ -300,6 +473,240 @@ describe('WorkspacePage clip memory note', () => {
       await mountWorkspace(context);
 
       expect(dialog()).toBeNull();
+    });
+  });
+});
+
+describe('WorkspacePage image memory tag', () => {
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => { resolve = done; });
+    return { promise, resolve };
+  };
+  const answer = (current = '4') => imageMemory(current);
+  const tag = () => target.querySelector('[data-testid="memory-tag"]');
+  const status = () => tag()?.querySelector('[data-status]')?.getAttribute('data-status');
+
+  /** Mount with the Quant the form holds; the server answers for the job as submitted, so the answers below name the same level. */
+  async function mountImage(quantize: number | null = 4): Promise<void> {
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext());
+    draft.update('quantize', quantize);
+    fakeDebounceTimers();
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    await waitDebounce();
+  }
+
+  it('asks for the preset size and shows the tag with the popover\'s title, sentence and quants', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('4'));
+
+    await mountImage();
+
+    expect(memoryApiMocks.checkMemory).toHaveBeenCalledWith({ media: 'image', kind: 'image', model: draft.state.model, quantize: 4, ratio: draft.state.ratio, size: draft.state.size });
+    expect(status()).toBe('too_large');
+    expect(tag()?.querySelector('[data-testid="memory-title"]')?.textContent).toBe(answer('4').title);
+    expect(tag()?.querySelector('[data-testid="memory-judged"]')?.textContent).toBe(answer('4').rows[2].details);
+    expect(tag()?.querySelector('[data-testid="memory-sentence"]')?.textContent).toBe(answer('4').rows[2].sentence);
+    expect(tag()?.querySelector('[data-testid="memory-options-label"]')?.textContent).toBe(answer('4').table_heading);
+    expect(Array.from(tag()!.querySelectorAll('[data-testid="memory-row"]')).map((row) => row.getAttribute('data-key'))).toEqual(['none', '8', '4']);
+    expect(tag()?.querySelector('[data-testid="memory-row"][data-current]')?.getAttribute('data-key')).toBe('4');
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('opens the popover on hover and on focus', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('8'));
+    await mountImage();
+    const bubble = tag()!.querySelector('[data-open]') as HTMLElement;
+    expect(bubble.dataset.open).toBe('false');
+
+    tag()!.dispatchEvent(new Event('pointerenter'));
+    flushSync();
+    expect(bubble.dataset.open).toBe('true');
+    tag()!.dispatchEvent(new Event('pointerleave'));
+    flushSync();
+    tag()!.dispatchEvent(new FocusEvent('focus'));
+    flushSync();
+    expect(bubble.dataset.open).toBe('true');
+  });
+
+  it('shows no tag while there is no answer, even for a model whose reference job is judged', async () => {
+    const reference = imageMemory('none');
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({ image_models: [{ id: 'zit', label: 'Z-Image Turbo', type: 'image', downloaded: true, memory: reference }] }));
+    memoryApiMocks.checkMemory.mockResolvedValue(null);
+    draft.update('quantize', 8);
+    fakeDebounceTimers();
+
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    await waitDebounce();
+
+    expect(tag()).toBeNull();
+  });
+
+  it('keeps the previous verdict between a model switch and its answer, dimmed and with rows that cannot be chosen', async () => {
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext());
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('4'));
+    await mountImage();
+    const badge = () => tag()?.querySelector('[data-status]');
+    expect(badge()?.hasAttribute('aria-busy')).toBe(false);
+    expect(badge()?.classList.contains('opacity-50')).toBe(false);
+    expect(tag()!.querySelectorAll('button[data-testid="memory-row"]').length).toBeGreaterThan(0);
+
+    const reply = deferred<JobMemory | null>();
+    memoryApiMocks.checkMemory.mockReturnValue(reply.promise);
+    draft.update('model', 'flux-lite');
+    await settle();
+
+    expect(status()).toBe('too_large');
+    expect(badge()?.getAttribute('aria-busy')).toBe('true');
+    expect(badge()?.classList.contains('opacity-50')).toBe(true);
+    expect(tag()!.querySelectorAll('button')).toHaveLength(0);
+
+    await waitDebounce();
+    reply.resolve(answer('8'));
+    await settle();
+
+    expect(status()).toBe('fits');
+    expect(badge()?.hasAttribute('aria-busy')).toBe(false);
+    expect(badge()?.classList.contains('opacity-50')).toBe(false);
+  });
+
+  it('follows a Quant change at once from the answer\'s rows, with no new request', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('4'));
+    await mountImage(4);
+    const asked = memoryApiMocks.checkMemory.mock.calls.length;
+    const current = () => tag()?.querySelector('[data-testid="memory-row"][data-current]')?.getAttribute('data-key');
+    expect([status(), current()]).toEqual(['too_large', '4']);
+
+    draft.update('quantize', 8);
+    await settle();
+
+    expect([status(), current()]).toEqual(['fits', '8']);
+    expect(tag()?.querySelector('[data-testid="memory-judged"]')?.textContent).toBe(answer('4').rows[1].details);
+    await waitDebounce();
+    expect(memoryApiMocks.checkMemory.mock.calls.length).toBe(asked);
+
+    draft.update('quantize', null);
+    await settle();
+
+    expect([status(), current()]).toEqual(['tight', 'none']);
+    expect(tag()?.querySelector('[data-testid="memory-judged"]')?.textContent).toBe(answer('4').rows[0].details);
+    await waitDebounce();
+    expect(memoryApiMocks.checkMemory.mock.calls.length).toBe(asked);
+  });
+
+  it('chooses a Quant from a row of the tag: the form and the tag change, and nothing is asked again', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('4'));
+    await mountImage(4);
+    const asked = memoryApiMocks.checkMemory.mock.calls.length;
+    const row = (key: string) => tag()!.querySelector<HTMLElement>(`[data-testid="memory-row"][data-key="${key}"]`)!;
+    expect(row('4').getAttribute('aria-pressed')).toBe('true');
+
+    row('8').click();
+    await settle();
+
+    expect(draft.state.quantize).toBe(8);
+    expect(status()).toBe('fits');
+    expect(row('8').getAttribute('aria-pressed')).toBe('true');
+    expect(target.querySelector('[data-testid="quantize-shell"]')?.textContent).toContain('q8');
+
+    row('none').click();
+    await settle();
+
+    expect(draft.state.quantize).toBeNull();
+    expect(status()).toBe('tight');
+    row('none').click();
+    await settle();
+    expect(draft.state.quantize).toBeNull();
+    await waitDebounce();
+    expect(memoryApiMocks.checkMemory.mock.calls.length).toBe(asked);
+  });
+
+  it('offers only the quants the model\'s Quant control offers, and none where the control is not shown', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('8'));
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({ quantize_options: [8] }));
+    draft.update('quantize', 8);
+    fakeDebounceTimers();
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    await waitDebounce();
+    const enabled = () => Array.from(tag()!.querySelectorAll<HTMLElement>('[data-testid="memory-row"]:not(:disabled)')).map((row) => row.dataset.key);
+
+    expect(enabled()).toEqual(['none', '8']);
+    const four = tag()!.querySelector<HTMLElement>('[data-key="4"]')!;
+    four.click();
+    await settle();
+    expect(draft.state.quantize).toBe(8);
+  });
+
+  it('shows no Size note, and leaves the image\'s answer only as a dimmed one when the tab changes to Video', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(answer('4'));
+    await mountImage();
+    expect(status()).toBe('too_large');
+    expect(target.querySelector('[data-testid="size-memory-note"]')).toBeNull();
+
+    memoryApiMocks.checkMemory.mockResolvedValue(null);
+    draft.update('workflow', 'txt2vid');
+    await settle();
+
+    expect(tag()?.querySelector('[data-status]')?.getAttribute('aria-busy')).toBe('true');
+    await waitDebounce();
+
+    expect(tag()).toBeNull();
+  });
+
+  describe('on a phone', () => {
+    beforeEach(() => {
+      layoutProbe.compact = true;
+      Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
+    });
+    afterEach(() => { delete (Element.prototype as Partial<Element>).animate; });
+
+    const sizeChip = () => target.querySelector('[data-chip="size"]') as HTMLButtonElement;
+    const sheetTag = () => document.querySelector('[data-testid="sheet"] [data-testid="memory-tag"]');
+
+    const modelChip = () => target.querySelector('[data-chip="model"]') as HTMLButtonElement;
+    const allButton = () => target.querySelector('button[aria-label="All settings"]') as HTMLButtonElement;
+
+    it('marks the All button, not the Size or Model chip, when the tag judges the job Too large or Tight, and shows no tag in the strip', async () => {
+      memoryApiMocks.checkMemory.mockResolvedValue(answer('4'));
+      await mountImage();
+
+      expect(allButton().classList.contains('warn')).toBe(true);
+      expect(allButton().getAttribute('aria-describedby')).not.toBeNull();
+      expect(modelChip().classList.contains('warn')).toBe(false);
+      expect(sizeChip().classList.contains('warn')).toBe(false);
+      expect(target.querySelector('[data-testid="settings-strip"] [data-testid="memory-tag"]')).toBeNull();
+    });
+
+    it('leaves the All button unmarked when the job fits or the tag has no answer', async () => {
+      memoryApiMocks.checkMemory.mockResolvedValue(answer('8'));
+      await mountImage(8);
+      expect(allButton().classList.contains('warn')).toBe(false);
+
+      draft.update('model', 'flux-lite');
+      memoryApiMocks.checkMemory.mockResolvedValue(null);
+      await settle();
+      await waitDebounce();
+      expect(allButton().classList.contains('warn')).toBe(false);
+    });
+
+    it('puts the tag on the Model and Quant row of All settings, and a tap opens its popover', async () => {
+      memoryApiMocks.checkMemory.mockResolvedValue(answer('4'));
+      await mountImage();
+
+      flushSync(() => (target.querySelector('button[aria-label="All settings"]') as HTMLButtonElement).click());
+      await settle();
+
+      const memoryTag = sheetTag() as HTMLElement;
+      expect(memoryTag).not.toBeNull();
+      expect(memoryTag.querySelector('[data-status]')?.getAttribute('data-status')).toBe('too_large');
+      const bubble = memoryTag.querySelector('[data-open]') as HTMLElement;
+      expect(bubble.dataset.open).toBe('false');
+      memoryTag.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+      flushSync();
+      expect(bubble.dataset.open).toBe('true');
+      expect(bubble.querySelector('[data-testid="memory-sentence"]')?.textContent).toBe(answer('4').rows[2].sentence);
     });
   });
 });
@@ -1082,6 +1489,53 @@ describe('WorkspacePage references', () => {
     expect(toasts[0]).toMatchObject({ type: 'info', count: 1 });
   });
 
+  it('sends the size of each uploaded reference and the path of each file on the server, and the tag shows what the server judged', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(imageMemory('4'));
+    draft.update('quantize', 4);
+    fakeDebounceTimers();
+    await mountReferences();
+    await waitDebounce();
+    expect(memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0]).not.toHaveProperty('reference_sizes');
+    expect(memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0]).not.toHaveProperty('reference_paths');
+
+    draft.update('referenceImagePaths', ['/in/a.png']);
+    await settle();
+    await addReferences(image('a.png'), image('b.png'));
+    await waitDebounce();
+
+    const request = memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0];
+    expect(request).toMatchObject({ kind: 'image', reference_sizes: [[800, 600], [800, 600]], reference_paths: ['/in/a.png'] });
+    expect(request).not.toHaveProperty('references');
+  });
+
+  it('shows the tag as pending, asking nothing, while an uploaded reference is still being measured, and asks once it is', async () => {
+    memoryApiMocks.checkMemory.mockResolvedValue(imageMemory('4'));
+    draft.update('quantize', 4);
+    fakeDebounceTimers();
+    await mountReferences();
+    await waitDebounce();
+    const badge = () => target.querySelector('[data-testid="memory-tag"] [data-status]');
+    expect(badge()?.hasAttribute('aria-busy')).toBe(false);
+    const asked = memoryApiMocks.checkMemory.mock.calls.length;
+
+    pictureReads.ready = false;
+    try {
+      await addReferences(image('a.png'));
+      await waitDebounce();
+      expect(badge()?.getAttribute('aria-busy')).toBe('true');
+      expect(memoryApiMocks.checkMemory.mock.calls.length).toBe(asked);
+    } finally {
+      pictureReads.ready = true;
+    }
+
+    draft.update('referenceImagePaths', [...draft.state.referenceImagePaths, '/in/b.png']);
+    await settle();
+    await waitDebounce();
+
+    expect(badge()?.hasAttribute('aria-busy')).toBe(false);
+    expect(memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0]).toMatchObject({ reference_sizes: [[800, 600]] });
+  });
+
   it('submits one repeated reference field, a file or a path per row, in row order', async () => {
     await mountReferences();
     draft.update('referenceImagePaths', ['/in/a.png']);
@@ -1406,17 +1860,17 @@ describe('WorkspacePage references', () => {
     }
 
     it('asks the memory check with the number of references the job sends', async () => {
-      videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue({ memory_fit: null, width: 704, height: 448, frames: 49 });
+      memoryApiMocks.checkMemory.mockResolvedValue(null);
       fakeDebounceTimers();
       await mountVideoReferences();
       await waitDebounce();
-      expect(videoMemoryApiMocks.checkVideoMemoryFit.mock.calls.at(-1)?.[0]).not.toHaveProperty('references');
+      expect(memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0]).not.toHaveProperty('references');
 
       draft.update('videoReferencePaths', ['/in/v1.png', '/in/v2.png']);
       await settle();
       await waitDebounce();
 
-      expect(videoMemoryApiMocks.checkVideoMemoryFit.mock.calls.at(-1)?.[0]).toMatchObject({ model: 'h3', references: 2 });
+      expect(memoryApiMocks.checkMemory.mock.calls.at(-1)?.[0]).toMatchObject({ model: 'h3', references: 2 });
     });
 
     it('offers a row labelled <Picture 1>, in place of the Image tab\'s list', async () => {

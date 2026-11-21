@@ -5,7 +5,7 @@ import type { ChipFacts } from '../features/workspace/settingsChips';
 export function makeChipFacts(overrides: Pick<ChipFacts, 'caps' | 'state'> & Partial<ChipFacts>): ChipFacts {
   return {
     changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null,
-    loraNames: [], videoKind: null, modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, track: null, memoryWarn: false,
+    loraNames: [], videoKind: null, modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, track: null,
     presetName: null, presetSlug: null, presetChanged: false,
     ...overrides,
   };

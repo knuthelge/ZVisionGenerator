@@ -106,7 +106,7 @@ Without a terminal, as in a script, a scheduled task or `ssh` without a terminal
 
 - **The keys don't work.** Skip, quit, pause and repeat (++n++, ++q++, ++p++, ++r++) are read from the terminal, so the only way to interrupt a run is to stop the process. `--review` needs a terminal and is refused without one.
 - **Install ffmpeg first.** `ziv-video` and `ziv-audio` need it and ask before installing it, which a script can't answer; see [ffmpeg](reference.md#ffmpeg).
-- **The exit status** is `0` when the command ends normally and non-zero when it stops: `2` for a refused option, a prompt file it can't read, a model that can't load, a `ziv-audio` take that fails, or a `ziv-video` run in which every clip fails, with the reason on standard error; `1` for an error of `ziv-model` and for a missing or declined ffmpeg. An image or clip that fails partway through a run is reported as a warning and skipped, and the run still ends with `0` when at least one other was made.
+- **The exit status** is `0` when the command ends normally and non-zero when it stops: `2` for a refused option, a prompt file it can't read, a model that can't load, or a `ziv-audio` take that fails, with the reason on standard error; `1` for an error of `ziv-model` and for a missing or declined ffmpeg. An image or clip that fails partway through a run is reported as a warning and skipped, and the run still ends with `0`, except a `ziv-video` run in which every clip fails, which ends with `2`.
 - **Use a fresh `-o` folder for each job.** Because a skipped image still exits with `0`, the way for a script to know it got what it asked for is to look in the folder: an empty one means nothing was made.
 
 ## What is Web UI only

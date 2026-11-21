@@ -65,8 +65,6 @@ export interface ChipFacts {
   images: ImagesSummary | null;
   /** The audio track view; null where the section is not offered (Image, a model that follows no track). */
   track: Pick<AudioTrackView, 'set' | 'start' | 'gone'> | null;
-  /** The clip or extension may not fit memory. */
-  memoryWarn: boolean;
   /** The applied settings preset's name, or null when none is applied. */
   presetName: string | null;
   /** The applied settings preset's slug, or null. */
@@ -91,9 +89,9 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
     f.videoKind ? { key: 'kind', label: '', value: VIDEO_KIND_INFO[f.videoKind].label, changed: false, icon: VIDEO_KIND_INFO[f.videoKind].icon } : null,
     caps.isImageMode ? { key: 'kind', label: '', value: kindOfTab.label, changed: false, icon: kindOfTab.icon } : null,
     caps.showPreset ? { key: 'preset', label: 'Preset', value: f.presetName ?? 'none', changed: f.presetChanged, on: f.presetName !== null, applied: f.presetSlug ?? '' } : null,
-    caps.showFrameCount && f.seconds !== null ? { key: 'seconds', label: 'Length', value: `${fmt(f.seconds)} s`, changed: f.changed('seconds'), warn: f.memoryWarn } : null,
+    caps.showFrameCount && f.seconds !== null ? { key: 'seconds', label: 'Length', value: `${fmt(f.seconds)} s`, changed: f.changed('seconds') } : null,
     // The Kind chip already says Extend, so the length chip reads Length in both kinds.
-    caps.showExtendLength ? { key: 'extendSeconds', label: 'Length', value: f.extendSeconds === null ? '—' : `+${fmt(f.extendSeconds)} s`, changed: f.changed('extendSeconds'), warn: f.memoryWarn } : null,
+    caps.showExtendLength ? { key: 'extendSeconds', label: 'Length', value: f.extendSeconds === null ? '—' : `+${fmt(f.extendSeconds)} s`, changed: f.changed('extendSeconds') } : null,
     caps.showSteps ? { key: 'steps', label: 'Steps', value: fmt(s.steps), changed: f.changed('steps') } : null,
     caps.showGuidance ? { key: 'guidance', label: 'Guidance', value: fmt(s.guidance), changed: f.changed('guidance') } : null,
     caps.showSeed ? { key: 'seed', label: 'Seed', value: s.seed === null ? 'random' : String(s.seed), changed: f.changed('seed'), on: s.seed !== null } : null,

@@ -296,7 +296,7 @@ Where Hugging Face keeps its cache and token. Downloaded models live in its `hub
 
     ### `PYTORCH_CUDA_ALLOC_CONF`
 
-    Windows and Linux with an NVIDIA card. When you set neither this nor `PYTORCH_ALLOC_CONF`, the app runs PyTorch's memory allocator with `expandable_segments:True,garbage_collection_threshold:0.8`, plus `pinned_max_round_threshold_mb:1`, which stops PyTorch from rounding pinned memory up to a power of two. When you set it, it is left as written and the pinned-memory setting is added to `PYTORCH_ALLOC_CONF` instead, unless you set that key yourself.
+    Windows and Linux with an NVIDIA card. When you set neither this nor `PYTORCH_ALLOC_CONF`, the app runs PyTorch's memory allocator with `expandable_segments:True,garbage_collection_threshold:0.8` on Linux and `garbage_collection_threshold:0.8` on Windows, which runs without `expandable_segments`, plus `pinned_max_round_threshold_mb:1`, which stops PyTorch from rounding pinned memory up to a power of two. When you set it, it is left as written and the pinned-memory setting is added to `PYTORCH_ALLOC_CONF` instead, unless you set that key yourself.
 
     ### `PYTORCH_ALLOC_CONF`
 

@@ -7,7 +7,6 @@ import {
   finalizeSceneFields, isOriginalLegacyPrompt,
 } from './extend';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
-import { memoryFitNote } from './memoryFit';
 
 describe('extendPrefillFor', () => {
   it('copies a recorded scene and leaves the prompt for what happens next', () => {
@@ -217,7 +216,6 @@ describe('the inspect route response', () => {
     expect(extendSourceUsable(info)).toBe(true);
     expect(extendPrefillFor(info)).toEqual({ scene: 'A woman in a red raincoat on a rainy street at night.', prompt: '', audioTrack: null, references: [] });
     expect(extendSourceFacts(info).map((fact) => fact.text)).toEqual(['512 × 256', '24 fps', '4.04 s', '97 frames', 'Audio']);
-    expect(memoryFitNote(info.memory_fit, 'extension')).toBeNull();
     expect(isOriginalLegacyPrompt({ prompt: info.prompt ?? '' }, info)).toBe(false);
   });
 });

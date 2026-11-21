@@ -6,8 +6,9 @@
   import { downloadStatusText } from '$lib/state/downloadProgress';
   import { downloadStore } from '$lib/state/downloads.svelte';
   import { galleryStore } from '$lib/state/gallery.svelte';
-  import { clipMemory } from '$lib/state/clipMemory.svelte';
-  import { clipTimeNote, memoryFitNote } from '$lib/state/memoryFit';
+  import { memoryCheck } from '$lib/state/memoryCheck.svelte';
+  import { clipTime as clipTimeText } from '$lib/state/clipTime';
+  import { lowMemoryLevelKey, quantLevelKey } from '$lib/state/memoryEstimate';
   import { addLoraChip, removeLoraChip } from '$lib/state/loraActions';
   import { chipDownload } from '$lib/state/loraDownloads';
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames } from '$lib/state/loras';
@@ -117,8 +118,9 @@
   const timing = $derived(videoTimingFor(context, s.model));
   const secondsSpec = $derived(durationSpec(timing.fps, timing.frameRule));
   const shownSeconds = $derived(roundSeconds(framesToSeconds(s.frameCount, timing.fps)));
-  const clipNote = $derived(memoryFitNote(clipMemory.fit, 'clip'));
-  const clipTime = $derived(clipTimeNote(clipMemory.fit));
+  // The estimated time of the clip or the extension, from the memory answer for the job as set up (MiniMax H3 only).
+  // The previous model's estimate is not shown while the new answer is on its way.
+  const jobTime = $derived(clipTimeText(memoryCheck.pending ? null : memoryCheck.answer));
 
   function setSeconds(seconds: number | null): void {
     if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameRule));
@@ -167,8 +169,6 @@
   const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
   // The finished clip is the frames the continued clip keeps plus the new ones.
   const extendLength = $derived(info && s.extendFrames !== null ? (extendCutView(info, s.extendFrom, s.extendFrames)?.total ?? null) : null);
-  const extendMemoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
-  const extendTime = $derived(clipTimeNote(info?.memory_fit ?? null));
   const sourceGuard = $derived(extendGuard(s, info, extendInspection.statusFor(s.extendSourcePath)));
 
   function setExtendSeconds(seconds: number | null): void {
@@ -305,8 +305,7 @@
         <input class="ui-range pop-range" type="range" aria-label="Clip length" min={secondsSpec.min} max={secondsSpec.max} step={secondsSpec.step} value={shownSeconds} style:--fill={rangeFill(shownSeconds, { min: secondsSpec.min ?? 0, max: secondsSpec.max })} oninput={(e) => setSeconds(Number(e.currentTarget.value))}>
       {/if}
       <p class="ui-help">{s.frameCount} frames at {timing.fps} fps.</p>
-      {#if clipTime}<p class="ui-help">{clipTime}</p>{/if}
-      {#if clipNote}<p class="ui-help ui-help-warning"><Icon name="alert" size={12} />{clipNote.text}</p>{/if}
+      {#if jobTime}<p class="ui-help">{jobTime}</p>{/if}
     {:else if key === 'length' && lengthRange && autoLength !== null && vocabulary}
       <InspectorNumber ariaLabel="Length in seconds, empty for Auto" value={lockedLength} step={1} min={lengthRange.min} max={lengthRange.max} nullable nudgeFrom={autoLength} placeholder="auto · {autoSecondsText(s.soundType, vocabulary)}" stepper size="lg" commitOnly onchange={setLength} />
       <input class="ui-range pop-range" type="range" aria-label="Length" min={lengthRange.min} max={lengthRange.max} step={1} value={lockedLength ?? autoLength} style:--fill={rangeFill(lockedLength ?? autoLength, lengthRange)} oninput={(e) => setLength(Number(e.currentTarget.value))}>
@@ -344,8 +343,7 @@
     {:else if key === 'extendSeconds'}
       <InspectorNumber ariaLabel="Extend by, in seconds" value={shownExtendSeconds} {...extendSecondsSpec} stepper size="lg" commitOnly disabled={sourceFps === null} onchange={setExtendSeconds} />
       <p class="ui-help">{sourceFps === null ? 'Choose a video to extend first.' : extendLength ? `Total ${extendLength.seconds.toFixed(2)} s · ${extendLength.frames} frames${s.extendFrames !== null ? ` · +${s.extendFrames} new` : ''}` : ''}</p>
-      {#if extendTime}<p class="ui-help">{extendTime}</p>{/if}
-      {#if extendMemoryNote}<p class="ui-help ui-help-warning"><Icon name="alert" size={12} />{extendMemoryNote.text}</p>{/if}
+      {#if jobTime}<p class="ui-help">{jobTime}</p>{/if}
     {:else if key === 'seed'}
       <InspectorNumber ariaLabel="Seed" value={s.seed} {...SPEC.seed} nullable placeholder="Random each run" stepper={false} size="lg" onchange={(v) => draft.update('seed', v)} />
       <div class="pop-list">
@@ -373,7 +371,7 @@
             <button type="button" class="pop-item" role="radio" aria-checked={model.id === s.model} onclick={() => { if (model.id !== s.model) onModelChange(model.id); }}>
               <Icon name="cube" size={16} />
               <span class="pop-item-text">{model.label}</span>
-              <ModelStatusBadges downloaded={model.downloaded} downloadStatus={downloadStatusText(downloadStore.activeModel(model))} memoryFit={model.memory_fit} quantize={quantizeOptions ? s.quantize : null} lowMemory={!caps.showLowMemory || s.lowMemory} tooltipPlacement="top" />
+              <ModelStatusBadges downloaded={model.downloaded} downloadStatus={downloadStatusText(downloadStore.activeModel(model))} memory={model.memory} level={quantizeOptions ? quantLevelKey(s.quantize) : caps.showLowMemory ? lowMemoryLevelKey(s.lowMemory) : null} tooltipPlacement="top" />
             </button>
             {#if model.licences?.length}<LicenceMark licences={model.licences} testId="model-licence-{model.id}" />{/if}
           </div>
@@ -520,6 +518,4 @@
   .pop-item:disabled { opacity: 0.5; }
   .pop-fold { color: var(--color-text-muted); }
   .pop-body :global(.pop-path) { height: 40px; font-family: var(--font-mono); font-size: 13px; }
-  .ui-help-warning { display: flex; gap: 4px; align-items: flex-start; }
-  .ui-help-warning :global(svg) { flex: none; margin-top: 2px; }
 </style>
