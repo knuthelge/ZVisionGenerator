@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
@@ -12,6 +14,9 @@ from PIL import Image
 from tests._factories import KLEIN_EDIT_DEFAULTS, _patch_image_main_dependencies
 from tests._images import SIDEWAYS_UPRIGHT_SIZE, painted_block, write_cutout, write_mask_png, write_sideways_photo
 from zvisiongenerator import image_cli
+from zvisiongenerator.processing.edit_region import edit_model_size
+from zvisiongenerator.utils.memory_verdict import MemoryVerdict, MemoryWeights
+from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 
 _IDEOGRAM = {"steps": 20, "guidance": 7.0, "scheduler": None, "supports_mask_edit": False, "max_reference_images": 0}
 _SIZE = (64, 48)
@@ -120,6 +125,46 @@ class TestEditArguments:
         result = run(["--edit", source, "--prompt", "x", "-m", "z", "-r", "2", "--steps", "6", "--seed", "7", "-q", "8"])
 
         assert (result.args.runs, result.args.steps, result.args.seed, result.args.quantize) == (2, 6, 7, 8)
+
+
+class TestEditMemoryWarning:
+    """An edit is judged at the canvas the model draws with its one reference picture, and warns once as an edit."""
+
+    @pytest.fixture
+    def judge(self, monkeypatch):
+        """Return the ``judge`` mock behind ``ziv-image``, answering a tight verdict on a 10 GB card."""
+        mock = MagicMock(return_value=MemoryVerdict(round(9.5 * GIB), None, "resident", "tight", "gpu"))
+        monkeypatch.setattr(image_cli, "accelerator_memory_budget_or_none", lambda: MemoryBudget(10 * GIB, system_bytes=30 * GIB))
+        monkeypatch.setattr(image_cli, "resolve_image_weights", MagicMock(return_value=MagicMock(family="flux2_klein", model_size="4b", stored_bits=None, weights=MemoryWeights())))
+        monkeypatch.setattr(image_cli, "judge", mock)
+        return mock
+
+    @pytest.mark.parametrize(
+        ("extra", "masked", "extend"),
+        [([], False, None), (["--mask", "MASK"], True, None), (["--extend", "right=256"], False, ("right", 256))],
+    )
+    def test_the_judge_gets_the_drawn_canvas_and_one_reference(self, run, source, judge, tmp_path, extra, masked, extend):
+        extra = [_save_mask(tmp_path / "m.png") if value == "MASK" else value for value in extra]
+        expected = edit_model_size(*_SIZE, masked=masked, extend=extend)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            run(["--edit", source, "--prompt", "x", "-m", "z", *extra])
+
+        job = judge.call_args.args[0]
+        assert (job.width, job.height, job.reference_megapixels) == (*expected, (_SIZE[0] * _SIZE[1] / 1e6,))
+        messages = [str(w.message) for w in caught if str(w.message).startswith("Memory for")]
+        assert messages == [f"Memory for this edit ({expected[0]}×{expected[1]}): Fits, but close to the GPU's limit. It may run out of memory (about 9.5 of 10 GB). Continuing."]
+
+    def test_a_fitting_edit_does_not_warn(self, run, source, judge):
+        judge.return_value = MemoryVerdict(round(5.0 * GIB), None, "resident", "fits", "gpu")
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = run(["--edit", source, "--prompt", "x", "-m", "z"])
+
+        assert [w for w in caught if str(w.message).startswith("Memory for")] == []
+        assert result.batch.called
 
 
 class TestEditOutput:

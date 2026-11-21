@@ -152,8 +152,9 @@ def run_video_batch(
         skip_signal: Control signal of the job; its queued actions and, with a review, its decisions are honoured.
 
     Returns:
-        The last failure's message when every attempted video failed and none was saved, else ``None``. A batch with
-        at least one saved, skipped or cancelled video returns ``None``.
+        The last failure's message (or ``"Video generation failed."``) when no video was saved and at least one
+        failed, even if other clips were skipped. ``None`` when at least one video was saved, when nothing failed
+        (every clip saved or skipped) or when the batch was cancelled.
 
     Raises:
         ValueError: When *plan* was cancelled or does not match the batch size, or a review is requested without

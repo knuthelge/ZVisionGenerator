@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import warnings
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import DEFAULT, MagicMock, patch
 
 from huggingface_hub.utils import httpx
 import pytest
@@ -16,11 +16,21 @@ from tests.video._helpers import make_ltx_info, patch_video_cli_for_preflight
 
 from zvisiongenerator import video_cli
 from zvisiongenerator.utils.config import load_config
-from zvisiongenerator.utils.model_memory import MemoryBudget
+from zvisiongenerator.utils.memory_verdict import MemoryVerdict, MemoryWeights
+from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
+from zvisiongenerator.utils.weight_totals import ResolvedWeights
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser
 
 _LTX_SETTINGS = video_config()["video_model_presets"]["ltx"]
+
+
+def _verdict(status: str = "fits", resource: str = "gpu", need_gb: float = 9.0, ram_gb: float | None = None) -> MemoryVerdict:
+    """Return the verdict a mocked ``judge`` answers with."""
+    return MemoryVerdict(round(need_gb * GIB), None if ram_gb is None else round(ram_gb * GIB), "streamed", status, resource)
+
+
+_TOO_LARGE = _verdict("too_large", need_gb=40.2)
 
 
 @pytest.fixture(autouse=True)
@@ -308,19 +318,27 @@ def _run_cli(
     config=None,
     local_models=("org/recorded-model", "ltx-8"),
     extend_supported=True,
-    fit=None,
+    verdict=None,
+    weights=True,
+    memory=None,
+    by_low_memory=None,
+    budget=None,
     resolve=None,
     detect=None,
     default_frames=49,
     run_error=None,
     run_result=None,
 ):
-    """Run ``main()`` with heavy steps patched out; return what the batch received plus the backend and memory-check mocks."""
+    """Run ``main()`` with heavy steps patched out; return what the batch received plus the backend and memory-check mocks.
+
+    *by_low_memory* maps a Low memory setting to the verdict the engine gives the clip with it, for the row of the other setting; a setting it lacks cannot be judged.
+    """
     import zvisiongenerator.video_cli as video_cli
 
     model_info = make_ltx_info()
     backend.load_model.return_value = (MagicMock(), model_info)
-    memory = MagicMock(return_value=fit)
+    memory = memory or MagicMock(return_value=verdict or _verdict())
+    resolve_weights = MagicMock(return_value=ResolvedWeights(MemoryWeights(), family="ltx") if weights else None)
     monkeypatch.chdir(tmp_path)
     app_config = {"ui": {"default_models": {"video": "ltx-8"}}, **video_config()} if config is None else config
     monkeypatch.setattr(video_cli, "load_config", lambda: app_config)
@@ -334,16 +352,16 @@ def _run_cli(
     monkeypatch.setattr(video_cli, "detect_video_model", detect or (lambda _model: model_info))
     monkeypatch.setattr(video_cli, "resolve_video_defaults", lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": default_frames})
     monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
-    monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: MemoryBudget(16 * 1024**3))
-    monkeypatch.setattr(video_cli, "clip_memory_fit", memory)
-    fits: list = []
-    real_clip_fit = video_cli._clip_fit
+    monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: budget or MemoryBudget(16 * GIB))
+    monkeypatch.setattr(video_cli, "judge", memory)
 
-    def _spy_clip_fit(args, *, upscale):
-        fits.append(real_clip_fit(args, upscale=upscale))
-        return fits[-1]
+    def _judge_row(job, *_):
+        if job.low_memory not in (by_low_memory or {}):
+            raise ValueError("no weights")
+        return by_low_memory[job.low_memory]
 
-    monkeypatch.setattr(video_cli, "_clip_fit", _spy_clip_fit)
+    monkeypatch.setattr("zvisiongenerator.utils.memory_rows.judge", _judge_row)
+    monkeypatch.setattr(video_cli, "resolve_ltx_weights", resolve_weights)
     monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
     loaded: list[str] = []
 
@@ -354,7 +372,7 @@ def _run_cli(
         return source or _cli_source()
 
     monkeypatch.setattr(video_cli, "load_extend_source", _load_source)
-    captured: dict = {"backend": backend, "memory": memory, "loaded": loaded, "fits": fits}
+    captured: dict = {"backend": backend, "memory": memory, "resolve_weights": resolve_weights, "loaded": loaded}
 
     def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, skip_signal=None):
         captured.update(prompts_data=prompts_data, args=args, plan=plan)
@@ -370,7 +388,7 @@ def _run_cli(
                 video_cli.main()
             finally:
                 captured["warnings"] = [str(item.message) for item in seen]
-                captured["memory_warnings"] = [message for message in captured["warnings"] if "GB" in message]
+                captured["memory_warnings"] = [message for message in captured["warnings"] if message.startswith("Memory for")]
     return captured
 
 
@@ -945,29 +963,24 @@ class TestVideoCliExtend:
         assert not any("gone.safetensors" in message for message in captured["warnings"])
 
     def test_a_window_that_does_not_fit_warns_and_the_run_continues(self, monkeypatch, tmp_path):
-        fit = {"status": "too_large", "required_gb": 40.2, "budget_gb": 16.0}
-        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "org/recorded-model"], fit=fit)
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "org/recorded-model"], verdict=_TOO_LARGE)
+
         (warning,) = captured["memory_warnings"]
-        assert captured["fits"][0]["status"] == "too_large" and "--extend-seconds" in warning and "--extend-frames" in warning
+        assert warning == "Memory for this extension (3 s · 512×288 · Low memory on): Needs more GPU memory than this card has (about 40.2 of 16 GB). Continuing."
         assert "args" in captured
-        call = captured["memory"].call_args
-        assert call.args == ("org/recorded-model",)
-        assert (call.kwargs["width"], call.kwargs["height"], call.kwargs["frames"], call.kwargs["low_memory"], call.kwargs["upscale"], call.kwargs["budget"]) == (
-            512,
-            288,
-            73,
-            True,
-            False,
-            MemoryBudget(16 * 1024**3),
-        )
+        job, machine, _weights = captured["memory"].call_args.args
+        assert (job.media, job.family, job.mode, job.width, job.height, job.frames, job.low_memory, job.upscale) == ("video", "ltx", "extend", 512, 288, 73, True, False)
+        assert machine == MemoryBudget(16 * GIB)
+        assert captured["resolve_weights"].call_args.args == ("org/recorded-model", "org/recorded-model")
 
     def test_a_window_that_fits_does_not_warn(self, monkeypatch, tmp_path):
-        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], fit={"status": "fits", "required_gb": 9.0, "budget_gb": 16.0})
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], verdict=_verdict("fits"))
         assert captured["memory_warnings"] == []
 
-    def test_an_unknown_memory_fit_does_not_warn(self, monkeypatch, tmp_path):
-        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], fit=None)
+    def test_weights_that_cannot_be_sized_do_not_warn(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], verdict=_TOO_LARGE, weights=False)
         assert captured["memory_warnings"] == []
+        captured["memory"].assert_not_called()
 
     def test_audio_follows_the_source_and_the_flag(self, monkeypatch, tmp_path):
         from zvisiongenerator.utils.video_extend import extend_audio_output
@@ -1000,52 +1013,118 @@ class TestVideoCliExtend:
 
 
 class TestVideoCliClipMemory:
-    """A text-to-video or image-to-video run checks its aligned size and length against memory once and warns; it never stops."""
+    """A text-to-video or image-to-video run judges its aligned size and length once, before any download, and warns when it is Tight or Too large; it never stops."""
 
     _main = TestVideoCliExtend._main
     _source = staticmethod(TestVideoCliExtend._source)
-    _TOO_LARGE = {"status": "too_large", "required_gb": 40.2, "budget_gb": 16.0}
 
     def test_a_clip_that_does_not_fit_warns_once_and_the_run_continues(self, monkeypatch, tmp_path):
-        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", "--runs", "3"], fit=self._TOO_LARGE)
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", "--runs", "3"], verdict=_TOO_LARGE)
 
-        assert [fit["status"] for fit in captured["fits"]] == ["too_large"]
-        assert len(captured["memory_warnings"]) == 1
+        assert captured["memory"].call_count == 1
+        assert captured["memory_warnings"] == ["Memory for this clip (2 s · 704×448 · Low memory on): Needs more GPU memory than this card has (about 40.2 of 16 GB). Continuing."]
         assert "args" in captured
 
-    def test_a_tight_clip_is_reported_as_tight(self, monkeypatch, tmp_path):
-        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], fit={"status": "tight", "required_gb": 18.0, "budget_gb": 16.0})
+    def test_a_too_large_clip_says_how_it_fits_with_low_memory_the_other_way_round(self, monkeypatch, tmp_path):
+        rows = {True: _TOO_LARGE, False: _verdict("fits", need_gb=12.5)}
 
-        assert [fit["status"] for fit in captured["fits"]] == ["tight"]
-        assert len(captured["memory_warnings"]) == 1
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", "--no-low-memory"], verdict=_TOO_LARGE, by_low_memory=rows)
 
-    @pytest.mark.parametrize(("flags", "advised"), [([], False), (["--no-low-memory"], True)])
-    def test_the_warning_points_at_low_memory_only_when_it_is_off(self, monkeypatch, tmp_path, flags, advised):
-        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", *flags], fit=self._TOO_LARGE)
+        assert captured["memory_warnings"] == [
+            "Memory for this clip (2 s · 704×448 · Low memory off): Needs more GPU memory than this card has (about 40.2 of 16 GB). Continuing. Low memory on: Too large (40.2 GB)"
+        ]
+
+    def test_a_tight_clip_names_the_other_low_memory_setting_too(self, monkeypatch, tmp_path):
+        rows = {True: _verdict("tight", need_gb=15.0), False: _verdict("too_large", need_gb=35.0)}
+
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], verdict=rows[True], by_low_memory=rows)
 
         (warning,) = captured["memory_warnings"]
-        assert ("--low-memory" in warning) is advised
-        assert "--frames" in warning and "--size" in warning
+        assert warning.endswith("Continuing. Low memory off: Too large (35 GB)")
 
-    @pytest.mark.parametrize("fit", [{"status": "fits", "required_gb": 9.0, "budget_gb": 16.0}, None])
-    def test_a_clip_that_fits_or_is_not_estimated_does_not_warn(self, monkeypatch, tmp_path, fit):
-        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], fit=fit)
+    def test_a_clip_that_fits_does_not_list_the_other_setting(self, monkeypatch, tmp_path):
+        rows = {True: _verdict("fits"), False: _TOO_LARGE}
+
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], verdict=rows[True], by_low_memory=rows)
 
         assert captured["memory_warnings"] == []
 
-    def test_the_check_sees_the_aligned_size_and_length(self, monkeypatch, tmp_path):
+    def test_a_clip_the_engine_cannot_judge_with_the_other_setting_warns_without_it(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], verdict=_TOO_LARGE, by_low_memory={True: _TOO_LARGE})
+
+        assert captured["memory_warnings"] == ["Memory for this clip (2 s · 704×448 · Low memory on): Needs more GPU memory than this card has (about 40.2 of 16 GB). Continuing."]
+
+    def test_an_extension_lists_the_other_low_memory_setting_too(self, monkeypatch, tmp_path):
+        rows = {True: _TOO_LARGE, False: _verdict("too_large", need_gb=50.0)}
+
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "org/recorded-model"], verdict=_TOO_LARGE, by_low_memory=rows)
+
+        assert captured["memory_warnings"][0].endswith("Continuing. Low memory off: Too large (50 GB)")
+
+    def test_a_tight_clip_warns_with_its_sentence(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], verdict=_verdict("tight", need_gb=15.0))
+
+        (warning,) = captured["memory_warnings"]
+        assert warning.endswith("Fits, but close to the GPU's limit. It may run out of memory (about 15 of 16 GB). Continuing.")
+
+    def test_a_discrete_card_names_the_resource_that_set_the_status(self, monkeypatch, tmp_path):
+        verdict = _verdict("too_large", resource="ram", need_gb=40.0, ram_gb=40.0)
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], verdict=verdict, budget=MemoryBudget(16 * GIB, system_bytes=32 * GIB))
+
+        (warning,) = captured["memory_warnings"]
+        assert warning.endswith("Needs more RAM than this computer has (about 40 of 32 GB). Continuing.")
+
+    def test_the_warning_carries_no_advice_and_names_low_memory_as_a_choice(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", "--no-low-memory"], verdict=_TOO_LARGE)
+
+        (warning,) = captured["memory_warnings"]
+        assert "Low memory off" in warning
+        assert "--frames" not in warning and "--size" not in warning and "--low-memory" not in warning
+
+    def test_a_clip_that_fits_does_not_warn(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], verdict=_verdict("fits"))
+
+        assert captured["memory_warnings"] == []
+        captured["memory"].assert_called_once()
+
+    def test_weights_that_cannot_be_sized_do_not_warn(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], verdict=_TOO_LARGE, weights=False)
+
+        assert captured["memory_warnings"] == []
+        captured["memory"].assert_not_called()
+
+    def test_a_job_the_engine_cannot_judge_does_not_warn(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], memory=MagicMock(side_effect=ValueError("no weights")))
+
+        assert captured["memory_warnings"] == []
+
+    def test_the_judge_sees_the_aligned_size_and_length(self, monkeypatch, tmp_path):
         captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", "-W", "700", "-H", "450", "--frames", "50"])
 
-        call = captured["memory"].call_args
-        assert call.args == ("ltx-8",)
-        assert (call.kwargs["width"], call.kwargs["height"], call.kwargs["frames"]) == (704, 448, 49)
-        assert (call.kwargs["low_memory"], call.kwargs["upscale"], call.kwargs["budget"]) == (True, False, MemoryBudget(16 * 1024**3))
+        job, machine, _weights = captured["memory"].call_args.args
+        assert (job.width, job.height, job.frames, job.low_memory, job.upscale) == (704, 448, 49, True, False)
+        assert machine == MemoryBudget(16 * GIB)
 
-    def test_an_upscaled_clip_is_checked_at_its_final_64_aligned_size(self, monkeypatch, tmp_path):
+    def test_an_upscaled_clip_is_judged_at_its_final_64_aligned_size(self, monkeypatch, tmp_path):
         captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", "--upscale", "2", "-W", "700", "-H", "450"])
 
-        call = captured["memory"].call_args
-        assert (call.kwargs["width"], call.kwargs["height"], call.kwargs["upscale"]) == (704, 448, True)
+        job = captured["memory"].call_args.args[0]
+        assert (job.width, job.height, job.upscale) == (704, 448, True)
+
+    def test_the_warning_comes_before_the_model_loads(self, monkeypatch, tmp_path):
+        backend = MagicMock()
+        memory = MagicMock(return_value=_TOO_LARGE)
+        judged_before_load: list[bool] = []
+
+        def _load(*_args, **_kwargs):
+            judged_before_load.append(memory.called)
+            return DEFAULT
+
+        backend.load_model.side_effect = _load
+
+        _run_cli(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], backend=backend, memory=memory)
+
+        assert judged_before_load == [True]
 
 
 # ---------------------------------------------------------------------------
@@ -1061,21 +1140,6 @@ class TestVideoCliClipMemory:
 # ---------------------------------------------------------------------------
 # align_frames (the LTX rule)
 # ---------------------------------------------------------------------------
-
-
-def test_a_clip_limited_by_system_memory_points_at_the_model_not_the_clip(monkeypatch):
-    import argparse
-
-    import zvisiongenerator.video_cli as video_cli
-
-    monkeypatch.setattr(video_cli, "_clip_fit", lambda *_args, **_kwargs: {"status": "too_large", "required_gb": 40.0, "budget_gb": 32.0, "kind": "discrete", "resource": "system"})
-    args = argparse.Namespace(upscale=None, model_name="ltx-4", width=704, height=448, num_frames=121, low_memory=True)
-
-    with pytest.warns(UserWarning) as caught:
-        video_cli._warn_if_too_large(args, extending=False)
-
-    assert len(caught) == 1
-    assert "--frames" not in str(caught[0].message)
 
 
 class TestVideoCliH3:
@@ -1203,7 +1267,7 @@ class TestVideoCliH3:
         captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "h3" if family == "h3" else "ltx-8", "--extend-frames", extend_frames], family=family)
 
         assert (captured["args"].extend_frames, captured["args"].num_frames) == (int(extend_frames), window)
-        assert captured["memory"].call_args.kwargs["frames"] == window
+        assert captured["memory"].call_args.args[0].frames == window
 
     def test_h3_with_both_images_reaches_the_batch(self, monkeypatch, tmp_path):
         first, last = self._images(tmp_path)
@@ -1245,8 +1309,8 @@ class TestVideoCliH3:
         with_references = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--reference", ",".join(refs)])
         without = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake"])
 
-        assert with_references["memory"].call_args.kwargs["references"] == len(refs)
-        assert without["memory"].call_args.kwargs["references"] == 0
+        assert with_references["memory"].call_args.args[0].references == len(refs)
+        assert without["memory"].call_args.args[0].references == 0
 
     @pytest.mark.parametrize("mode", ["text", "upscale", "extend", "image", "first_and_last", "audio"])
     def test_references_work_in_every_mode(self, monkeypatch, tmp_path, mode):
@@ -1522,7 +1586,7 @@ class TestEstimatedTimeLine:
 
     def _run(self, monkeypatch, budget, args):
         monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: budget)
-        video_cli._warn_if_too_large(args, extending=args.extend_source is not None)
+        video_cli._warn_if_memory_tight(args, extending=args.extend_source is not None)
 
     def test_the_line_names_the_size_the_frames_and_the_estimated_minutes(self, monkeypatch, capsys):
         self._run(monkeypatch, self._DISCRETE, self._args())
@@ -1541,41 +1605,54 @@ class TestEstimatedTimeLine:
 
         assert "864x480, 56 frames" in capsys.readouterr().out
 
-    def test_the_clip_fit_is_asked_with_the_mode_and_steps_of_the_run(self, monkeypatch):
-        calls = []
-        monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: self._DISCRETE)
-        monkeypatch.setattr(video_cli, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+    def test_the_judge_is_asked_with_the_mode_and_steps_of_the_run(self, monkeypatch):
+        judge = MagicMock(return_value=_verdict())
+        monkeypatch.setattr(video_cli, "judge", judge)
 
-        video_cli._clip_fit(self._args(steps=4, image_path="a.png"), upscale=False)
-        video_cli._clip_fit(self._args(extend_source=make_extend_source(), extend_frames=34, num_frames=56), upscale=False)
-        video_cli._clip_fit(self._args(model_family="ltx", steps=8), upscale=False)
+        for budget_args in (self._args(steps=4, image_path="a.png"), self._args(extend_source=make_extend_source(), extend_frames=34, num_frames=56), self._args(steps=None)):
+            self._run(monkeypatch, self._DISCRETE, budget_args)
 
-        assert [(call["mode"], call["forwards"], call["frames"]) for call in calls] == [("i2v", 4, 124), ("extend", 8, 56), ("t2v", 8, 124)]
+        jobs = [call.args[0] for call in judge.call_args_list]
+        assert [(job.mode, job.forwards, job.frames) for job in jobs] == [("i2v", 4, 124), ("extend", 8, 56), ("t2v", 8, 124)]
 
-    def test_the_clip_fit_knows_whether_the_upscale_pauses_for_review(self, monkeypatch):
-        calls = []
-        monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: self._DISCRETE)
-        monkeypatch.setattr(video_cli, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+    def test_the_judge_knows_whether_the_upscale_pauses_for_review(self, monkeypatch):
+        judge = MagicMock(return_value=_verdict())
+        monkeypatch.setattr(video_cli, "judge", judge)
 
-        video_cli._clip_fit(self._args(review=True), upscale=True)
-        video_cli._clip_fit(self._args(review=False), upscale=True)
-        video_cli._clip_fit(self._args(), upscale=True)
+        for review in (True, False, None):
+            self._run(monkeypatch, self._DISCRETE, self._args(review=review, upscale=2))
 
-        assert [call["review"] for call in calls] == [True, False, False]
+        assert [call.args[0].review for call in judge.call_args_list] == [True, False, False]
+
+    @pytest.mark.parametrize("family", ["ltx", "h3"])
+    def test_the_judge_is_told_the_size_of_the_runs_lora_files(self, monkeypatch, tmp_path, family):
+        judge = MagicMock(return_value=_verdict())
+        monkeypatch.setattr(video_cli, "judge", judge)
+        monkeypatch.setattr(video_cli, "resolve_ltx_weights", MagicMock(return_value=ResolvedWeights(MemoryWeights(), family="ltx")))
+        first, second = tmp_path / "a.safetensors", tmp_path / "b.safetensors"
+        first.write_bytes(b"x" * 300)
+        second.write_bytes(b"y" * 45)
+
+        self._run(monkeypatch, self._DISCRETE, self._args(model_family=family, lora_paths=[str(first), str(second)]))
+
+        assert judge.call_args.args[0].lora_bytes == 345
 
     def test_ltx_prints_no_time_line(self, monkeypatch, capsys):
-        monkeypatch.setattr(video_cli, "clip_memory_fit", lambda *_a, **_k: {"status": "fits", "required_gb": 8.0, "budget_gb": 10.0})
+        monkeypatch.setattr(video_cli, "judge", MagicMock(return_value=_verdict()))
+        monkeypatch.setattr(video_cli, "resolve_ltx_weights", MagicMock(return_value=ResolvedWeights(MemoryWeights(), family="ltx")))
 
         self._run(monkeypatch, self._DISCRETE, self._args(model_family="ltx"))
 
         assert capsys.readouterr().out == ""
 
-    def test_the_system_warning_of_h3_has_no_ltx_advice(self, monkeypatch):
+    def test_the_h3_warning_names_the_clip_and_gives_no_advice(self, monkeypatch):
         with pytest.warns(UserWarning) as caught:
-            self._run(monkeypatch, MemoryBudget(10 * 1024**3, system_bytes=16 * 1024**3), self._args())
+            self._run(monkeypatch, MemoryBudget(10 * 1024**3, system_bytes=16 * 1024**3), self._args(width=1920, height=1088, num_frames=345))
 
-        assert "system memory" in str(caught[0].message)
-        assert "ltx" not in str(caught[0].message)
+        message = str(caught[0].message)
+        assert message.startswith("Memory for this clip (14.4 s · 1920×1088):")
+        assert "Low memory" not in message and "ltx" not in message
+        assert message.endswith("Continuing.")
 
 
 class TestVideoCliExitStatus:

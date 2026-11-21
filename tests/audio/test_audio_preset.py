@@ -188,7 +188,7 @@ class TestPlatformSettings:
 
         yue2 = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "yue2")
 
-        assert (yue2.memory_gb_for("cuda"), yue2.memory_gb_for("mps")) == (6.7, None)
+        assert (yue2.memory_gb_for("cuda"), yue2.memory_gb_for("mps")) == (_packaged_entry("yue2")["platforms"]["cuda"]["memory_gb"], None)
 
     def test_a_preset_without_platforms_uses_the_shared_values_everywhere(self, monkeypatch, tmp_path):
         entry = _packaged_entry("sa3")

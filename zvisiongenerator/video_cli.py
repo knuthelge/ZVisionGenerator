@@ -25,9 +25,14 @@ from zvisiongenerator.utils.config import load_config, resolve_video_defaults, s
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
+from zvisiongenerator.utils.lora_size import lora_files_bytes
 from zvisiongenerator.utils.references import check_reference_files, parse_reference_paths
-from zvisiongenerator.utils.h3_memory import h3_lora_bytes
-from zvisiongenerator.utils.model_memory import clip_memory_fit
+from zvisiongenerator.utils.memory_rows import judge_rows, low_memory_key, low_memory_rows
+from zvisiongenerator.utils.memory_verdict import MemoryJob, MemoryVerdict, MemoryWeights, judge
+from zvisiongenerator.utils.memory_wording import judged_heading, memory_rows_line, memory_warning
+from zvisiongenerator.utils.video_memory_job import clip_memory_job
+from zvisiongenerator.utils.model_memory import MemoryBudget
+from zvisiongenerator.utils.weight_totals import resolve_ltx_weights
 from zvisiongenerator.downloads import describe_refusal
 from zvisiongenerator.downloads.plans import video_model_downloaded, video_plan
 from zvisiongenerator.licence_cli import print_licence_notice
@@ -285,60 +290,84 @@ def _fit_frames(args: argparse.Namespace) -> int:
     return args.num_frames
 
 
-def _clip_fit(args: argparse.Namespace, *, upscale: bool) -> dict[str, Any] | None:
-    """Return how the run's clip fits this machine's memory (``status``, ``required_gb``, ``budget_gb``, and an estimated ``expected_seconds`` for H3), or ``None`` when unknown."""
-    return clip_memory_fit(
-        args.model,
+def _clip_job(args: argparse.Namespace, *, upscale: bool) -> tuple[MemoryJob, MemoryWeights] | None:
+    """Return the run's clip as a memory job with the weights it is judged on, or ``None`` when the family has no estimate or the model's weights cannot be sized."""
+    family = getattr(args, "model_family", "ltx")
+    if family == "ltx":
+        resolved = resolve_ltx_weights(args.model_name, args.model, platform_key=sys.platform)
+        if resolved is None:
+            return None
+        weights = resolved.weights
+    elif family == "h3":
+        weights = MemoryWeights()
+    else:
+        return None
+    job = clip_memory_job(
+        family,
         width=args.width,
         height=args.height,
         frames=_fit_frames(args),
         low_memory=args.low_memory,
-        upscale=upscale,
-        budget=accelerator_memory_budget_or_none(),
-        model_name=getattr(args, "model_name", None),
-        family=getattr(args, "model_family", "ltx"),
         mode=_fit_mode(args),
-        forwards=getattr(args, "steps", None) or 8,
-        loras_bytes=h3_lora_bytes(getattr(args, "lora_paths", None) or ()),
-        review=bool(getattr(args, "review", False)),
         references=len(getattr(args, "reference_paths", None) or ()),
+        upscale=upscale,
+        review=bool(getattr(args, "review", False)),
+        steps=getattr(args, "steps", None),
+        lora_bytes=lora_files_bytes(getattr(args, "lora_paths", None) or ()),
     )
+    return job, weights
 
 
-def _print_estimated_time(args: argparse.Namespace, fit: dict[str, Any]) -> None:
-    """Print the estimated time of an H3 run, when the fit carries one."""
-    seconds = fit.get("expected_seconds")
+def _print_estimated_time(args: argparse.Namespace, verdict: MemoryVerdict) -> None:
+    """Print the estimated time of an H3 run, when the verdict carries one."""
+    seconds = verdict.expected_seconds
     if seconds is None:
         return
     print(f"MiniMax H3 at {args.width}x{args.height}, {_fit_frames(args)} frames: estimated {max(1, round(seconds / 60))} min (excludes the one-time weight preparation).")
 
 
-def _warn_if_too_large(args: argparse.Namespace, *, extending: bool) -> None:
-    """Print an H3 run's estimated time, and warn when the clip, or the window of an extension, may not fit in memory; the run continues either way."""
-    fit = _clip_fit(args, upscale=bool(args.upscale))
-    if fit is None:
-        return
-    _print_estimated_time(args, fit)
-    if fit["status"] == "fits":
-        return
-    if fit.get("resource") == "system":
-        # The weights, not the clip, are what fill system memory: a shorter or smaller clip does not help.
-        advice = " ltx-4 needs less than ltx-8, and --upscale adds about 4 GB." if getattr(args, "model_family", "ltx") == "ltx" else ""
-        warnings.warn(
-            f"The model needs about {fit['required_gb']:g} GB of system memory; this machine has {fit['budget_gb']:g} GB ({fit['status'].replace('_', ' ')}). Continuing; it may be slow or fail.{advice}",
-            stacklevel=2,
-        )
-        return
-    if extending:
-        subject = f"The {_fit_frames(args)}-frame extension window"
-        advice = "Use --extend-seconds or --extend-frames for a shorter extension"
-    else:
-        subject = f"At {args.width}x{args.height}, {args.num_frames} frames this clip"
-        advice = "Use fewer --frames or a smaller --size" + ("" if args.low_memory else ", and keep --low-memory on")
-    warnings.warn(
-        f"{subject} needs about {fit['required_gb']:g} GB; this machine's budget is {fit['budget_gb']:g} GB ({fit['status'].replace('_', ' ')}). Continuing; it may be slow or fail. {advice}.",
-        stacklevel=2,
+def _memory_heading(args: argparse.Namespace, *, extending: bool) -> str:
+    """Return what the memory warning judged: the clip or the extension window, its length and size, and the choices that change its placement."""
+    ltx = getattr(args, "model_family", "ltx") == "ltx"
+    return judged_heading(
+        "extension" if extending else "clip",
+        width=args.width,
+        height=args.height,
+        seconds=_fit_frames(args) / (getattr(args, "fps", None) or 24),
+        low_memory=args.low_memory if ltx else None,
+        references=len(getattr(args, "reference_paths", None) or ()),
+        loras=len(getattr(args, "lora_paths", None) or ()),
     )
+
+
+def _warn_if_memory_tight(args: argparse.Namespace, *, extending: bool) -> None:
+    """Print an H3 run's estimated time, and warn once when the clip, or the window of an extension, is Tight or Too large for this machine; the run continues either way.
+
+    An LTX clip's warning also says how the clip fits with Low memory the other way round.
+    """
+    machine = accelerator_memory_budget_or_none()
+    if machine is None or not machine.gpu_bytes:
+        return
+    setup = _clip_job(args, upscale=bool(args.upscale))
+    if setup is None:
+        return
+    job, weights = setup
+    try:
+        verdict = judge(job, machine, weights)
+    except ValueError:
+        return
+    _print_estimated_time(args, verdict)
+    text = memory_warning(_memory_heading(args, extending=extending), verdict, machine, other_choices=_other_low_memory(job, weights, machine))
+    if text:
+        warnings.warn(text, stacklevel=2)
+
+
+def _other_low_memory(job: MemoryJob, weights: MemoryWeights, machine: MemoryBudget) -> str | None:
+    """Return the line saying how the clip fits with Low memory the other way round, or ``None`` for a family without the setting (MiniMax H3) or a clip the engine cannot judge both ways."""
+    if job.family != "ltx":
+        return None
+    rows = judge_rows(low_memory_rows(job), machine, weights)
+    return None if rows is None else memory_rows_line("low_memory", rows, low_memory_key(job.low_memory), machine)
 
 
 def _apply_ratio_size_defaults(parser: argparse.ArgumentParser, args: argparse.Namespace, config: dict[str, Any]) -> None:
@@ -612,7 +641,7 @@ def main(*, prog: str = "ziv-video") -> None:
     except RuntimeError as e:
         parser.error(str(e))
 
-    _warn_if_too_large(args, extending=source is not None)
+    _warn_if_memory_tight(args, extending=source is not None)
 
     # Determine mode hint
     mode = "extend" if source is not None else "i2v" if args.image_path else "t2v"

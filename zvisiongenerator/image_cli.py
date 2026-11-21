@@ -8,10 +8,11 @@ import logging
 import os
 import sys
 import warnings
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import get_backend, release_accelerator_memory
+from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_backend, release_accelerator_memory
 from zvisiongenerator.built_models import ensure_built_model
 from zvisiongenerator.edit_cli import add_edit_arguments, check_edit_source, edit_output_folder, refuse_edit_options
 from zvisiongenerator.enhance_cli import add_enhance_arguments, defer_format_to_entries, parse_enhance_args
@@ -23,8 +24,13 @@ from zvisiongenerator.image_model_loader import SAVING_QUANT_PHASE, load_image_m
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.hf_snapshot import snapshot_download, snapshot_with
 from zvisiongenerator.utils.matte import matte_pins
+from zvisiongenerator.utils.memory_rows import judge_rows, level_key, quantize_choices, quantize_rows
+from zvisiongenerator.utils.memory_verdict import MemoryJob, judge
+from zvisiongenerator.utils.memory_wording import judged_heading, memory_rows_line, memory_warning
+from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.model_files import cached_snapshot_dirs
 from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
+from zvisiongenerator.utils.image_memory_job import run_memory_job
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL
@@ -36,8 +42,11 @@ from zvisiongenerator.utils.paths import canonical_model_name, get_ziv_data_dir,
 from zvisiongenerator.utils.prompts import inspect_prompts_file
 from zvisiongenerator.utils.prompt_enhance import image_enhance_entries
 from zvisiongenerator.utils.references import check_reference_count, check_reference_files, parse_reference_paths
+from zvisiongenerator.utils.weight_totals import ResolvedWeights, resolve_image_weights
 
 logger = logging.getLogger(__name__)
+
+_QUANTIZE_LEVELS = (4, 8)  # the levels --quantize takes
 
 
 def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
@@ -132,6 +141,60 @@ def _fetch_matte_models() -> None:
         snapshot_with(pin, snapshot_download)
 
 
+def _warn_if_memory_tight(args: argparse.Namespace, memory_job: MemoryJob) -> None:
+    """Warn once when the job is Tight or Too large for this machine's memory; the run continues either way.
+
+    Silent when the machine has no memory budget, the model's weights cannot be sized (from its files, the shipped table or
+    the Hugging Face header of a repo typed in) or the engine cannot judge the job. An edit is judged at the canvas the
+    model draws, with its picture as the one reference.
+    """
+    machine = accelerator_memory_budget_or_none()
+    if machine is None or not machine.gpu_bytes:
+        return
+    resolved = resolve_image_weights(args.model_name, args.model, platform_key=sys.platform, hub=True)
+    if resolved is None:
+        return
+    job = replace(memory_job, family=resolved.family, model_size=resolved.model_size, quantize=args.quantize)
+    try:
+        verdict = judge(job, machine, resolved.weights)
+    except ValueError:
+        return
+    editing = args.edit_source is not None
+    heading = judged_heading(
+        "edit" if editing else "image",
+        width=memory_job.width,
+        height=memory_job.height,
+        quantize=resolved.stored_bits or args.quantize,
+        references=0 if editing else len(args.reference_paths or ()),
+        loras=len(getattr(args, "lora_paths", None) or ()),
+    )
+    text = memory_warning(heading, verdict, machine, other_choices=_other_quants(job, resolved, machine, args.quantize))
+    if text:
+        warnings.warn(text, stacklevel=2)
+
+
+def _other_quants(job: MemoryJob, resolved: ResolvedWeights, machine: MemoryBudget, quantize: int | None) -> str | None:
+    """Return the line naming the job's other ``--quantize`` levels and how each fits, or ``None`` for a model stored at one level, one that cannot be quantized, or a job the engine cannot judge at them."""
+    choices = quantize_choices(resolved.stored_bits, resolved.family, _QUANTIZE_LEVELS)
+    if len(choices) < 2:
+        return None
+    rows = judge_rows(quantize_rows(job, choices), machine, resolved.weights)
+    return None if rows is None else memory_rows_line("quantize", rows, level_key(quantize), machine)
+
+
+def _image_memory_job(args: argparse.Namespace, sizes: dict[str, Any], lora_paths: list[str] | None) -> MemoryJob:
+    """Return the job the model loads for: the size the run draws (an upscale's final size is its largest), its reference pictures and LoRAs.
+
+    An edit draws the canvas of :func:`edit_model_size` and holds its picture as the one reference.
+    """
+
+    def drawn_size() -> tuple[int, int]:
+        dims = sizes[args.ratio][args.size]
+        return args.width or dims["width"], args.height or dims["height"]
+
+    return run_memory_job(args, size=drawn_size, reference_paths=args.reference_paths, lora_paths=lora_paths)
+
+
 def main(*, prog: str = "ziv-image") -> None:
     parser = _build_parser(prog=prog)
     args = parser.parse_args()
@@ -140,7 +203,7 @@ def main(*, prog: str = "ziv-image") -> None:
     refuse_edit_options(parser, args)
     if args.runs is not None and args.runs < 1:
         parser.error("--runs must be at least 1")
-    if args.quantize is not None and args.quantize not in (4, 8):
+    if args.quantize is not None and args.quantize not in _QUANTIZE_LEVELS:
         parser.error("--quantize must be 4 or 8")
     if args.width is not None and args.width <= 0:
         parser.error("--width must be positive")
@@ -354,6 +417,9 @@ def main(*, prog: str = "ziv-image") -> None:
         args.enhance = None
 
     args.lora_paths, args.lora_weights = lora_paths, lora_weights
+    # Before anything downloads, the prompt enhancer's model included: a card that is too small should be known before any files are fetched.
+    memory_job = _image_memory_job(args, sizes, lora_paths)
+    _warn_if_memory_tight(args, memory_job)
     # The key listener covers preflight and model load too, so [n]/[p]/[q] work while prompts are enhanced.
     skip = SkipSignal()
     skip.start()
@@ -400,6 +466,7 @@ def main(*, prog: str = "ziv-image") -> None:
                 on_phase=lambda phase: print(f"Saving a q{args.quantize} copy of the model for faster loading (first use only)...", flush=True) if phase == SAVING_QUANT_PHASE else None,
                 cancelled=lambda: skip.pending() == "quit",
                 release_memory=release_accelerator_memory,
+                memory_job=memory_job,
             )
 
         try:

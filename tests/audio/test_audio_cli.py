@@ -24,10 +24,14 @@ from zvisiongenerator.backends import prompt_enhancer_session
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, SpeechDelivery, VoiceRef
 from zvisiongenerator.downloads import require_checked
+from zvisiongenerator.utils import audio_memory as audio_memory_module
+from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.audio_settings import VIBES
 from zvisiongenerator.utils.audio_track import TRACK_UNREADABLE
 from zvisiongenerator.utils.enhance_record import parse_enhance_record
 from zvisiongenerator.utils.library_noise import MUTED_ERROR_TEXT
+from zvisiongenerator.utils.memory_verdict import MemoryVerdict
+from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 from zvisiongenerator.utils import audio_request as audio_request_module
 from zvisiongenerator.utils.prompt_enhance_audio import SPACE_AXIS
 from zvisiongenerator.utils.provenance import build_audio_config_payload
@@ -720,27 +724,60 @@ class TestQwenCloningFiles:
 
 
 class TestMemoryWarning:
-    def test_a_card_that_is_too_small_is_warned_before_the_licence_notice_and_the_download(self, env, monkeypatch, capsys):
-        from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
+    """``ziv audio`` warns once, before the licence notice and any download, when the memory verdict is Tight or Too large."""
 
-        monkeypatch.setattr(audio_cli, "accelerator_memory_budget_or_none", lambda: MemoryBudget(5 * GIB, system_bytes=64 * GIB))
+    _CARD = MemoryBudget(5 * GIB, system_bytes=64 * GIB)
+
+    @staticmethod
+    def _verdict(status, resource="gpu", gpu_gb=6.0):
+        return MemoryVerdict(round(gpu_gb * GIB), None, "resident", status, resource)
+
+    def _run(self, env, monkeypatch, verdict, *, machine=_CARD):
+        monkeypatch.setattr(audio_cli, "accelerator_memory_budget_or_none", lambda: machine)
+        judge = MagicMock(return_value=verdict)
+        monkeypatch.setattr(audio_memory_module, "judge", judge)
+        make(env, "-m", "qwen3_tts", "--prompt", "Hello there.", monkeypatch=monkeypatch)
+        return judge
+
+    def test_a_too_large_job_warns_once_before_the_licence_notice_and_the_download(self, env, monkeypatch):
         order: list[str] = []
         monkeypatch.setattr(audio_cli, "print_licence_notice", lambda *a, **k: order.append("licence"))
         env.ensure.side_effect = lambda *a, **k: order.append("download") or "ready"
 
-        with pytest.warns(UserWarning, match="Qwen3-TTS 1.7B.*6 GB.*5 GB") as warned:
-            make(env, "-m", "qwen3_tts", "--prompt", "Hello there.", monkeypatch=monkeypatch)
+        with pytest.warns(UserWarning) as warned:
+            judge = self._run(env, monkeypatch, self._verdict("too_large"))
 
-        assert len(warned) == 1 and order == ["licence", "download"]
+        assert [str(w.message) for w in warned if str(w.message).startswith("Memory for")] == [
+            "Memory for this track (Qwen3-TTS 1.7B): Needs more GPU memory than this card has (about 6 of 5 GB). Continuing."
+        ]
+        assert order == ["licence", "download"]
+        job, machine, weights = judge.call_args.args
+        assert (job.media, machine) == ("audio", self._CARD)
+        assert weights.audio_peak_bytes is not None and weights.audio_peak_bytes > 0
 
-    def test_a_card_that_fits_is_not_warned(self, env, monkeypatch, recwarn):
-        from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
+    def test_a_tight_job_warns_with_its_sentence(self, env, monkeypatch):
+        with pytest.warns(UserWarning, match=r"Fits, but close to the GPU's limit\. It may run out of memory \(about 4\.8 of 5 GB\)\. Continuing\."):
+            self._run(env, monkeypatch, self._verdict("tight", gpu_gb=4.8))
 
-        monkeypatch.setattr(audio_cli, "accelerator_memory_budget_or_none", lambda: MemoryBudget(24 * GIB, system_bytes=64 * GIB))
+    def test_a_fitting_job_is_not_warned(self, env, monkeypatch, recwarn):
+        judge = self._run(env, monkeypatch, self._verdict("fits", gpu_gb=3.0))
 
-        make(env, "-m", "qwen3_tts", "--prompt", "Hello there.", monkeypatch=monkeypatch)
+        judge.assert_called_once()
+        assert not [w for w in recwarn if str(w.message).startswith("Memory for")]
 
-        assert not [w for w in recwarn if "GPU" in str(w.message)]
+    def test_without_a_memory_budget_nothing_is_judged(self, env, monkeypatch, recwarn):
+        judge = self._run(env, monkeypatch, self._verdict("too_large"), machine=None)
+
+        judge.assert_not_called()
+        assert not [w for w in recwarn if str(w.message).startswith("Memory for")]
+
+    def test_a_model_with_no_measured_peak_is_not_judged(self, env, monkeypatch, recwarn):
+        monkeypatch.setattr(AudioPreset, "memory_gb_for", lambda self, platform_key: None)
+
+        judge = self._run(env, monkeypatch, self._verdict("too_large"))
+
+        judge.assert_not_called()
+        assert not [w for w in recwarn if str(w.message).startswith("Memory for")]
 
 
 class TestDownload:
