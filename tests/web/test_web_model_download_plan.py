@@ -416,10 +416,17 @@ class TestInstantStatus:
     @pytest.fixture
     def present(self, monkeypatch):
         repos: set[str] = set()
-        real = workspace_api_module.row_download_needed
-        monkeypatch.setattr(workspace_api_module, "row_download_needed", lambda *a, **k: real(*a, present=lambda target: target.repo_id in repos, **k))
+        real = workspace_api_module.nothing_to_download
+        monkeypatch.setattr(workspace_api_module, "nothing_to_download", lambda *a, **k: real(*a, target_present=lambda target: target.repo_id in repos, **k))
         monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: MemoryBudget(10 * 1024**3))
         return repos
+
+    @pytest.fixture
+    def memory_asked(self, monkeypatch):
+        """Record the ``downloaded`` each listing hands the memory answer (and answer nothing)."""
+        asked: list[bool | None] = []
+        monkeypatch.setattr(workspace_api_module, "reference_image_memory", lambda name, path, **kwargs: asked.append(kwargs["downloaded"]))
+        return asked
 
     def _status(self, env, *, instant_sources_count: bool = True) -> dict:
         folder = env.models_dir / "ideo"
@@ -427,20 +434,36 @@ class TestInstantStatus:
         resolve = workspace_api_module._status_resolver(web_config, {}, lambda path: Path(path) if Path(path).is_dir() else None, instant_sources_count=instant_sources_count)
         return resolve(web_config.image_inventory[0], "image")
 
-    def test_complete_sources_without_a_built_folder_read_as_downloaded_without_a_memory_fit(self, env, present):
+    def test_complete_sources_without_a_built_folder_read_as_downloaded_without_a_memory_answer(self, env, present):
         present.update({"owner/base", "owner/instant"})
 
-        assert self._status(env) == {"downloaded": True, "memory_fit": None}
+        assert self._status(env) == {"downloaded": True, "memory": None}
 
     def test_missing_sources_read_as_not_downloaded(self, env, present):
         present.add("owner/base")
 
-        assert self._status(env) == {"downloaded": False, "memory_fit": None}
+        assert self._status(env) == {"downloaded": False, "memory": None}
 
     def test_the_models_page_resolver_keeps_reporting_an_unbuilt_folder_as_not_downloaded(self, env, present):
         present.update({"owner/base", "owner/instant"})
 
-        assert self._status(env, instant_sources_count=False) == {"downloaded": False, "memory_fit": None}
+        assert self._status(env, instant_sources_count=False) == {"downloaded": False, "memory": None}
+
+    @pytest.mark.parametrize("instant_sources_count", [True, False])
+    def test_the_memory_answer_never_calls_for_a_download_the_sources_make_unneeded(self, env, present, memory_asked, instant_sources_count):
+        present.update({"owner/base", "owner/instant"})
+
+        self._status(env, instant_sources_count=instant_sources_count)
+
+        assert memory_asked == [True]
+
+    @pytest.mark.parametrize("instant_sources_count", [True, False])
+    def test_the_memory_answer_still_calls_for_a_download_when_a_source_is_missing(self, env, present, memory_asked, instant_sources_count):
+        present.add("owner/base")
+
+        self._status(env, instant_sources_count=instant_sources_count)
+
+        assert memory_asked == [False]
 
     def test_a_built_folder_is_reported_from_its_files(self, env, present):
         folder = env.models_dir / "ideo"

@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_backend_name, supports_stored_quants, supports_video_audio, video_capabilities
 from zvisiongenerator.converters.list_assets import list_loras
-from zvisiongenerator.downloads.plans import built_model_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.model_metadata import alias_map, model_display_name, model_download_size_label
@@ -25,6 +24,7 @@ from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, licence_payload
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.ltx_version import ltx_model_version
 from zvisiongenerator.utils.hf_cache import CachedRepo, cached_model_repos, repo_disk_bytes, stranded_shared_files
+from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.model_files import (
     directory_bytes,
     disk_size_label,
@@ -60,13 +60,14 @@ from zvisiongenerator.web.model_delete import (
     used_repo_ids,
 )
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, stored_quant_of
-from zvisiongenerator.web.model_status import describe_model_status
+from zvisiongenerator.web.memory_api import reference_image_memory, reference_video_memory
+from zvisiongenerator.web.model_status import model_downloaded, nothing_to_download
 from zvisiongenerator.web.workspace_contract import AUDIO_TRACK_CONTROLS, END_FRAME_CONTROLS, hidden_video_controls
 
 if TYPE_CHECKING:
     from zvisiongenerator.downloads.target import DownloadTarget
 
-_UNKNOWN_STATUS: dict[str, Any] = {"downloaded": None, "memory_fit": None}
+_UNKNOWN_STATUS: dict[str, Any] = {"downloaded": None, "memory": None}
 _IMAGE_BOOTSTRAP_STRENGTH = 0.5
 _IMAGE_BOOTSTRAP_POSTPROCESS = {
     # On with no amount: the backend uses the config's sharpening amounts unless the user sets one.
@@ -246,9 +247,9 @@ def build_prompt_enhancer_contract(
 
 
 def _gpu_budget_bytes() -> int | None:
-    """Return this machine's accelerator memory in bytes, or ``None`` when unknown."""
+    """Return this machine's accelerator memory in bytes (a card's whole memory), or ``None`` when unknown."""
     budget = memory_budget()
-    return budget.gpu_bytes if budget is not None else None
+    return budget.full_gpu_bytes if budget is not None else None
 
 
 def build_models_response(
@@ -362,7 +363,7 @@ def _seedvr2_model_rows(setup: SeedVR2Setup | None, models_dir: Path) -> list[di
             "source": "seedvr2",
             "stored_quant": None,
             "downloaded": setup.downloaded,
-            "memory_fit": None,
+            "memory": None,
             "delete": {"kind": target.kind, "repo_id": target.repo_id, "linked_by": [], "stored_quants": []} if target is not None else None,
             "disk_size_label": disk_size_label(directory_bytes(target.path)) if target is not None else None,
             "download_size_label": model_download_size_label(model, sys.platform),
@@ -491,14 +492,15 @@ def _status_resolver(
     *,
     instant_sources_count: bool = False,
 ) -> Callable[[ImageInventoryEntry | VideoInventoryEntry | None, str], dict[str, Any]]:
-    """Return a per-request resolver for each model's ``downloaded``/``memory_fit`` fields.
+    """Return a per-request resolver for each model's ``downloaded``/``memory`` fields.
 
     Image quantize levels come from the same bootstrap defaults that drive the workspace quantize picker, and
     download lookups are memoised for the request (LTX MLX models share one Gemma text-encoder lookup).
 
     With *instant_sources_count*, a model built on first use (Ideogram 4 Instant, MOSS-Image) that is not built yet reads as downloaded once all
-    its sources are on disk (the first job builds the folder from them), with ``memory_fit`` still ``None``.
-    The Models page leaves it off so a row shows it still has to be built.
+    its sources are on disk (the first job builds the folder from them).
+    The Models page leaves it off so a row shows it still has to be built. Its memory answer counts the sources either way
+    (:func:`~zvisiongenerator.web.model_status.nothing_to_download`), so it never says a download is needed that is not.
     """
     budget = memory_budget()
     find_local_dir = find_local_dir or functools.cache(find_local_model_dir)
@@ -508,24 +510,50 @@ def _status_resolver(
             return dict(_UNKNOWN_STATUS)
         quantize_options = _image_quantize_levels(web_config, image_model_defaults.get(entry.name, {})) if kind == "image" else ()
         try:
-            described = describe_model_status(
+            downloaded = model_downloaded(
                 entry.resolved_path,
                 kind=kind,
-                quantize_options=quantize_options,
-                budget=budget,
-                find_local_dir=find_local_dir,
+                family=entry.family if kind == "video" else None,
                 model_name=entry.name,
                 app_config=web_config.app_config,
-                family=entry.family if kind == "video" else None,
+                find_local_dir=find_local_dir,
             )
-            if instant_sources_count and not described["downloaded"] and built_model_plan(entry.resolved_path, platform_key=sys.platform) is not None:
-                described["downloaded"] = not row_download_needed(KIND_MODEL, entry.name, web_config, downloaded=False)
-            return described
+            nothing_left = nothing_to_download(entry.resolved_path, downloaded=downloaded)
+            return {
+                "downloaded": nothing_left if instant_sources_count else downloaded,
+                "memory": _reference_memory(entry, kind, quantize_options, budget, nothing_left, find_local_dir),
+            }
         except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
             warnings.warn(f"Could not determine status for model '{entry.name}': {exc}", stacklevel=2)
             return dict(_UNKNOWN_STATUS)
 
     return _status
+
+
+def _reference_memory(
+    entry: ImageInventoryEntry | VideoInventoryEntry,
+    kind: str,
+    quantize_options: tuple[int, ...],
+    budget: MemoryBudget | None,
+    downloaded: bool | None,
+    find_local_dir: Callable[[str], Path | None],
+) -> dict[str, Any] | None:
+    """Return a listed model's memory answer for its reference job, or ``None`` when it has none.
+
+    The reference job is a 1024x1024 image with no references and no LoRAs, or a 5 s clip at 768x448 (text to video, Low memory
+    on). An image answer carries a row per quantize level and is judged at the default level (unquantized, or the one a stored
+    quant is saved at), so the picker reads the row of the level it selected and the Models page the answer itself. The weights
+    come from the files or the shipped table, never the Hub, so the listing stays fast and offline.
+
+    One model that cannot be judged warns and reads as unknown instead of breaking the listing.
+    """
+    try:
+        if kind == "image":
+            return reference_image_memory(entry.name, entry.resolved_path, levels=quantize_options, budget=budget, downloaded=downloaded, find_local_dir=find_local_dir)
+        return reference_video_memory(entry.name, entry.resolved_path, entry.family, budget=budget, downloaded=downloaded, find_local_dir=find_local_dir)
+    except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
+        warnings.warn(f"Could not judge the memory of model '{entry.name}': {exc}", stacklevel=2)
+        return None
 
 
 def _delete_info_resolver(

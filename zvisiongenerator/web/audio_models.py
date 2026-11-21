@@ -10,12 +10,11 @@ from zvisiongenerator.backends import audio_platform_key
 from zvisiongenerator.downloads.plans import audio_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.target import DownloadTarget
-from zvisiongenerator.utils.audio_memory import audio_memory_fit
 from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
 from zvisiongenerator.utils.audio_request import MIN_SOUND_SECONDS, auto_seconds, find_audio_preset
 from zvisiongenerator.utils.licences import licence_payload, load_licences
 from zvisiongenerator.utils.model_memory import MemoryBudget
-from zvisiongenerator.web.model_status import NO_QUANTIZE_KEY
+from zvisiongenerator.web.memory_api import audio_memory
 
 __all__ = ["audio_model_rows", "audio_rows", "find_audio_model", "runnable_audio_models"]
 
@@ -67,7 +66,7 @@ def _audio_entries(
     """Return each audio preset that runs on this machine, as this machine runs it, with the keys both pages share, in config order.
 
     The shared keys are ``label``, ``kinds``, ``licences``, ``downloaded`` (every repository of the plan is on disk) and
-    ``memory_fit``. *target_present* defaults to the offline check.
+    ``memory``. *target_present* defaults to the offline check.
     """
     try:
         platform_key = _platform_key()
@@ -136,20 +135,18 @@ def _instrumental_sections(preset: AudioPreset, kind: str) -> str | None:
 
 
 def _status(preset: AudioPreset, platform_key: str, budget: MemoryBudget | None, present: Callable[[DownloadTarget], bool]) -> dict[str, Any]:
-    """Return the model's ``downloaded`` and ``memory_fit``; unknown (``None``) when they cannot be determined, since one model must not break the listing.
+    """Return the model's ``downloaded`` and ``memory``; unknown (``None``) when they cannot be determined, since one model must not break the listing.
 
-    ``memory_fit`` is the model's measured peak on this platform against *budget*, in the shape of an image model's
-    (``none`` is its only ``by_quantize`` key); ``None`` without a budget or a measured peak. ``downloaded`` covers the model's
+    ``memory`` is the model's measured peak on this platform against *budget* (see :func:`~zvisiongenerator.web.memory_api.audio_memory`); ``None`` without a budget or a measured peak. ``downloaded`` covers the model's
     ``files`` only; a speech model also gets ``voice_download``: ``{"downloaded": bool}`` for its cloning files, or ``None`` when it has none, and ``can_design``: whether it has VoiceDesign files.
     """
     try:
-        fit = audio_memory_fit(preset, platform_key, budget)
-        memory_fit = None if fit is None else {"kind": fit["kind"], "budget_gb": fit["budget_gb"], "by_quantize": {NO_QUANTIZE_KEY: {"status": fit["status"], "required_gb": fit["required_gb"]}}}
-        status: dict[str, Any] = {"downloaded": all(present(target) for target in audio_plan(preset)), "memory_fit": memory_fit}
+        downloaded = all(present(target) for target in audio_plan(preset))
+        status: dict[str, Any] = {"downloaded": downloaded, "memory": audio_memory(preset, platform_key=platform_key, budget=budget, downloaded=downloaded)}
         if "speech" in preset.kinds:
             status["voice_download"] = {"downloaded": all(present(DownloadTarget(item.repo_id, item.revision, item.patterns)) for item in preset.voice_files)} if preset.voice_files else None
             status["can_design"] = bool(preset.design_files)
         return status
     except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
         warnings.warn(f"Could not determine status for audio model '{preset.id}': {exc}", stacklevel=2)
-        return {"downloaded": None, "memory_fit": None, **({"voice_download": None, "can_design": bool(preset.design_files)} if "speech" in preset.kinds else {})}
+        return {"downloaded": None, "memory": None, **({"voice_download": None, "can_design": bool(preset.design_files)} if "speech" in preset.kinds else {})}

@@ -27,17 +27,21 @@ from tests._factories import _make_video_args, make_extend_source, video_config
 from tests.web._helpers import sse_payload, stub_request_job, wait_for_status
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
+from zvisiongenerator.utils.memory_verdict import MemoryJob
 from zvisiongenerator.core.video_types import ExtendCut, LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.core.memory_sampler import MemoryUsage
 from zvisiongenerator.upscale_runner import upscale_prompts
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils import video_cut as video_cut_module
+from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import job_downloads as job_downloads_module
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web.job_log import JobLog
+from zvisiongenerator.web.memory_readout import MemoryProbe
 from zvisiongenerator.workflows import build_video_workflow
 
 
@@ -160,8 +164,8 @@ class TestWebRunner:
         """The loader's saving phase becomes a model_loading event, and a queued Quit cancels the save."""
         loader_calls: dict = {}
 
-        def _fake_loader(backend, model_ref, *, quantize, models_dir, model_name, lora_paths, lora_weights, on_phase, cancelled, release_memory):
-            loader_calls.update(model_ref=model_ref, quantize=quantize, models_dir=models_dir, model_name=model_name, cancelled_before=cancelled())
+        def _fake_loader(backend, model_ref, *, quantize, models_dir, model_name, lora_paths, lora_weights, on_phase, cancelled, release_memory, memory_job, on_note):
+            loader_calls.update(model_ref=model_ref, quantize=quantize, models_dir=models_dir, model_name=model_name, memory_job=memory_job, cancelled_before=cancelled())
             on_phase("saving_quant")
             runner.queue_job_control(job_id_holder["id"], "quit")
             loader_calls["cancelled_after"] = cancelled()
@@ -196,11 +200,70 @@ class TestWebRunner:
             "quantize": 8,
             "models_dir": tmp_path / "models",
             "model_name": "atlas",
+            "memory_job": MemoryJob(media="image", width=request.width, height=request.height),
             "cancelled_before": False,
             "cancelled_after": True,
         }
         assert [event.get("phase") for event in events] == [None, "saving_quant"]
         assert events[1]["quantize"] == 8
+
+    def test_a_note_from_the_loader_becomes_a_model_loading_event_of_the_job(self, monkeypatch, tmp_path):
+        """The sentence a backend gives when it placed the weights for less free memory reaches the job's events, which the card shows."""
+        note = "Only 7.6 GB of GPU memory is free, so this runs slower."
+
+        def _fake_loader(backend, model_ref, *, on_note, **_kw):
+            on_note(note)
+            return MagicMock(name="model"), MagicMock(name="model_info")
+
+        events: list[dict] = []
+        stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "ensure_built_model", lambda *_a, **_kw: True)
+        monkeypatch.setattr(web_runner_module, "load_image_model", _fake_loader)
+        request = ImageGenerationRequest(backend=None, model=None, prompt="prompt", model_family="zimage", model_name="atlas")
+
+        web_runner_module._load_image_model_with_progress(request, "/models/atlas", 4, events.append, SkipSignal(), MemoryJob(media="image"))
+
+        assert [event for event in events if event.get("note")] == [{"type": "model_loading", "mode": "image", "model": "atlas", "note": note}]
+
+    def test_the_load_note_stays_among_the_job_notices_past_the_event_history_and_a_later_note_replaces_it(self):
+        """A reload after the capped history still shows the note, as one badge: a later load's note takes the earlier one's place."""
+        first = "Only 7.6 GB of GPU memory is free, so this runs slower."
+        second = "Only 6.1 GB of GPU memory is free. This may run out of memory."
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01, max_history_events=2)
+
+        try:
+            job_id = runner._submit_job(job_type="test", exclusive=True, context={"notices": ["original settings unknown"]}, target_factory=lambda progress_callback: None)
+            wait_for_status(runner, job_id, "completed")
+            runner._publish_event(job_id, {"type": "model_loading", "mode": "image", "model": "atlas", "note": first})
+            assert runner.get_job_snapshot(job_id)["notices"] == ["original settings unknown", first]
+            runner._publish_event(job_id, {"type": "model_loading", "mode": "image", "model": "atlas", "note": first})
+            runner._publish_event(job_id, {"type": "model_loading", "mode": "image", "model": "atlas", "note": second})
+            for _ in range(3):
+                runner._publish_event(job_id, {"type": "progress_text", "text": "x"})
+            record = runner._get_job(job_id)
+            notes = [event for event in record.history if event.get("note")]
+            snapshot = runner.get_job_snapshot(job_id)
+        finally:
+            runner.shutdown()
+
+        assert notes == []  # the events are long out of the history
+        assert snapshot["notices"] == ["original settings unknown", second]
+
+    def test_a_replacing_note_event_names_the_note_it_replaces(self):
+        first, second = "Only 7.6 GB of GPU memory is free, so this runs slower.", "Only 6.1 GB of GPU memory is free. This may run out of memory."
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda progress_callback: None)
+            wait_for_status(runner, job_id, "completed")
+            for note in (first, first, second):
+                runner._publish_event(job_id, {"type": "model_loading", "mode": "image", "model": "atlas", "note": note})
+            events = [event for event in runner._get_job(job_id).history if event.get("note")]
+        finally:
+            runner.shutdown()
+
+        assert [(event["note"], event.get("replaces")) for event in events] == [(first, None), (first, None), (second, first)]
 
     def test_submit_video_job_tracks_video_runner_progress(self, monkeypatch):
         """Video jobs should publish progress and terminal state from the wrapped runner."""
@@ -418,7 +481,7 @@ class TestWebRunner:
         loader_calls: dict = {}
         runs: list = []
 
-        def _fake_loader(backend, model_ref, *, quantize, models_dir, model_name, lora_paths, lora_weights, on_phase, cancelled, release_memory):
+        def _fake_loader(backend, model_ref, *, quantize, models_dir, model_name, lora_paths, lora_weights, on_phase, cancelled, release_memory, memory_job, on_note):
             loader_calls.update(model_ref=model_ref, quantize=quantize, model_name=model_name, lora_paths=lora_paths)
             return MagicMock(name="model"), MagicMock(name="model_info")
 
@@ -478,6 +541,39 @@ class TestWebRunner:
         assert args[1] == upscale_prompts(request)
         assert (kwargs["width"], kwargs["height"]) == (1664, 2432)
         assert kwargs["cancelled"]() is False
+
+    def test_upscale_loads_the_image_model_for_the_upscaled_size_without_references(self, tmp_path, monkeypatch):
+        """The model is sized for the refine (source times factor, 16-aligned) and the recorded references are not counted, since an upscale never loads them."""
+        seen: list = []
+        reference = tmp_path / "ref.png"
+        Image.new("RGB", (2000, 2000)).save(reference)
+
+        def _fake_loader(backend, model_ref, *, memory_job, **_kw):
+            seen.append(memory_job)
+            return MagicMock(name="model"), MagicMock(name="model_info")
+
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "load_image_model", _fake_loader)
+        monkeypatch.setattr(
+            web_runner_module, "run_upscale", lambda *_a, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
+        )
+        request = ImageGenerationRequest(
+            backend=None, model=None, prompt="p", model_name="zit", upscale_factor=4, upscale_source="/out/a.png", width=1024, height=1024, reference_paths=[str(reference)]
+        )
+
+        try:
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(name="workflow"), model_ref="/models/zit", config={}, context={"output_dir": str(tmp_path)})
+            wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert len(seen) == 1
+        assert (seen[0].width, seen[0].height) == (4096, 4096)
+        assert seen[0].reference_megapixels == ()
+        assert seen[0].from_picture is True
 
     def test_quit_queued_while_preparing_prompts_cancels_the_upscale(self, tmp_path, monkeypatch):
         """The prepare step sees a queued quit through its cancelled callback, and the upscale then reports batch_cancelled."""
@@ -1737,6 +1833,65 @@ class TestAcceleratorMemoryRelease:
         assert snapshot["status"] == "completed"
 
 
+class TestResidentEnhancerRelease:
+    """An enhancer an on-demand Enhance left resident is unloaded by the jobs that skip preflight; preflight reuses it for the jobs that enhance."""
+
+    @staticmethod
+    def _order(monkeypatch, submit):
+        order: list[str] = []
+        monkeypatch.setattr(web_runner_module.prompt_enhancer_session, "release_resident_enhancer", lambda: order.append("released"))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = submit(runner, order)
+            wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+        return order
+
+    def test_it_is_released_before_an_upscale_job_loads_its_model(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "run_upscale", lambda *args, **kwargs: None)
+        stub_request_job(monkeypatch)
+        request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_name="zit", upscale_factor=2, upscale_source="/out/a.png")
+
+        def _submit(runner, order):
+            monkeypatch.setattr(web_runner_module, "load_image_model", lambda *args, **kwargs: order.append("load") or (MagicMock(), MagicMock()))
+            return runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/zit", config={}, context={"output_dir": str(tmp_path)})
+
+        assert self._order(monkeypatch, _submit) == ["released", "load"]
+
+    def test_it_is_released_before_a_video_file_upscale_loads_seedvr2(self, tmp_path, monkeypatch):
+        order: list[str] = []
+        monkeypatch.setattr(web_runner_module.prompt_enhancer_session, "release_resident_enhancer", lambda: order.append("released"))
+        monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", lambda self, part, **kwargs: True)
+        monkeypatch.setattr(web_runner_module, "seedvr2_part", lambda *args, **kwargs: MagicMock())
+        monkeypatch.setattr(web_runner_module, "_load_seedvr2_with_progress", lambda *args, **kwargs: order.append("load") or (MagicMock(), MagicMock()))
+        monkeypatch.setattr(web_runner_module, "run_video_file_upscale", lambda *args, **kwargs: None)
+        request = VideoFileUpscaleRequest(
+            source=make_extend_source(path=tmp_path / "clip.mp4"), recorded_config=None, output_dir=str(tmp_path), width=1536, height=896, upscale_model="seedvr2-7b", softness=0.0, batch_size=25
+        )
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            runner._run_video_file_upscale_request(request=request, progress_callback=lambda _event: None, control_signal=SkipSignal())
+        finally:
+            runner.shutdown()
+
+        assert order == ["released", "load"]
+
+    def test_it_is_left_for_preflight_in_an_image_job(self, monkeypatch):
+        """Preflight reuses the resident enhancer when the job enhances, so the runner does not unload it first."""
+        order = self._order(monkeypatch, lambda runner, order: _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args()))
+
+        assert order == []
+
+    def test_it_is_left_alone_for_a_job_that_is_not_exclusive(self, monkeypatch):
+        order = self._order(monkeypatch, lambda runner, order: runner._submit_job(job_type="test", target_factory=lambda cb: order.append("target")))
+
+        assert order == ["target"]
+
+
 def test_non_generation_jobs_do_not_release_accelerator_memory(monkeypatch):
     """Only exclusive generation jobs hold models; others must not clear caches under a running generation."""
     calls: list[str] = []
@@ -2403,3 +2558,202 @@ class TestJobLifecycle:
             assert "enhanced_prompt" not in runner._get_job(job_id).history[-1]
         finally:
             runner.shutdown()
+
+
+class TestMemoryReadout:
+    """Exclusive jobs carry live memory readings; readings are a side channel of the event stream."""
+
+    BUDGET = MemoryBudget(gpu_bytes=10 * GIB, system_bytes=32 * GIB)
+
+    @staticmethod
+    def _reading(gb: float) -> dict[str, object]:
+        return {"kind": "unified", "used_gb": gb, "budget_gb": 24.0}
+
+    @classmethod
+    def _probe(cls, readings, *, budget=BUDGET):
+        """Return a probe over *readings* (each read takes the next one, the last repeats) that never samples on its own."""
+        remaining = list(readings)
+
+        def read():
+            return remaining.pop(0) if len(remaining) > 1 else remaining[0]
+
+        return MemoryProbe(read=read, budget=lambda: budget, interval=3600.0)
+
+    @staticmethod
+    def _run(runner, target, *, exclusive=True, status="completed"):
+        job_id = runner._submit_job(job_type="test", exclusive=exclusive, target_factory=target)
+        assert wait_for_status(runner, job_id, status)["status"] == status
+        return job_id, runner._get_job(job_id)
+
+    @staticmethod
+    def _memory_events(record):
+        return [event for event in record.history if event["type"] == "memory_usage"]
+
+    @pytest.fixture()
+    def runner(self):
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        yield runner
+        runner.shutdown()
+
+    def test_readings_are_a_side_channel_that_keeps_one_copy_in_history(self, runner):
+        def _target(progress_callback):
+            progress_callback({"type": "memory_usage", "memory": self._reading(1.0)})
+            progress_callback({"type": "step_progress", "current_step": 1, "total_steps": 2})
+            progress_callback({"type": "memory_usage", "memory": self._reading(2.0)})
+            progress_callback({"type": "memory_usage", "memory": self._reading(3.0)})
+
+        job_id, record = self._run(runner, _target)
+
+        assert [event["memory"]["used_gb"] for event in self._memory_events(record)] == [3.0]
+        counted = [event for event in record.history if event["type"] != "memory_usage"]
+        assert [event["type"] for event in counted] == ["job_submitted", "job_started", "step_progress", "job_completed"]
+        assert record.event_count == len(counted)
+        snapshot = runner.get_job_snapshot(job_id)
+        assert snapshot["last_event"]["type"] == "job_completed"
+        assert snapshot["memory"] == self._reading(3.0)
+
+    def test_a_reading_does_not_replace_last_event_or_status_but_reaches_subscribers(self, runner):
+        started, release = threading.Event(), threading.Event()
+
+        def _target(progress_callback):
+            progress_callback({"type": "step_progress", "current_step": 1, "total_steps": 2})
+            started.set()
+            release.wait(5)
+
+        job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=_target)
+        assert started.wait(5)
+        record = runner._get_job(job_id)
+        events: queue.Queue = queue.Queue()
+        with record.lock:
+            record.subscribers.add(events)
+        count_before = record.event_count
+
+        runner._publish_event(job_id, {"type": "memory_usage", "memory": self._reading(4.0)})
+
+        delivered = events.get_nowait()
+        assert delivered["type"] == "memory_usage"
+        assert isinstance(delivered["event_id"], int)
+        assert delivered["event_id"] == record.next_event_id - 1
+        snapshot = runner.get_job_snapshot(job_id)
+        assert snapshot["status"] == "running"
+        assert snapshot["last_event"]["type"] == "step_progress"
+        assert snapshot["event_count"] == count_before
+        assert snapshot["memory"] == self._reading(4.0)
+        release.set()
+        wait_for_status(runner, job_id, "completed")
+
+    def test_sampling_publishes_the_start_reading_and_stops_at_the_terminal_event(self, runner):
+        runner._memory_probe = self._probe([MemoryUsage(8 * GIB, 4 * GIB), MemoryUsage(6 * GIB, 3 * GIB)])
+
+        job_id, record = self._run(runner, lambda _cb: None)
+
+        snapshot = runner.get_job_snapshot(job_id)
+        assert snapshot["memory"]["kind"] == "discrete"
+        assert snapshot["memory"]["gpu_gb"] == 4.0
+        assert record.memory_stop is None
+
+    @pytest.mark.parametrize(("internal", "status"), [("batch_failed", "failed"), ("batch_cancelled", "cancelled")])
+    def test_a_terminal_event_published_from_inside_the_target_stops_the_sampler(self, runner, internal, status):
+        runner._memory_probe = self._probe([MemoryUsage(3 * GIB)])
+
+        _job_id, record = self._run(runner, lambda cb: cb({"type": internal, "mode": "image"}), status=status)
+
+        assert record.memory_stop is None
+
+    def test_a_reading_after_the_terminal_event_is_dropped(self, runner):
+        job_id, record = self._run(runner, lambda _cb: None)
+        events: queue.Queue = queue.Queue()
+        with record.lock:
+            record.subscribers.add(events)
+            next_id = record.next_event_id
+            history_length = len(record.history)
+
+        runner._publish_event(job_id, {"type": "memory_usage", "memory": self._reading(9.0)})
+
+        assert events.empty()
+        assert record.next_event_id == next_id
+        assert len(record.history) == history_length
+        assert record.memory is None
+
+    def test_a_job_that_is_not_exclusive_is_never_sampled(self, runner):
+        reads: list[str] = []
+        runner._memory_probe = MemoryProbe(read=lambda: reads.append("read"), budget=lambda: self.BUDGET, interval=3600.0)
+
+        job_id, record = self._run(runner, lambda _cb: None, exclusive=False)
+
+        assert reads == []
+        assert self._memory_events(record) == []
+
+    def test_without_a_budget_a_reading_that_names_no_totals_is_not_published(self, runner):
+        runner._memory_probe = MemoryProbe(read=lambda: MemoryUsage(8 * GIB, 4 * GIB), budget=lambda: None, interval=3600.0)
+
+        job_id, record = self._run(runner, lambda _cb: None)
+
+        assert self._memory_events(record) == []
+        assert runner.get_job_snapshot(job_id)["memory"] is None
+
+    def test_without_a_budget_a_reading_that_carries_its_totals_is_published(self, runner):
+        reading = MemoryUsage(8 * GIB, 4 * GIB, system_total_bytes=32 * GIB, gpu_total_bytes=10 * GIB)
+        runner._memory_probe = MemoryProbe(read=lambda: reading, budget=lambda: None, interval=3600.0)
+
+        job_id, _record = self._run(runner, lambda _cb: None)
+
+        assert runner.get_job_snapshot(job_id)["memory"] == {"kind": "discrete", "gpu_gb": 4.0, "gpu_budget_gb": 10.0, "system_gb": 8.0, "system_budget_gb": 32.0}
+
+    def test_a_probe_that_reads_nothing_gives_no_reading(self, runner):
+        runner._memory_probe = MemoryProbe(read=lambda: None, budget=lambda: self.BUDGET, interval=3600.0)
+
+        job_id, record = self._run(runner, lambda _cb: None)
+
+        assert self._memory_events(record) == []
+        assert runner.get_job_snapshot(job_id)["memory"] is None
+
+    def test_the_sampler_is_stopped_when_the_run_ends_without_a_terminal_event(self, runner):
+        runner._memory_probe = self._probe([MemoryUsage(5 * GIB)])
+        record = web_runner_module._JobRecord(job_id="orphan", job_type="test")
+        runner._start_memory_sampling(record)
+        assert record.memory_stop is not None
+
+        runner._stop_memory_sampling(record)
+
+        assert record.memory_stop is None
+
+    def test_the_sampler_is_stopped_while_no_lock_is_held(self, runner):
+        held: list[str] = []
+        stopped: list[bool] = []
+        started, release = threading.Event(), threading.Event()
+
+        def _target(_cb):
+            started.set()
+            release.wait(5)
+
+        job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=_target)
+        assert started.wait(5)
+        record = runner._get_job(job_id)
+
+        def _can_take(lock) -> bool:
+            """Return whether another thread can take *lock* now, which is false while the publishing thread holds it."""
+            result: list[bool] = []
+
+            def _try():
+                acquired = lock.acquire(timeout=1)
+                result.append(acquired)
+                if acquired:
+                    lock.release()
+
+            thread = threading.Thread(target=_try)
+            thread.start()
+            thread.join(5)
+            return result == [True]
+
+        def _stop():
+            held.extend(name for name, lock in (("record", record.lock), ("jobs", runner._jobs_lock)) if not _can_take(lock))
+            stopped.append(True)
+
+        with record.lock:
+            record.memory_stop = _stop
+        release.set()
+        wait_for_status(runner, job_id, "completed")
+
+        assert held == []
+        assert stopped == [True]

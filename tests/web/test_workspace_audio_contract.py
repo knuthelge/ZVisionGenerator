@@ -132,31 +132,42 @@ class TestVisibleControls:
 
 
 class TestMemoryAndDownloadStatus:
+    def test_smart_is_judged_on_the_cards_whole_memory_not_the_engine_budget(self, monkeypatch):
+        monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: MemoryBudget(10 * GIB, system_bytes=64 * GIB, gpu_total_bytes=11 * GIB))
+        assert workspace_api_module._gpu_budget_bytes() == 11 * GIB
+
+        monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: MemoryBudget(24 * GIB, unified_bytes=32 * GIB))
+        assert workspace_api_module._gpu_budget_bytes() == 24 * GIB  # a Mac has no separate total
+
+        monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
+        assert workspace_api_module._gpu_budget_bytes() is None
+
     @pytest.mark.parametrize(
         ("budget_gb", "status"),
-        [(10, "fits"), (7, "tight"), (6, "too_large")],
+        [(10, "fits"), (6.2, "tight"), (5, "too_large")],
     )
     def test_a_cuda_model_compares_its_measured_peak_with_the_cards_memory(self, monkeypatch, tmp_path, budget_gb, status):
-        row = _row(monkeypatch, tmp_path, "yue2", "cuda", budget=MemoryBudget(round(budget_gb * GIB), system_bytes=64 * GIB))  # measured at 6.7 GiB on CUDA
+        row = _row(monkeypatch, tmp_path, "yue2", "cuda", budget=MemoryBudget(round(budget_gb * GIB), system_bytes=64 * GIB))  # measured at 5.58 GiB on CUDA, plus the CUDA offset
 
-        assert row["memory_fit"] == {"kind": "discrete", "budget_gb": round(budget_gb, 1), "by_quantize": {"none": {"status": status, "required_gb": 6.7}}}
+        memory = row["memory"]
+        assert (memory["kind"], memory["budget"]["gpu_gb"], memory["rows"][0]["status"], memory["rows"][0]["gpu_gb"]) == ("discrete", round(budget_gb, 1), status, 6.0)
 
-    def test_a_mac_compares_the_mps_peak_with_the_recommended_working_set(self, monkeypatch, tmp_path):
+    def test_a_mac_compares_the_mps_peak_with_its_total_memory(self, monkeypatch, tmp_path):
         raw = yue2_preset()
         raw["platforms"]["mps"] = {"memory_gb": 12.0}
 
-        fit = _row(monkeypatch, tmp_path, "yue2", "mps", budget=MemoryBudget(16 * GIB), yue2=raw)["memory_fit"]
-        small = _row(monkeypatch, tmp_path, "yue2", "mps", budget=MemoryBudget(6 * GIB), yue2=raw)["memory_fit"]
+        fit = _row(monkeypatch, tmp_path, "yue2", "mps", budget=MemoryBudget(16 * GIB, unified_bytes=24 * GIB), yue2=raw)["memory"]
+        small = _row(monkeypatch, tmp_path, "yue2", "mps", budget=MemoryBudget(6 * GIB, unified_bytes=8 * GIB), yue2=raw)["memory"]
 
-        assert fit == {"kind": "unified", "budget_gb": 16.0, "by_quantize": {"none": {"status": "fits", "required_gb": 12.0}}}
-        assert small["by_quantize"]["none"]["status"] == "too_large"
+        assert (fit["kind"], fit["budget"], fit["rows"][0]["status"], fit["rows"][0]["gpu_gb"]) == ("unified", {"gpu_gb": 24.0, "ram_gb": None}, "fits", 12.0)
+        assert small["rows"][0]["status"] == "too_large"
 
     def test_an_unmeasured_mac_peak_or_an_unknown_budget_gives_no_estimate(self, monkeypatch, tmp_path):
         unmeasured = yue2_preset()
         del unmeasured["platforms"]["mps"]
 
-        assert _row(monkeypatch, tmp_path, "yue2", "mps", budget=MemoryBudget(16 * GIB), yue2=unmeasured)["memory_fit"] is None
-        assert _row(monkeypatch, tmp_path, "yue2", "cuda", budget=None)["memory_fit"] is None
+        assert _row(monkeypatch, tmp_path, "yue2", "mps", budget=MemoryBudget(16 * GIB), yue2=unmeasured)["memory"] is None
+        assert _row(monkeypatch, tmp_path, "yue2", "cuda", budget=None)["memory"] is None
 
     def test_a_model_is_downloaded_when_every_repository_of_its_plan_is_on_disk(self, monkeypatch, tmp_path):
         on_disk = {"m-a-p/YuE2-3B"}
@@ -241,6 +252,7 @@ class TestWorkspacePayload:
         workspace = self.build(web_config, monkeypatch)
 
         rows = {row["id"]: row for row in workspace["audio_models"]}
+        memory = rows["yue2"]["memory"]
         assert list(rows) == ["yue2", "qwen3_tts", "sa3"]
         assert rows["yue2"] == {
             "id": "yue2",
@@ -261,8 +273,20 @@ class TestWorkspacePayload:
                 }
             ],
             "downloaded": True,
-            "memory_fit": {"kind": "discrete", "budget_gb": 10.0, "by_quantize": {"none": {"status": "fits", "required_gb": 6.7}}},
+            "memory": memory,
         }
+        assert {key: value for key, value in memory.items() if key not in {"rows", "title", "control_title", "table_heading"}} == {
+            "kind": "discrete",
+            "budget": {"gpu_gb": 10.0, "ram_gb": 64.0},
+            "control": None,
+            "current": "only",
+            "judged": {"frame": "reference", "width": None, "height": None, "seconds": None, "quantize": None, "low_memory": None, "references": 0, "loras": 0},
+            "download_size_label": None,
+            "expected_seconds": None,
+        }
+        assert [{key: row[key] for key in ("key", "status", "resource", "gpu_gb", "ram_gb")} for row in memory["rows"]] == [
+            {"key": "only", "status": "fits", "resource": "gpu", "gpu_gb": 6.0, "ram_gb": None}
+        ]
         assert rows["qwen3_tts"]["limits"] == {"max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30}
         assert rows["sa3"]["limits"] == {"max_seconds": 380, "min_seconds": 1.0, "default_seconds": 12.0}
         assert [rows[model]["hidden_controls"] for model in rows] == [["length"], [], []]
@@ -353,4 +377,4 @@ class TestWorkspacePayload:
         with pytest.warns(UserWarning, match="Could not determine status for audio model 'sa3'"):
             workspace = self.build(web_config, monkeypatch)
 
-        assert [(row["id"], row["downloaded"], row["memory_fit"]) for row in workspace["audio_models"]] == [("sa3", None, None)]
+        assert [(row["id"], row["downloaded"], row["memory"]) for row in workspace["audio_models"]] == [("sa3", None, None)]

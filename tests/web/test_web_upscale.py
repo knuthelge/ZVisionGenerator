@@ -1177,7 +1177,7 @@ def ltx_gallery(monkeypatch):
     monkeypatch.setattr("zvisiongenerator.web.gallery.video_file_upscale_method", lambda: "ltx")
     monkeypatch.setattr("zvisiongenerator.web.gallery.video_model_downloaded", lambda *_args, **_kwargs: state.downloaded)
     monkeypatch.setattr("zvisiongenerator.web.gallery.accelerator_memory_budget_or_none", lambda: object())
-    monkeypatch.setattr("zvisiongenerator.utils.model_memory.clip_memory_fit", lambda *_args, **_kwargs: state.fit)
+    monkeypatch.setattr("zvisiongenerator.utils.video_upscale.ltx_upscale_verdict", lambda *_args, **_kwargs: state.fit)
     return state
 
 
@@ -1207,7 +1207,7 @@ def test_gallery_ltx_option_names_the_first_use_download_while_the_model_is_miss
 
 @pytest.mark.parametrize("status", ["tight", "too_large"])
 def test_gallery_ltx_option_is_warned_when_the_clip_may_not_fit(tmp_path, ltx_gallery, status):
-    ltx_gallery.fit = {"status": status, "required_gb": 27.0, "budget_gb": 25.0}
+    ltx_gallery.fit = SimpleNamespace(status=status)
 
     option = _video_asset_json(tmp_path, "clip.mp4", _ffprobe_data(_LTX_CLIP), _ltx_web_config(tmp_path))["upscale"]["ltx"]["options"][0]
 
