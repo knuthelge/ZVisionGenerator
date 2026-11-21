@@ -80,7 +80,6 @@ class TestLoadModel:
         torch = pytest.importorskip("torch")
         download = MagicMock()
         monkeypatch.setattr("huggingface_hub.hf_hub_download", download)
-        monkeypatch.setattr(module, "configure_allocator", lambda: None)
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
 
         with pytest.raises(RuntimeError):
@@ -186,7 +185,6 @@ class TestRun:
             monkeypatch.setattr(generation_utils, name, getattr(calls, name))
         for name in ("encode_all_batches", "upscale_all_batches", "decode_all_batches", "postprocess_all_batches"):
             monkeypatch.setattr(generation_phases, name, getattr(calls, name))
-        monkeypatch.setattr(module, "configure_allocator", calls.configure_allocator)
         return calls
 
     def _run(self) -> Image.Image:
@@ -196,7 +194,6 @@ class TestRun:
         self._run()
 
         assert [c[0] for c in core.mock_calls if not c[0].startswith("_")] == [
-            "configure_allocator",
             "setup_generation_context",
             "prepare_runner",
             "compute_generation_info",
@@ -311,7 +308,6 @@ class TestUpscaleVideo:
         for name in ("encode_all_batches", "upscale_all_batches", "decode_all_batches", "postprocess_all_batches"):
             monkeypatch.setattr(generation_phases, name, getattr(calls, name))
         monkeypatch.setattr(memory_manager, "complete_cleanup", calls.complete_cleanup)
-        monkeypatch.setattr(module, "configure_allocator", calls.configure_allocator)
         return calls
 
     def _frames(self, count: int) -> list[np.ndarray]:

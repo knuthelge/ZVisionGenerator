@@ -191,7 +191,7 @@ def smart_budget_bytes(choice: str | None, *, probe: Callable[[], Any] | None = 
     if probe is None:
         from zvisiongenerator.backends import accelerator_memory_budget_or_none as probe
     budget = probe()
-    return budget.gpu_bytes if budget is not None else None
+    return budget.full_gpu_bytes if budget is not None else None
 
 
 def plan_job_enhancer(

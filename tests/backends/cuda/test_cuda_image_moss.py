@@ -608,7 +608,7 @@ class _Backend:
     def write_quantized_files(self, source, path, bits, cancelled=None):
         moss.write_stored_copy(Path(source), Path(path), bits, torch.bfloat16, _FORMAT, cancelled)
 
-    def load_model(self, model_path, quantize=None, precision="bfloat16", lora_paths=None, lora_weights=None):
+    def load_model(self, model_path, quantize=None, precision="bfloat16", lora_paths=None, lora_weights=None, memory_job=None, on_note=None):
         self.loads.append(model_path)
         return MagicMock(), "info"
 

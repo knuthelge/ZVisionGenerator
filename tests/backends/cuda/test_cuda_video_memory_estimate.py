@@ -148,7 +148,7 @@ class TestCachedHubFile:
 
 
 class TestLtx25Estimate:
-    def test_the_q4_estimate_from_the_models_header_counts_is_21_08_gib_taking_turns(self, monkeypatch, tmp_path):
+    def test_the_q4_estimate_from_the_models_header_counts_is_the_weights_and_the_measured_runtime(self, monkeypatch, tmp_path):
         monkeypatch.setattr(memory_estimate.weights, "transformer_elements", lambda source: (18_555_076_608, 432_782_592))
         monkeypatch.setattr(memory_estimate.weights, "component_elements", lambda folder: 3_172_227_584)
         monkeypatch.setattr(memory_estimate.weights, "text_encoder_bytes", lambda folder: 13_019_512_880)
@@ -156,8 +156,8 @@ class TestLtx25Estimate:
         estimate = memory_estimate.cached_ltx_system_estimate("owner/ltx25@abc123", 4, model_name="ltx25-4", find_local_dir=lambda reference: tmp_path)
 
         assert estimate is not None
-        assert round(estimate.taking_turns / _GIB, 2) == 21.08
-        assert round(estimate.together / _GIB, 2) == 30.81
+        assert round(estimate.taking_turns / _GIB, 2) == 20.12  # bench run cuda-r10 held 20.14 GiB
+        assert round(estimate.together / _GIB, 2) == 29.85
 
 
 class TestConvertedFolderEstimate:
@@ -176,5 +176,5 @@ class TestConvertedFolderEstimate:
         estimate = memory_estimate.converted_ltx_system_estimate(_converted_folder(tmp_path, bits=8), {"bits": 8, "block_matrices": 10 * _GIB, "transformer_rest": 0})
 
         with pytest.raises(RuntimeError, match="--quantize 4") as raised:
-            _check_system_memory(estimate, 8, converted=True)
+            _check_system_memory(estimate, 8, converted=True, upscale=False, lora_bytes=0)
         assert "ltx-4" not in str(raised.value)

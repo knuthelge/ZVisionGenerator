@@ -110,8 +110,9 @@ class TestBackendRegistryLookup:
 
         monkeypatch.setattr(backends.sys, "platform", platform)
         monkeypatch.setattr(memory_cuda, "memory_sizes", lambda: (10, 30))
+        monkeypatch.setattr(memory_cuda, "card_total_bytes", lambda: 11)
 
-        assert backends.get_accelerator_memory_budget() == MemoryBudget(10, 30)
+        assert backends.get_accelerator_memory_budget() == MemoryBudget(10, 30, gpu_total_bytes=11)
 
     def test_mac_memory_budget_is_the_recommended_working_set_with_the_unified_memory(self, monkeypatch):
         import zvisiongenerator.backends as backends
@@ -174,16 +175,47 @@ class TestBackendRegistryLookup:
 
         assert backends.accelerator_free_bytes() is None
 
+    @pytest.mark.parametrize(("platform", "module"), [("linux", "cuda"), ("win32", "cuda"), ("darwin", "mac"), ("freebsd", None)])
+    def test_memory_usage_comes_from_the_platform_module(self, monkeypatch, platform, module):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
+        from zvisiongenerator.backends.mac import memory as memory_mac
+        from zvisiongenerator.core.memory_sampler import MemoryUsage
+
+        monkeypatch.setattr(backends.sys, "platform", platform)
+        monkeypatch.setattr(memory_cuda, "memory_usage", lambda: MemoryUsage(111))
+        monkeypatch.setattr(memory_mac, "memory_usage", lambda: MemoryUsage(222))
+
+        expected = {"cuda": MemoryUsage(111), "mac": MemoryUsage(222), None: None}[module]
+        assert backends.memory_usage() == expected
+
+    @pytest.mark.parametrize("platform", ["linux", "darwin"])
+    def test_a_failing_memory_reading_gives_none(self, monkeypatch, platform):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
+        from zvisiongenerator.backends.mac import memory as memory_mac
+
+        def fail():
+            raise ImportError("broken install")
+
+        monkeypatch.setattr(backends.sys, "platform", platform)
+        monkeypatch.setattr(memory_cuda, "memory_usage", fail)
+        monkeypatch.setattr(memory_mac, "memory_usage", fail)
+
+        assert backends.memory_usage() is None
+
     def test_gpu_memory_comes_from_nvidia_smi_without_starting_cuda(self, monkeypatch):
         import shutil
         import subprocess
 
         from zvisiongenerator.backends.cuda import memory as memory_cuda
+        from zvisiongenerator.backends.cuda import nvml
 
         psutil_mod = MagicMock()
         psutil_mod.virtual_memory.return_value.total = 30
         monkeypatch.setitem(sys.modules, "psutil", psutil_mod)
         monkeypatch.setitem(sys.modules, "torch", None)  # importing torch would raise
+        monkeypatch.setattr(nvml, "card_bus_id", lambda: "0000:01:00.0")  # the card CUDA names cuda:0, known without starting CUDA
         monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
         monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: MagicMock(stdout="10240\n"))
 

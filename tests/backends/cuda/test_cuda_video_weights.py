@@ -129,6 +129,27 @@ class TestElementCounts:
 
         assert weights.text_encoder_bytes(tmp_path) == 2 * 40 + 2 * 4 + 16
 
+    def test_a_file_that_has_not_changed_is_not_read_again_and_a_rewritten_one_is(self, tmp_path):
+        checkpoint = _write_checkpoint(tmp_path / "ltx.safetensors", _reference())
+        folder = tmp_path / "text_encoder"
+        folder.mkdir()
+        save_file({"a": torch.zeros(3, 4)}, str(folder / "model.safetensors"))
+        reads = []
+
+        def counted(path):
+            reads.append(path.name)
+            return real_read_header(path)
+
+        real_read_header = weights.read_header
+        with patch.object(weights, "read_header", counted):
+            first = (weights.transformer_elements(checkpoint), weights.component_elements(folder), weights.text_encoder_bytes(folder))
+            second = (weights.transformer_elements(checkpoint), weights.component_elements(folder), weights.text_encoder_bytes(folder))
+            assert first == second
+            assert reads == ["ltx.safetensors", "model.safetensors", "model.safetensors"]
+
+            save_file({"a": torch.zeros(3, 5)}, str(folder / "model.safetensors"))
+            assert weights.component_elements(folder) == 15
+
     def test_the_transformer_count_handles_scalars_zero_dims_and_other_ranks(self):
         shapes = [
             ("transformer_blocks.0.attn.weight", [4, 3]),  # block matrix

@@ -11,10 +11,10 @@ from zvisiongenerator.backends.cuda.video import weights
 from zvisiongenerator.utils.ltx_facts import ltx_companion_file
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.model_files import find_local_model_dir
-from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, estimate_ltx_cuda_system_memory
+from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, estimate_ltx_cuda_clip_memory, estimate_ltx_cuda_system_memory
 from zvisiongenerator.utils.paths import split_huggingface_revision
 
-__all__ = ["cached_ltx_system_estimate", "converted_ltx_system_estimate", "ltx_system_estimate"]
+__all__ = ["cached_ltx_system_estimate", "converted_ltx_system_estimate", "ltx_job_system_bytes", "ltx_system_estimate"]
 
 
 def ltx_system_estimate(repo_dir: Path, transformer_input: Path, quantize: int) -> LtxCudaMemoryEstimate:
@@ -30,6 +30,14 @@ def converted_ltx_system_estimate(model_dir: Path, manifest: dict[str, Any]) -> 
     weights' packed shapes would count about half.
     """
     return _estimate(model_dir, manifest["block_matrices"], manifest["transformer_rest"], manifest["bits"])
+
+
+def ltx_job_system_bytes(estimate: LtxCudaMemoryEstimate, *, upscale: bool, lora_bytes: int) -> int:
+    """Return the system memory the memory engine figures for an LTX job: the weights' peak with the user LoRAs and, for the two-stage upscale, its second stage.
+
+    It is the figure the tag grades. System memory does not depend on the clip's size, so the smallest clip stands in for it.
+    """
+    return estimate_ltx_cuda_clip_memory(estimate, width=32, height=32, frames=1, low_memory=True, upscale=upscale, lora_bytes=lora_bytes).system_bytes
 
 
 def _estimate(repo_dir: Path, block_matrices: int, transformer_rest: int, quantize: int) -> LtxCudaMemoryEstimate:

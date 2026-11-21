@@ -24,7 +24,7 @@ def kit_graph(monkeypatch):
 
 
 def _flash(monkeypatch, available):
-    monkeypatch.setattr(torch.backends.cuda, "is_flash_attention_available", lambda: available, raising=False)
+    monkeypatch.setattr(torch.backends.cuda, "is_flash_attention_available", lambda: available)
 
 
 class TestGraphAttentionBackend:
@@ -35,11 +35,6 @@ class TestGraphAttentionBackend:
 
     def test_a_build_without_flash_attention_asks_for_sdpa(self, monkeypatch):
         _flash(monkeypatch, False)
-
-        assert graph_attention_backend() == "sdpa"
-
-    def test_a_torch_that_cannot_say_asks_for_sdpa(self, monkeypatch):
-        monkeypatch.delattr(torch.backends.cuda, "is_flash_attention_available", raising=False)
 
         assert graph_attention_backend() == "sdpa"
 

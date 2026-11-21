@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 from PIL import Image
 
 from tests._images import noise_picture, painted_box
+from zvisiongenerator.core.image_backend import ImageBackend
+from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
+from zvisiongenerator.workflows import build_edit_workflow
 from zvisiongenerator.processing.edit_region import (
     BIG_MASK_FRACTION,
     PAINT_FADE,
     Plan,
     extend_canvas,
+    edit_model_size,
     edit_output_size,
     extend_draw_size,
     extend_reference,
@@ -42,6 +48,89 @@ def test_grid_size_rounds_each_side_to_the_nearest_16_with_no_upper_cap(size, ex
 @pytest.mark.parametrize(("extend", "expected"), [(None, (1921, 1081)), (("right", 128), (2049, 1081)), (("top", 64), (1921, 1145))])
 def test_edit_output_size_keeps_the_pictures_size_or_adds_the_extend(extend, expected):
     assert edit_output_size(1921, 1081, extend=extend) == expected
+
+
+class TestEditModelSize:
+    def test_an_extend_is_the_drawn_source_plus_the_strip_and_matches_the_canvas_the_stage_builds(self):
+        drawn, strip = extend_draw_size((1024, 1024), "right", 512)
+        canvas, _, _ = extend_canvas(Image.new("RGB", drawn), "right", strip)
+
+        assert edit_model_size(1024, 1024, masked=False, extend=("right", 512)) == canvas.size == (1488, 992)
+
+    def test_a_top_or_bottom_extend_adds_the_strip_to_the_height(self):
+        drawn, strip = extend_draw_size((1500, 1000), "top", 256)
+        canvas, _, _ = extend_canvas(Image.new("RGB", drawn), "top", strip)
+
+        assert edit_model_size(1500, 1000, masked=True, extend=("top", 256)) == canvas.size
+
+    def test_a_whole_picture_edit_is_drawn_at_the_pictures_own_size_on_the_grid(self):
+        assert edit_model_size(2048, 2048, masked=False, extend=None) == (2048, 2048)
+
+    def test_a_masked_edit_is_drawn_at_the_target_size(self):
+        assert edit_model_size(4000, 3000, masked=True, extend=None) == target_size(4000, 3000)
+
+
+class TestEditModelSizeMatchesTheStages:
+    """``edit_model_size`` is the canvas the real edit stages hand the model, whichever of paint and Extend is set."""
+
+    _SIZE = (1536, 1152)
+
+    def _drawn(self, tmp_path, *, paint=None, extend=None, size=_SIZE) -> tuple[int, int]:
+        """Run the edit workflow on a mock backend and return the size of the canvas the model was asked to draw."""
+        source = tmp_path / "photo.png"
+        noise_picture(*size, seed=3).save(source)
+        backend = MagicMock(spec=ImageBackend)
+        backend.edit_region.side_effect = lambda **kwargs: kwargs["image"].copy()
+        backend.text_to_image.side_effect = lambda **kwargs: Image.new("RGB", (kwargs["width"], kwargs["height"]))
+        request = ImageGenerationRequest(
+            backend=backend,
+            model=object(),
+            prompt="a red door",
+            edit_source=str(source),
+            edit_paint=paint,
+            edit_extend=extend,
+            output_dir=str(tmp_path / "out"),
+            filename_base="x",
+            steps=4,
+            seed=1,
+            max_reference_images=0,
+        )
+        build_edit_workflow().run(request, ImageWorkingArtifacts(filename="photo_edit"))
+        if backend.edit_region.called:
+            return backend.edit_region.call_args.kwargs["image"].size
+        call = backend.text_to_image.call_args.kwargs
+        return call["width"], call["height"]
+
+    def test_a_whole_picture_edit(self, tmp_path):
+        assert self._drawn(tmp_path) == edit_model_size(*self._SIZE, masked=False, extend=None)
+
+    def test_a_mask_over_most_of_the_picture_takes_the_whole_picture(self, tmp_path):
+        width, height = self._SIZE
+        paint = painted_box(height, width, (0, 0, width, height))
+
+        assert self._drawn(tmp_path, paint=paint) == edit_model_size(width, height, masked=True, extend=None)
+
+    def test_a_small_mask_is_drawn_no_larger_than_the_masked_estimate(self, tmp_path):
+        width, height = self._SIZE
+        paint = painted_box(height, width, (100, 100, 220, 200))
+
+        drawn = self._drawn(tmp_path, paint=paint)
+
+        estimate = edit_model_size(width, height, masked=True, extend=None)
+        assert drawn[0] * drawn[1] <= estimate[0] * estimate[1] * 1.06
+
+    @pytest.mark.parametrize("extend", [("right", 512), ("top", 300), ("left", 40)])
+    def test_an_extend_whether_or_not_a_mask_is_also_set(self, tmp_path, extend):
+        width, height = self._SIZE
+        paint = painted_box(height, width, (100, 100, 220, 200))
+
+        assert self._drawn(tmp_path, extend=extend) == edit_model_size(width, height, masked=False, extend=extend)
+        assert self._drawn(tmp_path, paint=paint, extend=extend) == edit_model_size(width, height, masked=True, extend=extend)
+
+    def test_a_source_smaller_than_one_megapixel_is_not_enlarged_by_an_extend(self, tmp_path):
+        extend = ("bottom", 200)
+
+        assert self._drawn(tmp_path, extend=extend, size=(500, 300)) == edit_model_size(500, 300, masked=False, extend=extend)
 
 
 class TestExtendDrawSize:

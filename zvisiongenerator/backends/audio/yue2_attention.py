@@ -20,8 +20,7 @@ def graph_attention_backend() -> str:
     """Return the kit's ``attention_backend`` for the CUDA-graph decoder: ``"auto"`` when this PyTorch can run FlashAttention, else ``"sdpa"``."""
     import torch
 
-    flash_available = getattr(torch.backends.cuda, "is_flash_attention_available", None)
-    return "auto" if flash_available is not None and flash_available() else "sdpa"
+    return "auto" if torch.backends.cuda.is_flash_attention_available() else "sdpa"
 
 
 @contextmanager

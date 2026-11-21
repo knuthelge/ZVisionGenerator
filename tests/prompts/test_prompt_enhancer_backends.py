@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import sys
 import types
 import warnings
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,6 +13,7 @@ from tests._factories import use_enhancer_models
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession, ensure_available, smart_budget_bytes
 from zvisiongenerator.utils.config import configured_enhancer_models, custom_enhancer_model, resolve_enhancer_model, split_model_revision
 from zvisiongenerator.utils.enhancer_models import enhancer_tier_models, smart_unavailable
+from zvisiongenerator.utils.model_memory import MemoryBudget
 
 
 # ── mlx-lm adapter ──────────────────────────────────────────────────────────
@@ -144,25 +143,6 @@ class TestTransformersAdapter:
         monkeypatch.setattr(fake_transformers.AutoTokenizer, "from_pretrained", MagicMock(side_effect=OSError("offline")))
         with pytest.raises(RuntimeError, match="owner/repo@rev: offline"):
             TransformersPromptEnhancer("owner/repo", "rev")
-
-    def test_sets_cuda_allocator_options_before_checking_for_cuda(self, fake_transformers, monkeypatch):
-        """Preflight enhancement can be the first thing to start CUDA, which reads PYTORCH_CUDA_ALLOC_CONF once."""
-        torch = pytest.importorskip("torch")
-        from zvisiongenerator.backends.cuda.prompt_enhancer import TransformersPromptEnhancer
-
-        monkeypatch.delenv("PYTORCH_CUDA_ALLOC_CONF", raising=False)
-        seen: dict[str, str | None] = {}
-
-        def is_available() -> bool:
-            seen["conf"] = os.environ.get("PYTORCH_CUDA_ALLOC_CONF")
-            return False
-
-        monkeypatch.setattr(torch.cuda, "is_available", is_available)
-        monkeypatch.setattr(fake_transformers.AutoTokenizer, "from_pretrained", MagicMock(side_effect=OSError("offline")))
-        with pytest.raises(RuntimeError):
-            TransformersPromptEnhancer("owner/repo", None)
-
-        assert "expandable_segments:True" in (seen["conf"] or "")
 
     @pytest.mark.parametrize(("cuda_version", "expects_hint"), [("13.0", True), ("12.6", False), (None, False)])
     def test_cpu_fallback_asks_for_a_driver_update_only_for_cuda_13_builds(self, fake_transformers, monkeypatch, cuda_version, expects_hint):
@@ -400,10 +380,15 @@ class TestEnhancerTiers:
         assert smart_unavailable(platform_key="win32", budget_bytes=budget) == expected
 
     def test_budget_is_probed_only_for_smart(self):
-        probe = MagicMock(return_value=SimpleNamespace(gpu_bytes=8 * _GIB))
+        probe = MagicMock(return_value=MemoryBudget(gpu_bytes=8 * _GIB))
         assert smart_budget_bytes("fast", probe=probe) is None
         probe.assert_not_called()
         assert smart_budget_bytes("smart", probe=probe) == 8 * _GIB
+
+    def test_smart_reads_the_cards_whole_memory_not_the_engine_budget(self):
+        probe = MagicMock(return_value=MemoryBudget(gpu_bytes=8 * _GIB, system_bytes=32 * _GIB, gpu_total_bytes=int(8.4 * _GIB)))
+
+        assert smart_budget_bytes("smart", probe=probe) == int(8.4 * _GIB)
 
     @pytest.mark.parametrize(("value", "expected"), [("a/b", ("a/b", None)), ("a/b@main", ("a/b", "main")), ("/models/llm", ("/models/llm", None))])
     def test_split(self, value, expected):

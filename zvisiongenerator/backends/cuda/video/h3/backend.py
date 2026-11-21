@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import tempfile
-import warnings
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -57,7 +56,6 @@ from zvisiongenerator.utils.h3_memory import (
     h3_cuda_system_bytes,
     h3_frames_of_latent_frames,
     h3_latent_frames,
-    h3_lora_bytes,
     h3_refine_windows,
     h3_upscale_keeps_transformer,
 )
@@ -65,6 +63,8 @@ from zvisiongenerator.utils.h3_converted import read_converted_h3
 from zvisiongenerator.utils.h3_preset import H3Files, H3Preset
 from zvisiongenerator.utils.h3_ref2va import load_h3_reference, task_tag
 from zvisiongenerator.utils.input_images import open_image_upright
+from zvisiongenerator.utils.lora_size import lora_files_bytes
+from zvisiongenerator.utils.memory_grade import CUDA_RAM_RATIOS, TOO_LARGE, grade
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE as JOIN_SAMPLE_RATE
 from zvisiongenerator.utils.video_extend import EXTEND_FPS_TOLERANCE, cut_window_audio
@@ -85,7 +85,6 @@ _MODEL_INFO = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, defau
 _MODES = ("t2v", "i2v", "extend")
 # What ``load_model`` takes. ``low_memory`` (H3 always streams its blocks) is accepted for the callers that pass it to every backend, and ignored.
 _LOAD_KEYS = frozenset({"mode", "low_memory", "loras", "upscale", "model_name", "preset", "end_image", "references"})
-_SYSTEM_MEMORY_TIGHT_RATIO = 0.8  # a load needing more than this share of system memory leaves little to the rest of the machine
 _RESOLUTION_FOR_UPSCALE = 2 * H3_ROW_PIXELS  # stage 1 runs at half size, which must stay a multiple of 32
 _PHASE = "video"
 _PHASE_STAGE_1 = "video_upscale_stage_1"
@@ -552,16 +551,19 @@ def _keeps_transformer(model: _H3Model, spec: _ClipSpec) -> bool:
         spec.num_frames,
         _gpu_total_bytes(model.device),
         mode=model.mode,
-        loras_bytes=h3_lora_bytes(path for path, _weight in model.loras),
+        loras_bytes=lora_files_bytes(path for path, _weight in model.loras),
         references=tuple(image.size for image in spec.references),
     )
 
 
 def _gpu_total_bytes(device: Any) -> int:
-    """Return the memory of the GPU *device*."""
+    """Return the memory budget of the GPU *device*: the budget the memory tag judges against (the card's total less the driver's reserve), else the driver's total."""
     import torch
 
-    return int(torch.cuda.get_device_properties(device).total_memory)
+    from zvisiongenerator.backends.cuda.memory import memory_sizes
+
+    sizes = memory_sizes()
+    return sizes[0] if sizes is not None else int(torch.cuda.get_device_properties(device).total_memory)
 
 
 def _review_stage1(clip: _Rendered, review: Callable[[Path], None]) -> None:
@@ -728,22 +730,22 @@ def _render_clip(
             _render_upscaled(model, spec, output_path, step_callback=step_callback, review=review)
 
 
-def _check_system_memory(loras: Sequence[tuple[Path, float]], *, references: bool = False) -> None:
-    """Refuse a load whose system memory (base, user LoRAs and, with *references*, the vision tower) exceeds the machine's, and warn above 80% of it.
+def _check_system_memory(loras: Sequence[tuple[Path, float]], *, vision: bool = False) -> None:
+    """Refuse a load whose job is Too large for system memory, judged as the memory tag judges it.
 
-    The decoded frames add to this per clip, so the figure is a floor.
+    The figure is the memory engine's for the job (base, user LoRAs and, with *vision*, the vision tower of a keyframe or references) and the line
+    is the one the tag's Too large starts at. A Tight job loads: the command line and the tag have already said so. The decoded frames add to the
+    figure per clip, which the load does not know, so it is a floor.
 
     Raises:
-        RuntimeError: If the estimate is more than the machine's system memory.
+        RuntimeError: If the job is Too large for the machine's system memory.
     """
     import psutil
 
     total = int(psutil.virtual_memory().total)
-    need = h3_cuda_system_bytes(loras_bytes=h3_lora_bytes(path for path, _weight in loras), vision=references)
-    if need > total:
+    need = h3_cuda_system_bytes(loras_bytes=lora_files_bytes(path for path, _weight in loras), vision=vision)
+    if grade(need, total, CUDA_RAM_RATIOS) == TOO_LARGE:
         raise RuntimeError(f"MiniMax H3 needs about {need / 1024**3:.0f} GB of system memory; this machine has {total / 1024**3:.0f} GB.")
-    if need > total * _SYSTEM_MEMORY_TIGHT_RATIO:
-        warnings.warn(f"MiniMax H3 needs about {need / 1024**3:.0f} GB of this machine's {total / 1024**3:.0f} GB of system memory, leaving little for other apps.", stacklevel=2)
 
 
 class H3VideoBackend:
@@ -799,7 +801,7 @@ class H3VideoBackend:
         require_cuda(torch, "MiniMax H3 on Windows and Linux")
         configure_torch_runtime(torch)
         references = bool(kwargs.get("references"))
-        _check_system_memory(loras, references=references)
+        _check_system_memory(loras, vision=references or mode == "i2v")  # a keyframe loads the vision tower as references do
         device = torch.device("cuda")
         if references:
             # The Ref2VA copy serves every model picked; it is a converted folder, so it takes the converted route.

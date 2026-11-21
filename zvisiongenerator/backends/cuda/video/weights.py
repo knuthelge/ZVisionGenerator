@@ -16,6 +16,7 @@ NF4 weights are packed by bitsandbytes on the GPU and saved with their quantizat
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -120,8 +121,12 @@ def text_encoder_sources(repo_dir: Path) -> list[Path]:
 
 
 def transformer_elements(source: Path) -> tuple[int, int]:
-    """Count the transformer's elements at *source* from the file headers: ``(2-D weights in its blocks, the rest)``."""
-    return count_transformer_elements(_transformer_shapes(source))
+    """Count the transformer's elements at *source* from the file headers: ``(2-D weights in its blocks, the rest)``.
+
+    The count of a file is kept while the file is unchanged (its path, size and modification time), so a listing that asks
+    for every request does not read the headers again.
+    """
+    return _transformer_elements(str(source), _identities(transformer_sources(source)))
 
 
 def count_transformer_elements(shapes: Iterable[tuple[str, list[int]]]) -> tuple[int, int]:
@@ -141,17 +146,47 @@ def count_transformer_elements(shapes: Iterable[tuple[str, list[int]]]) -> tuple
 
 
 def component_elements(component_dir: Path) -> int:
-    """Count the elements of the component in the diffusers folder *component_dir* from its file headers."""
-    files = [path for index in (_DIFFUSERS_INDEX_NAME, _TRANSFORMERS_INDEX_NAME) if (component_dir / index).is_file() for path in shard_files(component_dir, index)]
-    files = files or sorted(component_dir.glob("*.safetensors"))
-    return sum(math.prod(info["shape"]) for path in files for info in read_header(path)[1].values())
+    """Count the elements of the component in the diffusers folder *component_dir* from its file headers (kept while the files are unchanged)."""
+    return _component_elements(_identities(_component_files(component_dir)))
 
 
 def text_encoder_bytes(component_dir: Path) -> int:
-    """Return the bytes the FP8 text encoder in *component_dir* holds: one per element, two where it stays bfloat16."""
+    """Return the bytes the FP8 text encoder in *component_dir* holds: one per element, two where it stays bfloat16 (kept while the files are unchanged)."""
+    return _text_encoder_bytes(_identities(_component_files(component_dir)))
+
+
+def _component_files(component_dir: Path) -> list[Path]:
+    """Return the weight files of the diffusers folder *component_dir*: its shards, else its safetensors files."""
     files = [path for index in (_DIFFUSERS_INDEX_NAME, _TRANSFORMERS_INDEX_NAME) if (component_dir / index).is_file() for path in shard_files(component_dir, index)]
-    files = files or sorted(component_dir.glob("*.safetensors"))
-    return sum(math.prod(info["shape"]) * (2 if kept_in_compute_dtype(name) else 1) for path in files for name, info in read_header(path)[1].items())
+    return files or sorted(component_dir.glob("*.safetensors"))
+
+
+type _Identities = tuple[tuple[str, int, int], ...]
+
+
+def _identities(paths: Iterable[Path]) -> _Identities:
+    """Return each file's resolved path, size and modification time, which tell a rewritten file from the one whose header was counted."""
+    stats = [(path.resolve(), path.stat()) for path in paths]
+    return tuple((str(path), stat.st_size, stat.st_mtime_ns) for path, stat in stats)
+
+
+@functools.lru_cache(maxsize=32)
+def _transformer_elements(source: str, files: _Identities) -> tuple[int, int]:
+    """Count the transformer's elements at *source*; *files* are its sources as they were, which key the cache."""
+    del files
+    return count_transformer_elements(_transformer_shapes(Path(source)))
+
+
+@functools.lru_cache(maxsize=32)
+def _component_elements(files: _Identities) -> int:
+    """Count the elements in the weight files *files* names."""
+    return sum(math.prod(info["shape"]) for path, _size, _mtime in files for info in read_header(Path(path))[1].values())
+
+
+@functools.lru_cache(maxsize=32)
+def _text_encoder_bytes(files: _Identities) -> int:
+    """Sum the FP8 bytes of the text encoder files *files* names."""
+    return sum(math.prod(info["shape"]) * (2 if kept_in_compute_dtype(name) else 1) for path, _size, _mtime in files for name, info in read_header(Path(path))[1].items())
 
 
 def _transformer_shapes(source: Path) -> Iterator[tuple[str, list[int]]]:

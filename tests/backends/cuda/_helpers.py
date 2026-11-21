@@ -404,8 +404,9 @@ def install_fake_weights(monkeypatch):
         calls.repo_dirs.append(tuple(ignore))
         return Path("/fake/repo")
 
-    def _check_memory(estimate, quantize, *, converted):
+    def _check_memory(estimate, quantize, *, converted, upscale, lora_bytes):
         calls.memory_checks.append((estimate[1], quantize))
+        calls.memory_job = (upscale, lora_bytes)
         return calls.fits_together
 
     def _load_transformer(config, *, prepared, bits, compute_dtype):

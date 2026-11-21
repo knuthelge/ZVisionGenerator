@@ -40,6 +40,7 @@ from zvisiongenerator.core.moss import lora_stack as moss_lora_stack, run_size a
 from zvisiongenerator.core.progress_events import preview_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.lora_files import readable_lora_files
+from zvisiongenerator.utils.memory_verdict import MemoryJob
 from zvisiongenerator.utils.moss_build import is_moss_dir, require_built, shared_quant_source, turbo_lora_for
 
 if TYPE_CHECKING:
@@ -397,6 +398,8 @@ class MfluxBackend:
         precision: str = "bfloat16",
         lora_paths: list[str] | None = None,
         lora_weights: list[float] | None = None,
+        memory_job: MemoryJob | None = None,
+        on_note: Callable[[str], None] | None = None,
     ) -> tuple[Any, "ImageModelInfo"]:
         """Load a model from the given path with optional quantization, precision, and LoRA.
 
@@ -406,6 +409,8 @@ class MfluxBackend:
             precision: "bfloat16" (default, fast) or "float32" (slower, better detail).
             lora_paths: List of paths to LoRA .safetensors files, or None to disable.
             lora_weights: List of scale factors for each LoRA (default None).
+            memory_job: Accepted and ignored: macOS keeps fixed placements.
+            on_note: Accepted and never called, for the same reason.
         """
         model_info = detect_image_model(model_path)
 

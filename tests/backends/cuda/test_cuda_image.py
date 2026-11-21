@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import sys
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,9 +18,19 @@ import pytest
 from PIL import Image
 
 import zvisiongenerator.schedulers.beta_sigmas  # noqa: F401  (import scipy for real here; its first import under the fake ``torch`` fails and corrupts numpy)
+from tests.backends.cuda._image_weights import FAMILIES, image_components
+from zvisiongenerator.backends.cuda.image.placement import PlacementChoice
+from zvisiongenerator.backends.cuda.nvml import CardMemory
 from zvisiongenerator.core.image_types import JobPrompt
+from zvisiongenerator.utils.memory_offsets import CUDA_CONTEXT_BYTES
+from zvisiongenerator.utils.memory_verdict import MemoryJob
 from zvisiongenerator.utils import moss_build
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.memory_verdict import MemoryWeights
+from zvisiongenerator.utils.weight_totals import ResolvedWeights
+
+GIB = 1024**3
+_LABELS = {"zit": "Z-Image", "klein4b": "FLUX.2 Klein 4B"}
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +112,7 @@ def win_backend():
     diffusers_mod = MagicMock()
     fakes = _build_fake_modules(torch_mod, diffusers_mod)
 
-    with patch.dict(sys.modules, fakes):
+    with patch.dict(sys.modules, fakes), patch("zvisiongenerator.backends.cuda.nvml.card_memory", return_value=None):
         mod = _fresh_import(fakes)
         yield mod, torch_mod, diffusers_mod
 
@@ -685,6 +696,240 @@ class TestLoadModelQuantized:
         assert "text_encoder" not in mod.AutoPipelineForText2Image.from_pretrained.call_args.kwargs
 
 
+@pytest.fixture
+def placement_warnings():
+    """Collect the warnings a test raises, each shown however often it repeats."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        yield caught
+
+
+class TestPlacementAtLoad:
+    """The weights are placed by the memory verdict and the GPU memory free at load; a model whose sizes are unknown takes the placements that need the least GPU memory."""
+
+    @staticmethod
+    def _load(mod, model, quantize, *, card_gib, free_gib, memory_job=None, resolved=True, **kwargs):
+        family, size = FAMILIES[model]
+        weights = ResolvedWeights(MemoryWeights(components=image_components(model)), family=family, model_size=size) if resolved else None
+        with (
+            patch.object(mod, "detect_image_model", return_value=_make_model_info(family=family, size=size)),
+            patch.object(mod, "resolve_image_weights", return_value=weights),
+            patch.object(mod, "_gpu_memory", return_value=(round(card_gib * GIB), round(free_gib * GIB))),
+            patch.object(mod, "_load_nf4", return_value=MagicMock()) as mock_nf4,
+            patch.object(mod, "load_fp8_components", return_value={}),
+        ):
+            pipeline, _info = mod.DiffusersBackend().load_model("fake-model-path", quantize=quantize, memory_job=memory_job, **kwargs)
+        return pipeline, mock_nf4
+
+    @pytest.mark.parametrize("model", ["zit", "klein4b"])
+    def test_q4_stays_resident_at_9_40_gib_free_on_a_10_gib_card_without_a_warning(self, win_backend, placement_warnings, model):
+        mod, _, _ = win_backend
+
+        _pipeline, mock_nf4 = self._load(mod, model, 4, card_gib=10, free_gib=9.40)
+
+        assert mock_nf4.call_args.kwargs["offload"] is False
+        assert placement_warnings == []
+
+    @pytest.mark.parametrize("model", ["zit", "klein4b"])
+    def test_q4_takes_turns_at_6_gib_free_and_warns(self, win_backend, placement_warnings, model):
+        mod, _, _ = win_backend
+
+        _pipeline, mock_nf4 = self._load(mod, model, 4, card_gib=10, free_gib=6.0)
+
+        assert mock_nf4.call_args.kwargs["offload"] is True
+        assert [str(warning.message) for warning in placement_warnings] == [
+            f"Only 6.0 GB of GPU memory is free, so the text encoder and transformer of {_LABELS[model]} take turns on the GPU. This is slower."
+        ]
+
+    def test_when_every_candidate_is_over_the_free_memory_the_last_is_taken_and_the_warning_says_it_may_run_out(self, win_backend, placement_warnings):
+        mod, _, _ = win_backend
+
+        _pipeline, mock_nf4 = self._load(mod, "klein4b", 4, card_gib=10, free_gib=3.0)
+
+        assert mock_nf4.call_args.kwargs["offload"] is True
+        assert len(placement_warnings) == 1
+        assert "may run out of GPU memory" in str(placement_warnings[0].message)
+
+    def test_a_step_down_and_a_load_with_nothing_that_fits_report_their_note_and_a_plain_load_none(self, win_backend):
+        mod, _, _ = win_backend
+        notes: list[str] = []
+
+        self._load(mod, "zit", 4, card_gib=10, free_gib=9.40, on_note=notes.append)
+        assert notes == []
+
+        self._load(mod, "zit", 4, card_gib=10, free_gib=6.0, on_note=notes.append)
+        self._load(mod, "klein4b", 4, card_gib=10, free_gib=3.0, on_note=notes.append)
+
+        assert notes == ["Only 6.0 GB of GPU memory is free, so this runs slower.", "Only 3.0 GB of GPU memory is free. This may run out of memory."]
+
+    @pytest.mark.parametrize("quantize", [8, None])
+    def test_q8_and_full_precision_stream_even_on_a_24_gb_card(self, win_backend, placement_warnings, quantize):
+        mod, _, diffusers_mod = win_backend
+
+        self._load(mod, "klein9b", quantize, card_gib=24, free_gib=22.5)
+
+        assert diffusers_mod.hooks.apply_group_offloading.call_count == 2
+        mod.AutoPipelineForText2Image.from_pretrained.return_value.to.assert_not_called()
+        assert placement_warnings == []
+
+    def test_q8_streams_whatever_placement_is_forced(self, win_backend):
+        mod, _, diffusers_mod = win_backend
+
+        with patch.object(mod, "choose_placement", return_value=PlacementChoice("resident")):
+            self._load(mod, "klein9b", 8, card_gib=24, free_gib=22.5)
+
+        assert diffusers_mod.hooks.apply_group_offloading.call_count == 2
+        mod.AutoPipelineForText2Image.from_pretrained.return_value.to.assert_not_called()
+
+    def test_q8_streams_on_a_10_gb_card(self, win_backend, placement_warnings):
+        mod, _, diffusers_mod = win_backend
+
+        self._load(mod, "klein9b", 8, card_gib=10, free_gib=8.7)
+
+        assert diffusers_mod.hooks.apply_group_offloading.call_count == 2
+        mod.AutoPipelineForText2Image.from_pretrained.return_value.to.assert_not_called()
+        assert placement_warnings == []
+
+    def test_q8_streams_with_little_free_memory_and_warns_only_when_even_that_does_not_fit(self, win_backend, placement_warnings):
+        mod, _, diffusers_mod = win_backend
+
+        self._load(mod, "klein9b", 8, card_gib=24, free_gib=4.5)
+        assert placement_warnings == []
+
+        self._load(mod, "klein9b", 8, card_gib=24, free_gib=3.1)
+
+        assert diffusers_mod.hooks.apply_group_offloading.call_count == 4
+        assert [str(warning.message) for warning in placement_warnings] == ["Only 3.1 GB of GPU memory is free, which is less than FLUX.2 Klein 9B needs. It may run out of GPU memory."]
+
+    def test_without_a_memory_job_the_one_megapixel_reference_job_is_used(self, win_backend):
+        mod, _, _ = win_backend
+
+        _pipeline, with_default = self._load(mod, "zit", 4, card_gib=10, free_gib=9.40)
+        _pipeline, with_a_large_job = self._load(mod, "zit", 4, card_gib=10, free_gib=8.70, memory_job=MemoryJob(media="image", lora_bytes=2 * GIB))
+
+        assert with_default.call_args.kwargs["offload"] is False
+        assert with_a_large_job.call_args.kwargs["offload"] is True
+
+    def test_the_job_s_size_and_references_count_against_the_free_memory(self, win_backend, placement_warnings):
+        mod, _, _ = win_backend
+
+        self._load(mod, "klein9b", 4, card_gib=10, free_gib=6.5, memory_job=MemoryJob(media="image"))
+        assert placement_warnings == []
+
+        self._load(mod, "klein9b", 4, card_gib=10, free_gib=6.5, memory_job=MemoryJob(media="image", width=2048, height=2048, reference_megapixels=(1.0, 1.0, 1.0)))
+
+        assert len(placement_warnings) == 1 and "may run out of GPU memory" in str(placement_warnings[0].message)
+
+    @pytest.mark.parametrize("model", ["zit", "klein4b", "klein9b"])
+    def test_a_model_whose_sizes_are_unknown_takes_turns_at_q4_whatever_its_family(self, win_backend, placement_warnings, model):
+        mod, _, _ = win_backend
+
+        _pipeline, mock_nf4 = self._load(mod, model, 4, card_gib=10, free_gib=8.70, resolved=False)
+
+        assert mock_nf4.call_args.kwargs["offload"] is True
+        assert placement_warnings == []
+
+    @pytest.mark.parametrize(("free_gib", "restores_offload"), [(9.40, False), (7.5, True)])
+    def test_loras_restore_model_offload_only_when_the_weights_take_turns(self, win_backend, free_gib, restores_offload):
+        mod, _, _ = win_backend
+
+        with patch.object(mod, "_load_loras") as load_loras:
+            self._load(mod, "zit", 4, card_gib=10, free_gib=free_gib, lora_paths=["/l/a.safetensors"])
+
+        assert load_loras.call_args.kwargs["cpu_offload"] is restores_offload
+
+    @pytest.mark.parametrize("quantize", [8, None])
+    def test_a_model_whose_sizes_are_unknown_streams_at_q8_and_full_precision(self, win_backend, quantize):
+        mod, _, diffusers_mod = win_backend
+
+        self._load(mod, "klein9b", quantize, card_gib=24, free_gib=22.5, resolved=False)
+
+        assert diffusers_mod.hooks.apply_group_offloading.call_count == 2
+        mod.AutoPipelineForText2Image.from_pretrained.return_value.to.assert_not_called()
+
+    def test_a_stored_copy_is_sized_at_its_own_level(self, win_backend, tmp_path):
+        mod, _, _ = win_backend
+        stored = tmp_path / "atlas@q4"
+        stored.mkdir()
+        (stored / "ziv-quant.json").write_text('{"bits": 4}')
+        weights = ResolvedWeights(MemoryWeights(components=image_components("zit")), family="zimage")
+
+        with (
+            patch.object(mod, "detect_image_model", return_value=_make_model_info()),
+            patch.object(mod, "resolve_image_weights", return_value=weights),
+            patch.object(mod, "_gpu_memory", return_value=(10 * GIB, round(9.40 * GIB))),
+            patch.object(mod, "_load_nf4", return_value=MagicMock()) as mock_nf4,
+        ):
+            mod.DiffusersBackend().load_model(str(stored), quantize=None)
+
+        assert mock_nf4.call_args.kwargs["offload"] is False
+        assert mock_nf4.call_args.kwargs["prequantized"] is True
+
+    def test_the_memory_the_job_can_have_is_the_free_memory_read_after_collecting_and_emptying_the_cache_plus_what_the_process_holds_unused(self, win_backend):
+        mod, torch_mod, _ = win_backend
+        order: list[str] = []
+        torch_mod.cuda.empty_cache.side_effect = lambda: order.append("empty_cache")
+        torch_mod.cuda.mem_get_info.side_effect = lambda *args: order.append("mem_get_info") or (round(8.70 * GIB), 10 * GIB)
+        torch_mod.cuda.memory_reserved.return_value = round(0.5 * GIB)
+        torch_mod.cuda.memory_allocated.return_value = round(0.3 * GIB)  # tensors still alive after the collection are in use, not free
+
+        with patch.object(mod, "memory_sizes", return_value=(10 * GIB, 30 * GIB)), patch.object(mod.gc, "collect", side_effect=lambda: order.append("collect")):
+            card, available = mod._gpu_memory()
+
+        assert card == 10 * GIB
+        assert available == round(8.70 * GIB) + round(0.2 * GIB) + CUDA_CONTEXT_BYTES  # the context and the reserved-but-unused part are what the job can have, the live tensors are not
+        assert order == ["collect", "empty_cache", "mem_get_info"]
+
+    def test_the_free_memory_counts_other_programs_when_nvml_sees_them(self, win_backend):
+        mod, torch_mod, _ = win_backend
+        torch_mod.cuda.mem_get_info.return_value = (round(8.88 * GIB), 10 * GIB)  # Windows: ignores a program holding 3 GiB
+        torch_mod.cuda.memory_reserved.return_value = round(0.5 * GIB)
+        torch_mod.cuda.memory_allocated.return_value = 0
+
+        with (
+            patch.object(mod, "memory_sizes", return_value=(10 * GIB, 30 * GIB)),
+            patch.object(mod.nvml, "card_memory", return_value=CardMemory(total=10 * GIB, free=round(5.9 * GIB))),
+        ):
+            _, available = mod._gpu_memory()
+
+        assert available == round(5.9 * GIB) + round(0.5 * GIB) + CUDA_CONTEXT_BYTES
+
+    def test_nvml_never_raises_the_free_memory_above_the_cuda_query(self, win_backend):
+        mod, torch_mod, _ = win_backend
+        torch_mod.cuda.mem_get_info.return_value = (4 * GIB, 10 * GIB)
+        torch_mod.cuda.memory_reserved.return_value = 0
+        torch_mod.cuda.memory_allocated.return_value = 0
+
+        with patch.object(mod, "memory_sizes", return_value=(10 * GIB, 30 * GIB)), patch.object(mod.nvml, "card_memory", return_value=CardMemory(total=10 * GIB, free=7 * GIB)):
+            _, available = mod._gpu_memory()
+
+        assert available == 4 * GIB + CUDA_CONTEXT_BYTES
+
+    def test_the_drivers_total_stands_in_without_nvidia_smi(self, win_backend):
+        mod, torch_mod, _ = win_backend
+        torch_mod.cuda.mem_get_info.return_value = (5 * GIB, 12 * GIB)
+        torch_mod.cuda.memory_reserved.return_value = 0
+        torch_mod.cuda.memory_allocated.return_value = 0
+
+        with patch.object(mod, "memory_sizes", return_value=None):
+            assert mod._gpu_memory() == (12 * GIB, 5 * GIB + CUDA_CONTEXT_BYTES)
+
+    @pytest.mark.parametrize("family", ["ideogram4", "moss"])
+    def test_a_fixed_placement_family_is_not_sized_here(self, win_backend, family):
+        mod, _, _ = win_backend
+
+        with (
+            patch.object(mod, "detect_image_model", return_value=_make_model_info(family=family)),
+            patch.object(mod, "resolve_image_weights") as resolve,
+            patch.object(mod, "load_ideogram4_pipeline", return_value=MagicMock()),
+            patch.object(mod, "load_moss_pipeline", return_value=MagicMock()),
+            patch.object(mod, "turbo_lora_for", return_value=None),
+        ):
+            mod.DiffusersBackend().load_model("/models/fixed", quantize=4)
+
+        resolve.assert_not_called()
+
+
 class TestStoredQuants:
     def test_format_names_the_libraries_each_level_depends_on(self, win_backend):
         """A bitsandbytes upgrade must not make FP8 (q8) copies stale."""
@@ -923,20 +1168,22 @@ class TestLoadModelLoRA:
             self._load(mod, ["/l/bad.safetensors"], None, pipeline)
 
     @pytest.mark.parametrize(
-        ("hook", "quantize", "family", "restored"),
+        ("hook", "quantize", "placement", "restored"),
         [
-            (None, 4, "krea2", True),
-            (object(), 4, "krea2", False),
+            (None, 4, "turns", True),
+            (None, 4, "resident", False),
+            (None, 8, "streamed", False),
+            (object(), 4, "turns", False),
         ],
     )
-    def test_cpu_offload_is_restored_only_for_an_offloaded_pipeline_that_lost_its_hooks(self, loras, fake_peft_no_match, hook, quantize, family, restored):
+    def test_cpu_offload_is_restored_only_for_an_offloaded_pipeline_that_lost_its_hooks(self, loras, fake_peft_no_match, hook, quantize, placement, restored):
         mod, _, _, _ = loras
         pipeline = MagicMock()
         pipeline.transformer._hf_hook = hook
         pipeline.load_lora_weights.side_effect = self._unmatched_for(fake_peft_no_match, "/l/other-model.safetensors")
 
-        with pytest.warns(UserWarning):
-            self._load(mod, ["/l/other-model.safetensors"], [1.0], pipeline, quantize=quantize, family=family)
+        with pytest.warns(UserWarning), patch.object(mod, "_choose_placement", return_value=PlacementChoice(placement)):
+            self._load(mod, ["/l/other-model.safetensors"], [1.0], pipeline, quantize=quantize)
 
         assert pipeline.enable_model_cpu_offload.call_count == int(restored)
 
@@ -1369,33 +1616,22 @@ class TestKrea2:
 
         assert len(mod._img2img_sigmas(inflated, strength)) == requested
 
-    def test_load_model_passes_family_to_nf4_loader(self, win_backend):
-        mod, _, _ = win_backend
-
-        with (
-            patch.object(mod, "detect_image_model", return_value=_make_model_info(family="krea2")),
-            patch.object(mod, "_load_nf4", return_value=MagicMock()) as mock_nf4,
-        ):
-            mod.DiffusersBackend().load_model("unsloth/Krea-2-Turbo", quantize=4)
-
-        assert mock_nf4.call_args.args[2] == "krea2"
-
-    def test_nf4_moves_text_encoder_off_gpu_and_uses_model_offload(self, win_backend):
+    def test_nf4_takes_turns_through_model_offload_when_asked(self, win_backend):
         mod, _, _ = win_backend
         pipeline = mod.AutoPipelineForText2Image.from_pretrained.return_value
 
         with patch.object(mod, "load_nf4_components", return_value={}) as mock_components:
-            mod._load_nf4("unsloth/Krea-2-Turbo", "bf16-sentinel", "krea2", prequantized=False)
+            mod._load_nf4("example/model", "bf16-sentinel", prequantized=False, offload=True)
 
         assert mock_components.call_args.kwargs["text_encoder_to_cpu"] is True
         pipeline.enable_model_cpu_offload.assert_called_once()
 
-    def test_nf4_keeps_other_families_resident(self, win_backend):
+    def test_nf4_keeps_both_components_on_the_gpu_when_not_asked_to_offload(self, win_backend):
         mod, _, _ = win_backend
         pipeline = mod.AutoPipelineForText2Image.from_pretrained.return_value
 
         with patch.object(mod, "load_nf4_components", return_value={}) as mock_components:
-            mod._load_nf4("Tongyi-MAI/Z-Image-Turbo", "bf16-sentinel", "zimage", prequantized=False)
+            mod._load_nf4("Tongyi-MAI/Z-Image-Turbo", "bf16-sentinel", prequantized=False, offload=False)
 
         assert mock_components.call_args.kwargs["text_encoder_to_cpu"] is False
         pipeline.enable_model_cpu_offload.assert_not_called()

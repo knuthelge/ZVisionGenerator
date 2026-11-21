@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.core.image_backend import ImageBackend
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
+from zvisiongenerator.utils.memory_verdict import MemoryJob
 from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.stored_quant import (
     build_manifest,
@@ -235,6 +236,8 @@ def load_image_model(
     cancelled: Callable[[], bool] | None = None,
     release_memory: Callable[[], None] | None = None,
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
+    memory_job: MemoryJob | None = None,
+    on_note: Callable[[str], None] | None = None,
 ) -> tuple[Any, ImageModelInfo]:
     """Load *model_path*, reusing its stored quant at *quantize* or creating it on first use.
 
@@ -253,16 +256,20 @@ def load_image_model(
             discarded (the job's own stop handling follows).
         release_memory: Frees accelerator memory between the LoRA-free load used for saving and the LoRA load.
         find_local_dir: Resolves a model reference to its fully downloaded local folder.
+        memory_job: The job the model is loaded for; a backend that places weights by free memory reads it.
+        on_note: Receives the short sentence for the running job's card when the backend placed the weights for less free memory than the memory tag assumed.
     """
     backend_format = backend.stored_quant_format(quantize) if quantize is not None else None
     plan = plan_image_model_load(model_path, quantize, models_dir=models_dir, backend_format=backend_format, model_name=model_name, find_local_dir=find_local_dir)
     if plan.create is None or plan.quantize is None or backend_format is None:
-        return backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights)
+        return backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights, memory_job=memory_job, on_note=on_note)
     if backend.quantizes_from_files(plan.quantize, source=str(plan.source) if plan.source is not None else None):
-        return _write_then_load(backend, plan, plan.create, plan.quantize, backend_format, lora_paths=lora_paths, lora_weights=lora_weights, on_phase=on_phase, cancelled=cancelled)
+        return _write_then_load(
+            backend, plan, plan.create, plan.quantize, backend_format, lora_paths=lora_paths, lora_weights=lora_weights, on_phase=on_phase, cancelled=cancelled, memory_job=memory_job, on_note=on_note
+        )
 
-    # Saved weights must be LoRA-free: mflux bakes LoRAs into what it saves.
-    model, info = backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION)
+    # Saved weights must be LoRA-free: mflux bakes LoRAs into what it saves. Nothing is added to the model in this load.
+    model, info = backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION, memory_job=replace(memory_job, lora_bytes=0) if memory_job else None, on_note=on_note)
     # A Hugging Face model that was not downloaded before is now, unless the load read it some other way.
     source = plan.source or find_local_dir(plan.path)
     saved = False
@@ -281,8 +288,8 @@ def load_image_model(
     if on_phase is not None and source is not None:
         on_phase(LOADING_PHASE)
     if saved:
-        return backend.load_model(str(plan.create), quantize=None, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights)
-    return backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights)
+        return backend.load_model(str(plan.create), quantize=None, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights, memory_job=memory_job, on_note=on_note)
+    return backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights, memory_job=memory_job, on_note=on_note)
 
 
 def _write_then_load(
@@ -296,6 +303,8 @@ def _write_then_load(
     lora_weights: list[float] | None,
     on_phase: Callable[[str], None] | None,
     cancelled: Callable[[], bool] | None,
+    memory_job: MemoryJob | None,
+    on_note: Callable[[str], None] | None,
 ) -> tuple[Any, ImageModelInfo]:
     """Write *plan*'s stored quant at *bits* to *target* from the source files, then load it with the LoRAs.
 
@@ -309,10 +318,10 @@ def _write_then_load(
         if _write_stored_quant(backend, source=plan.source, target=target, bits=bits, backend_format=backend_format, cancelled=cancelled):
             if on_phase is not None:
                 on_phase(LOADING_PHASE)
-            return backend.load_model(str(target), quantize=None, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights)
+            return backend.load_model(str(target), quantize=None, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights, memory_job=memory_job, on_note=on_note)
         if cancelled is not None and cancelled():
             return None, detect_image_model(str(plan.source))  # the local copy: no Hub request on the way out
-    return backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights)
+    return backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights, memory_job=memory_job, on_note=on_note)
 
 
 def _is_plain_name(name: str) -> bool:
