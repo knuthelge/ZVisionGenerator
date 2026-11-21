@@ -1,0 +1,63 @@
+# Cases for the video bench (python -m bench.memory run --media video). Each case runs in a fresh process through ziv-video with the prompt enhancer off.
+#
+# A case names a `model` and a `size` of `video_sizes` (its `ratio` defaults to 16:9); `frames` overrides the preset's frame count, `low_memory: false`
+# keeps LTX's transformer on the GPU and `upscale: 2` renders at half size and enlarges. `only` limits a case to one platform (cuda or mac).
+# `width` and `height` (with no `size`) set the clip's own size; `references: N` adds N synthetic reference pictures (MiniMax H3 takes up to 2), at the size
+# of the `reference` entry below, which the prompt must name as <Picture 1>, <Picture 2>. `lora: true` runs the case with the LoRA file that `run --lora PATH` (or the ZIV_BENCH_LORA variable) names, and records its size; the case is skipped
+# without one. The file must suit the family you run. These are a start: add a case for each size and mode the estimate has a term for.
+#
+# `start_image: true` starts the clip from a synthetic picture of its own size (image-to-video). `extend_source` names an entry of `sources` below and
+# `extend_seconds` how much to add: the case continues that clip, at its size, and its row carries the window the app generates (the carried frames
+# plus the new ones). The bench renders each source clip once per results folder with the app itself (text-to-video, the `sources` entry's model, size
+# and frames, the case file's prompt), in a process of its own before the case's; it is the app's output, nobody's footage.
+#
+# The `ltx` family holds every LTX model (ltx-4, ltx-8, ltx25-4), which load different weights: select one model's cases with `--case`, not `--family`.
+
+defaults:
+  seed: 51207733
+  steps: 2
+  ratio: "16:9"
+reference: { width: 512, height: 320 }
+sources:
+  extend-xs: { model: ltx-4, size: xs, frames: 49 }
+prompt: A red bicycle rolls along a white brick wall in soft morning light, a green plant in a pot beside it.
+
+families:
+  ltx:
+    - { id: ltx8-s, model: ltx-8, size: s }
+    - { id: ltx8-m, model: ltx-8, size: m }
+    - { id: ltx8-s-resident, model: ltx-8, size: s, low_memory: false }
+    - { id: ltx8-s-lora, model: ltx-8, size: s, lora: true }
+    - { id: ltx8-s-resident-lora, model: ltx-8, size: s, low_memory: false, lora: true }
+    - { id: ltx4-s, model: ltx-4, size: s }
+    - { id: ltx4-m, model: ltx-4, size: m }
+    - { id: ltx4-s-i2v, model: ltx-4, size: s, start_image: true }
+    - { id: ltx4-s-extend, model: ltx-4, extend_source: extend-xs, extend_seconds: 3 }
+    - { id: ltx4-s-upscale, model: ltx-4, size: s, upscale: 2 }
+    # A 1280x704 clip rendered at 640x352 and enlarged: the size the upscale is used at.
+    - { id: ltx4-l-upscale, model: ltx-4, size: l, upscale: 2 }
+    - { id: ltx25-4-s, model: ltx25-4, size: s }
+    # Long clips at the XL preset (1600x896) with Low memory on, at 24 fps (frames follow 8k+1): 10 s is 241 frames, 14 s 337, 15 s 361. Their token counts (43k, 60k, 64k) sit
+    # beyond the knee where the transformer's float32 temporaries grow with the clip, the range a 10 GB card runs out of memory in; one 5 s clip at 1280x704 anchors the line's other end.
+    - { id: ltx4-xl-10s, model: ltx-4, size: xl, frames: 241 }
+    - { id: ltx4-xl-14s, model: ltx-4, size: xl, frames: 337 }
+    - { id: ltx4-xl-15s, model: ltx-4, size: xl, frames: 361 }
+    - { id: ltx4-l-5s, model: ltx-4, size: l }
+    - { id: ltx8-xl-10s, model: ltx-8, size: xl, frames: 241 }
+  h3:
+    - { id: h3-s, model: h3, size: s, frames: 22 }
+    - { id: h3-s-lora, model: h3, size: s, frames: 22, lora: true }
+    # A 5 s clip (124 frames) at 512x320, plain and with two references: the longest H3 clip the live test runs.
+    - { id: h3-5s, model: h3, width: 512, height: 320, frames: 124 }
+    - { id: h3-5s-refs, model: h3, width: 512, height: 320, frames: 124, references: 2, prompt: "<Picture 1> and <Picture 2> stand side by side in soft morning light, the red bicycle leaning on a white brick wall behind them." }
+    # The same 5 s at the size the docs name, and a 14 s clip (345 frames, the next count above 336) at it: the longest clip a 10 GB card runs.
+    - { id: h3-5s-864, model: h3, width: 864, height: 480, frames: 124 }
+    # The same clip with a LoRA: the transformer phase, not the decode, sets the peak of a small clip only when a LoRA adds to it.
+    - { id: h3-5s-864-lora, model: h3, width: 864, height: 480, frames: 124, lora: true }
+    - { id: h3-14s-864, model: h3, width: 864, height: 480, frames: 345 }
+    # The clips between them (10 s at 864x480, 243 frames; 5 s at 1280x736), and a 5 s clip at 1600x896 rendered at half size and enlarged, whose refine runs at the full size.
+    - { id: h3-10s-864, model: h3, width: 864, height: 480, frames: 243 }
+    - { id: h3-5s-1280, model: h3, width: 1280, height: 736, frames: 124 }
+    # The same clip with a LoRA: the transformer sets its peak, so the LoRA's own GPU share shows against the plain case.
+    - { id: h3-5s-1280-lora, model: h3, width: 1280, height: 736, frames: 124, lora: true }
+    - { id: h3-5s-1600-upscale, model: h3, width: 1600, height: 896, frames: 124, upscale: 2 }

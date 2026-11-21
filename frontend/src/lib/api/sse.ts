@@ -1,4 +1,4 @@
-import type { SSEEvent, AudioProgressEvent, BatchCompletedEvent, GenerationFinishedEvent } from '$lib/types';
+import type { SSEEvent, AudioProgressEvent, BatchCompletedEvent, GenerationFinishedEvent, MemoryUsageEvent } from '$lib/types';
 
 export type SSEEventHandler<T extends SSEEvent = SSEEvent> = (event: T) => void;
 
@@ -21,6 +21,8 @@ export function connectJobSSE(
     onProgressText?: SSEEventHandler;
     onJobPaused?: SSEEventHandler;
     onJobResumed?: SSEEventHandler;
+    /** The job's memory use was sampled; carries no progress. */
+    onMemory?: SSEEventHandler<MemoryUsageEvent>;
     onStatus?: (type: string, data: SSEEvent) => void;
     onClose?: () => void;
     /** The stream closed for good without a terminal event (e.g. 404 after a server restart or job pruning). */
@@ -84,11 +86,12 @@ export function connectJobSSE(
       case 'progress_text': handlers.onProgressText?.(data); break;
       case 'job_paused': handlers.onJobPaused?.(data); break;
       case 'job_resumed': handlers.onJobResumed?.(data); break;
+      case 'memory_usage': handlers.onMemory?.(data as MemoryUsageEvent); break;
     }
 
   }
 
-  const eventTypes = ['prompt_started', 'step_progress', 'audio_progress', 'batch_completed', 'job_completed', 'job_failed', 'job_cancelled', 'progress_text', 'job_paused', 'job_resumed', 'model_loading', 'model_downloading', 'batch_started', 'workflow_stage_started', 'workflow_stage_completed', 'generation_finished', 'enhancer_loading', 'prompt_enhanced', 'preflight_started', 'prompts_enhancing', 'prompt_enhance_failed', 'preflight_finished', 'job_started', 'workflow_started', 'generation_repeat', 'control_queued'];
+  const eventTypes = ['prompt_started', 'step_progress', 'audio_progress', 'batch_completed', 'job_completed', 'job_failed', 'job_cancelled', 'progress_text', 'job_paused', 'job_resumed', 'memory_usage', 'model_loading', 'model_downloading', 'batch_started', 'workflow_stage_started', 'workflow_stage_completed', 'generation_finished', 'enhancer_loading', 'prompt_enhanced', 'preflight_started', 'prompts_enhancing', 'prompt_enhance_failed', 'preflight_finished', 'job_started', 'workflow_started', 'generation_repeat', 'control_queued'];
   eventTypes.forEach(type => {
     es.addEventListener(type, (event: Event) => {
       try {

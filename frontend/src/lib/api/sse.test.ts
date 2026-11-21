@@ -47,6 +47,21 @@ describe('connectJobSSE', () => {
     subscription.close();
   });
 
+  it('routes memory_usage to onMemory and never to the status or step handlers', () => {
+    const onMemory = vi.fn();
+    const onStep = vi.fn();
+    const onStatus = vi.fn();
+    const subscription = connectJobSSE('test-job', { onMemory, onStep, onStatus });
+    const event = { type: 'memory_usage', job_id: 'test-job', event_id: 4, memory: { kind: 'unified', used_gb: 18.2, budget_gb: 26.8 } };
+
+    latestEventSource().emit('memory_usage', event);
+
+    expect(onMemory).toHaveBeenCalledExactlyOnceWith(event);
+    expect(onStep).not.toHaveBeenCalled();
+    expect(onStatus).not.toHaveBeenCalled();
+    subscription.close();
+  });
+
   it('does not close connection on batch_completed for multi-run job', () => {
     const onClose = vi.fn();
     const subscription = connectJobSSE('test-job', { onClose });

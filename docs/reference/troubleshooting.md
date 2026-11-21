@@ -203,19 +203,19 @@ The job card says why, and the [Job log](../web-ui/job-log.md) keeps the reason 
 
 The app estimates memory before a job, and what it does about it depends on the platform:
 
-- **Windows and Linux:** LTX and MiniMax H3 are refused before they load when the model needs more system memory than the machine has (the model's **Too large** badge). They warn when it needs more than 80% of it (**Tight**), and run.
-- **macOS:** nothing is refused. A video clip that may not fit gets a warning and the job continues.
-- **Everywhere:** the clip check (`ziv-video`'s warning and the note under **Duration (s)**) never blocks a job.
+- **Windows and Linux:** LTX and MiniMax H3 are refused before they load when the job needs more system memory than the machine has (**Too large** on the memory tag). A **Tight** job loads.
+- **macOS:** nothing is refused. A job that may not fit gets a warning and the job continues.
+- **Everywhere:** the memory tag and the command-line warnings never block a job.
 
-A job the check lets through can still be slow, or run out of memory. Image models have no refusal: on Windows and Linux a **Tight** image model runs slowly because part of it streams from disk, and one that needs more GPU memory than the card has stops with an out-of-memory error. Audio models warn before they start when the card is short.
+A job the check lets through can still be slow, or run out of memory. Image models have no refusal: on Windows and Linux an image job that is **Tight** on the GPU may stop with an out-of-memory error, and one that is **Tight** on system memory may run slowly. Audio models warn before they start when the card is short.
 
 ### The computer slows down, or the job stops with an out-of-memory error
 
 The model or clip is too large for this machine.
 
-- Pick a lower [quant](../concepts/memory.md#quantization): `q8`, or `q4`.
+- Pick a lower [quant](../concepts/memory.md#quantization): `q8`, or `q4`. When the GPU is what runs short on Windows or Linux, `q8` (which streams from system memory) needs less GPU memory than `q4`.
 - Make the image smaller, or generate small and [upscale](../concepts/upscaling.md).
-- For video, use **LTX-2.3 4-bit** (`ltx-4`), a shorter clip, a smaller size, and keep **Low memory** on.
+- For video, use a shorter clip and a smaller size, and keep **Low memory** on. `ltx-4` saves system memory, not GPU memory.
 - Close other apps that use a lot of memory.
 
 On Windows and Linux, PyTorch's own message begins with "CUDA out of memory". See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
@@ -227,19 +227,19 @@ The memory check can pass and the PC can still crawl. The check estimates the mo
 - Close other programs, a browser first, then run the job again.
 - Use the smaller choice: **LTX-2.3 4-bit** (`ltx-4`) for video, `q8` or `q4` for an image model, a shorter or smaller clip, and **Low memory** on.
 - Run one job at a time.
-- A job that sits close to the limit shows **Tight** on the model, or a note under **Duration (s)**. Treat that as a reason to switch before you start.
+- A job that sits close to the limit shows **Tight** on the memory tag. Treat that as a reason to switch before you start.
 
 The first run of a video model prepares it for your graphics card and reads tens of gigabytes; the PC can feel slow until that ends. See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
 
 ### macOS: the Mac slows down or beachballs
 
-The CPU and GPU share one pool of memory. A model above what macOS recommends for the GPU makes macOS compress or swap other memory, so the Mac slows down, the spinning beachball appears and the apps freeze. The memory check doesn't stop it: on a Mac it only warns. **Tight** on a model means the Mac may slow down, and **Too large** means heavy swapping that can make it unresponsive.
+The CPU and GPU share one pool of memory. A job above about three quarters of the Mac's memory makes macOS compress or swap other memory, so the Mac slows down, the spinning beachball appears and the apps freeze. The memory check doesn't stop it: on a Mac it only warns. **Tight** on a model means the Mac may slow down, and **Too large** means heavy swapping that can make it unresponsive.
 
 - Quit other apps first, a browser first.
 - Use the smaller choice: **LTX-2.3 4-bit** (`ltx-4`) for video, `q8` or `q4` for an image model, a shorter or smaller clip, and **Low memory** on.
-- On a Mac with 16 GB, start with **LTX-2.3 4-bit** (`ltx-4`).
+- On a Mac with 24 GB or less an LTX clip needs about 15 GB whatever its size, so it reads **Tight** on 16 GB with either LTX-2.3 model.
 
-See [The memory badges](../concepts/memory.md#the-memory-badges).
+See [The memory tag](../concepts/memory.md#the-memory-tag).
 
 ### Linux: the terminal or editor closes while a model loads
 
@@ -263,31 +263,25 @@ systemd-run --user --collect --same-dir -p OOMScoreAdjust=500 ziv-image -m klein
 
 ### "LTX at … needs about … GB of system memory; this machine has … GB" { #ltx-needs-more-system-memory }
 
-Windows and Linux. The job is refused before the model loads: even loading its parts one after the other needs more system memory than the machine has. Use the model the message names; `ltx-4` needs the least. For a converted model, convert the checkpoint again with `--quantize 4` under a new name. See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
-
-### "LTX at … needs about … GB of this machine's … GB of system memory, leaving little for other apps."
-
-Windows and Linux. A warning, not a refusal: the job runs, but the model needs more than 80% of system memory and the machine may slow down. For `q8`, switch to **LTX-2.3 4-bit** (`ltx-4`) if it is stopped for lack of memory. See [Windows: the PC crawls or freezes during a job](#windows-the-pc-crawls-or-freezes-during-a-job).
+Windows and Linux. The job is refused before the model loads: even loading its parts one after the other, with your LoRAs and an upscale, needs more system memory than the machine has. Use the model the message names; `ltx-4` needs the least. For a converted model, convert the checkpoint again with `--quantize 4` under a new name. See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
 
 ### "MiniMax H3 needs about … GB of system memory; this machine has … GB." { #h3-needs-more-system-memory }
 
-Windows and Linux. The job is refused before the model loads: the weights and your LoRAs need more system memory than the machine has. H3 needs about 18 GB before any LoRAs (and about 1.5 GB more when the job has reference images), so remove LoRAs first. A machine with less system memory than that can't run H3, and an LTX model needs more, not less: **LTX-2.3 4-bit** (`ltx-4`) needs about 20 GB. See [Models and licences](models.md#video-models).
+Windows and Linux. The job is refused before the model loads: the weights and your LoRAs need more system memory than the machine has. H3 needs about 16 GB before any LoRAs (and about 0.7 GB more when the job has reference images or a start image), so remove LoRAs first. A machine with less system memory than that can't run H3, and an LTX model needs more, not less: **LTX-2.3 4-bit** (`ltx-4`) needs about 20 GB. See [Models and licences](models.md#video-models).
 
-### "MiniMax H3 needs about … GB of this machine's … GB of system memory, leaving little for other apps."
+### "Memory for this …" { #memory-for-this }
 
-Windows and Linux. A warning: the job runs, but the weights need more than 80% of system memory, so close other programs first. The decoded frames add to this for each clip. See [Windows: the PC crawls or freezes during a job](#windows-the-pc-crawls-or-freezes-during-a-job).
+`ziv-image`, `ziv-video` and `ziv-audio` print this once, before anything downloads, when the job is **Tight** or **Too large**, and carry on. It says what was judged, what that means for this computer, what the job needs against what the computer has (GB) and, for an image or an LTX clip, how it fits at its other choices:
 
-### "The model needs about … GB of system memory; this machine has … GB (…). Continuing; it may be slow or fail"
+```
+Memory for this clip (5 s · 768×448 · Low memory off): Needs more GPU memory than this card has (about 14.5 of 9.6 GB). Continuing. Low memory on: Fits (4.8 GB)
+```
 
-Windows and Linux. `ziv-video` warns before the model loads. The weights, not the clip, fill system memory, so a shorter or smaller clip doesn't help; switch model instead. With `tight` in the brackets the job carries on and may be slow; with `too large` the weights need more system memory than the machine has, and the job is then refused with [*LTX at … needs about … GB of system memory*](#ltx-needs-more-system-memory) or [*MiniMax H3 needs about … GB of system memory*](#h3-needs-more-system-memory). See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
+To fit the job, take a choice that **Fits** (`--quantize`, `--low-memory`), use a smaller `--size`, fewer `--reference` images or fewer `--frames`, or [switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
 
-### "At …x…, … frames this clip"
+### "Only … GB of GPU memory is free" { #gpu-memory-is-free }
 
-`ziv-video` warns and carries on: the clip may be slow or fail. Use fewer `--frames` or a smaller `--size`, and keep `--low-memory` on. See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
-
-### "The …-frame extension window"
-
-`ziv-video` warns that the window an extension makes may not fit, and carries on. Use `--extend-seconds` or `--extend-frames` for a shorter extension. See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
+Windows and Linux. Other programs hold GPU memory, so an image model has less free than the tag assumed. The job runs, slower when a `q4` model's text encoder and transformer take turns on the GPU, and the message adds that it may run out of memory when even that doesn't fit. Close other programs that use the GPU, or switch from `q4` to `q8`, which streams from system memory.
 
 ### "MiniMax H3 ran out of GPU memory at …"
 
@@ -295,7 +289,7 @@ Windows and Linux. The clip didn't fit the GPU. Make it shorter or smaller and r
 
 ### "… ran out of GPU memory"
 
-Audio. The model needed more GPU memory than the card has. Close other apps that use the GPU and try again; for music, a shorter lyrics text also helps. When the model's memory estimate is known, the message adds what it needs and what the GPU has. See [Memory for audio](../concepts/memory.md#audio).
+Audio. The model needed more GPU memory than the card has. Close other apps that use the GPU and try again; for music, a shorter lyrics text also helps. When the model's memory estimate is known, the message adds what it needs and what the card (on a Mac, the Mac) has. See [Memory for audio](../concepts/memory.md#audio).
 
 ## Images { #images }
 

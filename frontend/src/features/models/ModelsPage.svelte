@@ -11,7 +11,7 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import type { AudioModelEntry, BackgroundRemovalEntry, ConversionStatus, DownloadItem, EnhancerModelEntry, CheckpointInspection, ModelDeleteInfo, ModelInventory, ModelLicence, ModelOperationResult, ModelStatusFields } from '$lib/types';
   import { Badge, Button, Icon, Input, StepProgress, Tooltip } from '$lib/components/atoms';
-  import { Alert, ConfirmDialog, EmptyState, FormField, HfTokenDialog, KeyValueList, LicenceMark, ModelStatusBadges, Panel, PathField, Select, hfTokenItem } from '$lib/components/molecules';
+  import { Alert, ConfirmDialog, EmptyState, FormField, HfTokenDialog, KeyValueList, LicenceMark, MemoryTag, Panel, PathField, Select, hfTokenItem } from '$lib/components/molecules';
   import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
   import { inventoryMemory } from '$lib/state/pageMemory';
@@ -522,9 +522,9 @@
   {/if}
 {/snippet}
 
-{#snippet memoryFitCell(m: ModelStatusFields)}
-  {#if m.memory_fit}
-    <ModelStatusBadges memoryFit={m.memory_fit} tooltipAlign="end" />
+{#snippet memoryCell(m: ModelStatusFields)}
+  {#if m.memory}
+    <MemoryTag memory={m.memory} align="end" testId="model-memory-tag" />
   {:else}
     <span class="text-text-muted">—</span>
   {/if}
@@ -598,7 +598,7 @@
                         </td>
                         <td class="font-mono">{m.family}</td>
                         <td>{@render diskSizeCell(m.disk_size_label)}</td>
-                        <td>{@render memoryFitCell(m)}</td>
+                        <td>{@render memoryCell(m)}</td>
                         {#snippet remove()}
                           <span class="dl-actions">
                             {#if m.download_needed}{@render downloadButton('model', m.name, m.downloaded === true)}{/if}
@@ -644,7 +644,7 @@
                         <td class="font-mono">{m.family}</td>
                         <td>{m.supports_i2v ? 'Yes' : '—'}</td>
                         <td>{@render diskSizeCell(m.disk_size_label)}</td>
-                        <td>{@render memoryFitCell(m)}</td>
+                        <td>{@render memoryCell(m)}</td>
                         {#snippet remove()}
                           <span class="dl-actions">
                             {#if m.download_needed}{@render downloadButton('model', m.name, m.downloaded === true)}{/if}
@@ -681,7 +681,7 @@
                         <td>{@render modelName({ ...m, source: 'audio' })}</td>
                         <td data-testid="audio-kind">{m.kinds.map((kind) => AUDIO_KIND_LABELS[kind]).join(' · ')}</td>
                         <td>{@render diskSizeCell(m.disk_size_label)}</td>
-                        <td>{@render memoryFitCell(m)}</td>
+                        <td>{@render memoryCell(m)}</td>
                         {#snippet remove()}
                           <span class="dl-actions">
                             {#if m.download_needed}{@render downloadButton('audio', m.name, m.downloaded === true)}{/if}

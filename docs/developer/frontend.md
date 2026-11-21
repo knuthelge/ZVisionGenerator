@@ -120,7 +120,10 @@ An audio take plays in `MediaPlayer` with `kind="audio"` on the stage, in the vi
 - **The voice.** `voiceMode` is `builtin`, `recording` (a one-off) or `saved`. A saved voice that the list no longer holds keeps the choice and turns Generate off; only this tab's own Delete moves the draft back to the default voice.
 - **Use as for takes.** **Audio track** is a Make action beside Reuse in the asset panel, the viewer's bar and dock and under the E key; for a speech take, Use as holds **Voice** and **Saved voice**. Both go through the prefill a Reuse uses with `use_as` set, so only that one slot changes. `voice_clone` tells the Speech tab to show the consent tick, because a voice that is itself a clone is a person's; the server decides the same way at submit (`voice_needs_consent`).
 - **Job card.** A job with `media_type: "audio"` counts takes and shows `AudioAurora`, whose phases come from `audio_progress` events kept as `job.audio`. The header bar follows `audioFraction`, so it only moves forward, and under `prefers-reduced-motion` the canvas redraws on each event only.
-- **Models page.** An audio model's memory fit is the GPU's alone, so the badge words an estimate without `system_gb` as GPU memory only.
+
+## Memory tag
+
+`MemoryTag` shows the status of a `POST /api/memory` answer and `MemoryEstimate` lays out its popover. The client words nothing: every sentence and heading is the server's (`utils/memory_wording.py`). Every answer carries every row, so a Quant or Low memory change sends no request, and `memoryEstimateView(memory, level)` picks the row the form holds. Only the Workspace tag passes `onselect` and `selectable`, which turn rows into buttons (`selectMemoryLevel`). `SettingsStrip`'s `memoryWarn` marks the phone's **All** button.
 
 ## The media player
 

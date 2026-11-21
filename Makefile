@@ -22,7 +22,7 @@ lock: ## Regenerate uv.lock
 
 # ——— Quality ——————————————————————————————————————————————
 
-.PHONY: lint lint-fix format format-check test docs-check docs-serve docs-screenshots check check-curated
+.PHONY: lint lint-fix format format-check test docs-check docs-serve docs-screenshots check check-curated weight-totals
 
 lint: ## Run ruff linter
 	uv run --frozen ruff check zvisiongenerator/ tests/ bench/
@@ -50,6 +50,9 @@ docs-screenshots: ## Retake the docs screenshots from a running throwaway Web UI
 
 check-curated: ## Compare the curated LoRA list's pinned files with the Hugging Face Hub (network; run before a release)
 	uv run --frozen python scripts/check_curated_loras.py
+
+weight-totals: ## Refill the weight_totals table of model_metadata.yaml from the Hugging Face headers (network, uses your token; ARGS="--only TEXT" limits it)
+	uv run --frozen python -m zvisiongenerator.utils.weight_totals --regenerate $(ARGS)
 
 check: lint format-check test frontend-test frontend-palette-check frontend-hover-check frontend-static-check docs-check ## Run lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate (full CI gate)
 

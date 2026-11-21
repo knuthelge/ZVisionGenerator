@@ -54,6 +54,8 @@ ziv-image -m klein9b -q 8 --prompt "A greenhouse full of orchids, soft morning l
 
 `-q 8` or `-q 4` runs the model quantized: it needs less memory and is a little less exact. The first run at a level may save a quantized copy, so later loads are faster. See [Memory and quantization](../concepts/memory.md#quantization).
 
+`ziv-image` warns before anything downloads when the job is Tight or Too large for this computer; see [*Memory for this …*](../reference/troubleshooting.md#memory-for-this).
+
 ### Cut out the background
 
 ```bash

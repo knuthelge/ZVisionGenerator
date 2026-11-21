@@ -5,8 +5,8 @@
   import { ActionBar, InspectorRow, InspectorSection, LicenceMark, Select } from '$lib/components/molecules';
   import { extendGuard } from '$lib/state/extend';
   import { extendCutView } from '$lib/state/extendCut';
-  import { clipMemory } from '$lib/state/clipMemory.svelte';
-  import { MEMORY_FIT_CONSEQUENCES, clipTimeNote, memoryFitNote, type MemoryNote } from '$lib/state/memoryFit';
+  import { memoryCheck } from '$lib/state/memoryCheck.svelte';
+  import { clipTime as clipTimeText } from '$lib/state/clipTime';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { generateBlock } from '$lib/state/generateBlock.svelte';
   import { textWriting } from '$lib/state/textWriting.svelte';
@@ -103,10 +103,9 @@
   const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
   // The finished clip is the frames the continued clip keeps plus the new ones.
   const extendLength = $derived(info && s.extendFrames !== null ? (extendCutView(info, s.extendFrom, s.extendFrames)?.total ?? null) : null);
-  const memoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
-  const clipNote = $derived(memoryFitNote(clipMemory.fit, 'clip'));
-  const clipTime = $derived(clipTimeNote(clipMemory.fit));
-  const extendTime = $derived(clipTimeNote(info?.memory_fit ?? null));
+  // The estimated time of the clip or the extension, from the memory answer for the job as set up (MiniMax H3 only).
+  // The previous model's estimate is not shown while the new answer is on its way.
+  const jobTime = $derived(clipTimeText(memoryCheck.pending ? null : memoryCheck.answer));
 
   function setExtendSeconds(seconds: number | null): void {
     if (seconds !== null && sourceFps) draft.update('extendFrames', extendFramesFromSeconds(seconds, sourceFps, extendStep));
@@ -198,12 +197,6 @@
     return { ...spec, value, onchange, disabled: disabled || busy };
   }
 </script>
-
-{#snippet memoryNoteLine(note: MemoryNote, testid: string)}
-  <p class="row-hint ui-help-warning memory-note" data-testid={testid} data-status={note.status} title="{note.text}&#10;{MEMORY_FIT_CONSEQUENCES.unified[note.status]}">
-    <Icon name="alert" size={12} />{note.text}
-  </p>
-{/snippet}
 
 {#snippet timeNoteLine(text: string, testid: string)}
   <p class="row-hint" data-testid={testid}>{text}</p>
@@ -299,8 +292,7 @@
           <input type="hidden" name="frames" value={s.frameCount}>
         </InspectorRow>
         <div aria-live="polite">
-          {#if clipTime}{@render timeNoteLine(clipTime, 'clip-time-note')}{/if}
-          {#if clipNote}{@render memoryNoteLine(clipNote, 'clip-memory-note')}{/if}
+          {#if jobTime}{@render timeNoteLine(jobTime, 'clip-time-note')}{/if}
         </div>
       {/if}
       {#if caps.showExtendLength}
@@ -319,8 +311,7 @@
           <span class="extend-total" data-testid="extend-total">{extendLength ? `${extendLength.seconds.toFixed(2)} s · ${extendLength.frames} frames` : '—'}</span>
         </InspectorRow>
         <div aria-live="polite">
-          {#if extendTime}{@render timeNoteLine(extendTime, 'extend-time-note')}{/if}
-          {#if memoryNote}{@render memoryNoteLine(memoryNote, 'extend-memory-note')}{/if}
+          {#if jobTime}{@render timeNoteLine(jobTime, 'extend-time-note')}{/if}
         </div>
       {/if}
       {#if caps.showSteps}
@@ -655,8 +646,6 @@
   @media (pointer: coarse) {
     .settings-pane :global(.inspector-select) { height: 32px; padding: 0 8px; background: var(--color-bg-surface-hover); font-size: 14px; }
   }
-  .memory-note { display: flex; align-items: flex-start; gap: 4px; }
-  .memory-note :global(svg) { margin-top: 2px; }
   .extend-total { font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-secondary); }
 
   .settings-footer { flex: none; padding: 10px 12px; }

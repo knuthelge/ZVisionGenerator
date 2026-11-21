@@ -1,0 +1,124 @@
+# Cases for the image bench (python -m bench.memory run --media image). Each case runs in a fresh process through ziv-image with the prompt enhancer off.
+#
+# Pictures are synthetic and made on first use under runs/<label>/sources/. `references: N` hands the model N distinct
+# synthetic pictures (`reference` size). `edit` names an entry of `pictures` and runs a whole-picture edit of it; with
+# `extend: side=pixels` the edit grows that side. `upscale: N` renders at 1/N of the size and refines back up, so its
+# output is the size of the plain case. `only` limits a case to one platform (cuda or mac); a family that is not listed
+# runs everywhere. A family's cases share the model's weights, so run one family per job.
+#
+# A case's own `quantize` overrides the shared one: 4 for the q4 cases, null for the unquantized ones. fit keeps each
+# (family, quantize) apart, so every level a family's estimate has a term for needs its own pairs.
+#
+# A case's `canvas: { width, height }` draws that size instead of the preset's (the preset still names the ratio).
+# A case's `budget_gib` makes the app read a card of that many GiB, so the loader picks the placement that card would get
+# (the run itself still uses this machine's card). `run --budget-gib` sets it for every case that runs. A case with a `budget_gib`
+# is marked `only: [cuda]`: a Mac is simulated by `total_gib`, and a `budget_gib` on a Mac raises.
+# A case's `placement: resident|turns|streamed` forces the loader to take that placement whatever the free memory is, to probe
+# the least card that placement runs on with `run --hold-in-process-gib`. fit judges a forced case in the placement it forced.
+#
+# A case marked `lora: true` runs with the LoRA file that `run --lora PATH` (or the ZIV_BENCH_LORA variable) names, passed to ziv-image as `--lora`, and records
+# its size (`lora_bytes`), never its path; the case is skipped without a file. The file must suit the family you run (Klein 9B for the klein9b-*-lora cases, Z-Image for zit-q4-m-resident-lora, a MOSS-Image LoRA for moss-sft-q4-m-lora, an Ideogram 4 LoRA for the ideo-*-lora cases).
+# A LoRA case is the plain case of the same id without `-lora` (or `-lokr`) plus the file, so the pair gives the file's share of the figures. The `-lora` cases are run
+# with a small standard LoRA (0.15 GiB), which sits within a run's noise, and the `-lokr` cases with a large LyCORIS LoKr file (1 GiB) that the share can be read from. The ideo-*-lora cases are run with a 1 GiB Ideogram 4 LoKr file.
+#
+# fit reads the pairs it needs from these ids: a model's smallest and largest plain size (size terms), and the plain
+# size with 0 and N references (reference term).
+
+defaults:
+  seed: 51207733
+  steps: 2
+  quantize: 8
+  ratio: "1:1"
+  references: 0
+prompt: A red bicycle leaning against a white brick wall in soft morning light, a green plant in a pot beside it.
+edit_prompt: Make the brick wall light blue.
+reference: { width: 1024, height: 1024 }
+pictures:
+  edit-2048: { width: 2048, height: 2048 }
+  extend-1024: { width: 1024, height: 1024 }
+
+families:
+  zimage:
+    - { id: zit-m, model: zit, size: m }
+    - { id: zit-xl, model: zit, size: xl }
+    - { id: zit-xl-up2, model: zit, size: xl, upscale: 2 }
+    - { id: zit-q4-m, model: zit, quantize: 4, size: m }
+    - { id: zit-q4-xl, model: zit, quantize: 4, size: xl }
+    - { id: zit-q4-m-resident, model: zit, quantize: 4, size: m, placement: resident, only: [cuda] }
+    - { id: zit-q4-m-resident-lora, model: zit, quantize: 4, size: m, placement: resident, lora: true, only: [cuda] }
+  flux2_klein:
+    - { id: klein4b-m, model: klein4b, size: m }
+    - { id: klein4b-xl, model: klein4b, size: xl }
+    - { id: klein4b-m-ref4, model: klein4b, size: m, references: 4 }
+    - { id: klein4b-xl-ref4, model: klein4b, size: xl, references: 4 }
+    - { id: klein4b-2048, model: klein4b, size: xl, canvas: { width: 2048, height: 2048 } }
+    - { id: klein4b-2048-ref4, model: klein4b, size: xl, canvas: { width: 2048, height: 2048 }, references: 4 }
+    - { id: klein4b-q4-m, model: klein4b, quantize: 4, size: m }
+    - { id: klein4b-q4-xl, model: klein4b, quantize: 4, size: xl }
+    - { id: klein4b-q4-m-resident, model: klein4b, quantize: 4, size: m, placement: resident, only: [cuda] }
+    - { id: klein4b-q4-m-turns, model: klein4b, quantize: 4, size: m, budget_gib: 6, only: [cuda] }
+    - { id: klein4b-q4-m-ref1, model: klein4b, quantize: 4, size: m, references: 1 }
+    - { id: klein4b-q4-2048, model: klein4b, quantize: 4, size: xl, canvas: { width: 2048, height: 2048 } }
+    - { id: klein4b-q4-m-ref3, model: klein4b, quantize: 4, size: m, references: 3 }
+    - { id: klein4b-q4-m-ref4, model: klein4b, quantize: 4, size: m, references: 4 }
+    - { id: klein4b-q4-xl-ref3, model: klein4b, quantize: 4, size: xl, references: 3 }
+    - { id: klein4b-q4-edit-2048, model: klein4b, quantize: 4, edit: edit-2048 }
+    - { id: klein4b-q4-extend-right512, model: klein4b, quantize: 4, edit: extend-1024, extend: right=512, prompt: Continue the brick wall and the pavement to the right. }
+    - { id: klein4b-q4-xl-turns, model: klein4b, quantize: 4, size: xl, budget_gib: 6, only: [cuda] }
+    - { id: klein4b-q4-2048-resident, model: klein4b, quantize: 4, size: xl, canvas: { width: 2048, height: 2048 }, placement: resident, only: [cuda] }
+    - { id: klein4b-q4-m-ref4-resident, model: klein4b, quantize: 4, size: m, references: 4, placement: resident, only: [cuda] }
+    - { id: klein4b-q4-xl-ref4-resident, model: klein4b, quantize: 4, size: xl, references: 4, placement: resident, only: [cuda] }
+    - { id: klein4b-q4-2048-turns, model: klein4b, quantize: 4, size: xl, canvas: { width: 2048, height: 2048 }, placement: turns, only: [cuda] }
+    - { id: klein4b-q4-xl-ref4-turns, model: klein4b, quantize: 4, size: xl, references: 4, placement: turns, only: [cuda] }
+    - { id: klein9b-m, model: klein9b, size: m }
+    - { id: klein9b-xl, model: klein9b, size: xl }
+    - { id: klein9b-m-ref1, model: klein9b, size: m, references: 1 }
+    - { id: klein9b-m-ref3, model: klein9b, size: m, references: 3 }
+    - { id: klein9b-edit-2048, model: klein9b, edit: edit-2048 }
+    - { id: klein9b-extend-right512, model: klein9b, edit: extend-1024, extend: right=512, prompt: Continue the brick wall and the pavement to the right. }
+    - { id: klein9b-none-m, model: klein9b, quantize: null, size: m }
+    - { id: klein9b-none-xl, model: klein9b, quantize: null, size: xl }
+    - { id: klein9b-q4-m, model: klein9b, quantize: 4, size: m }
+    - { id: klein9b-m-lora, model: klein9b, size: m, lora: true, only: [cuda] }
+    - { id: klein9b-q4-m-lora, model: klein9b, quantize: 4, size: m, lora: true, only: [cuda] }
+    - { id: klein9b-m-lokr, model: klein9b, size: m, lora: true, only: [cuda] }
+    - { id: klein9b-q4-m-lokr, model: klein9b, quantize: 4, size: m, lora: true, only: [cuda] }
+    - { id: klein9b-q4-l, model: klein9b, quantize: 4, size: l }
+    - { id: klein9b-q4-xl, model: klein9b, quantize: 4, size: xl }
+    - { id: klein9b-q4-2048, model: klein9b, quantize: 4, size: xl, canvas: { width: 2048, height: 2048 } }
+    - { id: klein9b-q4-xl-ref1, model: klein9b, quantize: 4, size: xl, references: 1 }
+    - { id: klein9b-q4-xl-ref3, model: klein9b, quantize: 4, size: xl, references: 3 }
+    - { id: klein9b-q4-m-ref4, model: klein9b, quantize: 4, size: m, references: 4 }
+    - { id: klein9b-q4-m-ref1, model: klein9b, quantize: 4, size: m, references: 1 }
+    - { id: klein9b-q4-m-ref3, model: klein9b, quantize: 4, size: m, references: 3 }
+    - { id: klein9b-q4-edit-2048, model: klein9b, quantize: 4, edit: edit-2048 }
+    - { id: klein9b-q4-extend-right512, model: klein9b, quantize: 4, edit: extend-1024, extend: right=512, prompt: Continue the brick wall and the pavement to the right. }
+  ideogram4:
+    - { id: ideo-m, model: ideo, size: m }
+    - { id: ideo-xl, model: ideo, size: xl }
+    - { id: ideo-none-m, model: ideo, quantize: null, size: m }
+    - { id: ideo-none-xl, model: ideo, quantize: null, size: xl }
+    - { id: ideo-l, model: ideo, size: l }
+    - { id: ideo-none-l, model: ideo, quantize: null, size: l }
+    - { id: ideo-q4-l, model: ideo, quantize: 4, size: l }
+    - { id: ideo-q4-m, model: ideo, quantize: 4, size: m }
+    - { id: ideo-m-lora, model: ideo, size: m, lora: true, only: [cuda] }
+    - { id: ideo-q4-m-lora, model: ideo, quantize: 4, size: m, lora: true, only: [cuda] }
+    - { id: ideo-q4-xl, model: ideo, quantize: 4, size: xl }
+  krea2:
+    - { id: krea2-m, model: krea2, size: m }
+    - { id: krea2-xl, model: krea2, size: xl }
+    - { id: krea2-q4-m, model: krea2, quantize: 4, size: m }
+    - { id: krea2-q4-xl, model: krea2, quantize: 4, size: xl }
+  moss:
+    - { id: moss-m, model: moss, size: m }
+    - { id: moss-xl, model: moss, size: xl }
+    - { id: moss-none-m, model: moss, quantize: null, size: m, only: [cuda] }
+    - { id: moss-none-xl, model: moss, quantize: null, size: xl, only: [cuda] }
+    - { id: moss-q4-m, model: moss, quantize: 4, size: m, only: [cuda] }
+    - { id: moss-sft-q4-m, model: moss-sft, quantize: 4, size: m, only: [cuda] }
+    - { id: moss-sft-q4-m-lora, model: moss-sft, quantize: 4, size: m, lora: true, only: [cuda] }
+    - { id: moss-q4-xl, model: moss, quantize: 4, size: xl, only: [cuda] }
+    - { id: moss-q4-2048, model: moss, quantize: 4, size: xl, canvas: { width: 2048, height: 2048 }, only: [cuda] }
+    - { id: moss-none-2048, model: moss, quantize: null, size: xl, canvas: { width: 2048, height: 2048 }, only: [cuda] }
+    - { id: moss-2048, model: moss, size: xl, canvas: { width: 2048, height: 2048 }, only: [cuda] }

@@ -1,13 +1,4 @@
 <script lang="ts" module>
-  import { MEMORY_FIT_CONSEQUENCES } from '$lib/state/memoryFit';
-  import type { MemoryFit, MemoryFitEstimate, MemoryFitStatus } from '$lib/types';
-
-  export const MEMORY_FIT_LABELS: Record<MemoryFitStatus, string> = {
-    fits: 'Fits',
-    tight: 'Tight',
-    too_large: 'Too large'
-  };
-
   export const DOWNLOADED_TOOLTIP = 'Downloaded: the model files are on this machine.';
   /** Shown in the Workspace, where a model can be downloaded ahead from the Models page. */
   export const NOT_DOWNLOADED_TOOLTIP = 'Not downloaded: it downloads the first time you generate with it, or ahead from the Models page.';
@@ -21,96 +12,50 @@
   /** Shown on the Models page for a row with nothing left to fetch that the first use still has to make. */
   export const PREPARED_SEEDVR2_TOOLTIP = 'Downloaded. The first upscale makes its 8-bit copy.';
   export const PREPARED_INSTANT_TOOLTIP = 'Downloaded. The first image builds it.';
-
-  /** Whether the estimate has a system-memory part: image and video models on a discrete GPU do; an audio model's fit is the GPU's alone. */
-  function hasSystemPart(fit: MemoryFit, estimate: MemoryFitEstimate): boolean {
-    return fit.kind === 'discrete' && estimate.system_gb !== undefined && fit.system_budget_gb !== undefined;
-  }
-
-  function needLine(fit: MemoryFit, estimate: MemoryFitEstimate): string {
-    if (fit.kind !== 'discrete') return `Needs ~${estimate.required_gb} GB; this Mac recommends up to ~${fit.budget_gb} GB for the GPU.`;
-    if (!hasSystemPart(fit, estimate)) return `Needs ~${estimate.required_gb} GB of GPU memory (this GPU has ${fit.budget_gb} GB).`;
-    return `Needs ~${estimate.required_gb} GB of GPU memory (this GPU has ${fit.budget_gb} GB) and ~${estimate.system_gb} GB of system memory (this machine has ${fit.system_budget_gb} GB).`;
-  }
-
-  function levelSummary(fit: MemoryFit, value: MemoryFitEstimate): string {
-    const need = hasSystemPart(fit, value) ? `~${value.required_gb} GB GPU, ~${value.system_gb} GB system` : `~${value.required_gb} GB`;
-    return `${need} (${MEMORY_FIT_LABELS[value.status]})`;
-  }
-
-  /**
-   * Pick the estimate for the selected settings. Returns null rather than a different setting's estimate when
-   * the selected quantize level was not estimated, so the badge never describes something else.
-   */
-  export function memoryFitFor(fit: MemoryFit | null | undefined, quantize: number | null, lowMemory = true): MemoryFitEstimate | null {
-    if (!fit) return null;
-    if (!lowMemory && fit.without_low_memory) return fit.without_low_memory;
-    return fit.by_quantize[quantize === null ? 'none' : String(quantize)] ?? null;
-  }
-
-  /** Describe the estimate, plus the quantized alternatives when they exist. */
-  export function memoryFitTitle(fit: MemoryFit, estimate: MemoryFitEstimate): string {
-    const lines = [needLine(fit, estimate)];
-    const consequence = MEMORY_FIT_CONSEQUENCES[fit.kind ?? 'unified'][estimate.status];
-    if (consequence) lines.push(consequence);
-    const quantized = Object.entries(fit.by_quantize).filter(([key]) => key !== 'none');
-    if (quantized.length > 0) {
-      lines.push(quantized.map(([key, value]) => `q${key}: ${levelSummary(fit, value)}`).join(' · '));
-    }
-    if (fit.without_low_memory) {
-      const staged = fit.by_quantize.none;
-      const resident = fit.without_low_memory;
-      lines.push(`Low memory on: ~${staged.required_gb} GB (${MEMORY_FIT_LABELS[staged.status]}) · off: ~${resident.required_gb} GB (${MEMORY_FIT_LABELS[resident.status]})`);
-    }
-    if (fit.note) lines.push(fit.note);
-    return lines.join('\n');
-  }
 </script>
 
 <script lang="ts">
   import { Badge, Tooltip } from '$lib/components/atoms';
+  import { MEMORY_VARIANTS, currentRow } from '$lib/state/memoryEstimate';
+  import type { JobMemory } from '$lib/types';
 
+  /**
+   * A model's download status and, in a list, the memory tag of its reference job. The tag here is the plain word with no popover, because
+   * these lists sit inside popovers and tables that cannot hold one; the Workspace toolbar and the Models page use `MemoryTag`.
+   */
   interface Props {
     downloaded?: boolean | null;
     /** Text for a queued or running download of the model, such as "Downloading 42%"; replaces "Not downloaded" while it is set. */
     downloadStatus?: string | null;
-    memoryFit?: MemoryFit | null;
-    quantize?: number | null;
-    /** Whether low-memory mode is on (video); the estimate switches to all-components-resident when off. */
-    lowMemory?: boolean;
+    /** The memory answer of the model's reference job. */
+    memory?: JobMemory | null;
+    /** The level the tag judges (`none`, `8`, `4`, `on`, `off`); the answer's own default when absent. */
+    level?: string | null;
     tooltipPlacement?: 'top' | 'bottom';
-    tooltipAlign?: 'start' | 'end';
     /** `control` matches the height of the controls beside it, as in the Workspace toolbar. */
     size?: 'badge' | 'control';
-    class?: string;
   }
 
-  let { downloaded = null, downloadStatus = null, memoryFit = null, quantize = null, lowMemory = true, tooltipPlacement = 'top', tooltipAlign = 'start', size = 'badge', class: extraClass = '' }: Props = $props();
+  let { downloaded = null, downloadStatus = null, memory = null, level = null, tooltipPlacement = 'top', size = 'badge' }: Props = $props();
 
   const badgeClass = $derived(size === 'control' ? 'ui-badge-control whitespace-nowrap' : 'whitespace-nowrap');
 
-  const variants: Record<MemoryFitStatus, 'success' | 'warning' | 'error'> = {
-    fits: 'success',
-    tight: 'warning',
-    too_large: 'error'
-  };
-
-  const estimate = $derived(memoryFitFor(memoryFit, quantize, lowMemory));
+  const current = $derived(memory ? currentRow(memory, level) : null);
+  const status = $derived(current?.status ?? null);
 </script>
 
-{#if downloaded === false || (memoryFit && estimate)}
-  <span class="inline-flex flex-wrap items-center gap-1 {extraClass}">
+{#if downloaded === false || status !== null}
+  <span class="inline-flex flex-wrap items-center gap-1">
     {#if downloaded === false}
-      <Tooltip text={downloadStatus ? DOWNLOADING_TOOLTIP : NOT_DOWNLOADED_TOOLTIP} placement={tooltipPlacement} align={tooltipAlign} testId="model-download-status">
+      <Tooltip text={downloadStatus ? DOWNLOADING_TOOLTIP : NOT_DOWNLOADED_TOOLTIP} placement={tooltipPlacement} testId="model-download-status">
         <Badge variant="neutral" class={badgeClass}>{downloadStatus ?? 'Not downloaded'}</Badge>
       </Tooltip>
     {/if}
-    {#if memoryFit && estimate}
-      <Tooltip text={memoryFitTitle(memoryFit, estimate)} placement={tooltipPlacement} align={tooltipAlign} testId="model-memory-fit">
-        <span data-status={estimate.status}>
-          <Badge variant={variants[estimate.status]} class={badgeClass}>{MEMORY_FIT_LABELS[estimate.status]}</Badge>
-        </span>
-      </Tooltip>
+    {#if status !== null}
+      <span data-status={status} data-testid="model-memory">
+        <span class="sr-only">Memory:</span>
+        <Badge variant={MEMORY_VARIANTS[status]} class={badgeClass}>{current?.word}</Badge>
+      </span>
     {/if}
   </span>
 {/if}

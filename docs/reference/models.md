@@ -4,15 +4,15 @@ A model is what turns a prompt into an image, a video or a sound. The built-in m
 
 ## Which model to start with { #which-model-to-start-with }
 
-- **Images:** FLUX.2 Klein 4B (`klein4b`) is the lightest and the first-run pick on machines with less than 32 GB of memory. FLUX.2 Klein 9B (`klein9b`) is the pick from 32 GB of unified memory on a Mac or of GPU memory on a graphics card. On a 16 GB Mac, Klein and Z-Image Turbo need `q8` or `q4`: see [Memory](../concepts/memory.md#what-fits).
-- **Video:** the Video tab starts on `ltx-8`, which comes closest to the full model. On a 16 GB Mac, or a card with 8 to 12 GB, start with **LTX-2.3 4-bit** (`ltx-4`): it needs the least memory of the LTX models. That advice comes from the app's memory estimate, not from a test on those machines. See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
+- **Images:** FLUX.2 Klein 4B (`klein4b`) is the lightest and the first-run pick on machines with less than 32 GB of memory. FLUX.2 Klein 9B (`klein9b`) is the pick from 32 GB of unified memory on a Mac or of GPU memory on a graphics card. On a 16 GB Mac, Z-Image Turbo and Klein 4B need `q8` or `q4`, and Klein 9B needs `q4`: see [Memory](../concepts/memory.md#what-fits).
+- **Video:** the Video tab starts on `ltx-8`, which comes closest to the full model. On a PC with less than 32 GB of system memory, switch to **LTX-2.3 4-bit** (`ltx-4`) when the tag says **Tight** or **Too large**. It saves nothing on a Mac with 24 GB or less, or on a card's GPU memory. See [Switch to the smaller model](../concepts/memory.md#switch-to-the-smaller-model).
 - **Audio:** `qwen3_tts` reads text aloud and is the smallest download. `yue2` makes songs and `sa3` makes sounds.
 
 All built-in models download without a Hugging Face account. Where the original repository needs a login, the alias points to an ungated mirror whose weights match the original.
 
 ## Download size and memory { #download-size-and-memory }
 
-The **Download** column is the one-time size, kept in the Hugging Face cache (see [Data folder](data-folder.md#models-and-the-hugging-face-cache)). Where a size is missing, such as `ltx-4` and `ltx-8` on Windows and Linux, the Web UI's download dialog shows it, with the free space on the drive, before anything downloads. Memory is another figure: what a model needs while it runs depends on your machine and its [quant](../concepts/memory.md#quantization). The Web UI's badges show what fits. See [Memory](../concepts/memory.md).
+The **Download** column is the one-time size, kept in the Hugging Face cache (see [Data folder](data-folder.md#models-and-the-hugging-face-cache)). Where a size is missing, such as `ltx-4` and `ltx-8` on Windows and Linux, the Web UI's download dialog shows it, with the free space on the drive, before anything downloads. Memory is another figure: what a model needs while it runs depends on your machine and its [quant](../concepts/memory.md#quantization). The Web UI's memory tag shows what fits. See [Memory](../concepts/memory.md).
 
 ## Image models
 
@@ -32,6 +32,8 @@ The License column names each model's licence; [Licences](#licences) has the ter
 
 `klein4b` and `klein9b` are distilled to 4 steps. They don't use a negative prompt. They also take up to four [references](../guides/images.md#references): images of a person, object, place or style the result should keep.
 
+On Windows and Linux, `klein9b` at `q4` fits 10–12 GB GPUs.
+
 ### Z-Image Turbo
 
 `zit` uses the `beta` scheduler on every platform, so a prompt and seed look alike on macOS, Windows and Linux. `--scheduler` or the Web UI's **Scheduler** picks another.
@@ -48,11 +50,11 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
 
 === "Windows"
 
-    `q8` needs about 18 GB of system memory, and `q4` fits 10–12 GB GPUs. Unquantized, Krea 2 needs about 35 GB of system memory and is very slow on machines with less.
+    `q8` needs about 20 GB of system memory, and `q4` fits 10–12 GB GPUs. Unquantized, Krea 2 needs about 35 GB of system memory and is very slow on machines with less.
 
 === "Linux"
 
-    `q8` needs about 18 GB of system memory, and `q4` fits 10–12 GB GPUs. Unquantized, Krea 2 needs about 35 GB of system memory and is very slow on machines with less.
+    `q8` needs about 20 GB of system memory, and `q4` fits 10–12 GB GPUs. Unquantized, Krea 2 needs about 35 GB of system memory and is very slow on machines with less.
 
 ### Ideogram 4 Instant
 
@@ -72,7 +74,7 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
 
     `ideo` takes `q4` (NF4 on Windows and Linux) and `q8` (FP8), saved once as `ideo@q4` and `ideo@q8`. On macOS the unquantized model is the FP8 build.
 
-    - **macOS:** at 1024×1024, unquantized and `q8` peak at about 33 GB and `q4` at about 25 GB, mostly briefly while the image is decoded at the end. On an Apple silicon Mac all three take about 15 s per step at that size; `q4` is faster at smaller sizes.
+    - **macOS:** at 1024×1024, unquantized and `q8` peak at about 20 GB and `q4` at about 12.5 GB. On an Apple silicon Mac all three take about 15 s per step at that size; `q4` is faster at smaller sizes.
     - **Windows and Linux:** the transformer streams to the GPU block by block. On a 10 GB GPU with 32 GB of system memory, `q4` and `q8` both take about 3.5 s per step at 1024×1024, about a minute per image (`q8` peaks at about 17 GB of system memory, `q4` at 14 GB). Unquantized it takes about 15 s per step and peaks at about 26 GB, so pick `q4` or `q8`.
 
     Every source is pinned to a checked revision, and the folder is rebuilt when a pin changes. The model is under the Ideogram Non-Commercial Model Agreement, which applies as soon as you download or use it: see `LICENSE.md` in the folder.
@@ -126,13 +128,13 @@ For **4× creative** upscales of a MOSS-Image picture on a 10 GB GPU, results up
 | Model | Alias | Download | Needs | Can do | License |
 |---|---|---|---|---|---|
 | LTX-2.3 4-bit | `ltx-4` | 28.6 GB (macOS) | The least memory of the LTX models. About 20 GB of system memory on Windows and Linux. | Text or image to video, Extend, upscale | LTX-2 Community License Agreement and Gemma Terms of Use |
-| LTX-2.3 8-bit | `ltx-8` | 37.8 GB (macOS) | Closer to the full model. About 27 GB of system memory on Windows and Linux; a Mac with 32 GB or more. | The same | LTX-2 Community License Agreement and Gemma Terms of Use |
-| LTX-2.5 4-bit | `ltx25-4` | 71 GB (Windows, Linux), 28.8 GB (macOS) | The newer LTX, with the memory need of `ltx-4`: about 21 GB of system memory on Windows and Linux. | The same | LTX-2.x Community License Agreement |
-| MiniMax H3 | `h3` | 98 GB (Windows, Linux), 107 GB (macOS) | Much larger and slower than LTX. About 18 GB of free system memory on Windows and Linux; a Mac with 32 GB. | 4 or 8 steps. No upscale on macOS | MiniMax H3 Community License Agreement |
+| LTX-2.3 8-bit | `ltx-8` | 37.8 GB (macOS) | Closer to the full model. About 24 GB of system memory on Windows and Linux; a Mac with 32 GB or more. | The same | LTX-2 Community License Agreement and Gemma Terms of Use |
+| LTX-2.5 4-bit | `ltx25-4` | 71 GB (Windows, Linux), 28.8 GB (macOS) | The newer LTX, with the memory need of `ltx-4`: about 20 GB of system memory on Windows and Linux. | The same | LTX-2.x Community License Agreement |
+| MiniMax H3 | `h3` | 98 GB (Windows, Linux), 107 GB (macOS) | Much larger and slower than LTX. About 16 GB of free system memory on Windows and Linux; a Mac with 32 GB. | 4 or 8 steps. No upscale on macOS | MiniMax H3 Community License Agreement |
 
 All of them make video with sound, from a prompt or a starting image (with an optional [last frame](../guides/video.md#first-and-last-frame)), and can [extend](../guides/video.md#extend-a-clip) a clip. The first run of each downloads it and, on Windows and Linux, prepares it for your GPU, which takes a while. See [Video](../guides/video.md).
 
-On a 10 GB GPU with 32 GB of system memory, `ltx-4` fits clips up to 20 s at `m`, 15 s at `l` and 10 s at `xl`, with or without upscaling. On a 32 GB Mac, the estimate was measured with `ltx-4` for clips up to about 10 s at 704×448 and is extrapolated beyond that; Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. A clip's memory depends on the size and length of what is generated, so an extension costs the same however long its source is.
+On a 10 GB GPU with 32 GB of system memory, `ltx-4` fits clips up to 20 s at `m`, 15 s at `l` and 13 s at `xl`, with or without upscaling. On a 32 GB Mac, the estimate was measured with `ltx-4` for clips up to about 10 s at 704×448 and is extrapolated beyond that; Macs with 24 GB or less stream the transformer from disk, where a clip needs about 15 GB whatever its size or length. A clip's memory depends on the size and length of what is generated, so an extension costs the same however long its source is.
 
 You can also convert an [LTX-2.3 or LTX-2.5 fine-tune](../guides/models.md#ltx-23-and-ltx-25-video-fine-tunes) or a [MiniMax H3 fine-tune](../guides/models.md#minimax-h3-video-fine-tunes) into a model you pick by name.
 
@@ -140,7 +142,7 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 
 ### LTX-2.5
 
-`ltx25-4` is LTX-2.5, the newer LTX model, at 4 bits. It needs about as much memory as `ltx-4`: a PC with a 10 GB GPU and about 21 GB of system memory, or a Mac with 32 GB. It downloads without a Hugging Face account.
+`ltx25-4` is LTX-2.5, the newer LTX model, at 4 bits. It needs about as much memory as `ltx-4`: a PC with a 10 GB GPU and about 20 GB of system memory, or a Mac with 32 GB. It downloads without a Hugging Face account.
 
 === "macOS"
 
@@ -148,11 +150,11 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 
 === "Windows"
 
-    The download is about 71 GB. The first run prepares a 4-bit transformer and an FP8 text encoder from it, about 22 GiB more on disk, and later runs reuse them. As a typical figure, a 5 s clip with sound at 1280×704, upscaled 2×, took about 200 s on a 10 GB NVIDIA card with 32 GB of system memory, the same as `ltx-4` with that setup. It needs about 21 GB of system memory.
+    The download is about 71 GB. The first run prepares a 4-bit transformer and an FP8 text encoder from it, about 22 GiB more on disk, and later runs reuse them. As a typical figure, a 5 s clip with sound at 1280×704, upscaled 2×, took about 200 s on a 10 GB NVIDIA card with 32 GB of system memory, the same as `ltx-4` with that setup. It needs about 20 GB of system memory.
 
 === "Linux"
 
-    The download is about 71 GB. The first run prepares a 4-bit transformer and an FP8 text encoder from it, about 22 GiB more on disk, and later runs reuse them. As a typical figure, a 5 s clip with sound at 1280×704, upscaled 2×, took about 200 s on a 10 GB NVIDIA card with 32 GB of system memory, the same as `ltx-4` with that setup. It needs about 21 GB of system memory.
+    The download is about 71 GB. The first run prepares a 4-bit transformer and an FP8 text encoder from it, about 22 GiB more on disk, and later runs reuse them. As a typical figure, a 5 s clip with sound at 1280×704, upscaled 2×, took about 200 s on a 10 GB NVIDIA card with 32 GB of system memory, the same as `ltx-4` with that setup. It needs about 20 GB of system memory.
 
 - **Sampler.** Text and image to video use LTX-2.5's own distilled sampler, which adds fresh noise at every step; a repeated seed still gives the same video. **Extend** uses the plain deterministic sampler, as `ltx-4` does.
 - **No 8-bit level** for `ltx25-4` itself. LTX-2.5 fine-tunes convert at q4 or q8 and run with LTX-2.5's settings.
@@ -174,7 +176,7 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
     MiniMax H3 on macOS does everything above except upscale. It is built on a port to MLX. Image to video, first and last frame and Extend run in stages, with one component in memory at a time, and their figures were measured on an Apple silicon Mac with 32 GB of memory; the other figures are estimates.
 
     - **Download and first use:** about 107 GB. The first run converts the text encoder once into a 4-bit copy of about 15 GB (`h3@mlx-te4`).
-    - **Memory and time:** a 5 s clip at `s` is estimated at about 15 GiB and 23 minutes with 8 steps, 14 minutes with 4. At `l` it is about 18 GiB and 77 minutes. The image modes need about the same as text to video: a 3 s image-to-video clip at `s` with 8 steps took about 10 minutes and peaked at about 14 GiB with no swapping, and is estimated at about 14 minutes. First and last frame and Extend peak at about the same, and a LoRA adds about 1.5 GiB. A Mac with 32 GB is the target.
+    - **Memory and time:** a 5 s clip at `s` is estimated at about 13 GiB and 23 minutes with 8 steps, 14 minutes with 4. At `l` it is about 17 GiB and 77 minutes. With references, a start image or Extend it needs about 15 GiB, and a LoRA adds about 1.5 GiB. A Mac with 32 GB is the target.
     - **Extend** continues from the source's last frame alone, so the seam is weaker than on Windows and Linux.
     - **References:** the first job with references builds a copy of the transformer, about 37 GB, as `h3@ref2va-q8`. A clip with references always uses H3's own reference model, so a fine-tune's look doesn't carry over; its LoRAs do.
     - **No upscale or review.** Image to video, first and last frame and Extend show a step counter and stop at a step boundary; text to video shows its phases but no step counter, and **Skip** and **Quit** take effect when the clip finishes ([While a job runs](../web-ui/workspace.md#while-a-job-runs)).
@@ -183,7 +185,7 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 === "Windows"
 
     - **Download and first use:** about 98 GB. The first run builds a 4-bit copy of the transformer, about 12 GB, as `h3@q4`; it took about 4 minutes, and later runs reuse it. A fine-tune gets a copy of its own, named after it.
-    - **Memory:** a 5 s clip at 864×480 uses about 6.3 GiB of GPU memory and about 17 GiB of system memory; plan for about 18 GB free. 1280×736 clips and 14 s clips at 864×480 fit a 10 GB GPU.
+    - **Memory:** a 5 s clip at 864×480 uses about 5.3 GiB of GPU memory and about 16 GiB of system memory; plan for about 17 GB free. 1280×736 clips and 14 s clips at 864×480 fit a 10 GB GPU.
     - **References:** the first job with references builds a copy of the transformer, about 12 GB, as `h3@ref2va-q4`; later runs reuse it. A clip with references always uses H3's own reference model, so a fine-tune's look doesn't carry over; its LoRAs do.
     - **Upscale:** a 2× upscale renders at half size, enlarges the result in latent space with H3's own upscaler (0.69 GB, downloaded on first use) and refines it at full size in 2 more steps. The clip keeps the sound of the half-size render and looks like a native full-size render.
     - **Time:** the CLI prints an estimate when a job starts, and the Workspace shows one under **Duration (s)**, such as *About 5 min (estimated)*. On a 10 GB NVIDIA card, a 5 s clip with sound:
@@ -199,7 +201,7 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 === "Linux"
 
     - **Download and first use:** about 98 GB. The first run builds a 4-bit copy of the transformer, about 12 GB, as `h3@q4`; it took about 4 minutes, and later runs reuse it. A fine-tune gets a copy of its own, named after it.
-    - **Memory:** a 5 s clip at 864×480 uses about 6.3 GiB of GPU memory and about 17 GiB of system memory; plan for about 18 GB free. 1280×736 clips and 14 s clips at 864×480 fit a 10 GB GPU.
+    - **Memory:** a 5 s clip at 864×480 uses about 5.3 GiB of GPU memory and about 16 GiB of system memory; plan for about 17 GB free. 1280×736 clips and 14 s clips at 864×480 fit a 10 GB GPU.
     - **References:** the first job with references builds a copy of the transformer, about 12 GB, as `h3@ref2va-q4`; later runs reuse it. A clip with references always uses H3's own reference model, so a fine-tune's look doesn't carry over; its LoRAs do.
     - **Upscale:** a 2× upscale renders at half size, enlarges the result in latent space with H3's own upscaler (0.69 GB, downloaded on first use) and refines it at full size in 2 more steps. The clip keeps the sound of the half-size render and looks like a native full-size render.
     - **Time:** the CLI prints an estimate when a job starts, and the Workspace shows one under **Duration (s)**, such as *About 5 min (estimated)*. On a 10 GB NVIDIA card, a 5 s clip with sound:
@@ -226,13 +228,13 @@ The alias is what you pass to `ziv audio -m`. What each kind does, and how long 
 
 ### Audio memory { #audio-memory }
 
-The audio models fit a 10 GB GPU on Windows and Linux, and a Mac with 32 GB of unified memory. Figures are peak GPU memory.
+The audio models fit a 10 GB GPU on Windows and Linux, and a Mac with 32 GB of unified memory. Figures are the app's estimate of peak GPU memory on Windows and Linux (Linux reads about 0.6 GiB lower) and its peak memory on a Mac.
 
 | Model | macOS, 32 GB | Windows and Linux, 10 GB card | Measured at |
 |---|---|---|---|
-| YuE2 3B (`yue2`) | about 10.5 GiB | about 6.7 GiB | A take of the full 6:00 |
-| Qwen3-TTS 1.7B (`qwen3_tts`) | about 12.0 GiB | about 6.0 GiB | A text read in parts, in a default voice or a recording |
-| Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | about 6.1 GiB | A sound of the full 380 s |
+| YuE2 3B (`yue2`) | about 11.5 GiB | about 6.6 GiB | A take of the full 6:00 |
+| Qwen3-TTS 1.7B (`qwen3_tts`) | about 11.8 GiB | about 5.8 GiB | A text read in parts, in a default voice or a recording |
+| Stable Audio 3 Medium (`sa3`) | about 8.5 GiB | about 6.3 GiB | A sound of the full 380 s |
 
 Designing a voice loads its own checkpoint and needs no more than the Qwen3-TTS row on Windows and Linux.
 

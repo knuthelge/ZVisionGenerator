@@ -147,6 +147,14 @@ describe('JobCard', () => {
       expect(log().textContent).toContain('original settings unknown');
     });
 
+    it('shows the note a load added to a running job, beside its other notices', () => {
+      const note = 'Only 7.6 GB of GPU memory is free, so this runs slower.';
+      render({ status: 'running', phase: 'load', notices: ['original settings unknown', note] });
+
+      const badges = Array.from(log().querySelectorAll('.badges .ui-badge')).map((badge) => badge.textContent?.trim());
+      expect(badges).toEqual(['original settings unknown', note]);
+    });
+
     it('shows the names of the files the job starts from, under the prompt, with no pictures', () => {
       render({
         workflow: 'edit',
@@ -700,6 +708,79 @@ describe('JobCard', () => {
     it('keeps no preview slot for audio', () => {
       render(take());
       expect(card().querySelector('figure')).toBeNull();
+    });
+  });
+
+  describe('memory line', () => {
+    const line = () => target.querySelector<HTMLElement>('[data-testid="job-memory"]');
+    const parts = () => [...target.querySelectorAll<HTMLElement>('[data-testid="job-memory-part"]')];
+    const squash = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
+    /** What a sighted user reads: the sr-only words are left out. */
+    const seen = (node: HTMLElement) => {
+      const copy = node.cloneNode(true) as HTMLElement;
+      copy.querySelectorAll('.sr-only').forEach((element) => element.remove());
+      return squash(copy.textContent);
+    };
+    /** What a screen reader announces: aria-hidden marks are left out. */
+    const heard = (node: HTMLElement) => {
+      const copy = node.cloneNode(true) as HTMLElement;
+      copy.querySelectorAll('[aria-hidden="true"]').forEach((element) => element.remove());
+      return squash(copy.textContent);
+    };
+
+    it('shows one figure on unified memory while running', () => {
+      render({ memory: { kind: 'unified', used_gb: 18.2, budget_gb: 21.3 } });
+
+      expect(seen(line()!)).toBe('Memory 18.2 / 21.3 GB');
+      expect(heard(line()!)).toBe('Memory 18.2 of 21.3 GB');
+      expect(line()?.querySelector('.ui-badge')).toBeNull();
+      expect(line()?.hasAttribute('aria-live')).toBe(false);
+    });
+
+    it('shows GPU and RAM on CUDA as plain figures, whatever they are', () => {
+      render({ memory: { kind: 'discrete', gpu_gb: 9.8, gpu_budget_gb: 10, system_gb: 27.6, system_budget_gb: 30.3 } });
+
+      expect(seen(line()!)).toBe('GPU 9.8 / 10 GB RAM 27.6 / 30.3 GB');
+      expect(heard(line()!)).toBe('GPU 9.8 of 10 GB RAM 27.6 of 30.3 GB');
+      expect(line()?.hasAttribute('data-status')).toBe(false);
+      expect(parts().some((part) => part.hasAttribute('data-status') || part.querySelector('svg') !== null)).toBe(false);
+      expect(line()?.querySelector('.ui-badge')).toBeNull();
+    });
+
+    it('shows a dash for the GPU until its use is known, and tells a screen reader it is not known', () => {
+      render({ memory: { kind: 'discrete', gpu_gb: null, gpu_budget_gb: 10, system_gb: 21.4, system_budget_gb: 30.3 } });
+
+      expect(seen(line()!)).toBe('GPU — / 10 GB RAM 21.4 / 30.3 GB');
+      expect(heard(line()!)).toBe('GPU in use not known yet, total 10 GB RAM 21.4 of 30.3 GB');
+    });
+
+    it('swaps the figure in place as new readings arrive', () => {
+      const props = reactiveProps({ job: makeJob({ memory: { kind: 'unified', used_gb: 18.2, budget_gb: 21.3 } }) });
+      component = mountComponent(JobCard, props);
+      target = component.target;
+      const before = line();
+
+      props.job = { ...props.job, memory: { kind: 'unified', used_gb: 29.4, budget_gb: 21.3 } };
+      flushSync();
+      expect(line()).toBe(before);
+      expect(seen(line()!)).toBe('Memory 29.4 / 21.3 GB');
+    });
+
+    it('is absent when there is no reading, and for an ended job', () => {
+      render({});
+      expect(line()).toBeNull();
+      component?.unmount();
+
+      render({ status: 'completed', memory: { kind: 'unified', used_gb: 3, budget_gb: 21.3 } });
+      expect(line()).toBeNull();
+    });
+
+    it('sits between the hero and the notice regions', () => {
+      render({ memory: { kind: 'unified', used_gb: 18.2, budget_gb: 21.3 } });
+
+      const region = target.querySelector('[data-testid="job-notice-region"]')!;
+      expect(line()!.compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(target.querySelector('.hero')!.compareDocumentPosition(line()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
   });
 });

@@ -37,9 +37,9 @@ vi.mock('$lib/api/extend', async () => {
   return { inspectExtendSource: extendApiMocks.inspectExtendSource };
 });
 
-vi.mock('$lib/api/videoMemory', async () => {
-  const { videoMemoryApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { checkVideoMemoryFit: videoMemoryApiMocks.checkVideoMemoryFit };
+vi.mock('$lib/api/memory', async () => {
+  const { memoryApiMocks } = await import('../../test-utils/workspaceMocks');
+  return { checkMemory: memoryApiMocks.checkMemory };
 });
 
 vi.mock('$lib/api/workspace', async (importOriginal) => {

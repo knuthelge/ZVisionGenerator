@@ -60,20 +60,15 @@ def load_upscale_model(model_name: str, *, low_memory: bool = True) -> LoadedMod
 
 
 def estimate_fit(model: LoadedModel, source: ExtendSource, *, low_memory: bool = True) -> dict[str, Any] | None:
-    """Return the app's memory estimate for a two-stage render at the upscale's output size."""
+    """Return the app's memory verdict for a two-stage render at the upscale's output size: ``{"status", "required_gb", "budget_gb"}``."""
     from zvisiongenerator.backends import accelerator_memory_budget_or_none
-    from zvisiongenerator.utils.model_memory import clip_memory_fit
+    from zvisiongenerator.utils.video_upscale import ltx_upscale_verdict
 
-    return clip_memory_fit(
-        model.model_path,
-        width=source.width * 2,
-        height=source.height * 2,
-        frames=source.frame_count,
-        low_memory=low_memory,
-        upscale=True,
-        budget=accelerator_memory_budget_or_none(),
-        model_name=model.model_name,
-    )
+    budget = accelerator_memory_budget_or_none()
+    verdict = ltx_upscale_verdict(model.model_path, model.model_name, source.width * 2, source.height * 2, source.frame_count, low_memory=low_memory, budget=budget)
+    if verdict is None or budget is None:
+        return None
+    return {"status": verdict.status, "required_gb": round(verdict.gpu_bytes / _GIB, 1), "budget_gb": round(budget.gpu_bytes / _GIB, 1)}
 
 
 @contextmanager

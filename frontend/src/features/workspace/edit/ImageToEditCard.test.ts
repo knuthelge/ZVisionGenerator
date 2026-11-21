@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { mountComponent } from '../../../test-utils/mount';
 import { draft } from '$lib/state/draft.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
+import { memoryCheck } from '$lib/state/memoryCheck.svelte';
 import { memoryUploadStore } from '$lib/state/uploadStore';
 import { imageEdit } from './editStore.svelte';
 import { sourceOfPath } from './editSource';
@@ -20,6 +21,7 @@ function card(model = 'klein'): string {
 }
 
 beforeEach(() => {
+  memoryCheck.reset();
   localStorage.clear();
   draft.reset();
   heldUploads.useStore(memoryUploadStore());

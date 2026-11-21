@@ -18,7 +18,7 @@ Choose a **Ratio** and a **Resolution**. The default is `2:3` portrait at `m`.
 
 For another shape, type an exact **W × H**. Every image model needs a width and height that are multiples of 16, and Ideogram 4 also limits each side to 256–2048 pixels.
 
-Larger images take longer and need more memory. To get a large one quickly, make it smaller and [upscale it](#upscale-while-generating).
+Larger images take longer and need more memory. The [memory tag](../concepts/memory.md#the-memory-tag) follows the size. To get a large one quickly, make it smaller and [upscale it](#upscale-while-generating).
 
 To change the size every new image starts with, set **Base resolution** on the [Config page](../web-ui/config.md).
 

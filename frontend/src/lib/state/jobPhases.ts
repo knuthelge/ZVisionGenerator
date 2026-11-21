@@ -165,6 +165,15 @@ export function trackJobEvent(job: ActiveJobState, type: string, event: EventDat
     if (loadPhase === 'building' || loadPhase === 'downloading' || loadPhase === 'loading' || loadPhase === 'saving_quant') next.loadPhase = loadPhase;
     if (event?.replaces_download === true) next.loadReplacesDownload = true;
     if (loadPhase === 'saving_quant') next.loadQuant = numberField(event, 'quantize') ?? 8;
+    // A note says how the load deviates from what the memory tag assumed (too little GPU memory free); the card shows it as a notice. It replaces the note
+    // of an earlier load (`replaces`), and one the card already shows (from the snapshot, or a replay) is not added again.
+    const note = event?.note;
+    if (typeof note === 'string' && note !== '') {
+      const replaced = event?.replaces;
+      const kept = (job.notices ?? []).filter((notice) => notice !== replaced);
+      if (!kept.includes(note)) next.notices = [...kept, note];
+      else if (kept.length !== (job.notices ?? []).length) next.notices = kept;
+    }
   }
   if (type === 'model_downloading') next.download = downloadFromEvent(event);
   else if (job.download && (phase === 'generate' || endsDownload(job.download, type))) next.download = null;

@@ -11,24 +11,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Add a Hugging Face token in the app.** **Add token** on the Config and Models pages saves a token after Hugging Face checks it, for higher download limits (big downloads are less likely to be slowed down) and gated models, with no terminal and no restart. From a terminal, the messages now say `uvx hf auth login`, which works without installing anything else. See [Hugging Face token](https://knuthelge.github.io/ZVisionGenerator/reference/data-folder/#hugging-face-token).
 - **See the files a job starts from.** The job card and each queued job name the source of an edit or upscale (a Gallery upscale included), the start and end images of a video, the clip an extension continues and every reference. See [While a job runs](https://knuthelge.github.io/ZVisionGenerator/web-ui/workspace/#while-a-job-runs).
 - **References on MiniMax H3 video.** Add up to two pictures on the Video tab (or `--reference` in `ziv-video`) and name them `<Picture 1>` and `<Picture 2>` in the prompt to keep a person or object in a clip. See [Keep a person or place in a clip](https://knuthelge.github.io/ZVisionGenerator/guides/video/#references).
+- **A memory tag for every job.** **Fits**, **Tight** or **Too large** beside **Model** and **Quant** on the Image, Video and Audio tabs; its popover shows the other choices. See [The memory tag](https://knuthelge.github.io/ZVisionGenerator/concepts/memory/#the-memory-tag).
+- **Memory warnings on the command line.** `ziv-image`, `ziv-video` and `ziv-audio` warn before anything downloads when a job is **Tight** or **Too large**. See [*Memory for this …*](https://knuthelge.github.io/ZVisionGenerator/reference/troubleshooting/#memory-for-this).
+- **Live memory use on the job card.** A running job shows the machine's memory in use. See [Memory while a job runs](https://knuthelge.github.io/ZVisionGenerator/concepts/memory/#memory-while-a-job-runs).
 
 ### Changed
 - **The Gallery and the viewer list a file's actions the same way everywhere.** ⋯, right-click and press and hold open one [file panel](https://knuthelge.github.io/ZVisionGenerator/web-ui/gallery/#the-file-panel) whose choices say what they make, and the viewer's toolbar and touch docks follow its order. A narrow window shows icons instead of hiding actions, Copy prompt is on every tile, a touch tile's star is one tap, and E starts Audio track on an audio take.
 - **A redesigned job card and queue.** Blob stands inside a progress ring with one arc for each image and the job's percentage at its foot. A mark replaces the percentage when a job pauses or ends, and a beating dot shows that work is running. The card is never cut off: the queue folds to one line, or the column scrolls. Queued jobs show their kind, runs, model and file.
 - **A new job bar and status pill on a phone.** The bar carries the same ring, the queue length on **⋯**, the project and, once a job ends, what it saved. The status pill shows a small ring in place of the pulsing dot.
 - **The last preview of an ended job is tagged "Last preview"** instead of keeping its live percentage.
-- **Loading an image model at `q8` on Windows and Linux takes less system memory.** The text encoder is converted to 8 bits as it is read from disk instead of being held at full precision first, which saves several GB at load on models such as FLUX.2 [klein] 9B. Images are unchanged.
+- **More accurate memory estimates** for image, LTX and MiniMax H3 jobs, and image jobs on a Mac use about 3 to 4 GB less memory.
 
 ### Fixed
 - **The Web UI added to a phone's Home Screen picks up an update.** It could keep loading the old version of the app for hours after an update, even when closed and opened again.
-- **YuE2 music works on Windows.** Every take failed at its first token because the Windows PyTorch build has no FlashAttention. YuE2 now uses PyTorch's standard attention there.
-- **`ziv-video` exits with `2` when every clip fails.** A video job that ran out of memory, or failed for another reason, ended with `0` and only a log line, so a script could not tell that no clip was made.
 - **Sliders, checkboxes and path boxes are finger-sized on touch screens.** The larger touch sizes were being overridden by the desktop ones.
 - **A zoomed image fills the screen once a tap hides the viewer's controls.** It stopped at the edges of the hidden bar, dock and strip, which stayed black; on a tablet the viewer now also reaches the screen's edges.
 - **Moving between files in the viewer no longer freezes on an iPad when a video is shown.** The soft glow of a video's colours around it is gone, since copying its frames for it stalled Safari.
 - **Tapping the viewer's arrows on a tablet only moves to the next file.** It also hid the controls, and two quick taps zoomed the image.
 - **Starring a picture in the viewer no longer blurs it.** The thumbnail stood in for the full image until you moved to another file.
 - **Copying works when the Web UI is opened over plain HTTP from another machine.** **Copy prompt**, the Job log's **Copy error** and the Discover panel's copy button had no clipboard to use on a plain-HTTP address; they now copy there too.
+- **YuE2 music works on Windows.** Every take failed because the Windows PyTorch build has no FlashAttention.
+- **`ziv-video` exits with `2` when every clip fails.** It ended with `0`.
+- **Loading an image model at `q8` on Windows and Linux takes less system memory.** The text encoder is converted to 8 bits as it is read.
 
 ## [0.15.0] - 2026-11-15
 

@@ -109,4 +109,4 @@ make e2e-video-ltx LTX_MODEL=ltx-4
 
 There is no audio end-to-end target. Check an audio model by hand with `uv run ziv-audio`, and see [Add a built-in model](how-to.md#add-a-built-in-model) for measuring its memory.
 
-The [prompt-enhancer bench](enhancer-bench.md) is the other check that loads a real model.
+The [prompt-enhancer bench](enhancer-bench.md) and the [memory bench](memory-bench.md) are the other checks that load a real model.

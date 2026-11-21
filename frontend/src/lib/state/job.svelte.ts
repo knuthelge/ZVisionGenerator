@@ -1,4 +1,4 @@
-import type { ActiveJobState, AudioProgressEvent, EnhanceStatus, JobContext, JobReview, JobSnapshot, GalleryAsset, MovedAsset, StepEvent, SSEEvent } from '$lib/types';
+import type { ActiveJobState, AudioProgressEvent, EnhanceStatus, JobContext, JobReview, JobSnapshot, GalleryAsset, MemoryReading, MovedAsset, StepEvent, SSEEvent } from '$lib/types';
 import { connectJobSSE } from '$lib/api/sse';
 import type { SSESubscription } from '$lib/api/sse';
 import { ApiError } from '$lib/api/client';
@@ -71,6 +71,11 @@ function eventReview(event: Record<string, unknown> | null | undefined): JobRevi
     iteration: typeof iteration === 'number' && Number.isFinite(iteration) ? iteration : 0,
     attempt: typeof attempt === 'number' && Number.isFinite(attempt) ? attempt : 1,
   };
+}
+
+/** A memory reading the server sent; null when it sent none or something that is not an object. */
+function memoryReading(value: unknown): MemoryReading | null {
+  return value && typeof value === 'object' ? (value as MemoryReading) : null;
 }
 
 const ENHANCE_STATUSES: ReadonlySet<string> = new Set(['off', 'enhanced', 'failed', 'skipped']);
@@ -246,6 +251,7 @@ function makeInitialJobState(ctx: JobContext): ActiveJobState {
     message: 'Waiting for worker allocation...',
     outputs: [],
     previewUrl: null,
+    memory: null,
     ...initialPhase('queued', ctx.created_at),
     connection: 'live',
   };
@@ -297,6 +303,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     ...promptProgress(lastEvent),
     outputs: dedupeOutputs(snapshot.outputs ?? []),
     previewUrl: previewUrlFor(snapshot.job_id ?? snapshot.id, snapshot.preview_version),
+    memory: memoryReading(snapshot.memory),
     ...initialPhase(snapshot.status, snapshot.created_at, lastEvent),
     ...(download ? { download } : {}),
     connection: 'live',
@@ -458,6 +465,15 @@ function attachJobEvents(jobId: string, afterEventId = 0): void {
         batchLabel: completed !== null && total !== null ? `${completed} / ${total} iterations` : 'Batch completed',
         message: completed !== null && total !== null ? `Batch completed: ${completed} of ${total} iterations.` : 'Batch completed.',
       };
+    },
+    onMemory(event) {
+      _recoveryAttempts = 0;
+      // Not a progress event: it must not go through track(), which would move the phase and clock. A late reading
+      // after the job ended is ignored.
+      if (!_job || isTerminalStatus(_job.status)) return;
+      const memory = memoryReading(event.memory);
+      _lastEventId = Math.max(_lastEventId, eventFieldNumber(event as unknown as Record<string, unknown>, 'event_id'));
+      if (memory) _job = { ..._job, memory };
     },
     onJobCompleted(event) {
       track('job_completed', event);

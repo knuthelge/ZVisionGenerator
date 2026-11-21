@@ -59,3 +59,6 @@ bench/transparent/runs/
 
 # Video-upscale bench renders and upscales
 bench/video_upscale/runs/
+
+# Memory bench results, synthetic pictures and renders
+bench/memory/runs/

@@ -29,43 +29,26 @@ describe('extendInspection', () => {
     draft.setExtendSourcePath(SOURCE);
   });
 
-  it('sends the source, the length, the model, the low-memory setting and the steps, and hands the answer to the draft', async () => {
+  it('sends the source, the length and the model, and hands the answer to the draft', async () => {
     apiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
     draft.update('extendFrames', 64);
-    draft.update('steps', 4);
     await extendInspection.inspect(null);
 
-    expect(apiMocks.inspectExtendSource).toHaveBeenCalledWith({ path: SOURCE, extend_frames: 64, model: 'ltx-8', low_memory: true, steps: 4, lora: null });
+    expect(apiMocks.inspectExtendSource).toHaveBeenCalledWith({ path: SOURCE, extend_frames: 64, model: 'ltx-8' });
     expect(draft.extendSource?.filename).toBe('walk.mp4');
     expect(extendInspection.statusFor(SOURCE)).toBe('ready');
     expect(draft.state.scene).toBe('A woman on a rainy street.');
   });
 
-  it('sends the selected LoRAs, and counts a change of them as a change to inspect again', async () => {
+  it('does not ask again for what only the memory check reads: the LoRAs, the references, the steps and Low memory', async () => {
     apiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
+    await extendInspection.inspect(null);
+
     draft.update('loraString', 'detail:0.8');
-    await extendInspection.inspect(null);
-
-    expect(apiMocks.inspectExtendSource).toHaveBeenCalledWith(expect.objectContaining({ lora: 'detail:0.8' }));
-    expect(extendInspection.isCurrent()).toBe(true);
-    draft.update('loraString', 'detail:0.5');
-    expect(extendInspection.isCurrent()).toBe(false);
-  });
-
-  it('sends the references the extension holds, and counts a change of them as a change to inspect again', async () => {
-    apiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
-    await extendInspection.inspect(null);
-    expect(apiMocks.inspectExtendSource.mock.calls[0]?.[0]).not.toHaveProperty('references');
-
-    // New's references are not the extension's.
-    draft.patch({ videoReferencePaths: ['/refs/v.png'] });
-    expect(extendInspection.isCurrent()).toBe(true);
-
     draft.patch({ extendReferencePaths: ['/refs/a.png', '/refs/b.png'] });
-    expect(extendInspection.isCurrent()).toBe(false);
-    await extendInspection.inspect(null);
+    draft.update('steps', 4);
+    draft.update('lowMemory', false);
 
-    expect(apiMocks.inspectExtendSource).toHaveBeenLastCalledWith(expect.objectContaining({ references: 2 }));
     expect(extendInspection.isCurrent()).toBe(true);
   });
 
@@ -162,7 +145,7 @@ describe('extendInspection', () => {
   });
 
   describe('knowing what was asked', () => {
-    it('is current after an inspection, and stale once the length, model, low-memory setting or source changes', async () => {
+    it('is current after an inspection, and stale once the length, model or source changes', async () => {
       apiMocks.inspectExtendSource.mockResolvedValue(sceneSource({ extend_frames: null }));
       expect(extendInspection.isCurrent()).toBe(false);
       draft.update('extendFrames', 48);
@@ -173,13 +156,6 @@ describe('extendInspection', () => {
       draft.update('extendFrames', 72);
       expect(extendInspection.isCurrent()).toBe(false);
       draft.update('extendFrames', 48);
-      expect(extendInspection.isCurrent()).toBe(true);
-      draft.update('lowMemory', false);
-      expect(extendInspection.isCurrent()).toBe(false);
-      draft.update('lowMemory', true);
-      draft.update('steps', 4);
-      expect(extendInspection.isCurrent()).toBe(false);
-      draft.update('steps', 0);
       expect(extendInspection.isCurrent()).toBe(true);
       draft.update('model', 'other');
       expect(extendInspection.isCurrent()).toBe(false);

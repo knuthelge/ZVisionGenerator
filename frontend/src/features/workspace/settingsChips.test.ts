@@ -179,99 +179,20 @@ describe('settingsChips', () => {
     expect(applied).toMatchObject({ key: 'preset', applied: 'soft-portrait', changed: true, on: true });
   });
 
-  it('warns on a model that is not downloaded and a clip that may not fit', () => {
-    const chips = settingsChips(facts({ modelDownloaded: false, caps: { ...imageCaps, showFrameCount: true } as WorkspaceCapabilities, seconds: 8, memoryWarn: true }));
+  it('warns on a model that is not downloaded', () => {
+    const chips = settingsChips(facts({ modelDownloaded: false }));
     expect(chips.find((chip) => chip.key === 'model')?.warn).toBe(true);
-    expect(chips.find((chip) => chip.key === 'seconds')?.warn).toBe(true);
   });
 });
 
-describe('audioChips', () => {
-  const audioState = { workflow: 'speech', audioSeconds: 12, audioTempo: null, seed: null, runs: 1, audioDescribe: AUDIO_FIELD_DEFAULTS.audioDescribe } as DraftState;
-  const voice = { summary: { text: 'Ryan', tone: 'muted' as const }, cloned: false, chip: 'Ryan', pending: 0 };
+describe('the Size and Length chips', () => {
+  it('carry no memory mark: the memory tag sits on the Model and Quant row of All settings instead', () => {
+    const video = { ...imageCaps, isImageMode: false, showFrameCount: true } as WorkspaceCapabilities;
 
-  function audioFacts(overrides: Partial<AudioChipFacts> = {}): AudioChipFacts {
-    return { kind: 'speech', state: audioState, modelLabel: 'Qwen3-TTS 1.7B', modelDownloaded: true, voice, voiceBlocks: false, changed: () => false, delivery: { shown: false, summary: 'Natural' }, showLength: false, seconds: null, lengthAuto: false, soundType: { shown: false, label: 'Auto' }, tempo: { shown: false }, key: { shown: false, name: null }, showSeed: true, showRuns: true, ...overrides };
-  }
+    const image = settingsChips(facts({ width: 1536, height: 2048 }));
+    const clip = settingsChips(facts({ caps: video, seconds: 8, modelDownloaded: false }));
 
-  it('lists Kind, Model, Voice, Delivery, Seed and Batch for Speech, with no preset, size or LoRA', () => {
-    const chips = audioChips(audioFacts({ delivery: { shown: true, summary: 'Natural' } }));
-
-    expect(chips.map((chip) => chip.key)).toEqual(['kind', 'model', 'voice', 'delivery', 'seed', 'runs']);
-    expect(chips[0]).toMatchObject({ value: 'Speech', icon: 'speech' });
-    expect(chips[2]).toMatchObject({ label: 'Voice', value: 'Ryan', on: false });
-  });
-
-  it('writes the Vibe, Natural or Custom on the Delivery chip, marks it changed and leaves it out for a recording', () => {
-    const chip = (overrides: Partial<AudioChipFacts> = {}) => audioChips(audioFacts({ delivery: { shown: true, summary: 'Natural' }, ...overrides })).find((item) => item.key === 'delivery');
-
-    expect(chip()).toMatchObject({ label: 'Delivery', value: 'Natural', changed: false, on: false });
-    expect(chip({ delivery: { shown: true, summary: 'Excited host' }, changed: (key) => key === 'delivery' })).toMatchObject({ value: 'Excited host', changed: true, on: true });
-    expect(chip({ delivery: { shown: false, summary: 'Natural' } })).toBeUndefined();
-  });
-
-  it('puts Type and Length in place of Voice for Sound, and Tempo and Key for Music', () => {
-    const sound = audioFacts({ kind: 'sound', voice: null, showLength: true, seconds: 12, soundType: { shown: true, label: 'Auto' } });
-    expect(audioChips(sound).map((chip) => chip.key)).toEqual(['kind', 'model', 'soundType', 'length', 'seed', 'runs']);
-    expect(audioChips(sound).find((chip) => chip.key === 'length')?.value).toBe('12 s');
-    const music = audioFacts({ kind: 'music', voice: null, tempo: { shown: true }, key: { shown: true, name: null } });
-    expect(audioChips(music).map((chip) => chip.key)).toEqual(['kind', 'model', 'tempo', 'key', 'seed', 'runs']);
-  });
-
-  it('writes the Sound Type, and a length on Auto with the number it will use, and marks a locked one changed', () => {
-    const chip = (key: string, overrides: Partial<AudioChipFacts> = {}) =>
-      audioChips(audioFacts({ kind: 'sound', voice: null, showLength: true, seconds: 5, lengthAuto: true, soundType: { shown: true, label: 'Effect' }, ...overrides })).find((item) => item.key === key);
-
-    expect(chip('soundType')).toMatchObject({ label: 'Type', value: 'Effect', changed: false, on: false });
-    expect(chip('length')).toMatchObject({ label: 'Length', value: 'auto ≈ 5 s', changed: false, on: false });
-    const locked = { seconds: 8, lengthAuto: false, changed: (key: string) => key === 'length' || key === 'soundType' };
-    expect(chip('length', locked)).toMatchObject({ value: '8 s', changed: true, on: true });
-    expect(chip('soundType', locked)).toMatchObject({ changed: true, on: true });
-  });
-
-  it('lists a song\'s Length after its Key on a model that sets it', () => {
-    const facts = audioFacts({ kind: 'music', voice: null, tempo: { shown: true }, key: { shown: true, name: null }, showLength: true, seconds: 30 });
-
-    expect(audioChips(facts).map((chip) => chip.key)).toEqual(['kind', 'model', 'tempo', 'key', 'length', 'seed', 'runs']);
-    expect(audioChips(facts).find((chip) => chip.key === 'length')).toMatchObject({ label: 'Length', value: '30 s' });
-  });
-
-  it('writes Tempo and Key as Auto until they are set, the key in the width of a chip, and marks them changed', () => {
-    const chip = (key: string, overrides: Partial<AudioChipFacts> = {}) => audioChips(audioFacts({ kind: 'music', voice: null, tempo: { shown: true }, key: { shown: true, name: null }, ...overrides })).find((item) => item.key === key);
-
-    expect(chip('tempo')).toMatchObject({ label: 'Tempo', value: 'Auto', changed: false });
-    expect(chip('key')).toMatchObject({ label: 'Key', value: 'Auto', changed: false });
-    const set = { state: { ...audioState, audioTempo: 92 } as DraftState, key: { shown: true, name: 'A minor' }, changed: (key: string) => key === 'tempo' || key === 'key' };
-    expect(chip('tempo', set)).toMatchObject({ value: '92', changed: true });
-    expect(chip('key', set)).toMatchObject({ value: 'A min', changed: true });
-  });
-
-  it('marks a model that is not downloaded, a followed recording, and a recording that is wrong', () => {
-    expect(audioChips(audioFacts({ modelDownloaded: false })).find((chip) => chip.key === 'model')?.warn).toBe(true);
-    const cloned = { summary: { text: 'me.wav', tone: 'active' as const }, cloned: true, chip: 'me.wav', pending: 0 };
-    expect(audioChips(audioFacts({ voice: cloned })).find((chip) => chip.key === 'voice')).toMatchObject({ value: 'me.wav', on: true, warn: false });
-    const wrong = { summary: { text: 'Use a recording of 3 to 30 seconds', tone: 'error' as const }, cloned: true, chip: 'me.wav', pending: 0 };
-    expect(audioChips(audioFacts({ voice: wrong })).find((chip) => chip.key === 'voice')?.warn).toBe(true);
-  });
-
-  it('counts the designed voices waiting to be picked on the Voice chip, and warns on a deleted voice', () => {
-    const waiting = { ...voice, pending: 3 };
-    expect(audioChips(audioFacts({ voice: waiting })).find((chip) => chip.key === 'voice')).toMatchObject({ value: 'Ryan', count: 3 });
-    expect(audioChips(audioFacts({ voice })).find((chip) => chip.key === 'voice')).not.toHaveProperty('count');
-    const deleted = { summary: { text: 'Voice deleted', tone: 'error' as const }, cloned: true, chip: 'deleted', pending: 0 };
-    expect(audioChips(audioFacts({ voice: deleted })).find((chip) => chip.key === 'voice')).toMatchObject({ value: 'deleted', warn: true });
-  });
-
-  it('marks the Voice chip changed when the voice differs from its default', () => {
-    const chip = (changedKeys: string[]) => audioChips(audioFacts({ changed: (key) => changedKeys.includes(key) })).find((item) => item.key === 'voice');
-
-    expect(chip(['voice'])?.changed).toBe(true);
-    expect(chip([])?.changed).toBe(false);
-  });
-
-  it('warns on the Voice chip while the voice holds Generate back', () => {
-    const cloned = { summary: { text: 'me.wav', tone: 'active' as const }, cloned: true, chip: 'me.wav', pending: 0 };
-
-    expect(audioChips(audioFacts({ voice: cloned, voiceBlocks: true })).find((chip) => chip.key === 'voice')?.warn).toBe(true);
+    expect(image.find((chip) => chip.key === 'size')?.warn).toBeUndefined();
+    expect(clip.find((chip) => chip.key === 'seconds')?.warn).toBeUndefined();
   });
 });

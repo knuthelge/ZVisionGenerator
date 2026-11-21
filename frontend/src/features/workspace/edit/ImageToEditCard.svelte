@@ -32,7 +32,7 @@
 </section>
 
 <style>
-  .edit-card { display: flex; align-items: center; gap: 4px; margin: 8px max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px)); padding: 4px; border-radius: var(--radius-md); background: var(--color-bg-surface); }
+  .edit-card { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 8px max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px)); padding: 4px; border-radius: var(--radius-md); background: var(--color-bg-surface); }
   /* Without an image the dashed zone is the card. */
   .edit-card.empty { padding: 0; background: transparent; }
   .edit-card-open { display: flex; flex: 1; min-width: 0; align-items: center; gap: 10px; min-height: var(--spacing-bar); padding: 4px; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); text-align: left; }
@@ -44,6 +44,7 @@
   /* A detail that does not fit beside the badge goes under it whole, so no state is cut off on a narrow phone. */
   .edit-card-summary :global(.mode-line) { flex-wrap: wrap; gap: 2px 8px; }
   .edit-card-summary :global(.mode-detail) { overflow: visible; white-space: normal; }
+  /* The note, when there is one, sits under the row, across the card. */
   .edit-card-clear { width: var(--spacing-control); padding: 0; background: transparent; color: var(--color-text-muted); }
   .edit-card :global(.edit-drop) { flex: 1; }
 </style>

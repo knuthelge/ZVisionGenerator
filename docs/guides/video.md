@@ -172,7 +172,7 @@ If an extension is refused, see [A video can't be extended](../reference/trouble
 
 ## Fit a clip in memory { #fit-a-clip-in-memory }
 
-A note under **Duration (s)** warns when a clip may not fit; it never blocks **Generate**. If the clip is slow or fails:
+The [memory tag](../concepts/memory.md#the-memory-tag) beside **Model** says when a clip may not fit; it never blocks **Generate**. If the clip is slow or fails:
 
 - **Make it shorter or smaller:** lower **Duration (s)** or **Resolution**. An extension needs only the memory of about the last second of the source plus the new frames, not of the whole result.
 - **Use fewer references.** On MiniMax H3 each one adds memory and time.

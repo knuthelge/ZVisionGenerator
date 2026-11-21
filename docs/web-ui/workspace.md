@@ -22,7 +22,7 @@ The project picked in the top bar decides which files the preview, the Gallery s
 
 The toolbar above the sidebar and the preview picks the **Model** for the current tab, its quantization (**Quant**, for models that have one) and its **LoRAs**. On a phone it heads the **All** sheet.
 
-Each model carries a memory badge; see [The memory badges](../concepts/memory.md#the-memory-badges).
+Each model carries a memory tag; see [The memory tag](../concepts/memory.md#the-memory-tag).
 
 Which LoRAs are offered, and how they are remembered per model, is in [LoRAs](../concepts/loras.md#use-one).
 
@@ -204,7 +204,7 @@ While a job runs, **Generate** reads **Add to queue**; see [The queue](#the-queu
 
 ![The job card of a running job, with its controls and phases](../assets/screenshots/job-card.webp){ width="420" }
 
-The card lists the names of the files a job starts from. If a job fails, the card says why, and the [Job log](job-log.md) keeps the reason.
+The card lists the names of the files a job starts from. A line at the foot of the card shows the machine's memory use; see [Memory while a job runs](../concepts/memory.md#memory-while-a-job-runs). If a job fails, the card says why, and the [Job log](job-log.md) keeps the reason.
 
 The **live preview** shows the current image taking shape after every step, so you can skip a bad one early. It is never saved, and a video shows none while it is made. When the job ends, the stage keeps its last frame, tagged **Last preview**, or shows the last image the job saved when that frame is gone. Jobs already in the queue don't ask about downloads; they download when their turn comes.
 
