@@ -7,6 +7,7 @@ import pytest
 
 from zvisiongenerator.backends.cuda.video.h3.frames import Geometry, geometry
 from zvisiongenerator.utils import h3_memory
+from zvisiongenerator.utils.lora_size import lora_files_bytes
 from zvisiongenerator.utils.h3_memory import (
     H3_TEXT_TOKENS,
     estimate_h3_mlx_clip_memory,
@@ -14,14 +15,40 @@ from zvisiongenerator.utils.h3_memory import (
     h3_audio_latents,
     h3_frames_of_latent_frames,
     h3_latent_frames,
-    h3_mlx_clip_fit,
     h3_nominal_references,
     h3_reference_block_rows,
     h3_refine_windows,
     h3_sequence_rows,
     h3_video_rows,
 )
+from zvisiongenerator.utils.memory_offsets import CUDA_OFFSET_BYTES
+from zvisiongenerator.utils.memory_verdict import MemoryJob, MemoryWeights, judge
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
+
+
+def _h3_fit(width, height, frames, budget, *, forwards, mode="t2v", loras_bytes=0, upscale=False, review=False, references=0):
+    """Judge an H3 clip the way every surface does and return the figures the estimates are asserted on; ``None`` without a discrete budget."""
+    if budget is None or not budget.gpu_bytes or budget.system_bytes is None:
+        return None
+    job = MemoryJob(media="video", family="h3", width=width, height=height, frames=frames, mode=mode, references=references, lora_bytes=loras_bytes, upscale=upscale, review=review, forwards=forwards)
+    verdict = judge(job, budget, MemoryWeights())
+    return {
+        "status": verdict.status,
+        "required_gb": round(verdict.gpu_bytes / GIB, 1),
+        "budget_gb": round(budget.gpu_bytes / GIB, 1),
+        "kind": "discrete",
+        "resource": "system" if verdict.resource == "ram" else verdict.resource,
+        "family": "h3",
+        "expected_seconds": verdict.expected_seconds,
+    }
+
+
+def _h3_mac_fit(width, height, frames, budget, *, forwards, mode="t2v", references=0):
+    """Judge an H3 clip on a Mac the way every surface does; ``None`` without a unified budget."""
+    if budget is None or not budget.unified_bytes or budget.system_bytes is not None:
+        return None
+    verdict = judge(MemoryJob(media="video", family="h3", width=width, height=height, frames=frames, mode=mode, references=references, forwards=forwards), budget, MemoryWeights())
+    return {"status": verdict.status, "required_gb": round(verdict.gpu_bytes / GIB, 1), "budget_gb": round(budget.unified_bytes / GIB, 1), "expected_seconds": verdict.expected_seconds}
 
 
 @pytest.mark.parametrize(("frames", "latents"), [(22, 7), (39, 12), (124, 37), (243, 72)])
@@ -192,32 +219,33 @@ def test_the_windows_cover_the_clip_in_order_and_are_all_22_long():
 
 
 class TestMacMemory:
-    """The macOS (MLX) estimate, from the fork's M4 Pro measurements."""
+    """The macOS (MLX) estimate, from the process's peak footprint on a 32 GB Mac M5."""
 
-    def test_the_reference_clip_is_15_gib(self):
-        assert h3_sequence_rows(768, 448, 124) == 12_946
-        assert estimate_h3_mlx_clip_memory(768, 448, 124) == 15 * GIB
-        assert estimate_h3_mlx_clip_memory(768, 448, 124, mode="t2v") == 15 * GIB
+    def test_the_two_measured_text_to_video_clips_are_reproduced(self):
+        assert h3_sequence_rows(512, 320, 124) == 6_434
+        assert estimate_h3_mlx_clip_memory(512, 320, 124) == pytest.approx(12.03 * GIB, abs=0.01 * GIB)
+        assert estimate_h3_mlx_clip_memory(768, 448, 22) == pytest.approx(11.33 * GIB, abs=0.01 * GIB)
+        assert estimate_h3_mlx_clip_memory(768, 448, 124, mode="t2v") == estimate_h3_mlx_clip_memory(768, 448, 124)
 
-    def test_text_to_video_grows_160_kib_per_row(self):
-        extra = h3_sequence_rows(1280, 704, 124) - 12_946
+    def test_text_to_video_grows_by_a_fixed_amount_per_row(self):
+        small, large = (512, 320, 124), (1280, 704, 124)
+        rows = h3_sequence_rows(*large) - h3_sequence_rows(*small)
 
-        assert estimate_h3_mlx_clip_memory(1280, 704, 124) == 15 * GIB + 160 * 1024 * extra
+        assert (estimate_h3_mlx_clip_memory(*large) - estimate_h3_mlx_clip_memory(*small)) / rows == pytest.approx(186.5 * 1024, rel=1e-3)
 
-    def test_a_small_clip_shrinks_below_the_reference(self):
-        assert estimate_h3_mlx_clip_memory(512, 288, 22) < 15 * GIB
+    def test_a_small_clip_shrinks_below_the_measured_one(self):
+        assert estimate_h3_mlx_clip_memory(512, 288, 22) < estimate_h3_mlx_clip_memory(512, 320, 124)
 
     @pytest.mark.parametrize("mode", ["i2v", "extend"])
     def test_an_image_mode_is_the_conditioning_phase_when_that_is_larger(self, mode):
-        assert estimate_h3_mlx_clip_memory(576, 320, 73, mode=mode) == pytest.approx(14.2 * GIB, abs=1)
+        assert estimate_h3_mlx_clip_memory(576, 320, 73, mode=mode) == pytest.approx(15.34 * GIB, abs=1)
 
     @pytest.mark.parametrize("mode", ["i2v", "extend"])
     def test_an_image_mode_is_the_denoise_phase_with_its_keyframe_when_that_is_larger(self, mode):
-        rows = h3_sequence_rows(1920, 1088, 243, keyframes=1)
-        denoise = 15 * GIB + 160 * 1024 * (rows - 12_946)
+        large = estimate_h3_mlx_clip_memory(1920, 1088, 243, mode=mode)
 
-        assert denoise > 14.2 * GIB
-        assert estimate_h3_mlx_clip_memory(1920, 1088, 243, mode=mode) == denoise
+        assert large > 15.34 * GIB
+        assert large > estimate_h3_mlx_clip_memory(1920, 1088, 243)  # it also holds the keyframe's rows
 
     def test_an_image_mode_never_needs_less_than_text_to_video(self):
         for width, height, frames in [(512, 288, 22), (768, 448, 124), (1280, 704, 243), (1920, 1088, 243)]:
@@ -250,41 +278,41 @@ class TestMacMemory:
             estimate_h3_mlx_seconds(768, 448, 124, forwards=0)
 
     @pytest.mark.parametrize(
-        ("gpu_gib", "mode", "status", "required_gb"),
+        ("unified_gib", "mode", "status", "required_gb"),
         [
-            (24, "t2v", "fits", 15.0),
-            (24, "i2v", "fits", 15.1),
-            (16, "t2v", "fits", 15.0),
-            (13, "t2v", "tight", 15.0),
-            (9, "t2v", "too_large", 15.0),
-            (13, "i2v", "tight", 15.1),
-            (9, "extend", "too_large", 15.1),
+            (24, "t2v", "fits", 13.2),
+            (24, "i2v", "fits", 15.3),
+            (32, "t2v", "fits", 13.2),
+            (16, "t2v", "tight", 13.2),
+            (12, "t2v", "too_large", 13.2),
+            (18, "i2v", "tight", 15.3),
+            (14, "extend", "too_large", 15.3),
         ],
     )
-    def test_the_fit_classifies_against_the_gpu_working_set(self, gpu_gib, mode, status, required_gb):
-        fit = h3_mlx_clip_fit(768, 448, 124, MemoryBudget(gpu_gib * GIB, unified_bytes=32 * GIB), forwards=8, mode=mode)
+    def test_the_fit_classifies_against_the_total_memory(self, unified_gib, mode, status, required_gb):
+        fit = _h3_mac_fit(768, 448, 124, MemoryBudget(8 * GIB, unified_bytes=unified_gib * GIB), forwards=8, mode=mode)
 
-        assert fit == {"status": status, "required_gb": required_gb, "budget_gb": float(gpu_gib), "expected_seconds": estimate_h3_mlx_seconds(768, 448, 124, forwards=8, mode=mode)}
+        assert fit == {"status": status, "required_gb": required_gb, "budget_gb": float(unified_gib), "expected_seconds": estimate_h3_mlx_seconds(768, 448, 124, forwards=8, mode=mode)}
 
     def test_an_image_mode_can_be_tight_where_text_to_video_fits(self):
-        budget = MemoryBudget(int(12.8 * GIB), unified_bytes=24 * GIB)
+        budget = MemoryBudget(int(12.8 * GIB), unified_bytes=int(19.5 * GIB))
 
-        assert h3_mlx_clip_fit(576, 320, 73, budget, forwards=8)["status"] == "fits"
-        assert h3_mlx_clip_fit(576, 320, 73, budget, forwards=8, mode="i2v")["status"] == "tight"
+        assert _h3_mac_fit(576, 320, 73, budget, forwards=8)["status"] == "fits"
+        assert _h3_mac_fit(576, 320, 73, budget, forwards=8, mode="i2v")["status"] == "tight"
 
     def test_text_to_video_with_references_runs_the_staged_path_so_the_conditioning_phase_sets_a_floor(self):
         plain = estimate_h3_mlx_clip_memory(576, 320, 73)
         with_reference = estimate_h3_mlx_clip_memory(576, 320, 73, references=[SQUARE])
 
-        assert plain < 14.2 * GIB
-        assert with_reference == pytest.approx(14.2 * GIB, abs=1)
+        assert plain < 15.34 * GIB
+        assert with_reference == pytest.approx(15.34 * GIB, abs=1)
         assert estimate_h3_mlx_clip_memory(576, 320, 73, mode="i2v") == with_reference
 
-    def test_the_reference_rows_grow_the_denoise_phase_by_160_kib_each(self):
+    def test_the_reference_rows_grow_the_denoise_phase_by_the_per_row_amount(self):
         plain = estimate_h3_mlx_clip_memory(1280, 704, 243)
         with_references = estimate_h3_mlx_clip_memory(1280, 704, 243, references=[SQUARE, WIDE])
 
-        assert with_references - plain == 160 * 1024 * (2056 + 3592)
+        assert with_references - plain == int(186.5 * 1024) * (2056 + 3592)
 
     def test_an_extension_has_no_tail_block_on_the_mac(self):
         assert estimate_h3_mlx_clip_memory(1280, 704, 243, mode="extend", references=[SQUARE]) == estimate_h3_mlx_clip_memory(1280, 704, 243, mode="i2v", references=[SQUARE])
@@ -295,21 +323,21 @@ class TestMacMemory:
     def test_the_fit_counts_the_references_at_the_canvas_aspect(self):
         budget = MemoryBudget(16 * GIB, unified_bytes=32 * GIB)
         sizes = h3_nominal_references(2, 768, 448)
-        fit = h3_mlx_clip_fit(768, 448, 124, budget, forwards=8, references=2)
+        fit = _h3_mac_fit(768, 448, 124, budget, forwards=8, references=2)
 
         assert fit["required_gb"] == round(estimate_h3_mlx_clip_memory(768, 448, 124, references=sizes) / GIB, 1)
-        assert fit["required_gb"] > h3_mlx_clip_fit(768, 448, 124, budget, forwards=8)["required_gb"]
+        assert fit["required_gb"] > _h3_mac_fit(768, 448, 124, budget, forwards=8)["required_gb"]
         assert fit["expected_seconds"] == estimate_h3_mlx_seconds(768, 448, 124, forwards=8, references=sizes)
 
-    @pytest.mark.parametrize("budget", [None, MemoryBudget(0), MemoryBudget(10 * GIB, system_bytes=30 * GIB)])
+    @pytest.mark.parametrize("budget", [None, MemoryBudget(0), MemoryBudget(10 * GIB, system_bytes=32 * GIB)])
     def test_there_is_no_fit_without_a_unified_budget(self, budget):
-        assert h3_mlx_clip_fit(768, 448, 124, budget, forwards=8) is None
+        assert _h3_mac_fit(768, 448, 124, budget, forwards=8) is None
 
 
 class TestCudaEstimate:
     """The RTX 3080 calibration: GPU peak, system peak and time of an H3 clip on a discrete GPU."""
 
-    BUDGET = MemoryBudget(10 * GIB, system_bytes=30 * GIB)
+    BUDGET = MemoryBudget(10 * GIB, system_bytes=32 * GIB)  # a clip's process memory is about 25 GiB, which reads Fits up to 80 % of 32 GiB
 
     # Measured on the RTX 3080 (generation time of clean runs, excluding the one-time weight preparation).
     @pytest.mark.parametrize(
@@ -375,38 +403,53 @@ class TestCudaEstimate:
         with pytest.raises(ValueError, match=message):
             h3_memory.h3_expected_seconds(864, 480, 124, **kwargs)
 
-    def test_the_gpu_peak_of_the_reference_clip_is_the_decode_plus_the_desktop_share(self):
+    def test_the_gpu_peak_of_the_reference_clip_is_the_video_decode(self):
         estimate = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124)
 
-        assert estimate.gpu_bytes == pytest.approx((5.857 + 9.48e-7 * 864 * 480 + 1.0) * GIB, abs=0.01 * GIB)
+        assert estimate.gpu_bytes == pytest.approx(h3_memory._CUDA_DECODE_BASE_BYTES + h3_memory._CUDA_DECODE_BYTES_PER_PIXEL * 864 * 480, abs=0.01 * GIB)
 
-    # The process peaks of the M1 runs (the chunked feed-forward at 1280x736 and 345 frames); an estimate must not fall below them.
+    # Figures of RTX 3080 runs, in the quantity the bench compares (a probed case: the middle of its hold-probe bracket; else the allocated peak plus the CUDA offset): 5 s at 512x320
+    # and 22 frames at 768x448 (4.77 GiB allocated at both, ``cuda-r8``), 5 s at 864x480 (4.98 allocated, ``cuda-r12``), then the three the transformer sets: 10 s at 864x480 (6.20,
+    # the stand-in of 5.80 allocated plus the offset, not probed), 5 s at 1280x736 (6.65, bracket 6.50..6.80 in ``cuda-r13-probe``) and 14 s at 864x480 (7.95, bracket 7.81..8.09 in
+    # ``cuda-r13-probe``). The estimate plus the CUDA offset is within the bench's tolerance of each, and the transformer's three within 0.15 GiB (a line through three points that
+    # do not lie on one).
     @pytest.mark.parametrize(
-        ("width", "height", "frames", "measured_gib"),
-        [(864, 480, 73, 5.34), (864, 480, 107, 5.70), (864, 480, 124, 6.30), (1280, 736, 124, 7.84), (864, 480, 345, 8.90)],
+        ("width", "height", "frames", "figure_gib"),
+        [(512, 320, 124, 4.77 + 0.40), (768, 448, 22, 4.77 + 0.40), (864, 480, 124, 4.98 + 0.40), (864, 480, 243, 6.20), (1280, 736, 124, 6.65), (864, 480, 345, 7.95)],
     )
-    def test_the_gpu_estimate_covers_the_measured_peak_without_overshooting_it_far(self, width, height, frames, measured_gib):
-        estimate = h3_memory.estimate_h3_cuda_clip_memory(width, height, frames)
+    def test_the_gpu_estimate_is_within_the_bench_tolerance_of_the_measured_figure(self, width, height, frames, figure_gib):
+        figure = h3_memory.estimate_h3_cuda_clip_memory(width, height, frames).gpu_bytes + CUDA_OFFSET_BYTES
+        measured = figure_gib * GIB
 
-        assert measured_gib * GIB <= estimate.gpu_bytes <= (measured_gib + 2.0) * GIB
+        assert abs(figure - measured) <= max(0.10 * measured, GIB)
+        if frames > 124 or width > 864:
+            assert abs(figure - measured) <= 0.15 * GIB
 
-    def test_the_transformer_grows_151_kib_per_row_and_a_keyframe_adds_its_rows(self):
+    def test_two_references_take_the_text_encoders_turn_to_the_measured_peak(self):
+        """Bench run ``cuda-r8``: a 5 s clip at 512x320 with two references peaked at 6.45 GiB allocated, 1.68 GiB above the plain clip."""
+        plain = h3_memory.estimate_h3_cuda_clip_memory(512, 320, 124)
+        referenced = h3_memory.estimate_h3_cuda_clip_memory(512, 320, 124, references=h3_nominal_references(2, 512, 320))
+
+        assert abs(referenced.gpu_bytes + CUDA_OFFSET_BYTES - (6.45 * GIB + CUDA_OFFSET_BYTES)) <= 0.1 * GIB
+        assert referenced.gpu_bytes > plain.gpu_bytes
+
+    def test_the_transformer_grows_150_kib_per_row_and_a_keyframe_adds_its_rows(self):
         plain = h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124)
         image = h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124, mode="i2v")
 
-        assert image.gpu_bytes - plain.gpu_bytes == 151 * 1024 * 40 * 23
+        assert image.gpu_bytes - plain.gpu_bytes == 150 * 1024 * 40 * 23
         assert h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124, mode="extend").gpu_bytes == plain.gpu_bytes
 
     def test_an_image_to_video_clip_adds_the_vision_tower_to_system_memory(self):
         plain = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124)
         image = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, mode="i2v")
 
-        assert image.system_bytes - plain.system_bytes == int(1.5 * GIB)
+        assert image.system_bytes - plain.system_bytes == h3_memory._CUDA_VISION_SYSTEM_BYTES
         assert h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, mode="extend").system_bytes == plain.system_bytes
 
     def test_references_add_their_rows_to_the_transformer_in_every_mode(self):
         plain = h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124)
-        per_row = 151 * 1024
+        per_row = 150 * 1024
 
         assert h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124, references=[WIDE]).gpu_bytes - plain.gpu_bytes == per_row * 3592
         assert h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124, references=[SQUARE, WIDE]).gpu_bytes - plain.gpu_bytes == per_row * (2056 + 3592)
@@ -421,7 +464,7 @@ class TestCudaEstimate:
         plain = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, mode=mode)
         referenced = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, mode=mode, references=[SQUARE])
 
-        assert referenced.system_bytes - plain.system_bytes == int(1.5 * GIB)
+        assert referenced.system_bytes - plain.system_bytes == h3_memory._CUDA_VISION_SYSTEM_BYTES
 
     def test_the_vision_tower_is_counted_once_for_a_keyframe_and_references(self):
         image = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, mode="i2v")
@@ -450,58 +493,69 @@ class TestCudaEstimate:
                 break
 
         assert card is not None
-        fit = h3_memory.h3_clip_fit(1344, 768, 124, MemoryBudget(card, system_bytes=30 * GIB), forwards=8, upscale=True, references=2)
-        plain = h3_memory.h3_clip_fit(1344, 768, 124, MemoryBudget(card, system_bytes=30 * GIB), forwards=8, upscale=True)
+        fit = _h3_fit(1344, 768, 124, MemoryBudget(card, system_bytes=32 * GIB), forwards=8, upscale=True, references=2)
+        plain = _h3_fit(1344, 768, 124, MemoryBudget(card, system_bytes=32 * GIB), forwards=8, upscale=True)
         assert plain["expected_seconds"] == h3_memory.h3_expected_seconds(1344, 768, 124, forwards=8, upscale=True, keep_transformer=True)
         assert fit["expected_seconds"] == h3_memory.h3_expected_seconds(1344, 768, 124, forwards=8, upscale=True, references=[WIDE, WIDE])
 
     def test_the_fit_counts_the_references_at_the_canvas_aspect(self):
         sizes = h3_nominal_references(2, 1344, 768)
-        fit = h3_memory.h3_clip_fit(1344, 768, 124, self.BUDGET, forwards=8, references=2)
+        fit = _h3_fit(1344, 768, 124, self.BUDGET, forwards=8, references=2)
         estimate = h3_memory.estimate_h3_cuda_clip_memory(1344, 768, 124, references=sizes)
 
-        assert fit["required_gb"] == round(estimate.gpu_bytes / GIB, 1)
+        assert fit["required_gb"] == round((estimate.gpu_bytes + CUDA_OFFSET_BYTES) / GIB, 1)
         assert fit["expected_seconds"] == h3_memory.h3_expected_seconds(1344, 768, 124, forwards=8, references=sizes)
 
-    def test_an_extension_with_two_references_is_flagged_on_the_10_gb_card_where_it_fits_without(self):
-        card = MemoryBudget(10_350_886_912, system_bytes=30 * GIB)  # the RTX 3080's bytes
-        plain = h3_memory.h3_clip_fit(1344, 768, 90, card, forwards=8, mode="extend")
-        one = h3_memory.h3_clip_fit(1344, 768, 90, card, forwards=8, mode="extend", references=1)
-        two = h3_memory.h3_clip_fit(1344, 768, 90, card, forwards=8, mode="extend", references=2)
+    def test_an_extension_with_two_references_is_flagged_on_a_card_where_it_fits_without(self):
+        def figure(references: int) -> int:
+            sizes = h3_nominal_references(references, 1344, 768)
+            return h3_memory.estimate_h3_cuda_clip_memory(1344, 768, 90, mode="extend", references=sizes).gpu_bytes + CUDA_OFFSET_BYTES
 
-        assert (plain["status"], one["status"], two["status"]) == ("fits", "fits", "tight")
-        assert h3_memory.h3_clip_fit(1344, 768, 124, card, forwards=8, mode="extend", references=2)["status"] == "too_large"
+        card = MemoryBudget(int((figure(1) + figure(2)) / 2 / 0.9), system_bytes=40 * GIB)  # the fits line lies between one reference and two
+        plain = _h3_fit(1344, 768, 90, card, forwards=8, mode="extend")
+        one = _h3_fit(1344, 768, 90, card, forwards=8, mode="extend", references=1)
+        two = _h3_fit(1344, 768, 90, card, forwards=8, mode="extend", references=2)
 
-    def test_a_user_lora_adds_2_7_times_its_size_to_the_transformer_and_all_of_it_to_system_memory(self):
+        assert (plain["status"], one["status"]) == ("fits", "fits")
+        assert two["status"] != "fits"
+
+    def test_a_user_lora_adds_a_share_of_its_size_to_the_transformer_and_a_multiple_of_it_to_system_memory(self):
         lora = 310_000_000
         plain = h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124)
         loaded = h3_memory.estimate_h3_cuda_clip_memory(1280, 736, 124, loras_bytes=lora)
 
-        assert loaded.gpu_bytes - plain.gpu_bytes == pytest.approx(2.7 * lora, abs=1024)
-        assert loaded.system_bytes - plain.system_bytes == lora
+        assert loaded.gpu_bytes - plain.gpu_bytes == pytest.approx(h3_memory._CUDA_DIT_LORA_BYTES_PER_BYTE * lora, abs=1024)
+        assert loaded.system_bytes - plain.system_bytes == pytest.approx(h3_memory._CUDA_SYSTEM_LORA_BYTES_PER_BYTE * lora, abs=1)
 
-    def test_a_lora_clip_at_the_reference_size_covers_the_measured_peak(self):
-        assert h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, loras_bytes=310_000_000).gpu_bytes >= 7.16 * GIB
+    def test_a_user_lora_does_not_lift_a_small_clips_gpu_peak_above_the_decode(self):
+        lora = 1_400_000_000
+        plain = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124)
+        loaded = h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, loras_bytes=lora)
+
+        assert loaded.gpu_bytes == plain.gpu_bytes
 
     def test_a_large_or_long_clip_fits_the_card_that_the_chunked_feed_forward_serves(self):
-        large = h3_memory.h3_clip_fit(1280, 736, 124, self.BUDGET, forwards=8)
-        long = h3_memory.h3_clip_fit(864, 480, 345, self.BUDGET, forwards=8)
+        large = _h3_fit(1280, 736, 124, self.BUDGET, forwards=8)
+        long = _h3_fit(864, 480, 345, self.BUDGET, forwards=8)
 
         assert large["status"] == "fits"
-        assert long["status"] == "tight"
+        assert long["status"] == "fits"
 
     def test_an_upscale_needs_no_tier(self):
         assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True).gpu_bytes > 0
 
-    @pytest.mark.parametrize(("width", "height", "frames", "measured_gib"), [(1280, 704, 124, 5.7), (1600, 896, 124, 6.6), (1600, 896, 243, 6.7)])
-    def test_the_upscale_gpu_estimate_covers_the_spikes_peaks(self, width, height, frames, measured_gib):
-        # 5.7 GiB: the full-size decode at 1280x704; 6.6 and 6.7 GiB: the chunked refine at 1600x896.
-        assert h3_memory.estimate_h3_cuda_clip_memory(width, height, frames, upscale=True).gpu_bytes >= measured_gib * GIB
+    def test_the_upscale_gpu_estimate_covers_the_full_size_decode_peak(self):
+        # 5.7 GiB: the full-size decode at 1280x704, a reserved peak of an earlier run.
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True).gpu_bytes + CUDA_OFFSET_BYTES >= 5.7 * GIB
+
+    def test_the_upscale_gpu_estimate_is_the_refines_allocated_peak(self):
+        # Bench run ``cuda-r12``: 5 s at 1600x896, rendered at half size and refined at the full size, peaked at 5.97 GiB allocated (the refine's transformer).
+        assert abs(h3_memory.estimate_h3_cuda_clip_memory(1600, 896, 124, upscale=True).gpu_bytes - 5.97 * GIB) <= 0.1 * GIB
 
     @pytest.mark.parametrize(("width", "height"), [(1280, 704), (1600, 896)])
     def test_the_large_upscales_fit_a_10_gib_card(self, width, height):
         estimate = h3_memory.estimate_h3_cuda_clip_memory(width, height, 124, upscale=True)
-        fit = h3_memory.h3_clip_fit(width, height, 124, self.BUDGET, forwards=8, upscale=True)
+        fit = _h3_fit(width, height, 124, self.BUDGET, forwards=8, upscale=True)
 
         assert estimate.gpu_bytes <= 9.0 * GIB
         assert fit["status"] == "fits"
@@ -512,15 +566,18 @@ class TestCudaEstimate:
         [
             ({}, 124 * 864 * 480 * 3),
             ({"upscale": True}, 124 * 1280 * 704 * 3),
-            ({"mode": "i2v", "loras_bytes": GIB, "upscale": True}, int(1.5 * GIB) + GIB + 124 * 1280 * 704 * 3),
+            ({"mode": "i2v", "loras_bytes": GIB, "upscale": True}, h3_memory._CUDA_VISION_SYSTEM_BYTES + h3_memory._CUDA_SYSTEM_LORA_BYTES_PER_BYTE * GIB + 124 * 1280 * 704 * 3),
         ],
     )
     def test_the_system_bytes_are_the_base_the_vision_tower_the_loras_and_the_decoded_frames(self, kwargs, extra):
         width, height = (1280, 704) if kwargs.get("upscale") else (864, 480)
 
-        assert h3_memory.estimate_h3_cuda_clip_memory(width, height, 124, **kwargs).system_bytes == int(17.7 * GIB) + extra
-        assert h3_memory.h3_cuda_system_bytes() == int(17.7 * GIB)
-        assert h3_memory.h3_cuda_system_bytes(loras_bytes=GIB, frame_bytes=2 * GIB, vision=True) == int(17.7 * GIB) + int(1.5 * GIB) + 3 * GIB
+        assert h3_memory.estimate_h3_cuda_clip_memory(width, height, 124, **kwargs).system_bytes == pytest.approx(h3_memory._CUDA_SYSTEM_BASE_BYTES + extra, abs=1)
+        assert h3_memory.h3_cuda_system_bytes() == h3_memory._CUDA_SYSTEM_BASE_BYTES
+        assert (
+            h3_memory.h3_cuda_system_bytes(loras_bytes=GIB, frame_bytes=2 * GIB, vision=True)
+            == h3_memory._CUDA_SYSTEM_BASE_BYTES + h3_memory._CUDA_VISION_SYSTEM_BYTES + int(h3_memory._CUDA_SYSTEM_LORA_BYTES_PER_BYTE * GIB) + 2 * GIB
+        )
 
     def test_a_clip_of_73_frames_or_fewer_refines_at_its_own_rows(self):
         short = h3_memory.estimate_h3_cuda_clip_memory(1600, 896, 39, upscale=True)
@@ -542,11 +599,11 @@ class TestCudaEstimate:
     def test_the_upsampler_stage_is_part_of_the_gpu_peak(self, monkeypatch):
         monkeypatch.setattr(h3_memory, "_cuda_upsampler_bytes", lambda width, height, frames: 20 * GIB)
 
-        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True).gpu_bytes == 21 * GIB
-        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124).gpu_bytes < 21 * GIB
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True).gpu_bytes == 20 * GIB
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124).gpu_bytes < 20 * GIB
 
     def test_a_default_upscale_on_30_gib_fits_with_the_gpu_as_the_limit(self):
-        fit = h3_memory.h3_clip_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True)
+        fit = _h3_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True)
 
         assert fit["status"] == "fits"
         assert fit["resource"] == "gpu"
@@ -578,11 +635,11 @@ class TestCudaEstimate:
         assert h3_memory.h3_upscale_keeps_transformer(1280, 704, 124, 24 * GIB)
 
     def test_a_card_too_small_for_the_clip_loads_twice(self):
-        assert not h3_memory.h3_upscale_keeps_transformer(1600, 896, 124, 8 * GIB)
+        assert not h3_memory.h3_upscale_keeps_transformer(1600, 896, 124, 6 * GIB)
 
     def test_the_fit_of_an_upscale_without_review_skips_the_second_load(self):
-        no_review = h3_memory.h3_clip_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True)
-        review = h3_memory.h3_clip_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True, review=True)
+        no_review = _h3_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True)
+        review = _h3_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True, review=True)
 
         assert no_review["expected_seconds"] == h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True, keep_transformer=True)
         assert review["expected_seconds"] == h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True)
@@ -591,19 +648,19 @@ class TestCudaEstimate:
     def test_the_fit_loads_twice_where_the_single_load_does_not_fit(self, monkeypatch):
         monkeypatch.setattr(h3_memory, "_cuda_upsampler_bytes", lambda width, height, frames: 7 * GIB)
 
-        fit = h3_memory.h3_clip_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True)
+        fit = _h3_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True)
 
         assert fit["expected_seconds"] == h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True)
 
     def test_the_review_flag_does_not_change_a_clip_without_an_upscale(self):
-        assert h3_memory.h3_clip_fit(864, 480, 124, self.BUDGET, forwards=8, review=True) == h3_memory.h3_clip_fit(864, 480, 124, self.BUDGET, forwards=8)
+        assert _h3_fit(864, 480, 124, self.BUDGET, forwards=8, review=True) == _h3_fit(864, 480, 124, self.BUDGET, forwards=8)
 
     def test_the_fit_carries_status_budget_resource_family_and_the_estimated_time(self):
-        fit = h3_memory.h3_clip_fit(864, 480, 124, self.BUDGET, forwards=8)
+        fit = _h3_fit(864, 480, 124, self.BUDGET, forwards=8)
 
         assert fit == {
             "status": "fits",
-            "required_gb": 7.3,
+            "required_gb": round((h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124).gpu_bytes + CUDA_OFFSET_BYTES) / GIB, 1),
             "budget_gb": 10.0,
             "kind": "discrete",
             "resource": "gpu",
@@ -613,16 +670,16 @@ class TestCudaEstimate:
 
     @pytest.mark.parametrize(
         ("gpu_gib", "system_gib", "status", "resource"),
-        [(10, 30, "fits", "gpu"), (8, 30, "tight", "gpu"), (7, 30, "too_large", "gpu"), (10, 20, "tight", "system"), (10, 16, "too_large", "system")],
+        [(10, 32, "fits", "gpu"), (5.5, 32, "tight", "gpu"), (5, 32, "too_large", "gpu"), (10, 17, "tight", "system"), (10, 15, "too_large", "system")],
     )
     def test_the_fit_classifies_both_memories(self, gpu_gib, system_gib, status, resource):
-        fit = h3_memory.h3_clip_fit(864, 480, 124, MemoryBudget(gpu_gib * GIB, system_bytes=system_gib * GIB), forwards=8)
+        fit = _h3_fit(864, 480, 124, MemoryBudget(int(gpu_gib * GIB), system_bytes=system_gib * GIB), forwards=8)
 
         assert (fit["status"], fit["resource"]) == (status, resource)
 
     @pytest.mark.parametrize("budget", [None, MemoryBudget(0, system_bytes=GIB), MemoryBudget(24 * GIB, unified_bytes=32 * GIB)])
     def test_there_is_no_fit_without_a_discrete_budget(self, budget):
-        assert h3_memory.h3_clip_fit(864, 480, 124, budget, forwards=8) is None
+        assert _h3_fit(864, 480, 124, budget, forwards=8) is None
 
     def test_the_lora_files_are_summed_and_a_missing_path_counts_nothing(self, tmp_path):
         (tmp_path / "a.safetensors").write_bytes(b"x" * 10)
@@ -630,7 +687,7 @@ class TestCudaEstimate:
         folder.mkdir()
         (folder / "b.safetensors").write_bytes(b"y" * 5)
 
-        assert h3_memory.h3_lora_bytes([tmp_path / "a.safetensors", folder, tmp_path / "missing"]) == 15
+        assert lora_files_bytes([tmp_path / "a.safetensors", folder, tmp_path / "missing"]) == 15
 
     def test_an_extension_window_carries_the_22_frame_tail(self):
         assert h3_memory.h3_extend_window_frames(34) == 56

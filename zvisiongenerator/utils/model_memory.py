@@ -1,9 +1,9 @@
-"""Estimate how much memory a downloaded model needs: unified memory on MLX, GPU and system memory on CUDA.
+"""Size the weights of a model and estimate a video clip's memory: unified memory on MLX, GPU and system memory on CUDA.
 
-Estimates read only safetensors headers (tensor dtypes and shapes), never the weights, and mirror how
-each backend holds each component in memory. They are deliberately rough: a fixed working-memory
-margin stands in for activations in image models, and the LTX MLX clip estimate uses working-memory
-curves measured over the clip's size and length. LoRAs are not counted, except MOSS-Image Turbo's built-in LoRA.
+Sizes read only safetensors headers (tensor dtypes and shapes), never the weights, and mirror how each backend holds each
+component in memory. The image estimates live in :mod:`zvisiongenerator.utils.memory_verdict`; this module holds what they are
+built from (the weight totals and the memory budget) and the LTX and H3 clip estimates, whose working-memory curves were measured
+over the clip's size and length.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import functools
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -19,8 +19,6 @@ from typing import Any
 from zvisiongenerator.utils.model_files import (
     component_of,
     find_local_model_dir,
-    is_ideogram4_model,
-    is_krea2_model,
     is_ltx_mlx_layout,
     is_moss_model,
     ltx_mlx_bundled_text_encoder,
@@ -31,56 +29,45 @@ from zvisiongenerator.utils.model_files import (
 )
 from zvisiongenerator.utils.moss_build import moss_base_dir, turbo_lora_file
 from zvisiongenerator.utils.safetensors_stream import read_header
-from zvisiongenerator.utils.stored_quant import stored_quant_bits
 
 GIB = 1024**3
-_IMAGE_WORKING_BYTES = int(1.5 * GIB)
-# Ideogram 4 Instant on MLX, above its weights at 1024x1024: the VAE decode peaks 15.6-16.2 GiB over the weights at
-# every level (FP8, q8, q4), measured on a 32 GB M5; its denoising alone needs 4-5 GiB.
-_IDEOGRAM4_MLX_WORKING_BYTES = 16 * GIB
-# Apple's recommended working set is conservative: a modest overshoot is absorbed by memory compression
-# without a noticeable slowdown.
-_FITS_RATIO = 1.1
-# MLX's own default memory limit is 1.5x Apple's recommended working set: up to there it keeps allocating and
-# lets macOS compress and swap, so models in that range run, at the cost of slowing the rest of the Mac.
-_TIGHT_LIMIT_RATIO = 1.5
-# CUDA (diffusers backend). Unquantized and q8 weights stay in system memory and stream to the GPU block by
-# block; the GPU holds the blocks in flight plus activations (up to about 4 GB at 1024x1024).
-_CUDA_STREAMED_GPU_BYTES = 4 * GIB
-_CUDA_RESIDENT_WORKING_BYTES = int(1.5 * GIB)
-_CUDA_SYSTEM_WORKING_BYTES = int(1.5 * GIB)
+# The generic MLX working memory above an image model's weights at 1 MP, which a model with no measured working memory of its own reads.
+# Fitted to the process's peak footprint: the middle of the 1 MP working memory of Z-Image, Krea 2 and Klein at q4 and q8 (1.06-1.62 GiB),
+# from bench run ``mac-r11`` (32 GB M5). not measured for a model with no row; the per-model terms of ``memory_verdict`` correct it where a model was measured.
+IMAGE_WORKING_BYTES = int(1.2 * GIB)
+# Ideogram 4 Instant on MLX, above its weights at 1024x1024: the peak footprint sat 2.6-3.1 GiB above them (unquantized, q8, q4); this is the
+# q8 figure and ``memory_verdict`` carries each level's distance from it. measured, from bench run ``mac-r11`` (32 GB M5).
+_IDEOGRAM4_MLX_WORKING_BYTES = int(2.79 * GIB)
 # bitsandbytes NF4 packs two weights per byte plus a double-quantized scale per 64-weight block (~4.13 bits).
 _NF4_BYTES_PER_WEIGHT = 4.13 / 8
-_CUDA_QUANTIZED_COMPONENTS = ("text_encoder", "transformer")
-# MOSS-Image on CUDA, measured on a 10 GB card with gate G2 (1024x1024 Turbo txt2img, then up to 4 MP). The VAE and the
-# Turbo LoRA (~1.34 GiB together) stay on the GPU throughout. The peak is the FP32 VAE decode: 8.8 GiB reserved at the
-# worst size at q4 (q8 8.6, unquantized 7.2), so 8.8 - 1.34 = 7.46 rounds up to 7.5 GiB above the resident weights.
-_MOSS_CUDA_WORKING_BYTES = int(7.5 * GIB)
-# MOSS-Image process memory beyond the weights held in system memory (text encoder, plus the transformer unless it is
-# on the GPU), so the estimate lands just above the peak RSS measured per level: q4 15.4, q8 16.8, unquantized 16.9
-# GiB. The unquantized figure is the load and 1 MP peak; the other two include sizes up to 4 MP.
-_MOSS_CUDA_SYSTEM_WORKING_BYTES = {4: int(7.75 * GIB), 8: int(6.75 * GIB), None: int(2 * GIB)}
-# A CUDA model fits while its GPU need stays under 90% of VRAM and its weights under 80% of system memory,
-# leaving the rest to the desktop and other apps. Weights beyond that stream from disk, which is much slower.
-_CUDA_GPU_FITS_RATIO = 0.9
-_CUDA_SYSTEM_FITS_RATIO = 0.8
 # LTX on CUDA: beyond the weights, the process holds the CUDA runtime, the VAEs' and tokenizer's CPU side and the
-# copies a load stages. Measured at q4 on a 10 GB GPU: peaks of 20-21 GB against 14.3 GiB of weights.
-_LTX_CUDA_RUNTIME_BYTES = 6 * GIB
-# LTX on CUDA, per clip. With the transformer streamed (low-memory mode), the peak allocated GPU memory is flat up to a
-# knee, then grows linearly with the token count (the float32 temporaries outside the chunked layers). Measured on a
-# 10 GB card with 2-step runs: q4 4.40 GiB from 5k to 20k tokens, then 6.44 at 45.6k and 7.21 at 53.0k; q8 3.61 GiB at
-# 5k and 6.30 at 45.6k. The same slope fits both levels and predicts 7.6 GiB at 56.7k tokens, where XL 15 s ran out of memory.
-_LTX_CUDA_GPU_PLATEAU_BYTES = {4: int(4.40 * GIB), 8: int(3.61 * GIB)}
-_LTX_CUDA_GPU_KNEE_TOKENS = {4: 26000, 8: 19700}
-_LTX_CUDA_GPU_BYTES_PER_TOKEN = int(1.04e-4 * GIB)
-# The two-stage upscale also holds the latent upsampler on the GPU: a small clip peaked at 5.04 GiB at q4, 0.64 over its plateau.
-_LTX_CUDA_UPSCALE_GPU_BYTES = int(0.64 * GIB)
-# Beyond the allocated peak, the caching allocator fragments (reserved was 1.0-2.2 GiB above allocated) and the CUDA
-# context and desktop take their share; with it XL 14 s (7.21 GiB) is tight and XL 15 s (7.6 GiB) too large on 10 GiB.
-_LTX_CUDA_GPU_HEADROOM_BYTES = int(2.5 * GIB)
-# The two-stage upscale also holds the upsampler and the first stage's latents: measured +3 to +5 GB of system memory.
-_LTX_CUDA_UPSCALE_SYSTEM_BYTES = 4 * GIB
+# copies a load stages, per level; the figure is the process's memory (anonymous plus shared pages, the highest the two summed to in one sample) less the
+# weights taking turns. The shared pages are the pinned copies of the streamed blocks (RssShmem: 9.85 GiB at q4, 1.97 at q8, about 0 for a resident model),
+# which are real memory the machine loses and cannot swap; they are not counted twice, the kernel keeps RssAnon and RssShmem apart. The two counters peak at
+# different moments (the text encoder's anonymous memory, then the pinned blocks), so the sum of their separate peaks, which earlier runs recorded, overstates it.
+# q8 (``ltx8-s``, 5 s at 768x448): 24.13 GiB in bench run ``cuda-r10`` (the app, fresh) against 21.04 GiB of weights, 3.08 GiB above them. q4 (``cuda-r10``,
+# text-to-video at 768x448: LTX-2.3 and LTX-2.5): 20.27 and 20.14 GiB against 15.25 and 15.08 GiB of weights, 5.03 and 5.06 GiB above them; the mean is 5.04.
+# measured.
+_LTX_CUDA_RUNTIME_BYTES = {4: int(5.04 * GIB), 8: int(3.08 * GIB)}
+# LTX on CUDA, per clip: the GPU need of the streamed transformer (low-memory mode), before the CUDA offset ``memory_verdict`` adds once. It is flat up to a knee,
+# then grows linearly with the token count (the float32 temporaries outside the chunked layers). Each term is its probed figure less the offset: the middle of the
+# case's hold-probe bracket (``cuda-r15-probe``, 2-step runs on a 10 GB card; the PyTorch allocator of a streaming LTX job holds 1-2 GiB more than its allocated
+# peak and gives it back under a hold, so these figures sit 0.36-0.8 GiB over the allocated peak, more at long clips and at q8, and the peak alone understates them).
+# q4 (``ltx-4``): out of memory on / ran on, and the figure (allocated peak), 1280x704 for 5 s (14.1k tokens): 4.67 / 4.84, 4.76 (4.40); 1600x896 for 10 s (43.4k):
+# 6.62 / 6.83, 6.72 (6.20); 14 s (60.2k): 8.37 / 8.52, 8.45 (7.96); 15 s (64.4k): 8.85 / 9.13, 8.99 (8.40). The shipped slope (1.07e-4 GiB per token) is a line through
+# the three long clips, every residual within 0.06 GiB, and it meets the 5 s figure at the knee of 25.2k tokens. A least-squares fit of the same clips gives 1.063e-4 and a knee at 24.97k, with
+# plateaus that round to 4.35 and 3.58 GiB against the shipped 4.36 and 3.59. q8 (``ltx-8``): 768x448 for 5 s (5.4k): 3.89 / 4.08, 3.99 (3.61); 1600x896 for 10 s: 6.73 / 6.99,
+# 6.86 (6.06); the same per-token slope as q4 (the allocated peaks agree to 1 %) through them puts the knee at 16.6k tokens. measured at both levels up to 64.4k tokens at q4
+# and 43.4k at q8; extrapolated beyond. A free 10 GB card ran 15 s at 1600x896 (9.16 GiB reserved of 9.64), though the least it runs on is 8.99.
+_LTX_CUDA_GPU_PLATEAU_BYTES = {4: int(4.36 * GIB), 8: int(3.59 * GIB)}
+_LTX_CUDA_GPU_KNEE_TOKENS = {4: 25200, 8: 16600}
+_LTX_CUDA_GPU_BYTES_PER_TOKEN = int(1.07e-4 * GIB)
+# The two-stage upscale also holds the latent upsampler on the GPU: a small clip peaked at 5.04 GiB allocated at q4 (``ltx4-s-upscale`` in ``cuda-r10`` and ``ltx4-l-upscale`` in
+# ``cuda-r12``), 0.68 over the plateau term; the figure is that peak, not a probed one (not measured: peak + offset). It carries to q8 unchanged (not measured).
+_LTX_CUDA_UPSCALE_GPU_BYTES = int(0.68 * GIB)
+# The two-stage upscale also holds the upsampler and the first stage's latents: 0.93 GiB of system memory above the plain clip at q4 (21.20 against
+# 20.27 GiB in ``cuda-r10``), where earlier live runs read +3 to +5 GB. measured at q4 in a bench run; not measured at q8.
+_LTX_CUDA_UPSCALE_SYSTEM_BYTES = int(0.93 * GIB)
 
 _DTYPE_BYTES = {
     "F64": 8,
@@ -104,29 +91,54 @@ _FLOAT_DTYPES = frozenset({"F64", "F32", "F16", "BF16"})
 _QUANT_GROUP_OVERHEAD_BYTES = 4 / 64
 # Diffusion pipelines read text-encoder hidden states, never logits, so mflux does not load the LM head.
 _TEXT_ENCODER_SKIPPED_PREFIXES = ("lm_head.",)
-# MOSS-Image on MLX, above the denoiser stage's weights: the loop and the strip VAE decode at 1024x1024 peaked 1.9 GiB
-# above them at q4 and q8 (32 GB Mac); the text encoder stage takes the fixed margin, which covers a 2,000-token prompt.
-_MOSS_MLX_DENOISE_WORKING_BYTES = 2 * GIB
+# MOSS-Image on MLX, from bench run ``mac-r11`` (32 GB Mac): the peak footprint is 9.17 GiB at 1024x1024 and 8.54 at 1600x1600, which does not rise with
+# the size, so the text encoder stage (7.85 GiB of weights) sets it; the middle of the two rows puts its working memory at 1.0 GiB. measured.
+_MOSS_MLX_TEXT_ENCODER_WORKING_BYTES = int(1.0 * GIB)
+# The denoiser stage's working memory above its weights (the loop and the strip VAE decode): the rows give only the larger stage, and at 1600x1600 the
+# peak sits 2.17 GiB above the denoiser's weights, so this stays under that bound. not measured: the earlier MLX-peak figure of 1.9 GiB, which no
+# footprint row isolates.
+_MOSS_MLX_DENOISE_WORKING_BYTES = int(1.9 * GIB)
 # mflux loads only MOSS-Image's language model; the Qwen3.5 vision tower (``visual.``) stays on disk, and a stored copy has none.
 _MOSS_MLX_TEXT_ENCODER_SKIPPED_PREFIXES = (*_TEXT_ENCODER_SKIPPED_PREFIXES, "visual.")
 _LTX_MLX_CONNECTOR_FILE = "connector.safetensors"
 # The audio decoders loaded for a decode next to the video VAE decoder: the VAE tiler's budget limits only activations, not these weights.
 _LTX_MLX_AUDIO_DECODER_FILES = ("audio_vae.safetensors", "vocoder.safetensors")
-# LTX MLX working memory beyond the weights, in GiB, from per-stage peak memory measured with ``mx.get_peak_memory``
-# (one fresh process per clip). Fit on the q4 distilled LTX 2.3 model with its Gemma 4-bit text
-# encoder on a 32 GiB Apple Silicon Mac, where the transformer is not streamed; Macs with 24 GiB or less stream
-# it, so the estimate is conservative there. Each term is a measured absolute curve, not scaled by model.
-_LTX_PROMPT_WORKING_GIB = 0.85  # Gemma + connector while the prompt is encoded.
-_LTX_DENOISE_FLOOR_GIB = 1.6  # Transformer working memory at small clips.
-_LTX_DENOISE_AT_REFERENCE_GIB = 1.7  # ... at _LTX_REFERENCE_TOKENS tokens,
-_LTX_DENOISE_GIB_PER_TOKEN = 0.000205  # ... and growing by this per token.
-_LTX_REFERENCE_TOKENS = 4928  # 704x448 at 121 frames.
+# LTX MLX working memory beyond the weights, in GiB, fitted to the process's peak footprint (a lifetime peak of ``phys_footprint``, which the MLX
+# buffer cache does not inflate: the app runs the generation with the cache off) from bench run ``mac-r10`` on a 32 GiB Apple Silicon Mac, where the
+# transformer is not streamed; Macs with 24 GiB or less stream it, so the estimate is conservative there (not measured). One fresh process per clip.
+# Each term is an absolute curve, not scaled by model.
+#
+# The load phase (the prompt stage: Gemma and the connector held while the prompt is encoded) sets the peak of a clip whose denoise stage is
+# smaller: ltx-4's peak is 16.46 GiB flat from 768x448 to 1024x576 and with an upscale, which puts the phase 3.07 GiB above Gemma 3 and the connector.
+# LTX-2.5 (Gemma 4, bundled in its pack) peaked at 17.86 GiB at 768x448, 4.27 GiB above its own. measured, one row for each.
+_LTX_PROMPT_WORKING_GIB = 3.07
+_LTX_PROMPT_WORKING_BUNDLED_GIB = 4.27
+# The denoise stage grows with the video tokens: ltx-8 peaked 22.59 GiB at 768x448 and 23.54 at 1024x576 (121 frames), 3.41 and 4.36 GiB above its
+# transformer. measured; the line through the two rows. A smaller transformer (ltx-4) never reaches it in a measured clip, so the load phase sets its peak.
+_LTX_DENOISE_AT_REFERENCE_GIB = 3.41
+_LTX_REFERENCE_TOKENS = 5376  # 768x448 at 121 frames.
+_LTX_DENOISE_GIB_PER_TOKEN = 0.000247
+# Image to video (``i2v``) and Extend add the conditioning's own encode to the peak: ltx-4 at 768x448 peaked 0.56 GiB above the text-to-video clip with a start
+# picture, and an Extend of a 3 s source at 576x320 (97 frames) 4.20 GiB above it. measured, once each; the same constant carries to other sizes and
+# packs (not measured there).
+_LTX_MODE_GIB = {"i2v": 0.56, "extend": 4.20}
+# The decode stage and the upsample stage below are fitted to MLX's peak, not measured on the footprint: no footprint row isolates them (the load or
+# the denoise phase sets every measured peak, and ltx-4 at 1024x576, where the decode cap applies, peaked 0.64 GiB under the cap's figure).
 _LTX_DECODE_BASE_GIB = 12.9  # Peak of a VAE decode (decoder weights included) up to _LTX_DECODE_KNEE_TOKENS tokens,
 _LTX_DECODE_KNEE_TOKENS = 2048
 _LTX_DECODE_GIB_PER_TOKEN = 0.00067  # ... growing by this per token beyond it, until the tiler's budget caps it.
 _LTX_UPSAMPLE_WORKING_GIB = 0.5  # Transformer + spatial upsampler + this, before the second denoise stage.
 _LTX_DECODE_RELEASED_GIB = 2.83  # With Low memory off, the decode peak includes weights that stay resident anyway.
 _LTX_VAE_DECODE_BUDGET_ENV = "LTX2_VAE_DECODE_BUDGET_GB"  # Mirrors ltx_core_mlx's decode_budget_bytes().
+# The streaming path (Macs with 24 GiB or less, Low memory on) holds the process's peak footprint flat whatever the job: measured on a 32 GiB M5
+# forced onto the path at 16 and 24 GiB (bench ``--total-gib``), identical at both, one fresh process per case. ``ltx-4``: 14.76-14.77 GiB for
+# t2v, i2v, Extend, 1024x576 and a 2x upscale (14.77 is the highest). ``ltx25-4``: 15.60 GiB (t2v only; the path is flat in job type).
+# ``ltx8-s``: 14.76 GiB at 16 GiB (t2v), identical to ``ltx-4``: the peak is set while the text encoder loads (see ``_LOW_RAM_THRESHOLD_BYTES`` in
+# ``backends/mac/video.py``) and the Gemma 3 packs share that encoder and connector, so ``ltx-8`` reads ``ltx-4``'s constant (measured). The
+# transformer is not added: the figure did not move with the job's size, so no measured share of it is held. User LoRAs are not counted on this
+# path either (not measured).
+_LTX_STREAMING_GIB = 14.77
+_LTX_STREAMING_BUNDLED_GIB = 15.60
 _LTX_TOKEN_FRAME_STEP = 8
 _LTX_TOKEN_PIXELS = 32
 
@@ -135,14 +147,22 @@ _LTX_TOKEN_PIXELS = 32
 class MemoryBudget:
     """The memory a model may use on this machine.
 
-    On Apple Silicon (unified memory) *gpu_bytes* is Apple's recommended GPU working set and *system_bytes* is
-    ``None``. On a discrete GPU (CUDA) *gpu_bytes* is the VRAM and *system_bytes* the system memory that
-    offloaded weights stream from. *unified_bytes* is the total unified memory on Apple Silicon, when known.
+    On Apple Silicon (unified memory) *gpu_bytes* is Apple's recommended GPU working set, *system_bytes* is
+    ``None`` and *unified_bytes* is the total unified memory, which a Mac verdict is graded against. On a discrete GPU (CUDA)
+    *gpu_bytes* is the card's budget (its total less the driver's reserve) and *system_bytes* the system memory that
+    offloaded weights stream from. *gpu_total_bytes* is the card's whole memory, reserve included, for the features tuned on
+    that size (SeedVR2's tier, the Smart prompt enhancer, the first-run model pick); the memory engine reads *gpu_bytes*.
     """
 
     gpu_bytes: int
     system_bytes: int | None = None
     unified_bytes: int | None = None
+    gpu_total_bytes: int | None = None
+
+    @property
+    def full_gpu_bytes(self) -> int:
+        """The card's whole memory, or *gpu_bytes* where there is no separate total (a Mac's working set, a card with no ``nvidia-smi`` reading)."""
+        return self.gpu_total_bytes or self.gpu_bytes
 
 
 @dataclass(frozen=True)
@@ -199,6 +219,20 @@ def read_safetensors_totals(path: Path, skipped_prefixes: tuple[str, ...] = ()) 
 def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: tuple[str, ...]) -> WeightTotals:
     del size, mtime_ns  # Cache-key only: a rewritten file gets a fresh read.
     _, header = read_header(Path(path))
+    return totals_from_header(header, skipped_prefixes, label=path)
+
+
+def totals_from_header(header: Mapping[str, Mapping[str, Any]], skipped_prefixes: tuple[str, ...] = (), *, label: str = "the header") -> WeightTotals:
+    """Summarise a safetensors *header* (tensor name to ``{"dtype", "shape", ...}``, without its metadata entry) by how the loaders hold the tensors.
+
+    Args:
+        header: The tensors of one or more files; only each one's dtype and shape are read.
+        skipped_prefixes: Tensor-name prefixes the loader never reads, left out of the totals.
+        label: What the header is of, named in the error.
+
+    Raises:
+        ValueError: If a tensor uses a dtype the estimate does not know.
+    """
     matrix = other = packed = fp8_matrix = embedding = 0
     prequantized = False
     for name, spec in header.items():
@@ -206,7 +240,7 @@ def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: t
             continue
         dtype = str(spec["dtype"])
         if dtype not in _DTYPE_BYTES:
-            raise ValueError(f"Unsupported safetensors dtype {dtype!r} in {path}")
+            raise ValueError(f"Unsupported safetensors dtype {dtype!r} in {label}")
         shape = [int(dim) for dim in spec["shape"]]
         elements = math.prod(shape)
         if dtype.startswith("F8_") and len(shape) == 2:
@@ -223,72 +257,24 @@ def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: t
     return WeightTotals(matrix, other, packed, prequantized, fp8_matrix, embedding)
 
 
-def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ...] = (None,)) -> dict[int | None, int] | None:
-    """Estimate resident memory for an mflux image model loaded in bfloat16, at each quantize level.
-
-    Mirrors ``MfluxBackend.load_model``: floating-point weights load as bfloat16, the VAE is upcast to
-    float32, FP8 and pre-quantized weights stay as stored, and quantizing packs 2-D weights. Only the
-    files the loader reads count (see :func:`model_weight_files`), minus the text encoder's unused LM head,
-    and headers are read once for all levels. Ideogram 4 adds its measured working memory at 1024x1024, whose VAE
-    decode peaks far above the weights; other families add the fixed margin. The estimate covers the weights
-    resident at load, including the text encoder; it does not count the per-prompt encodings kept for the job.
-    MOSS-Image loads its text encoder and its denoiser one after the other, so its peak is the larger stage (see
-    :func:`_mlx_moss_estimate`).
+def mlx_image_bytes(components: dict[str, WeightTotals], quantize: int | None, *, family: str | None, lora_bytes: int = 0) -> int:
+    """Estimate resident memory of an mflux image model from its component totals, at one quantize level.
 
     Args:
-        model_dir: Directory holding the model's safetensors files.
-        quantize_levels: Levels to estimate: ``None`` for unquantized, or 4 / 8 bits.
+        components: Each component's totals, as :func:`_image_components` reads them (MOSS-Image's text encoder without its vision tower).
+        quantize: ``None`` for unquantized, or 4 / 8 bits.
+        family: The image family; ``"moss"`` loads its stages one after the other, ``"ideogram4"`` adds its measured working memory and ``"krea2"`` keeps its text encoder in bfloat16.
+        lora_bytes: MOSS-Image's Turbo LoRA bytes plus any user LoRAs, which mflux keeps as separate layers; ignored for other families, whose LoRAs mflux merges into the weights.
 
     Returns:
-        Estimated peak bytes per level, or ``None`` when weights are missing or unreadable.
+        Estimated peak bytes, for 1 MP and no references.
     """
-    if is_moss_model(model_dir):
-        moss_components = _image_components(model_dir, _MOSS_MLX_TEXT_ENCODER_SKIPPED_PREFIXES)
-        if moss_components is None:
-            return None
-        return {level: _mlx_moss_estimate(moss_components, level, _turbo_lora_bytes(model_dir)) for level in quantize_levels}
-    components = _image_components(model_dir)
-    if components is None:
-        return None
+    if family == "moss":
+        return _mlx_moss_estimate(components, quantize, lora_bytes)
     # mflux keeps Krea 2's text encoder in bfloat16 at every quantize level.
-    quantize_text_encoder = not is_krea2_model(model_dir)
-    working = _IDEOGRAM4_MLX_WORKING_BYTES if is_ideogram4_model(model_dir) else _IMAGE_WORKING_BYTES
-    return {
-        level: int(sum(_image_component_bytes(name, totals, _component_quantize(name, level, quantize_text_encoder)) for name, totals in components.items())) + working for level in quantize_levels
-    }
-
-
-def estimate_cuda_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ...] = (None,)) -> dict[int | None, CudaMemoryEstimate] | None:
-    """Estimate GPU and system memory for a diffusers image model on CUDA, at each quantize level.
-
-    Mirrors ``DiffusersBackend.load_model``: unquantized (bfloat16) and q8 (FP8 weight storage) keep the
-    transformer and text encoder in system memory and stream them to the GPU; q4 holds them in NF4 on the GPU,
-    one at a time for Krea 2 (whose NF4 pair does not fit a 10-12 GB card together). The VAE stays on the GPU.
-    Ideogram 4 Instant streams its transformer at every level and keeps its pre-quantized NF4 text encoder on the
-    GPU only while it encodes (see :func:`_cuda_ideogram4_estimate`). MOSS-Image keeps its NF4 text encoder on the
-    GPU only while it encodes and holds its transformer resident at q4 (away for the encoder and the decode) or
-    streams it otherwise (see
-    :func:`_cuda_moss_estimate`). A stored quant loads at its own level whatever
-    level is asked for.
-
-    Args:
-        model_dir: Directory holding the model's safetensors files.
-        quantize_levels: Levels to estimate: ``None`` for unquantized, or 4 / 8 bits.
-
-    Returns:
-        Estimated peak memory per level, or ``None`` when weights are missing or unreadable.
-    """
-    components = _image_components(model_dir)
-    if components is None:
-        return None
-    stored_bits = stored_quant_bits(model_dir)
-    if is_ideogram4_model(model_dir):
-        return {level: _cuda_ideogram4_estimate(components, stored_bits or level) for level in quantize_levels}
-    if is_moss_model(model_dir):
-        return {level: _cuda_moss_estimate(components, stored_bits or level, _turbo_lora_bytes(model_dir)) for level in quantize_levels}
-    # Mirrors _Q4_CPU_OFFLOAD_FAMILIES in backends/cuda/image/backend.py.
-    text_encoder_offloaded = is_krea2_model(model_dir)
-    return {level: _cuda_level_estimate(components, stored_bits or level, text_encoder_offloaded) for level in quantize_levels}
+    quantize_text_encoder = family != "krea2"
+    working = _IDEOGRAM4_MLX_WORKING_BYTES if family == "ideogram4" else IMAGE_WORKING_BYTES
+    return int(sum(image_component_bytes(name, totals, _component_quantize(name, quantize, quantize_text_encoder)) for name, totals in components.items())) + working
 
 
 def ltx_video_tokens(width: int, height: int, frames: int) -> int:
@@ -315,52 +301,33 @@ def ltx_decode_budget_bytes(unified_bytes: int | None, env: Mapping[str, str]) -
     return unified_bytes // 2 if unified_bytes else None
 
 
-def estimate_ltx_mlx_clip_memory(
-    model_dir: Path,
-    text_encoder_dir: Path | None,
-    *,
-    width: int,
-    height: int,
-    frames: int,
-    low_memory: bool,
-    upscale: bool = False,
-    unified_bytes: int | None = None,
-    env: Mapping[str, str] | None = None,
-) -> int | None:
-    """Estimate peak memory for generating a clip with ltx-pipelines-mlx.
+@dataclass(frozen=True)
+class LtxMlxWeights:
+    """The bfloat16 bytes of the components of an LTX MLX pack, as the memory estimate reads them from the safetensors headers."""
 
-    The peak is the largest stage. Weights are read from safetensors headers (bfloat16 bytes of the text encoder *G*,
-    connector *C*, transformer *T*, spatial upsampler *U* and decoders *D*: video VAE, audio VAE, vocoder). *G* is the pack's bundled text encoder (LTX-2.5) when it has
-    one, else the Gemma 3 in *text_encoder_dir*; *D* uses the video decoder the pipeline picks for the pack. The
-    working memory of each stage is a measured curve (the ``_LTX_*_GIB`` constants) over the video tokens of the
-    final output size, which is stage 2 when upscaling::
+    gemma: int  # the text encoder: the pack's bundled one, else the Gemma 3 repo
+    connector: int
+    transformer: int
+    decoders: int  # the video decoder the pipeline picks for the pack, the audio VAE and the vocoder
+    upsampler: int | None = None  # the spatial upsampler, ``None`` when the clip is not upscaled or the pack has none
+    bundled_encoder: bool = False  # whether the pack carries its own text encoder (LTX-2.5's Gemma 4) rather than using the Gemma 3 repo
 
-        prompt   = G + C + prompt working memory
-        denoise  = T + denoise working memory(tokens)
-        decode   = min(decode budget + D, decode peak(tokens))   # the decode peak includes D
-        upsample = T + U + upsample working memory              # upscale only
 
-    With ``low_memory`` the stages run one after another and the peak is their maximum. Without it Gemma, the
-    connector, the transformer and the upsampler stay resident, so their weights add to the larger of the
-    denoise working memory and the decode peak less the weights it already counts. The decode budget is the VAE
-    tiler's (half of unified memory, or ``LTX2_VAE_DECODE_BUDGET_GB``); it limits activations, not weights.
+def ltx_mlx_weights(model_dir: Path, text_encoder_dir: Path | None, *, upscale: bool = True, file_bytes: Callable[[Path], int] | None = None) -> LtxMlxWeights | None:
+    """Return the bfloat16 bytes of the components of the LTX MLX pack in *model_dir*, read from the safetensors headers.
 
-    The working constants were fit on the q4 distilled model on a 32 GiB Mac. Macs with 24 GiB or less stream
-    the transformer, so the estimate is conservative there. It ignores memory used by other apps.
+    The text encoder *G* is the pack's bundled one (LTX-2.5) when it has one, else the Gemma 3 in *text_encoder_dir*; the
+    decoders *D* are the video decoder the pipeline picks for the pack, the audio VAE and the vocoder.
 
     Args:
         model_dir: The LTX MLX model directory.
-        text_encoder_dir: The Gemma 3 text-encoder directory; ``None`` is accepted for a pack with a bundled text encoder, which is read from *model_dir* instead.
-        width: Output width in pixels, as aligned for the job.
-        height: Output height in pixels, as aligned for the job.
-        frames: Output frame count, as aligned for the job.
-        low_memory: Whether the pipeline frees Gemma before loading the transformer.
-        upscale: Whether the clip is upscaled 2x. Without an upsampler file in *model_dir* the upsampler is left out.
-        unified_bytes: The machine's unified memory; without it the decode peak is not capped.
-        env: The environment to read the decode budget from; the process environment when omitted.
+        text_encoder_dir: The Gemma 3 text-encoder directory; ``None`` is accepted for a pack with a bundled text encoder.
+        upscale: Whether to include the spatial upsampler; without an upsampler file in *model_dir* it is left out either way.
+        file_bytes: Returns the bfloat16 bytes of one weight file; reads its safetensors header when omitted. A caller that
+            knows the sizes without the files (a folder of empty stand-ins named like the pack's files) passes its own.
 
     Returns:
-        Estimated peak bytes, or ``None`` when the layout is not LTX MLX, the pack has no bundled text encoder and *text_encoder_dir* is ``None``, or weights are unreadable.
+        The components' bytes, or ``None`` when the layout is not LTX MLX, the pack has no bundled text encoder and *text_encoder_dir* is ``None``, or weights are unreadable.
     """
     transformer_file = ltx_mlx_transformer_file(model_dir)
     if not is_ltx_mlx_layout(model_dir) or transformer_file is None:
@@ -372,119 +339,97 @@ def estimate_ltx_mlx_clip_memory(
     upsampler_file = ltx_mlx_upsampler_file(model_dir) if upscale else None
     video_decoder = ltx_mlx_video_decoder_file(model_dir)
     decoder_files = [*([video_decoder] if video_decoder is not None else []), *(model_dir / name for name in _LTX_MLX_AUDIO_DECODER_FILES)]
+    measure = file_bytes or _file_bfloat16_bytes
+
+    def total(paths: list[Path]) -> int:
+        return sum(measure(path) for path in paths if path.is_file())
+
     try:
-        gemma = _files_bfloat16_bytes(encoder_files) / GIB
-        connector = _files_bfloat16_bytes([model_dir / _LTX_MLX_CONNECTOR_FILE]) / GIB
-        transformer = _files_bfloat16_bytes([transformer_file]) / GIB
-        upsampler = _files_bfloat16_bytes([upsampler_file]) / GIB if upsampler_file is not None else 0.0
-        decoders = _files_bfloat16_bytes(decoder_files) / GIB
+        return LtxMlxWeights(
+            gemma=total(encoder_files),
+            connector=total([model_dir / _LTX_MLX_CONNECTOR_FILE]),
+            transformer=total([transformer_file]),
+            decoders=total(decoder_files),
+            upsampler=total([upsampler_file]) if upsampler_file is not None else None,
+            bundled_encoder=bundled_encoder is not None,
+        )
     except OSError, ValueError, KeyError, TypeError:
         return None
-    tokens = ltx_video_tokens(width, height, frames)
-    denoise_work = max(_LTX_DENOISE_FLOOR_GIB, _LTX_DENOISE_AT_REFERENCE_GIB + _LTX_DENOISE_GIB_PER_TOKEN * (tokens - _LTX_REFERENCE_TOKENS))
-    decode = _LTX_DECODE_BASE_GIB + _LTX_DECODE_GIB_PER_TOKEN * max(0, tokens - _LTX_DECODE_KNEE_TOKENS)
-    decode_budget = ltx_decode_budget_bytes(unified_bytes, os.environ if env is None else env)
-    if decode_budget is not None:
-        decode = min(decode, decode_budget / GIB + decoders)
-    if low_memory:
-        stages = [gemma + connector + _LTX_PROMPT_WORKING_GIB, transformer + denoise_work, decode]
-        if upsampler_file is not None:
-            stages.append(transformer + upsampler + _LTX_UPSAMPLE_WORKING_GIB)
-        peak = max(stages)
-    else:
-        peak = gemma + connector + transformer + upsampler + max(denoise_work, decode - _LTX_DECODE_RELEASED_GIB)
-    return int(peak * GIB)
 
 
-def clip_memory_fit(
-    resolved_model: str,
+def _streams(low_memory: bool, unified_bytes: int | None) -> bool:
+    """Return whether the Mac backend streams the transformer from disk, by the backend's own rule."""
+    from zvisiongenerator.backends.mac.video import _use_low_ram_streaming  # lazy: the backend package imports this module
+
+    return _use_low_ram_streaming(low_memory, unified_bytes)
+
+
+def ltx_mlx_clip_bytes(
+    weights: LtxMlxWeights,
     *,
     width: int,
     height: int,
     frames: int,
     low_memory: bool,
-    upscale: bool = False,
-    budget: MemoryBudget | None,
-    find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
+    unified_bytes: int | None = None,
     env: Mapping[str, str] | None = None,
-    model_name: str | None = None,
-    family: str = "ltx",
+    lora_bytes: int = 0,
     mode: str = "t2v",
-    forwards: int = 8,
-    loras_bytes: int = 0,
-    review: bool = False,
-    references: int = 0,
-) -> dict[str, Any] | None:
-    """Check a clip against the memory budget; callers warn on ``tight`` or ``too_large`` and never block.
+) -> int:
+    """Estimate peak memory of an LTX MLX clip from its component *weights* (as :func:`ltx_mlx_weights` reads them).
+
+    The peak is the largest stage. The weights are the bfloat16 bytes of the text encoder *G*, connector *C*, transformer *T*,
+    spatial upsampler *U* and decoders *D* (video VAE, audio VAE, vocoder). The working memory of each stage is a curve
+    (the ``_LTX_*_GIB`` constants) over the video tokens of the final output size, which is stage 2 when upscaling::
+
+        prompt   = G + C + prompt working memory                # the pack's own: Gemma 3, or LTX-2.5's bundled Gemma 4
+        denoise  = T + denoise working memory(tokens)
+        decode   = min(decode budget + D, decode peak(tokens))   # the decode peak includes D
+        upsample = T + U + upsample working memory              # upscale only
+
+    With ``low_memory`` the stages run one after another and the peak is their maximum. Without it Gemma, the
+    connector, the transformer and the upsampler stay resident, so their weights add to the larger of the
+    denoise working memory and the decode peak less the weights it already counts. The decode budget is the VAE
+    tiler's (half of unified memory, or ``LTX2_VAE_DECODE_BUDGET_GB``); it limits activations, not weights.
+
+    An image-to-video clip and an Extend add their conditioning's encode to the peak (``mode`` ``"i2v"`` and ``"extend"``). The constants were
+    fit to the process's peak footprint on a 32 GiB Mac. Macs with 24 GiB or less stream the transformer when ``low_memory`` is on, and there the
+    peak is a constant per pack (``_LTX_STREAMING_GIB``, ``_LTX_STREAMING_BUNDLED_GIB``), whatever the clip. It ignores memory used by other apps.
 
     Args:
-        resolved_model: The resolved model reference (a local directory or a Hugging Face repo id).
+        weights: The pack's component bytes; a spatial upsampler stage counts only when ``weights.upsampler`` is set.
         width: Output width in pixels, as aligned for the job.
         height: Output height in pixels, as aligned for the job.
-        frames: Output frame count, as aligned for the job (an extension window carries its carried frames).
+        frames: Output frame count, as aligned for the job.
         low_memory: Whether the pipeline frees Gemma before loading the transformer.
-        upscale: Whether the clip is upscaled 2x (*width* and *height* are the enlarged size).
-        budget: The accelerator's memory budget, or ``None`` when unknown.
-        find_local_dir: Locates a downloaded model directory.
+        unified_bytes: The machine's unified memory; without it the decode peak is not capped.
         env: The environment to read the decode budget from; the process environment when omitted.
-        model_name: The name the model was picked by (``ltx-4``), which sets the quantize level on a discrete GPU.
-        family: The model's video family; LTX and H3 have an estimate.
-        mode: H3 only: ``"t2v"``, ``"i2v"`` or ``"extend"``; the image modes cost more memory and time (a keyframe, or an extension's tail).
-        forwards: H3 only: the transformer forwards of the run, which set the estimated time.
-        loras_bytes: H3 on a discrete GPU only: the total size of the user LoRA files.
-        review: H3 on a discrete GPU only: whether the upscale pauses to review the half-size render, which makes it load the transformer twice.
-        references: H3 only: how many reference images the clip holds. Each adds its rows to the sequence and loads the vision tower; their
-            size is assumed to share the canvas's aspect ratio (see ``h3_nominal_references``).
+        mode: ``"t2v"``, ``"i2v"`` (the clip starts from a picture) or ``"extend"`` (it continues a source video).
+        lora_bytes: The total size of the user LoRA files. The backend attaches them unfused (``_DEFAULT_LORA_MODE`` in ``backends/mac/video.py``), and
+            ltx_core_mlx's ``attach_loras`` adds each file's ``lora_a`` and ``lora_b`` to the transformer's own layers, so they count with the transformer.
 
     Returns:
-        ``{"status", "required_gb", "budget_gb"}`` (H3 adds ``"expected_seconds"``, an estimate in seconds), or ``None`` when no memory budget is known, the family has no estimate or the model is not a
-        downloaded LTX model with its text encoder (bundled in the pack, or the Gemma 3 repo). On a discrete GPU (CUDA) it adds ``"kind": "discrete"`` and
-        ``"resource"`` (``"gpu"`` or ``"system"``): the memory the numbers are about, whichever is closer to its limit.
+        Estimated peak bytes.
     """
-    if budget is None or not budget.gpu_bytes:
-        return None
-    if family == "h3":
-        return _h3_clip_fit(width, height, frames, budget, mode=mode, forwards=forwards, upscale=upscale, loras_bytes=loras_bytes, review=review, references=references)
-    if family != "ltx":
-        return None
-    if budget.system_bytes is not None:
-        return _cuda_clip_fit(
-            resolved_model,
-            width=width,
-            height=height,
-            frames=frames,
-            low_memory=low_memory,
-            upscale=upscale,
-            budget=budget,
-            find_local_dir=find_local_dir,
-            model_name=model_name,
-        )
-    model_dir = find_local_dir(resolved_model)
-    if model_dir is None or not is_ltx_mlx_layout(model_dir):
-        return None
-    text_encoder_dir = None
-    if ltx_mlx_bundled_text_encoder(model_dir) is None:
-        from zvisiongenerator.utils.ltx_facts import ltx_gemma_repo_id
-
-        text_encoder_dir = find_local_dir(ltx_gemma_repo_id())
-        if text_encoder_dir is None:
-            return None
-    required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=low_memory, upscale=upscale, unified_bytes=budget.unified_bytes, env=env)
-    if required is None:
-        return None
-    return {"status": classify_memory_fit(required, budget.gpu_bytes), "required_gb": round(required / GIB, 1), "budget_gb": round(budget.gpu_bytes / GIB, 1)}
-
-
-def _h3_clip_fit(width: int, height: int, frames: int, budget: MemoryBudget, *, mode: str, forwards: int, upscale: bool, loras_bytes: int, review: bool, references: int) -> dict[str, Any] | None:
-    """Check an H3 clip against the budget, or return ``None`` when it has no estimate (a canvas or length H3 cannot take)."""
-    from zvisiongenerator.utils.h3_memory import h3_clip_fit, h3_mlx_clip_fit
-
-    try:
-        if budget.system_bytes is None:
-            return h3_mlx_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode, references=references)
-        return h3_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode, loras_bytes=loras_bytes, upscale=upscale, review=review, references=references)
-    except ValueError:
-        return None
+    if _streams(low_memory, unified_bytes):
+        return int((_LTX_STREAMING_BUNDLED_GIB if weights.bundled_encoder else _LTX_STREAMING_GIB) * GIB)
+    gemma, connector, transformer, decoders = weights.gemma / GIB, weights.connector / GIB, (weights.transformer + lora_bytes) / GIB, weights.decoders / GIB
+    upsampler = (weights.upsampler or 0) / GIB
+    tokens = ltx_video_tokens(width, height, frames)
+    denoise_work = _LTX_DENOISE_AT_REFERENCE_GIB + _LTX_DENOISE_GIB_PER_TOKEN * (tokens - _LTX_REFERENCE_TOKENS)
+    prompt_work = _LTX_PROMPT_WORKING_BUNDLED_GIB if weights.bundled_encoder else _LTX_PROMPT_WORKING_GIB
+    decode = _LTX_DECODE_BASE_GIB + _LTX_DECODE_GIB_PER_TOKEN * max(0, tokens - _LTX_DECODE_KNEE_TOKENS)
+    decode_budget = ltx_decode_budget_bytes(unified_bytes, os.environ if env is None else env)
+    if decode_budget is not None:
+        decode = min(decode, decode_budget / GIB + decoders)
+    if low_memory:
+        stages = [gemma + connector + prompt_work, transformer + denoise_work, decode]
+        if weights.upsampler is not None:
+            stages.append(transformer + upsampler + _LTX_UPSAMPLE_WORKING_GIB)
+        peak = max(stages)
+    else:
+        peak = gemma + connector + transformer + upsampler + max(denoise_work, decode - _LTX_DECODE_RELEASED_GIB)
+    return int((peak + _LTX_MODE_GIB.get(mode, 0.0)) * GIB)
 
 
 def ltx_cuda_system_memory(
@@ -511,59 +456,6 @@ def ltx_cuda_system_memory(
     return estimate_ltx_system_memory(resolved_model, quantize, find_local_dir=find_local_dir, model_name=model_name)
 
 
-def _cuda_clip_fit(
-    resolved_model: str,
-    *,
-    width: int,
-    height: int,
-    frames: int,
-    low_memory: bool,
-    upscale: bool,
-    budget: MemoryBudget,
-    find_local_dir: Callable[[str], Path | None],
-    model_name: str | None,
-) -> dict[str, Any] | None:
-    """Check an LTX clip against a discrete GPU's budget, or return ``None`` when the model's files or level are unknown."""
-    system = ltx_cuda_system_memory(resolved_model, model_name, find_local_dir)
-    if system is None:
-        return None
-    estimate = estimate_ltx_cuda_clip_memory(system, width=width, height=height, frames=frames, low_memory=low_memory, upscale=upscale)
-    return discrete_clip_fit(estimate, budget)
-
-
-def discrete_clip_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget) -> dict[str, Any]:
-    """Summarise a video clip's CUDA *estimate* against a discrete GPU's *budget*: the status and the memory closer to its limit.
-
-    Weights beyond system memory are ``too_large``, like the LTX backend refuses them (:func:`classify_ltx_cuda_memory_fit`).
-
-    Returns:
-        ``{"status", "required_gb", "budget_gb", "kind": "discrete", "resource"}``, with ``resource`` ``"gpu"`` or ``"system"``.
-    """
-    # Report the memory that is closer to its limit, so the note's numbers explain its status.
-    system_budget = budget.system_bytes or 0
-    resource, required, limit = "gpu", estimate.gpu_bytes, budget.gpu_bytes
-    if system_budget and estimate.system_bytes / (system_budget * _CUDA_SYSTEM_FITS_RATIO) > estimate.gpu_bytes / (budget.gpu_bytes * _CUDA_GPU_FITS_RATIO):
-        resource, required, limit = "system", estimate.system_bytes, system_budget
-    status = classify_ltx_cuda_memory_fit(estimate, budget)
-    # A clip out of GPU memory is about the GPU, even when system memory is fuller.
-    if status == "too_large" and estimate.gpu_bytes > budget.gpu_bytes:
-        resource, required, limit = "gpu", estimate.gpu_bytes, budget.gpu_bytes
-    return {"status": status, "required_gb": round(required / GIB, 1), "budget_gb": round(limit / GIB, 1), "kind": "discrete", "resource": resource}
-
-
-def classify_memory_fit(required_bytes: int, budget_bytes: int) -> str:
-    """Classify an estimate against the memory budget as ``fits``, ``tight``, or ``too_large``.
-
-    ``fits`` stays within 1.1x Apple's recommended working set; ``tight`` stays within MLX's default memory
-    limit (1.5x it), where the model runs but macOS compresses and swaps other memory; beyond is ``too_large``.
-    """
-    if required_bytes <= budget_bytes * _FITS_RATIO:
-        return "fits"
-    if required_bytes <= budget_bytes * _TIGHT_LIMIT_RATIO:
-        return "tight"
-    return "too_large"
-
-
 @dataclass(frozen=True)
 class LtxCudaMemoryEstimate:
     """Estimated system memory of LTX on the diffusers/CUDA backend, in bytes, for its two ways of holding the model."""
@@ -576,12 +468,12 @@ class LtxCudaMemoryEstimate:
     @property
     def taking_turns(self) -> int:
         """The peak when the transformer is released while the text encoder runs."""
-        return max(self.text_encoder_bytes, self.transformer_bytes) + self.resident_bytes + _LTX_CUDA_RUNTIME_BYTES
+        return max(self.text_encoder_bytes, self.transformer_bytes) + self.resident_bytes + _LTX_CUDA_RUNTIME_BYTES[self.quantize]
 
     @property
     def together(self) -> int:
         """The peak when the transformer stays loaded while the text encoder runs."""
-        return self.text_encoder_bytes + self.transformer_bytes + self.resident_bytes + _LTX_CUDA_RUNTIME_BYTES
+        return self.text_encoder_bytes + self.transformer_bytes + self.resident_bytes + _LTX_CUDA_RUNTIME_BYTES[self.quantize]
 
 
 def estimate_ltx_cuda_system_memory(*, block_matrices: int, transformer_rest: int, connectors: int, text_encoder: int, quantize: int) -> LtxCudaMemoryEstimate:
@@ -610,6 +502,7 @@ def estimate_ltx_cuda_clip_memory(
     frames: int,
     low_memory: bool,
     upscale: bool = False,
+    lora_bytes: int = 0,
 ) -> CudaMemoryEstimate:
     """Estimate the peak GPU and system memory of one LTX clip on the diffusers/CUDA backend.
 
@@ -624,69 +517,19 @@ def estimate_ltx_cuda_clip_memory(
         frames: Output frame count.
         low_memory: Whether the transformer streams to the GPU instead of staying there.
         upscale: Whether the clip is upscaled 2x.
+        lora_bytes: The total size of the user LoRA files. The backend loads them as peft adapters (``_apply_loras`` in ``backends/cuda/video/backend.py``)
+            on the transformer, so they sit wherever its layers do: in system memory with it, and on the GPU too when the transformer stays there (no
+            low-memory mode). Streamed, each block carries its own adapters to the GPU, a share too small to count.
     """
+    system = replace(system, transformer_bytes=system.transformer_bytes + lora_bytes)
     tokens = ltx_video_tokens(width, height, frames)
     plateau = _LTX_CUDA_GPU_PLATEAU_BYTES[system.quantize]
     gpu = plateau + max(tokens - _LTX_CUDA_GPU_KNEE_TOKENS[system.quantize], 0) * _LTX_CUDA_GPU_BYTES_PER_TOKEN
     if upscale:
         gpu = max(gpu, plateau + _LTX_CUDA_UPSCALE_GPU_BYTES)
-    gpu += _LTX_CUDA_GPU_HEADROOM_BYTES
     if not low_memory:
         gpu += system.transformer_bytes
     return CudaMemoryEstimate(gpu_bytes=int(gpu), system_bytes=system.taking_turns + (_LTX_CUDA_UPSCALE_SYSTEM_BYTES if upscale else 0))
-
-
-def classify_cuda_memory_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget) -> str:
-    """Classify a CUDA estimate as ``fits``, ``tight`` (runs, but slowly), or ``too_large`` (out of GPU memory).
-
-    ``too_large`` needs more GPU memory than the card has. ``tight`` needs over 90% of it, or weights over 80%
-    of system memory, so part of them streams from disk; otherwise it ``fits``.
-    """
-    if estimate.gpu_bytes > budget.gpu_bytes:
-        return "too_large"
-    system_limit = (budget.system_bytes or 0) * _CUDA_SYSTEM_FITS_RATIO
-    if estimate.gpu_bytes > budget.gpu_bytes * _CUDA_GPU_FITS_RATIO or estimate.system_bytes > system_limit:
-        return "tight"
-    return "fits"
-
-
-def classify_ltx_cuda_memory_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget) -> str:
-    """Classify an LTX estimate on CUDA like :func:`classify_cuda_memory_fit`, but weights beyond system memory are ``too_large``.
-
-    The LTX backend refuses to load weights that need more than the machine's system memory, unlike an image model.
-    """
-    if budget.system_bytes and estimate.system_bytes > budget.system_bytes:
-        return "too_large"
-    return classify_cuda_memory_fit(estimate, budget)
-
-
-def _cuda_level_estimate(components: dict[str, WeightTotals], quantize: int | None, text_encoder_offloaded: bool) -> CudaMemoryEstimate:
-    vae = components["vae"].bfloat16_bytes if "vae" in components else 0
-    unquantized = sum(totals.bfloat16_bytes for name, totals in components.items() if name not in ("vae", *_CUDA_QUANTIZED_COMPONENTS))
-    if quantize == 4:
-        nf4 = {name: _cuda_component_bytes(components[name], _NF4_BYTES_PER_WEIGHT) for name in _CUDA_QUANTIZED_COMPONENTS if name in components}
-        total = sum(nf4.values())
-        on_gpu = max(nf4.values(), default=0) if text_encoder_offloaded else total
-        return CudaMemoryEstimate(int(on_gpu + vae + _CUDA_RESIDENT_WORKING_BYTES), int(total - on_gpu + unquantized + _CUDA_SYSTEM_WORKING_BYTES))
-    bytes_per_weight = 1 if quantize == 8 else 2
-    streamed = sum(_cuda_component_bytes(components[name], bytes_per_weight) for name in _CUDA_QUANTIZED_COMPONENTS if name in components)
-    return CudaMemoryEstimate(vae + _CUDA_STREAMED_GPU_BYTES, int(streamed + unquantized + _CUDA_SYSTEM_WORKING_BYTES))
-
-
-def _cuda_ideogram4_estimate(components: dict[str, WeightTotals], quantize: int | None) -> CudaMemoryEstimate:
-    """Estimate Ideogram 4 Instant on CUDA, mirroring ``backends/cuda/image/ideogram4._place``.
-
-    The transformer stays in system memory at every level (NF4, FP8 or bfloat16) and streams to the GPU block by
-    block. The text encoder is stored NF4 and is counted as stored; it is on the GPU only while it encodes the
-    prompt, before the transformer runs, so the GPU holds the larger of the two phases plus the VAE.
-    """
-    vae = components["vae"].bfloat16_bytes if "vae" in components else 0
-    text_encoder = components["text_encoder"].bfloat16_bytes if "text_encoder" in components else 0
-    rest = sum(totals.bfloat16_bytes for name, totals in components.items() if name not in ("vae", "text_encoder", "transformer"))
-    bytes_per_weight = {4: _NF4_BYTES_PER_WEIGHT, 8: 1}.get(quantize, 2)
-    transformer = _cuda_component_bytes(components["transformer"], bytes_per_weight) if "transformer" in components else 0
-    gpu = max(text_encoder + _CUDA_RESIDENT_WORKING_BYTES, _CUDA_STREAMED_GPU_BYTES) + vae
-    return CudaMemoryEstimate(int(gpu), int(transformer + text_encoder + rest + _CUDA_SYSTEM_WORKING_BYTES))
 
 
 def _mlx_moss_estimate(components: dict[str, WeightTotals], quantize: int | None, lora_bytes: int) -> int:
@@ -696,37 +539,40 @@ def _mlx_moss_estimate(components: dict[str, WeightTotals], quantize: int | None
     the float32 VAE and the LoRAs, which mflux keeps as separate layers in the file's dtype (the Turbo LoRA is
     float32, so its file size is its footprint).
     """
-    text_encoder = _image_component_bytes("text_encoder", components["text_encoder"], quantize) if "text_encoder" in components else 0
-    denoiser = sum(_image_component_bytes(name, totals, quantize) for name, totals in components.items() if name != "text_encoder") + lora_bytes
-    return int(max(text_encoder + _IMAGE_WORKING_BYTES, denoiser + _MOSS_MLX_DENOISE_WORKING_BYTES))
+    text_encoder = image_component_bytes("text_encoder", components["text_encoder"], quantize) if "text_encoder" in components else 0
+    denoiser = sum(image_component_bytes(name, totals, quantize) for name, totals in components.items() if name != "text_encoder") + lora_bytes
+    return int(max(text_encoder + _MOSS_MLX_TEXT_ENCODER_WORKING_BYTES, denoiser + _MOSS_MLX_DENOISE_WORKING_BYTES))
 
 
-def _cuda_moss_estimate(components: dict[str, WeightTotals], quantize: int | None, lora_bytes: int) -> CudaMemoryEstimate:
-    """Estimate MOSS-Image on CUDA, mirroring its placement.
+def _nf4_component_bytes(name: str, totals: WeightTotals) -> float:
+    """Return a component's resident bytes under bitsandbytes NF4: 2-D weights in NF4, other floats in bfloat16.
 
-    The text encoder is on the GPU only while it encodes. Its NF4 weights cover the Linear layers; the token
-    embedding table stays in bfloat16, because bitsandbytes quantizes only ``nn.Linear``. The VAE (FP32) and the Turbo
-    LoRA, when the model has one, stay on the GPU throughout. At q4 the transformer is resident on the GPU for the
-    denoising and steps aside to system memory for the encoder turn and the VAE decode. At q8 and unquantized it
-    streams from system memory through a fixed GPU window. The GPU peak is the largest phase above the resident VAE and
-    LoRA: the encoder turn, the denoising, or the VAE decode.
+    A text encoder's token-embedding table stays in bfloat16, because bitsandbytes quantizes only ``nn.Linear``.
     """
-    text_encoder = _moss_text_encoder_bytes(components["text_encoder"]) if "text_encoder" in components else 0
-    transformer = _cuda_component_bytes(components["transformer"], {4: _NF4_BYTES_PER_WEIGHT, 8: 1}.get(quantize, 2)) if "transformer" in components else 0
-    vae = _image_component_bytes("vae", components["vae"], None) if "vae" in components else 0
-    rest = sum(totals.bfloat16_bytes for name, totals in components.items() if name not in ("vae", *_CUDA_QUANTIZED_COMPONENTS))
-    denoising = transformer + _CUDA_RESIDENT_WORKING_BYTES if quantize == 4 else _CUDA_STREAMED_GPU_BYTES
-    gpu = vae + lora_bytes + max(text_encoder + _CUDA_RESIDENT_WORKING_BYTES, denoising, _MOSS_CUDA_WORKING_BYTES)
-    system = text_encoder + transformer + rest + _MOSS_CUDA_SYSTEM_WORKING_BYTES.get(quantize, _MOSS_CUDA_SYSTEM_WORKING_BYTES[None])
-    return CudaMemoryEstimate(int(gpu), int(system))
+    embedding = totals.embedding_elements * (2 - _NF4_BYTES_PER_WEIGHT) if name == "text_encoder" else 0
+    return _cuda_component_bytes(totals, _NF4_BYTES_PER_WEIGHT) + embedding
 
 
-def _moss_text_encoder_bytes(totals: WeightTotals) -> float:
-    """Return the NF4 text encoder's resident bytes: Linear weights in NF4, the embedding table in bfloat16."""
-    return _cuda_component_bytes(totals, _NF4_BYTES_PER_WEIGHT) + totals.embedding_elements * (2 - _NF4_BYTES_PER_WEIGHT)
+def level_component_bytes(name: str, totals: WeightTotals, level: int | None) -> float:
+    """Return a CUDA image component's resident bytes at quantize *level*: NF4 (4), FP8 (8) or bfloat16 (``None``).
+
+    The text encoder's token-embedding table stays in bfloat16 at both quantized levels: bitsandbytes quantizes only
+    ``nn.Linear`` and :func:`~zvisiongenerator.backends.cuda.quant.cast_to_fp8` skips modules named ``embed``.
+
+    Raises:
+        ValueError: If *level* is not ``None``, 4 or 8.
+    """
+    if level is None:
+        return _cuda_component_bytes(totals, 2)
+    if level == 4:
+        return _nf4_component_bytes(name, totals)
+    if level == 8:
+        embedding = totals.embedding_elements if name == "text_encoder" else 0  # one extra byte each over FP8's one
+        return _cuda_component_bytes(totals, 1) + embedding
+    raise ValueError(f"Unsupported quantize level {level!r}; expected None, 4 or 8.")
 
 
-def _turbo_lora_bytes(model_dir: Path) -> int:
+def turbo_lora_bytes(model_dir: Path) -> int:
     """Return the bytes the Turbo LoRA occupies in memory; zero when the model has none."""
     lora = turbo_lora_file(moss_base_dir(model_dir))
     if lora is None:
@@ -738,6 +584,30 @@ def _turbo_lora_bytes(model_dir: Path) -> int:
 def _cuda_component_bytes(totals: WeightTotals, bytes_per_weight: float) -> float:
     """Return a component's bytes with its 2-D weights at *bytes_per_weight* and other floats in bfloat16."""
     return totals.float_matrix_elements * bytes_per_weight + totals.float_other_elements * 2 + totals.fp8_matrix_elements + totals.packed_bytes
+
+
+def read_image_components(model_dir: Path, *, unified: bool) -> dict[str, WeightTotals] | None:
+    """Return each component's weight totals of the image model in *model_dir*, or ``None`` when its weights are missing or unreadable.
+
+    Args:
+        model_dir: The model directory.
+        unified: Whether the totals are for a unified-memory (MLX) backend, which leaves MOSS-Image's vision tower out of its text encoder.
+    """
+    skipped = _MOSS_MLX_TEXT_ENCODER_SKIPPED_PREFIXES if unified and is_moss_model(model_dir) else _TEXT_ENCODER_SKIPPED_PREFIXES
+    return _image_components(model_dir, skipped)
+
+
+def image_component_totals(component: str, header: Mapping[str, Mapping[str, Any]], *, unified: bool) -> WeightTotals:
+    """Summarise the *header* of a file of the image model's *component* the way :func:`read_image_components` does: the text encoder without its unused tensors.
+
+    Args:
+        component: The component's folder name, such as ``"text_encoder"``.
+        header: The file's tensors (see :func:`totals_from_header`).
+        unified: Whether the totals are for MOSS-Image on a unified-memory (MLX) backend, which leaves its vision tower (``visual.``) out of the text encoder.
+    """
+    if component != "text_encoder":
+        return totals_from_header(header)
+    return totals_from_header(header, _MOSS_MLX_TEXT_ENCODER_SKIPPED_PREFIXES if unified else _TEXT_ENCODER_SKIPPED_PREFIXES)
 
 
 def _image_components(model_dir: Path, text_encoder_skipped: tuple[str, ...] = _TEXT_ENCODER_SKIPPED_PREFIXES) -> dict[str, WeightTotals] | None:
@@ -757,7 +627,7 @@ def _component_quantize(name: str, quantize: int | None, quantize_text_encoder: 
     return None if name == "text_encoder" and not quantize_text_encoder else quantize
 
 
-def _image_component_bytes(name: str, totals: WeightTotals, quantize: int | None) -> float:
+def image_component_bytes(name: str, totals: WeightTotals, quantize: int | None) -> float:
     if name == "vae":
         return (totals.float_matrix_elements + totals.float_other_elements) * 4 + totals.packed_bytes
     if quantize and not totals.prequantized:
@@ -766,6 +636,6 @@ def _image_component_bytes(name: str, totals: WeightTotals, quantize: int | None
     return totals.bfloat16_bytes
 
 
-def _files_bfloat16_bytes(paths: list[Path] | tuple[Path, ...]) -> int:
-    """Return bytes resident when *paths* load with floats as bfloat16 and packed weights as stored."""
-    return sum((read_safetensors_totals(path) for path in paths if path.is_file()), WeightTotals()).bfloat16_bytes
+def _file_bfloat16_bytes(path: Path) -> int:
+    """Return bytes resident when the weight file *path* loads with floats as bfloat16 and packed weights as stored."""
+    return read_safetensors_totals(path).bfloat16_bytes

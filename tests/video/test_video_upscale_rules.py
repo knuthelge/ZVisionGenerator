@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from zvisiongenerator.utils.config import load_config
+from zvisiongenerator.utils.memory_verdict import MemoryJob, MemoryWeights, judge
+from zvisiongenerator.utils.model_memory import GIB, LtxMlxWeights, MemoryBudget
 from zvisiongenerator.utils.upscale import SEEDVR2_MEMORY_WARNING, WARNING_MEMORY
-from zvisiongenerator.utils.video_upscale import DEFAULT_LTX_UPSCALE_STEPS, ltx_upscale_eta, ltx_upscale_problem, ltx_upscale_prompt, ltx_upscale_steps, ltx_video_option, upscale_progress_units
+from zvisiongenerator.utils.video_upscale import (
+    DEFAULT_LTX_UPSCALE_STEPS,
+    ltx_upscale_eta,
+    ltx_upscale_problem,
+    ltx_upscale_prompt,
+    ltx_upscale_steps,
+    ltx_upscale_verdict,
+    ltx_video_option,
+    upscale_progress_units,
+)
+from zvisiongenerator.utils.weight_totals import ResolvedWeights
 
 
 @pytest.mark.parametrize(("width", "height", "frames"), [(768, 448, 121), (1024, 576, 249), (32, 32, 9)])
@@ -67,34 +81,67 @@ def test_steps_outside_one_to_three_are_refused(steps):
         ltx_upscale_steps(_config(steps))
 
 
-def _option(monkeypatch, fit, *, frame_count=121, budget="budget"):
+def _option(monkeypatch, status, *, frame_count=121, budget="budget"):
     calls = []
-    monkeypatch.setattr("zvisiongenerator.utils.model_memory.clip_memory_fit", lambda *args, **kwargs: calls.append((args, kwargs)) or fit)
+    monkeypatch.setattr(
+        "zvisiongenerator.utils.video_upscale.ltx_upscale_verdict", lambda *args, **kwargs: calls.append((args, kwargs)) or (None if status is None else SimpleNamespace(status=status))
+    )
     option = ltx_video_option(768, 448, frame_count, model_ref="o/ltx@a", model_name="ltx-4", budget=budget)
     return option, calls
 
 
 def test_the_option_is_twice_the_size_and_checks_a_two_stage_render_at_that_size(monkeypatch):
-    option, calls = _option(monkeypatch, {"status": "fits"})
+    option, calls = _option(monkeypatch, "fits")
 
     assert (option.factor, option.width, option.height, option.allowed, option.warning) == (2, 1536, 896, True, None)
     ((args, kwargs),) = calls
-    assert args == ("o/ltx@a",)
-    assert (kwargs["width"], kwargs["height"], kwargs["frames"], kwargs["upscale"], kwargs["low_memory"], kwargs["model_name"]) == (1536, 896, 121, True, True, "ltx-4")
+    assert args == ("o/ltx@a", "ltx-4", 1536, 896, 121)
+    assert kwargs["budget"] == "budget"
+
+
+def test_a_clip_whose_weights_cannot_be_sized_has_no_warning(monkeypatch):
+    option, _ = _option(monkeypatch, None)
+
+    assert (option.allowed, option.warning) == (True, None)
 
 
 @pytest.mark.parametrize("status", ["tight", "too_large"])
 def test_the_option_is_warned_but_allowed_when_the_clip_may_not_fit(monkeypatch, status):
-    option, _ = _option(monkeypatch, {"status": status})
+    option, _ = _option(monkeypatch, status)
 
     assert (option.allowed, option.warning, option.warning_code) == (True, SEEDVR2_MEMORY_WARNING, WARNING_MEMORY)
 
 
-@pytest.mark.parametrize(("frame_count", "budget"), [(None, "budget"), (121, None)])
-def test_without_a_frame_count_or_a_budget_there_is_no_check(monkeypatch, frame_count, budget):
-    option, calls = _option(monkeypatch, {"status": "too_large"}, frame_count=frame_count, budget=budget)
+def test_without_a_frame_count_there_is_no_check(monkeypatch):
+    option, calls = _option(monkeypatch, "too_large", frame_count=None)
 
     assert (option.warning, calls) == (None, [])
+
+
+class TestLtxUpscaleVerdict:
+    _BUDGET = MemoryBudget(gpu_bytes=20 * GIB, unified_bytes=32 * GIB)
+    _PACK = LtxMlxWeights(gemma=5 * GIB, connector=GIB, transformer=10 * GIB, decoders=GIB, upsampler=GIB)
+
+    def _verdict(self, monkeypatch, budget=_BUDGET, resolved=ResolvedWeights(MemoryWeights(ltx_mlx=_PACK), family="ltx")):
+        monkeypatch.setattr("zvisiongenerator.utils.weight_totals.resolve_ltx_weights", lambda *_args, **_kwargs: resolved)
+        return ltx_upscale_verdict("o/ltx@a", "ltx-4", 1536, 896, 121, budget=budget)
+
+    def test_it_is_the_engines_verdict_of_a_two_stage_render_at_the_output_size(self, monkeypatch):
+        verdict = self._verdict(monkeypatch)
+
+        expected = judge(MemoryJob(media="video", family="ltx", width=1536, height=896, frames=121, low_memory=True, upscale=True), self._BUDGET, MemoryWeights(ltx_mlx=self._PACK))
+        assert verdict == expected
+
+    def test_a_smaller_machine_judges_the_same_clip_less_kindly(self, monkeypatch):
+        roomy = self._verdict(monkeypatch)
+        small = self._verdict(monkeypatch, budget=MemoryBudget(gpu_bytes=8 * GIB, unified_bytes=12 * GIB))
+
+        assert (roomy.status, small.status) == ("fits", "too_large")
+
+    def test_there_is_no_verdict_without_a_budget_or_weights(self, monkeypatch):
+        assert self._verdict(monkeypatch, budget=None) is None
+        assert self._verdict(monkeypatch, resolved=None) is None
+        assert self._verdict(monkeypatch, resolved=ResolvedWeights(MemoryWeights(), family="ltx")) is None
 
 
 @pytest.mark.parametrize("finished", [[], [18.0]])

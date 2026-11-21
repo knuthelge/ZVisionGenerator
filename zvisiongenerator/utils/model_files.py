@@ -6,7 +6,7 @@ import json
 import os
 import re
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Final
 
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
@@ -152,15 +152,29 @@ def model_weight_files(model_dir: Path, components: tuple[str, ...] | None = Non
         model_dir: The model directory.
         components: Its :func:`weighted_components`, when the caller already read them.
     """
-    files = _without_redundant_variants(sorted(path for path in model_dir.rglob("*.safetensors", recurse_symlinks=True) if path.is_file()))
+    files = {path.relative_to(model_dir).as_posix(): path for path in model_dir.rglob("*.safetensors", recurse_symlinks=True) if path.is_file()}
     components = weighted_components(model_dir) if components is None else components
+    return tuple(files[name] for name in weight_file_names(files, components, krea2=components is not None and is_krea2_model(model_dir)))
+
+
+def weight_file_names(names: Iterable[str], components: tuple[str, ...] | None, *, krea2: bool = False) -> list[str]:
+    """Return the safetensors files among *names* (paths relative to a model folder) that a loader reads, in sorted order.
+
+    The selection is :func:`model_weight_files`' on file names alone, so it also serves a repo listing that is not on disk.
+
+    Args:
+        names: Relative paths with ``/`` separators; those that are not ``.safetensors`` files are ignored.
+        components: The folder's :func:`weighted_components`, or ``None`` without a readable ``model_index.json`` (every file counts).
+        krea2: Whether the folder is a Krea 2 model, whose root-level files stand in for a transformer folder without weights.
+    """
+    files = _without_redundant_variants(sorted(PurePosixPath(name) for name in names if name.endswith(".safetensors")))
     if components is None:
-        return tuple(files)
+        return [path.as_posix() for path in files]
     allowed = set(components)
-    selected = [path for path in files if component_of(model_dir, path) in allowed]
-    if _TRANSFORMER_COMPONENT in allowed and not any(component_of(model_dir, path) == _TRANSFORMER_COMPONENT for path in selected) and is_krea2_model(model_dir):
-        selected += [path for path in files if component_of(model_dir, path) == ""]
-    return tuple(selected)
+    selected = [path for path in files if _component_name(path) in allowed]
+    if _TRANSFORMER_COMPONENT in allowed and not any(_component_name(path) == _TRANSFORMER_COMPONENT for path in selected) and krea2:
+        selected += [path for path in files if _component_name(path) == ""]
+    return [path.as_posix() for path in selected]
 
 
 def weighted_components(model_dir: Path) -> tuple[str, ...] | None:
@@ -205,12 +219,6 @@ def is_krea2_model(model_dir: Path) -> bool:
     """Return whether *model_dir*'s ``model_index.json`` declares a Krea 2 pipeline."""
     index = _read_model_index(model_dir)
     return index is not None and index.get("_class_name") == "Krea2Pipeline"
-
-
-def is_ideogram4_model(model_dir: Path) -> bool:
-    """Return whether *model_dir*'s ``model_index.json`` declares an Ideogram 4 pipeline."""
-    index = _read_model_index(model_dir)
-    return index is not None and index.get("_class_name") == "Ideogram4Pipeline"
 
 
 def is_moss_model(model_dir: Path) -> bool:
@@ -344,7 +352,7 @@ def cached_snapshot_dirs(repo_id: str, revision: str | None) -> list[Path]:
     return sorted(snapshots, key=lambda path: path.stat().st_mtime, reverse=True)
 
 
-def _without_redundant_variants(files: list[Path]) -> list[Path]:
+def _without_redundant_variants(files: list[PurePosixPath]) -> list[PurePosixPath]:
     """Drop precision-variant files from folders that also hold the plain (non-variant) weights."""
     folders_with_plain = {path.parent for path in files if not _VARIANT_RE.search(path.name)}
     return [path for path in files if not (_VARIANT_RE.search(path.name) and path.parent in folders_with_plain)]
@@ -352,8 +360,12 @@ def _without_redundant_variants(files: list[Path]) -> list[Path]:
 
 def component_of(model_dir: Path, path: Path) -> str:
     """Return the top-level component folder of *path*, or ``""`` for files at the model root."""
-    parts = path.relative_to(model_dir).parts
-    return parts[0] if len(parts) > 1 else ""
+    return _component_name(PurePosixPath(path.relative_to(model_dir).as_posix()))
+
+
+def _component_name(relative: PurePosixPath) -> str:
+    """Return the top-level folder of the relative path *relative*, or ``""`` for a file at the root."""
+    return relative.parts[0] if len(relative.parts) > 1 else ""
 
 
 def _shards_complete(files: tuple[Path, ...]) -> bool:

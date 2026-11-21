@@ -383,6 +383,32 @@ def test_root_single_file_counts_only_when_the_transformer_folder_is_empty(tmp_p
     assert set(model_files.model_weight_files(tmp_path)) == {shard, vae}
 
 
+class TestWeightFileNames:
+    """The selection ``model_weight_files`` makes, on the names of a repo listing."""
+
+    _NAMES = [
+        "model_index.json",
+        "single-file.safetensors",
+        "transformer/model.safetensors",
+        "vae/model.safetensors",
+        "vae/model.fp16.safetensors",
+        "scheduler/config.json",
+        "extras/other.safetensors",
+    ]
+
+    def test_only_the_weighted_components_count_and_a_precision_variant_beside_the_plain_file_does_not(self):
+        assert model_files.weight_file_names(self._NAMES, ("transformer", "vae")) == ["transformer/model.safetensors", "vae/model.safetensors"]
+
+    def test_without_components_every_weight_file_counts(self):
+        assert model_files.weight_file_names(self._NAMES, None) == ["extras/other.safetensors", "single-file.safetensors", "transformer/model.safetensors", "vae/model.safetensors"]
+
+    def test_a_krea_2_root_file_stands_in_for_a_transformer_folder_without_weights(self):
+        names = ["turbo.safetensors", "vae/model.safetensors"]
+
+        assert model_files.weight_file_names(names, ("transformer", "vae"), krea2=True) == ["vae/model.safetensors", "turbo.safetensors"]
+        assert model_files.weight_file_names(names, ("transformer", "vae")) == ["vae/model.safetensors"]
+
+
 @pytest.mark.parametrize(
     ("present", "expected"),
     [

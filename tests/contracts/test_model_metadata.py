@@ -18,6 +18,8 @@ from zvisiongenerator.utils.matte import matte_pins
 from zvisiongenerator.utils.moss_build import LINKED_COMPONENTS as MOSS_LINKED
 from zvisiongenerator.utils.seedvr2 import seedvr2_files, seedvr2_tiers
 from zvisiongenerator.utils.video_model_detect import detect_video_model
+from zvisiongenerator.utils.weight_totals import resolve_image_weights, resolve_ltx_weights
+from zvisiongenerator.utils.weight_totals_table import memory_sources
 
 _PLATFORMS = sorted(PLATFORM_KEYS)
 _PIN = re.compile(r"[0-9a-f]{40}")
@@ -240,3 +242,41 @@ def test_ideo_declares_one_components_and_one_single_file_transformer_in_a_forma
 )
 def test_only_flux2_klein_supports_mask_edit(family: str, variant: str | None, expected: bool) -> None:
     assert model_capabilities(family, variant)["supports_mask_edit"] is expected
+
+
+_WEIGHT_MODEL_IDS = [*model_ids("image"), *_LTX_IDS]
+
+
+@pytest.mark.parametrize("model_id", _WEIGHT_MODEL_IDS)
+def test_every_pinned_image_and_ltx_model_has_a_weight_row_for_each_download_its_memory_reads(model_id: str) -> None:
+    table = load_model_metadata()["weight_totals"]
+
+    for source in memory_sources(model_id):
+        target = source.target
+        assert source.key in table, f"{model_id}: no weight_totals row for {source.key}"
+        if target.revision is None:
+            # An unpinned image repo is keyed by its bare id; its row records the commit it was read at.
+            assert source.key == target.repo_id and _PIN.fullmatch(table[source.key]["revision"]), f"{model_id}: {source.key}"
+        else:
+            assert source.key == f"{target.repo_id}@{target.revision}" and "revision" not in table[source.key], f"{model_id}: {source.key}"
+
+
+def test_the_weight_table_holds_no_row_that_no_pinned_image_or_ltx_model_reads() -> None:
+    wanted = {source.key for model_id in _WEIGHT_MODEL_IDS for source in memory_sources(model_id)}
+
+    assert set(load_model_metadata()["weight_totals"]) == wanted
+
+
+@pytest.mark.parametrize("platform_key", _PLATFORMS)
+@pytest.mark.parametrize("model_id", _WEIGHT_MODEL_IDS)
+def test_the_weight_table_resolves_every_pinned_image_and_ltx_model_on_every_platform(model_id: str, platform_key: str) -> None:
+    """The rows are enough to judge the model before it is downloaded: nothing else is read."""
+    nothing_downloaded = lambda _reference: None  # noqa: E731
+    if model_id in _LTX_IDS:
+        resolved = resolve_ltx_weights(model_id, model_id, platform_key=platform_key, find_local_dir=nothing_downloaded)
+        assert resolved is not None
+        assert (resolved.weights.ltx_mlx if platform_key == "darwin" else resolved.weights.ltx_cuda) is not None
+        return
+    resolved = resolve_image_weights(model_id, model_id, platform_key=platform_key, find_local_dir=nothing_downloaded)
+    assert resolved is not None and resolved.family is not None
+    assert {"text_encoder", "transformer", "vae"} <= set(resolved.weights.components)

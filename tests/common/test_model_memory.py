@@ -4,32 +4,52 @@ from __future__ import annotations
 
 import json
 import struct
-from unittest.mock import MagicMock
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from zvisiongenerator.utils import model_memory
+from zvisiongenerator.utils.image_model_detect import detect_image_model
+from zvisiongenerator.utils.memory_verdict import MemoryJob, MemoryWeights, judge
 from zvisiongenerator.utils.model_memory import (
-    CudaMemoryEstimate,
     MemoryBudget,
-    classify_cuda_memory_fit,
-    classify_memory_fit,
-    clip_memory_fit,
-    estimate_cuda_image_memory,
-    estimate_image_memory,
+    WeightTotals,
     estimate_ltx_cuda_clip_memory,
     estimate_ltx_cuda_system_memory,
-    estimate_ltx_mlx_clip_memory,
+    level_component_bytes,
     ltx_decode_budget_bytes,
+    ltx_mlx_clip_bytes,
+    ltx_mlx_weights,
     ltx_video_tokens,
+    mlx_image_bytes,
+    read_image_components,
     read_safetensors_totals,
+    turbo_lora_bytes,
 )
-from zvisiongenerator.utils.model_memory import WeightTotals
 
 _GIB = 1024**3
 _GEMMA = "mlx-community/gemma-3-12b-it-4bit"  # the Gemma 3 repo the model metadata declares for the macOS LTX-2.3 packs
-_IMAGE_MARGIN = model_memory._IMAGE_WORKING_BYTES
+_IMAGE_MARGIN = model_memory.IMAGE_WORKING_BYTES
+
+
+def _detected_family(model_dir: Path) -> str | None:
+    """Return the image family the app detects in *model_dir*, ``None`` for a folder without a model index."""
+    try:
+        return detect_image_model(str(model_dir)).family
+    except FileNotFoundError, ValueError:
+        return None
+
+
+def estimate_image_memory(model_dir: Path, levels: tuple[int | None, ...] = (None,)) -> dict[int | None, int] | None:
+    """Return the MLX estimate of the image model in *model_dir* at each level, as the memory verdict builds it from the files; ``None`` without readable weights."""
+    components = read_image_components(model_dir, unified=True)
+    if components is None:
+        return None
+    detected = _detected_family(model_dir)
+    family = detected if detected in {"moss", "ideogram4", "krea2"} else None
+    lora_bytes = turbo_lora_bytes(model_dir) if family == "moss" else 0
+    return {level: mlx_image_bytes(components, level, family=family, lora_bytes=lora_bytes) for level in levels}
 
 
 def _write_safetensors(path: Path, tensors: dict[str, tuple[str, list[int]]]) -> Path:
@@ -73,7 +93,7 @@ class TestReadSafetensorsTotals:
             read_safetensors_totals(path)
 
 
-class TestEstimateImageMemory:
+class TestMlxImageMemory:
     def test_float_weights_load_as_bfloat16_and_vae_as_float32(self, tmp_path):
         _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"w": ("F32", [1000, 1000])})
         _write_safetensors(tmp_path / "text_encoder" / "model.safetensors", {"w": ("BF16", [500, 1000])})
@@ -145,6 +165,129 @@ class TestEstimateImageMemory:
         assert estimate_image_memory(tmp_path) is None
 
 
+class TestLevelComponentBytes:
+    """A CUDA image component's bytes at each level: the 2-D weights packed, the text encoder's embedding table left in bfloat16."""
+
+    _TOTALS = WeightTotals(float_matrix_elements=1000, float_other_elements=100, embedding_elements=300)
+
+    def test_unquantized_floats_are_two_bytes_each(self):
+        assert level_component_bytes("text_encoder", self._TOTALS, None) == 1000 * 2 + 100 * 2
+        assert level_component_bytes("transformer", self._TOTALS, None) == 1000 * 2 + 100 * 2
+
+    def test_q8_packs_the_matrices_to_one_byte_but_a_text_encoders_embedding_table_stays_two(self):
+        assert level_component_bytes("text_encoder", self._TOTALS, 8) == 1000 * 1 + 300 * 1 + 100 * 2
+        assert level_component_bytes("transformer", self._TOTALS, 8) == 1000 * 1 + 100 * 2
+
+    def test_q4_packs_to_nf4_and_a_text_encoders_embedding_table_stays_two_bytes(self):
+        nf4 = model_memory._NF4_BYTES_PER_WEIGHT
+
+        assert level_component_bytes("text_encoder", self._TOTALS, 4) == pytest.approx(1000 * nf4 + 300 * (2 - nf4) + 100 * 2)
+        assert level_component_bytes("transformer", self._TOTALS, 4) == pytest.approx(1000 * nf4 + 100 * 2)
+
+    def test_fp8_and_packed_bytes_stay_as_stored(self):
+        stored = WeightTotals(fp8_matrix_elements=50, packed_bytes=7)
+
+        assert [level_component_bytes("text_encoder", stored, level) for level in (None, 8)] == [57, 57]
+
+    def test_an_unknown_level_is_refused(self):
+        with pytest.raises(ValueError, match="quantize level"):
+            level_component_bytes("transformer", self._TOTALS, 3)
+
+
+class TestLtxLoraBytes:
+    def test_the_mlx_estimate_counts_them_with_the_transformer(self):
+        weights = model_memory.LtxMlxWeights(gemma=2 * _GIB, connector=_GIB, transformer=14 * _GIB, decoders=_GIB)
+        clip = {"width": 704, "height": 448, "frames": 121, "low_memory": True, "unified_bytes": 64 * _GIB, "env": {}}
+
+        assert ltx_mlx_clip_bytes(weights, lora_bytes=_GIB, **clip) - ltx_mlx_clip_bytes(weights, **clip) == pytest.approx(_GIB, abs=2)
+
+    def test_the_cuda_estimate_counts_them_in_system_memory_and_on_the_gpu_only_when_the_transformer_stays_there(self):
+        system = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=4 * _GIB, transformer_bytes=10 * _GIB)
+        clip = {"width": 704, "height": 448, "frames": 121}
+
+        streamed = estimate_ltx_cuda_clip_memory(system, low_memory=True, **clip)
+        streamed_loaded = estimate_ltx_cuda_clip_memory(system, low_memory=True, lora_bytes=_GIB, **clip)
+        resident = estimate_ltx_cuda_clip_memory(system, low_memory=False, **clip)
+        resident_loaded = estimate_ltx_cuda_clip_memory(system, low_memory=False, lora_bytes=_GIB, **clip)
+
+        assert streamed_loaded.system_bytes - streamed.system_bytes == _GIB
+        assert streamed_loaded.gpu_bytes == streamed.gpu_bytes
+        assert resident_loaded.gpu_bytes - resident.gpu_bytes == _GIB
+
+
+class TestTotalsFromHeader:
+    def test_summarises_a_header_without_a_file(self):
+        header = {"matrix": {"dtype": "BF16", "shape": [4, 8]}, "bias": {"dtype": "F32", "shape": [8]}, "lm_head.weight": {"dtype": "BF16", "shape": [2, 2]}}
+
+        totals = model_memory.totals_from_header(header, ("lm_head.",))
+
+        assert totals == WeightTotals(float_matrix_elements=32, float_other_elements=8)
+
+    def test_rejects_unknown_dtypes_naming_what_it_read(self):
+        with pytest.raises(ValueError, match="the repo"):
+            model_memory.totals_from_header({"w": {"dtype": "F4", "shape": [2]}}, label="the repo")
+
+
+class TestImageComponentTotals:
+    _HEADER = {"model.w": {"dtype": "BF16", "shape": [2, 2]}, "lm_head.weight": {"dtype": "BF16", "shape": [3, 3]}, "visual.w": {"dtype": "BF16", "shape": [5, 5]}}
+
+    def test_a_text_encoder_leaves_out_its_lm_head_and_for_moss_on_a_mac_its_vision_tower(self):
+        assert model_memory.image_component_totals("text_encoder", self._HEADER, unified=False).float_matrix_elements == 4 + 25
+        assert model_memory.image_component_totals("text_encoder", self._HEADER, unified=True).float_matrix_elements == 4
+
+    def test_another_component_counts_everything(self):
+        assert model_memory.image_component_totals("transformer", self._HEADER, unified=True).float_matrix_elements == 4 + 9 + 25
+
+
+class TestReadImageComponents:
+    def test_a_moss_text_encoder_drops_its_vision_tower_only_on_a_unified_backend(self, tmp_path):
+        (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "MOSSImagePipeline", "text_encoder": ["transformers", "Model"]}))
+        _write_safetensors(tmp_path / "text_encoder" / "model.safetensors", {"w": ("BF16", [2, 2]), "visual.w": ("BF16", [5, 5])})
+
+        assert model_memory.read_image_components(tmp_path, unified=False)["text_encoder"].float_matrix_elements == 29
+        assert model_memory.read_image_components(tmp_path, unified=True)["text_encoder"].float_matrix_elements == 4
+
+    def test_another_model_keeps_everything_on_either(self, tmp_path):
+        (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "ZImagePipeline", "text_encoder": ["transformers", "Model"]}))
+        _write_safetensors(tmp_path / "text_encoder" / "model.safetensors", {"w": ("BF16", [2, 2]), "visual.w": ("BF16", [5, 5])})
+
+        assert model_memory.read_image_components(tmp_path, unified=True)["text_encoder"].float_matrix_elements == 29
+
+    def test_none_without_weights(self, tmp_path):
+        assert model_memory.read_image_components(tmp_path, unified=False) is None
+
+
+class TestLtxMlxWeights:
+    def test_sizes_come_from_the_callers_when_given(self, tmp_path):
+        pack, encoder = tmp_path / "pack", tmp_path / "gemma"
+        for name in ("connector.safetensors", "transformer-distilled.safetensors", "vae_decoder.safetensors", "audio_vae.safetensors", "vocoder.safetensors", "spatial_upscaler_x2_v1_1.safetensors"):
+            (pack / name).parent.mkdir(parents=True, exist_ok=True)
+            (pack / name).touch()
+        (encoder / "model.safetensors").parent.mkdir()
+        (encoder / "model.safetensors").touch()
+        sizes = {
+            "connector.safetensors": 1,
+            "transformer-distilled.safetensors": 2,
+            "vae_decoder.safetensors": 3,
+            "audio_vae.safetensors": 4,
+            "vocoder.safetensors": 5,
+            "spatial_upscaler_x2_v1_1.safetensors": 6,
+            "model.safetensors": 7,
+        }
+
+        weights = model_memory.ltx_mlx_weights(pack, encoder, file_bytes=lambda path: sizes[path.name])
+        no_upscale = model_memory.ltx_mlx_weights(pack, encoder, upscale=False, file_bytes=lambda path: sizes[path.name])
+
+        assert (weights.gemma, weights.connector, weights.transformer, weights.decoders, weights.upsampler) == (7, 1, 2, 12, 6)
+        assert no_upscale.upsampler is None
+
+    def test_a_pack_without_a_bundled_text_encoder_needs_the_gemma_folder(self, tmp_path):
+        (tmp_path / "connector.safetensors").touch()
+        (tmp_path / "transformer-distilled.safetensors").touch()
+
+        assert model_memory.ltx_mlx_weights(tmp_path, None, file_bytes=lambda path: 1) is None
+
+
 def _write_sized(path: Path, gib: float) -> Path:
     """Write a header-only safetensors file whose weights load as *gib* GiB of bfloat16."""
     return _write_safetensors(path, {"w": ("BF16", [int(gib * _GIB / 2 / 1024), 1024])})
@@ -179,37 +322,45 @@ def _make_ltx_25(root: Path, *, encoder: float) -> tuple[Path, Path]:
     return model_dir, text_encoder_dir
 
 
-# The weights (GiB) and the peaks MLX measured per run on the machine the estimate was fit on (32 GiB, q4 distilled).
-_MEASURED_WEIGHTS = {"gemma": 7.477, "connector": 5.909, "transformer": 10.535, "upsampler": 0.927}
+# The weights (GiB) of the two packs and the peak footprints measured per run on the machine the estimate was fit on (32 GiB Mac, bench run ``mac-r10``).
+_LTX4_WEIGHTS = {"gemma": 7.477, "connector": 5.909, "transformer": 10.535, "upsampler": 0.927}
+_LTX8_WEIGHTS = {"gemma": 7.477, "connector": 5.909, "transformer": 19.173, "upsampler": 0.927}
 _MEASURED_UNIFIED = 32 * _GIB
-# (width, height, frames, low_memory, upscale, measured overall peak in GiB)
+# (weights, width, height, frames, upscale, mode, measured overall peak in GiB)
 _MEASURED_RUNS = [
-    pytest.param(512, 256, 121, True, False, 14.23, id="run1-small"),
-    pytest.param(704, 448, 121, True, False, 14.81, id="run2-reference"),
-    pytest.param(704, 448, 241, True, False, 15.91, id="run3-long"),
-    pytest.param(960, 512, 121, True, False, 15.39, id="run4-large"),
-    pytest.param(704, 448, 121, False, False, 35.14, id="run5-resident"),
-    pytest.param(704, 448, 121, True, True, 14.80, id="run6-upscale"),
+    pytest.param(_LTX4_WEIGHTS, 768, 448, 121, False, "t2v", 16.46, id="ltx4-small"),
+    pytest.param(_LTX4_WEIGHTS, 1024, 576, 121, False, "t2v", 16.46, id="ltx4-medium"),
+    pytest.param(_LTX4_WEIGHTS, 768, 448, 121, True, "t2v", 16.46, id="ltx4-upscale"),
+    pytest.param(_LTX4_WEIGHTS, 768, 448, 121, False, "i2v", 17.02, id="ltx4-image-to-video"),
+    pytest.param(_LTX4_WEIGHTS, 576, 320, 97, False, "extend", 20.66, id="ltx4-extend"),
+    pytest.param(_LTX8_WEIGHTS, 768, 448, 121, False, "t2v", 22.59, id="ltx8-small"),
+    pytest.param(_LTX8_WEIGHTS, 1024, 576, 121, False, "t2v", 23.54, id="ltx8-medium"),
 ]
 
 
-class TestEstimateLtxMlxClipMemory:
-    @pytest.mark.parametrize(("width", "height", "frames", "low_memory", "upscale", "measured"), _MEASURED_RUNS)
-    def test_reproduces_the_measured_peaks_without_going_below_them(self, tmp_path, width, height, frames, low_memory, upscale, measured):
-        model_dir, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
+def _mlx_clip_memory(model_dir: Path, text_encoder_dir: Path | None, *, upscale: bool = False, **clip) -> int | None:
+    """Return the peak of an LTX MLX clip from the pack in *model_dir*: its weights read from the files, then the estimate; ``None`` when the weights cannot be read."""
+    weights = ltx_mlx_weights(model_dir, text_encoder_dir, upscale=upscale)
+    return None if weights is None else ltx_mlx_clip_bytes(weights, **clip)
 
-        required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=low_memory, upscale=upscale, unified_bytes=_MEASURED_UNIFIED, env={})
+
+class TestLtxMlxClipBytes:
+    @pytest.mark.parametrize(("weights", "width", "height", "frames", "upscale", "mode", "measured"), _MEASURED_RUNS)
+    def test_reproduces_the_measured_peaks_without_going_below_them(self, tmp_path, weights, width, height, frames, upscale, mode, measured):
+        model_dir, text_encoder_dir = _make_ltx(tmp_path, **weights)
+
+        required = _mlx_clip_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=True, upscale=upscale, mode=mode, unified_bytes=_MEASURED_UNIFIED, env={})
 
         assert required is not None
         # Header sizes are rounded to the GiB thousandth, so allow for that; the fit is otherwise never under.
-        # A long clip reaches the tiler's cap, where the decoder weights sit on top of its budget (up to 0.76 GiB above what was measured).
+        # A long clip reaches the tiler's cap, where the decoder weights sit on top of its budget (up to 0.3 GiB above what was measured).
         assert measured - 0.02 <= required / _GIB <= measured + 1.4
 
-    def test_a_bigger_clip_needs_more_memory(self, tmp_path):
-        model_dir, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
+    def test_a_bigger_clip_needs_more_memory_where_the_denoise_stage_sets_the_peak(self, tmp_path):
+        model_dir, text_encoder_dir = _make_ltx(tmp_path, **_LTX8_WEIGHTS)
 
         sizes = [
-            estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=True, env={})
+            _mlx_clip_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=True, env={})
             for width, height, frames in ((512, 256, 121), (704, 448, 121), (704, 448, 241), (1280, 704, 241))
         ]
 
@@ -219,22 +370,53 @@ class TestEstimateLtxMlxClipMemory:
         model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=0.1, connector=0.1, transformer=0.1)
         clip = {"width": 1280, "height": 704, "frames": 241, "low_memory": True, "env": {}}
 
-        uncapped = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, **clip)
-        capped = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, unified_bytes=32 * _GIB, **clip)
-        small_mac = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, unified_bytes=24 * _GIB, **clip)
+        uncapped = _mlx_clip_memory(model_dir, text_encoder_dir, **clip)
+        capped = _mlx_clip_memory(model_dir, text_encoder_dir, unified_bytes=32 * _GIB, **clip)
+        small_mac = _mlx_clip_memory(model_dir, text_encoder_dir, unified_bytes=28 * _GIB, **clip)
 
         assert uncapped is not None and uncapped / _GIB > 16 + _DECODER_GIB
         assert capped == pytest.approx((16 + _DECODER_GIB) * _GIB, abs=2**20)
-        assert small_mac == pytest.approx((12 + _DECODER_GIB) * _GIB, abs=2**20)
+        assert small_mac == pytest.approx((14 + _DECODER_GIB) * _GIB, abs=2**20)
+
+    @pytest.mark.parametrize("unified_gib", [16, 24])
+    @pytest.mark.parametrize(
+        ("width", "height", "frames", "upscale", "mode"), [(768, 448, 121, False, "t2v"), (1280, 704, 241, True, "t2v"), (768, 448, 121, False, "i2v"), (576, 320, 97, False, "extend")]
+    )
+    def test_a_streaming_mac_needs_one_figure_per_pack_whatever_the_clip(self, tmp_path, unified_gib, width, height, frames, upscale, mode):
+        gemma3, gemma3_dir = _make_ltx(tmp_path / "gemma3", **_LTX4_WEIGHTS)
+        big, big_dir = _make_ltx(tmp_path / "big", **_LTX8_WEIGHTS)
+        clip = {"width": width, "height": height, "frames": frames, "low_memory": True, "upscale": upscale, "mode": mode, "unified_bytes": unified_gib * _GIB, "env": {}}
+
+        small_pack = _mlx_clip_memory(gemma3, gemma3_dir, **clip)
+        big_pack = _mlx_clip_memory(big, big_dir, **clip)
+
+        assert small_pack == big_pack
+        assert small_pack is not None and small_pack / _GIB == pytest.approx(14.77, abs=0.001)
+
+    def test_a_streaming_mac_reads_the_bundled_encoder_pack_higher(self):
+        bundled = model_memory.LtxMlxWeights(gemma=_GIB, connector=_GIB, transformer=_GIB, decoders=_GIB, bundled_encoder=True)
+        plain = replace(bundled, bundled_encoder=False)
+        clip = {"width": 768, "height": 448, "frames": 121, "low_memory": True, "unified_bytes": 16 * _GIB, "env": {}}
+
+        assert ltx_mlx_clip_bytes(bundled, **clip) > ltx_mlx_clip_bytes(plain, **clip)
+
+    @pytest.mark.parametrize(("low_memory", "unified_gib"), [(False, 16), (True, 32), (True, 25)])
+    def test_the_streaming_figure_applies_only_with_low_memory_on_a_mac_of_24_gib_or_less(self, tmp_path, low_memory, unified_gib):
+        model_dir, text_encoder_dir = _make_ltx(tmp_path, **_LTX4_WEIGHTS)
+        clip = {"width": 768, "height": 448, "frames": 121, "low_memory": low_memory, "unified_bytes": unified_gib * _GIB, "env": {}}
+
+        required = _mlx_clip_memory(model_dir, text_encoder_dir, **clip)
+
+        assert required is not None and required / _GIB != pytest.approx(14.77, abs=0.001)
 
     def test_a_capped_decode_adds_the_decoder_weights_to_the_tiler_budget(self, tmp_path):
         model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=0.1, connector=0.1, transformer=0.1)
         _write_sized(model_dir / "audio_vae.safetensors", 0.1)
         _write_sized(model_dir / "vocoder.safetensors", 0.2)
         _write_sized(model_dir / "vae_encoder.safetensors", 5)  # Not loaded for a decode.
-        clip = {"width": 1280, "height": 704, "frames": 241, "low_memory": True, "env": {}, "unified_bytes": 16 * _GIB}
+        clip = {"width": 704, "height": 448, "frames": 121, "low_memory": True, "env": {"LTX2_VAE_DECODE_BUDGET_GB": "8"}}
 
-        required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, **clip)
+        required = _mlx_clip_memory(model_dir, text_encoder_dir, **clip)
 
         assert required == pytest.approx((8 + _DECODER_GIB + 0.1 + 0.2) * _GIB, abs=2**20)
 
@@ -242,7 +424,7 @@ class TestEstimateLtxMlxClipMemory:
         model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=0.1, connector=0.1, transformer=0.1)
         clip = {"width": 1280, "height": 704, "frames": 241, "low_memory": True, "unified_bytes": 64 * _GIB}
 
-        required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, env={"LTX2_VAE_DECODE_BUDGET_GB": "10"}, **clip)
+        required = _mlx_clip_memory(model_dir, text_encoder_dir, env={"LTX2_VAE_DECODE_BUDGET_GB": "10"}, **clip)
 
         assert required == pytest.approx((10 + _DECODER_GIB) * _GIB, abs=2**20)
 
@@ -250,7 +432,7 @@ class TestEstimateLtxMlxClipMemory:
         model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=0.1, connector=0.1, transformer=0.1)
         monkeypatch.setenv("LTX2_VAE_DECODE_BUDGET_GB", "9")
 
-        required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=1280, height=704, frames=241, low_memory=True)
+        required = _mlx_clip_memory(model_dir, text_encoder_dir, width=1280, height=704, frames=241, low_memory=True)
 
         assert required == pytest.approx((9 + _DECODER_GIB) * _GIB, abs=2**20)
 
@@ -259,9 +441,9 @@ class TestEstimateLtxMlxClipMemory:
         without_file, _ = _make_ltx(tmp_path / "without", gemma=1, connector=1, transformer=1)
         clip = {"width": 704, "height": 448, "frames": 121, "low_memory": True, "env": {}}
 
-        plain = estimate_ltx_mlx_clip_memory(with_file, text_encoder_dir, **clip)
-        upscaled = estimate_ltx_mlx_clip_memory(with_file, text_encoder_dir, upscale=True, **clip)
-        no_upsampler = estimate_ltx_mlx_clip_memory(without_file, text_encoder_dir, upscale=True, **clip)
+        plain = _mlx_clip_memory(with_file, text_encoder_dir, **clip)
+        upscaled = _mlx_clip_memory(with_file, text_encoder_dir, upscale=True, **clip)
+        no_upsampler = _mlx_clip_memory(without_file, text_encoder_dir, upscale=True, **clip)
 
         assert upscaled == pytest.approx((1 + 20 + 0.5) * _GIB, abs=1)  # transformer + upsampler + working memory
         assert plain is not None and plain < upscaled
@@ -271,8 +453,8 @@ class TestEstimateLtxMlxClipMemory:
         model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=2, connector=3, transformer=4, upsampler=1)
         clip = {"width": 704, "height": 448, "frames": 121, "low_memory": False, "env": {}}
 
-        resident = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, **clip)
-        upscaled = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, upscale=True, **clip)
+        resident = _mlx_clip_memory(model_dir, text_encoder_dir, **clip)
+        upscaled = _mlx_clip_memory(model_dir, text_encoder_dir, upscale=True, **clip)
 
         # 4928 tokens: denoise working memory 1.7 GiB, decode 12.9 + 0.00067 * 2880 less the 2.83 GiB already counted.
         working = 12.9 + 0.00067 * (4928 - 2048) - 2.83
@@ -282,22 +464,23 @@ class TestEstimateLtxMlxClipMemory:
     def test_without_low_memory_the_working_memory_is_the_larger_of_denoise_and_decode(self, tmp_path):
         model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=2, connector=3, transformer=4)
 
-        # A tight decode budget leaves the denoise working memory (1.7 GiB at 4928 tokens) as the larger term.
-        required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=704, height=448, frames=121, low_memory=False, env={"LTX2_VAE_DECODE_BUDGET_GB": "3"})
+        # A tight decode budget leaves the denoise working memory (3.41 GiB at 5376 tokens, 0.000247 less per token below) as the larger term.
+        required = _mlx_clip_memory(model_dir, text_encoder_dir, width=704, height=448, frames=121, low_memory=False, env={"LTX2_VAE_DECODE_BUDGET_GB": "3"})
 
-        assert required == pytest.approx((2 + 3 + 4 + 1.7) * _GIB, abs=1)
+        assert required == pytest.approx((2 + 3 + 4 + 3.41 + 0.000247 * (4928 - 5376)) * _GIB, abs=1)
 
     def test_a_bundled_pack_estimates_without_a_text_encoder_dir_and_matches_a_gemma_dir_holding_the_same_file(self, tmp_path):
         model_dir, text_encoder_dir = _make_ltx_25(tmp_path, encoder=7.477)
         clip = {"width": 768, "height": 448, "frames": 121, "low_memory": True, "env": {}}
 
-        bundled = estimate_ltx_mlx_clip_memory(model_dir, None, **clip)
-        with_dir = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, **clip)
+        bundled = _mlx_clip_memory(model_dir, None, **clip)
+        with_dir = _mlx_clip_memory(model_dir, text_encoder_dir, **clip)
 
         assert bundled is not None
         assert bundled == with_dir
-        # 5376 tokens: the decode stage (12.9 + 0.00067 * 3328 GiB) is the peak, about 15.1 GiB.
-        assert bundled / _GIB == pytest.approx(12.9 + 0.00067 * (5376 - 2048), abs=0.01)
+        # The bundled Gemma 4's prompt stage (the encoder, the connector and 4.27 GiB) is the peak, above the decode stage (about 15.1 GiB at 5376 tokens).
+        assert bundled / _GIB == pytest.approx(7.477 + 5.909 + 4.27, abs=0.01)
+        assert bundled / _GIB > 12.9 + 0.00067 * (5376 - 2048)
 
     def test_the_bundled_encoder_is_counted_resident_without_low_memory(self, tmp_path):
         model_dir, _ = _make_ltx_25(tmp_path, encoder=3)
@@ -305,22 +488,22 @@ class TestEstimateLtxMlxClipMemory:
         _write_sized(model_dir / "transformer-distilled-1.1.safetensors", 4)
         clip = {"width": 704, "height": 448, "frames": 121, "low_memory": False, "env": {}}
 
-        resident = estimate_ltx_mlx_clip_memory(model_dir, None, **clip)
+        resident = _mlx_clip_memory(model_dir, None, **clip)
 
         assert resident == pytest.approx((3 + 2 + 4 + 12.9 + 0.00067 * (4928 - 2048) - 2.83) * _GIB, abs=1)
 
     def test_a_2_3_pack_without_a_text_encoder_dir_gives_none(self, tmp_path):
         model_dir, _ = _make_ltx(tmp_path, gemma=1, connector=1, transformer=1)
 
-        assert estimate_ltx_mlx_clip_memory(model_dir, None, width=704, height=448, frames=121, low_memory=True) is None
+        assert _mlx_clip_memory(model_dir, None, width=704, height=448, frames=121, low_memory=True) is None
 
     def test_the_conv_decoder_bytes_are_counted_in_the_capped_decode(self, tmp_path):
         model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=0.1, connector=0.1, transformer=0.1)
-        clip = {"width": 1280, "height": 704, "frames": 241, "low_memory": True, "env": {}, "unified_bytes": 16 * _GIB}
-        plain = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, **clip)
+        clip = {"width": 704, "height": 448, "frames": 121, "low_memory": True, "env": {"LTX2_VAE_DECODE_BUDGET_GB": "8"}}
+        plain = _mlx_clip_memory(model_dir, text_encoder_dir, **clip)
         _write_sized(model_dir / "vae_decoder_conv.safetensors", 0.5)
 
-        with_conv = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, **clip)
+        with_conv = _mlx_clip_memory(model_dir, text_encoder_dir, **clip)
 
         assert plain == pytest.approx((8 + _DECODER_GIB) * _GIB, abs=2**20)
         assert with_conv == pytest.approx((8 + 0.5) * _GIB, abs=2**20)  # The conv decoder replaces vae_decoder.
@@ -328,13 +511,13 @@ class TestEstimateLtxMlxClipMemory:
     def test_returns_none_for_non_ltx_layout(self, tmp_path):
         _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"w": ("BF16", [10, 10])})
 
-        assert estimate_ltx_mlx_clip_memory(tmp_path, tmp_path, width=704, height=448, frames=121, low_memory=True) is None
+        assert _mlx_clip_memory(tmp_path, tmp_path, width=704, height=448, frames=121, low_memory=True) is None
 
     def test_returns_none_for_unreadable_weights(self, tmp_path):
         model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=1, connector=1, transformer=1)
         (model_dir / "connector.safetensors").write_bytes(b"")
 
-        assert estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=704, height=448, frames=121, low_memory=True) is None
+        assert _mlx_clip_memory(model_dir, text_encoder_dir, width=704, height=448, frames=121, low_memory=True) is None
 
 
 class TestLtxDecodeBudget:
@@ -355,204 +538,6 @@ class TestLtxDecodeBudget:
 def test_ltx_video_tokens_count_latent_frames_times_32_pixel_cells():
     assert ltx_video_tokens(704, 448, 121) == 16 * 22 * 14
     assert ltx_video_tokens(512, 256, 121) == 2048
-
-
-class TestClipMemoryFit:
-    _CLIP = {"width": 704, "height": 448, "frames": 121, "low_memory": True}
-
-    def _finder(self, model_dir: Path | None, text_encoder_dir: Path | None):
-        return lambda reference: {"example/model": model_dir, _GEMMA: text_encoder_dir}.get(reference)
-
-    def _required(self, model_dir: Path, text_encoder_dir: Path) -> int:
-        required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, env={}, **self._CLIP)
-        assert required is not None
-        return required
-
-    def test_classifies_the_clip_estimate_against_the_budget(self, tmp_path):
-        model_dir, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
-        required = self._required(model_dir, text_encoder_dir)
-        finder = self._finder(model_dir, text_encoder_dir)
-
-        fits = clip_memory_fit("example/model", budget=MemoryBudget(required), find_local_dir=finder, env={}, **self._CLIP)
-        too_large = clip_memory_fit("example/model", budget=MemoryBudget(required // 2), find_local_dir=finder, env={}, **self._CLIP)
-
-        assert fits == {"status": "fits", "required_gb": round(required / _GIB, 1), "budget_gb": round(required / _GIB, 1)}
-        assert too_large is not None and too_large["status"] == "too_large"
-
-    def test_a_tight_budget_is_tight(self, tmp_path):
-        model_dir, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
-        required = self._required(model_dir, text_encoder_dir)
-
-        result = clip_memory_fit("example/model", budget=MemoryBudget(int(required / 1.3)), find_local_dir=self._finder(model_dir, text_encoder_dir), env={}, **self._CLIP)
-
-        assert result is not None and result["status"] == "tight"
-
-    def test_the_budgets_unified_memory_caps_the_decode_peak(self, tmp_path):
-        model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=0.1, connector=0.1, transformer=0.1)
-        clip = {"width": 1280, "height": 704, "frames": 241, "low_memory": True, "env": {}}
-        finder = self._finder(model_dir, text_encoder_dir)
-
-        capped = clip_memory_fit("example/model", budget=MemoryBudget(20 * _GIB, unified_bytes=24 * _GIB), find_local_dir=finder, **clip)
-        unknown = clip_memory_fit("example/model", budget=MemoryBudget(20 * _GIB), find_local_dir=finder, **clip)
-
-        assert capped is not None and capped["required_gb"] == round(12 + _DECODER_GIB, 1)
-        assert unknown is not None and unknown["required_gb"] > 16
-
-    @pytest.mark.parametrize("budget", [None, MemoryBudget(0)])
-    def test_no_memory_budget_means_no_estimate_and_no_filesystem_lookup(self, budget):
-        finder = MagicMock(return_value=None)
-
-        assert clip_memory_fit("example/model", budget=budget, find_local_dir=finder, **self._CLIP) is None
-        finder.assert_not_called()
-
-    def test_upscale_is_passed_to_the_estimate(self, tmp_path):
-        model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=1, connector=1, transformer=1, upsampler=20)
-        finder = self._finder(model_dir, text_encoder_dir)
-
-        plain = clip_memory_fit("example/model", budget=MemoryBudget(40 * _GIB), find_local_dir=finder, env={}, **self._CLIP)
-        upscaled = clip_memory_fit("example/model", budget=MemoryBudget(40 * _GIB), find_local_dir=finder, upscale=True, env={}, **self._CLIP)
-
-        assert plain is not None and upscaled is not None
-        assert upscaled["required_gb"] > plain["required_gb"]
-
-    def test_looks_the_model_and_its_text_encoder_up_by_reference(self, tmp_path):
-        model_dir, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
-        seen: list[str] = []
-
-        def finder(reference: str) -> Path | None:
-            seen.append(reference)
-            return self._finder(model_dir, text_encoder_dir)(reference)
-
-        clip_memory_fit("example/model", budget=MemoryBudget(_GIB), find_local_dir=finder, env={}, **self._CLIP)
-
-        assert seen == ["example/model", _GEMMA]
-
-    def test_a_model_that_is_not_downloaded_gives_none(self, tmp_path):
-        _, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
-
-        assert clip_memory_fit("example/model", budget=MemoryBudget(_GIB), find_local_dir=self._finder(None, text_encoder_dir), **self._CLIP) is None
-
-    def test_a_bundled_pack_needs_no_gemma_lookup(self, tmp_path):
-        model_dir, _ = _make_ltx_25(tmp_path, encoder=7.477)
-        seen: list[str] = []
-
-        def finder(reference: str) -> Path | None:
-            seen.append(reference)
-            return self._finder(model_dir, None)(reference)
-
-        result = clip_memory_fit("example/model", budget=MemoryBudget(40 * _GIB), find_local_dir=finder, env={}, **self._CLIP)
-
-        assert result is not None and result["status"] == "fits"
-        assert seen == ["example/model"]
-
-    def test_a_missing_text_encoder_gives_none(self, tmp_path):
-        model_dir, _ = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
-
-        assert clip_memory_fit("example/model", budget=MemoryBudget(_GIB), find_local_dir=self._finder(model_dir, None), **self._CLIP) is None
-
-    def test_a_model_without_the_ltx_layout_gives_none(self, tmp_path):
-        _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"w": ("BF16", [10, 10])})
-
-        assert clip_memory_fit("example/model", budget=MemoryBudget(_GIB), find_local_dir=self._finder(tmp_path, tmp_path), **self._CLIP) is None
-
-
-class TestLtxClipMemoryFitGolden:
-    """G5: the LTX MLX clip estimates, pinned so the family dispatch cannot move them."""
-
-    _BUDGET = MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB)
-    _CLIPS = [
-        ({"width": 704, "height": 448, "frames": 121, "low_memory": True}, {"status": "fits", "required_gb": 14.8, "budget_gb": 24.0}),
-        ({"width": 960, "height": 512, "frames": 241, "low_memory": True}, {"status": "fits", "required_gb": 16.8, "budget_gb": 24.0}),
-        ({"width": 704, "height": 448, "frames": 121, "low_memory": False, "upscale": True}, {"status": "too_large", "required_gb": 36.8, "budget_gb": 24.0}),
-    ]
-
-    def test_a_family_without_an_estimate_gives_none_without_a_filesystem_lookup(self):
-        finder = MagicMock(return_value=None)
-
-        result = clip_memory_fit("example/model", budget=self._BUDGET, find_local_dir=finder, env={}, family="wan", **self._CLIPS[0][0])
-
-        assert result is None
-        finder.assert_not_called()
-
-    @pytest.mark.parametrize("family", ["wan", "h3"])
-    def test_a_family_other_than_ltx_never_reaches_the_ltx_estimate_on_a_discrete_gpu(self, family):
-        finder = MagicMock(return_value=None)
-        budget = MemoryBudget(10 * _GIB, system_bytes=30 * _GIB)
-
-        assert clip_memory_fit("example/model", budget=budget, find_local_dir=finder, env={}, family=family, **self._CLIPS[0][0]) is None
-        finder.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    ("required", "expected"),
-    [(11 * _GIB, "fits"), (11 * _GIB + 1, "tight"), (15 * _GIB, "tight"), (15 * _GIB + 1, "too_large")],
-)
-def test_classify_memory_fit(required, expected):
-    assert classify_memory_fit(required, 10 * _GIB) == expected
-
-
-class TestEstimateCudaImageMemory:
-    """Mirror DiffusersBackend: unquantized and q8 stream from system memory, q4 holds NF4 on the GPU."""
-
-    def _model(self, tmp_path: Path, pipeline: str = "ZImagePipeline") -> Path:
-        index = {"_class_name": pipeline, "transformer": ["diffusers", "T"], "text_encoder": ["transformers", "E"], "vae": ["diffusers", "V"]}
-        (tmp_path / "model_index.json").write_text(json.dumps(index), encoding="utf-8")
-        _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"linear": ("BF16", [4096, 1024]), "norm": ("BF16", [1024])})
-        _write_safetensors(tmp_path / "text_encoder" / "model.safetensors", {"linear": ("BF16", [1024, 1024])})
-        _write_safetensors(tmp_path / "vae" / "model.safetensors", {"conv": ("BF16", [64, 64, 3, 3])})
-        return tmp_path
-
-    def test_streamed_levels_hold_weights_in_system_memory(self, tmp_path):
-        estimates = estimate_cuda_image_memory(self._model(tmp_path), (None, 8))
-
-        vae = 64 * 64 * 9 * 2
-        bf16 = (4096 * 1024 + 1024 + 1024 * 1024) * 2
-        fp8 = (4096 * 1024 + 1024 * 1024) + 1024 * 2
-        assert estimates[None].gpu_bytes == estimates[8].gpu_bytes == vae + model_memory._CUDA_STREAMED_GPU_BYTES
-        assert estimates[None].system_bytes == bf16 + model_memory._CUDA_SYSTEM_WORKING_BYTES
-        assert estimates[8].system_bytes == fp8 + model_memory._CUDA_SYSTEM_WORKING_BYTES
-
-    def test_nf4_holds_transformer_and_text_encoder_on_the_gpu(self, tmp_path):
-        estimate = estimate_cuda_image_memory(self._model(tmp_path), (4,))[4]
-
-        nf4 = (4096 * 1024 + 1024 * 1024) * model_memory._NF4_BYTES_PER_WEIGHT + 1024 * 2
-        assert estimate.gpu_bytes == int(nf4 + 64 * 64 * 9 * 2 + model_memory._CUDA_RESIDENT_WORKING_BYTES)
-        assert estimate.system_bytes == model_memory._CUDA_SYSTEM_WORKING_BYTES
-
-    def test_krea2_nf4_holds_one_component_on_the_gpu_at_a_time(self, tmp_path):
-        estimate = estimate_cuda_image_memory(self._model(tmp_path, "Krea2Pipeline"), (4,))[4]
-
-        transformer = 4096 * 1024 * model_memory._NF4_BYTES_PER_WEIGHT + 1024 * 2
-        text_encoder = 1024 * 1024 * model_memory._NF4_BYTES_PER_WEIGHT
-        assert estimate.gpu_bytes == int(transformer + 64 * 64 * 9 * 2 + model_memory._CUDA_RESIDENT_WORKING_BYTES)
-        assert estimate.system_bytes == int(text_encoder + model_memory._CUDA_SYSTEM_WORKING_BYTES)
-
-    def test_ideogram4_streams_its_transformer_at_every_level_and_counts_the_nf4_text_encoder_as_stored(self, tmp_path):
-        model_dir = self._model(tmp_path, "Ideogram4Pipeline")
-        _write_safetensors(model_dir / "text_encoder" / "model.safetensors", {"packed": ("U8", [512 * 1024, 1]), "embed": ("BF16", [1024, 64])})
-
-        estimates = estimate_cuda_image_memory(model_dir, (None, 4, 8))
-
-        vae = 64 * 64 * 9 * 2
-        text_encoder = 512 * 1024 + 1024 * 64 * 2
-        gpu = max(text_encoder + model_memory._CUDA_RESIDENT_WORKING_BYTES, model_memory._CUDA_STREAMED_GPU_BYTES) + vae
-        assert estimates[None].gpu_bytes == estimates[4].gpu_bytes == estimates[8].gpu_bytes == gpu
-        transformer = {None: 4096 * 1024 * 2, 4: 4096 * 1024 * model_memory._NF4_BYTES_PER_WEIGHT, 8: 4096 * 1024}
-        for level, weights in transformer.items():
-            assert estimates[level].system_bytes == int(weights + 1024 * 2 + text_encoder + model_memory._CUDA_SYSTEM_WORKING_BYTES)
-
-    def test_stored_q4_copy_holds_its_weights_on_the_gpu(self, tmp_path):
-        (tmp_path / "stored").mkdir()
-        (tmp_path / "plain").mkdir()
-        model_dir = self._model(tmp_path / "stored")
-        (model_dir / "ziv-quant.json").write_text(json.dumps({"version": 1, "bits": 4}), encoding="utf-8")
-
-        estimates = estimate_cuda_image_memory(model_dir)
-
-        assert estimates[None] == estimate_cuda_image_memory(self._model(tmp_path / "plain"), (4,))[4]
-
-    def test_returns_none_without_weights(self, tmp_path):
-        assert estimate_cuda_image_memory(tmp_path) is None
 
 
 class TestEstimateMlxMossMemory:
@@ -586,112 +571,7 @@ class TestEstimateMlxMossMemory:
         monkeypatch.setattr(model_memory, "_MOSS_MLX_DENOISE_WORKING_BYTES", 0)
         estimates = estimate_image_memory(self._model(tmp_path, encoder_rows=8192, transformer_rows=1024))
 
-        assert estimates[None] == 8192 * 1024 * 2 + model_memory._IMAGE_WORKING_BYTES
-
-
-class TestEstimateCudaMossMemory:
-    """MOSS-Image: NF4 text encoder (bf16 embeddings) at every level, resident transformer at q4, streamed otherwise, plus the Turbo LoRA."""
-
-    _TE = 1024 * 1024
-    _EMBED = 256 * 1024
-    _DIT = 4096 * 1024
-    _VAE = 64 * 64 * 9
-    _LORA = 4000
-
-    def _model(self, root: Path, name: str = "moss", *, lora: bool = True, stored: int | None = None) -> Path:
-        model_dir = root / name
-        index = {"_class_name": "MOSSImagePipeline", "transformer": ["x", "T"], "text_encoder": ["x", "E"], "vae": ["x", "V"]}
-        model_dir.mkdir(parents=True)
-        (model_dir / "model_index.json").write_text(json.dumps(index), encoding="utf-8")
-        embed = {"language_model.embed_tokens.weight": ("BF16", [256, 1024])}
-        if stored == 4:
-            _write_safetensors(model_dir / "transformer" / "model.safetensors", {"packed": ("U8", [self._DIT // 2, 1]), "norm": ("BF16", [1024])})
-            _write_safetensors(model_dir / "text_encoder" / "model.safetensors", {"packed": ("U8", [self._TE // 2, 1]), **embed})
-        else:
-            _write_safetensors(model_dir / "transformer" / "model.safetensors", {"linear": ("BF16", [4096, 1024]), "norm": ("BF16", [1024])})
-            _write_safetensors(model_dir / "text_encoder" / "model.safetensors", {"linear": ("BF16", [1024, 1024]), **embed})
-        _write_safetensors(model_dir / "vae" / "model.safetensors", {"conv": ("F32", [64, 64, 3, 3])})
-        if stored is not None:
-            (model_dir / "ziv-quant.json").write_text(json.dumps({"version": 1, "bits": stored}), encoding="utf-8")
-        if lora:
-            (model_dir.with_name(model_dir.name.split("@")[0]) / "turbo_lora.safetensors").write_bytes(b"\0" * self._LORA)
-        return model_dir
-
-    def _text_encoder_bytes(self, linear_elements: int) -> float:
-        nf4 = model_memory._NF4_BYTES_PER_WEIGHT
-        return linear_elements * nf4 + self._EMBED * 2
-
-    def test_levels_follow_the_placement(self, tmp_path, monkeypatch):
-        # Shrink the measured constants so each phase can win in turn.
-        monkeypatch.setattr(model_memory, "_MOSS_CUDA_WORKING_BYTES", 0)
-        monkeypatch.setattr(model_memory, "_CUDA_STREAMED_GPU_BYTES", 0)
-        monkeypatch.setattr(model_memory, "_CUDA_RESIDENT_WORKING_BYTES", 0)
-        estimates = estimate_cuda_image_memory(self._model(tmp_path, lora=False), (None, 4, 8))
-
-        te = self._text_encoder_bytes(self._TE)
-        dit = {None: self._DIT * 2, 4: self._DIT * model_memory._NF4_BYTES_PER_WEIGHT, 8: self._DIT}
-        vae = self._VAE * 4
-        for level in (None, 8):
-            assert estimates[level].gpu_bytes == int(te + vae)
-        assert estimates[4].gpu_bytes == int(max(te, dit[4] + 1024 * 2) + vae)
-        for level in (None, 4, 8):
-            assert estimates[level].system_bytes == int(te + dit[level] + 1024 * 2 + model_memory._MOSS_CUDA_SYSTEM_WORKING_BYTES[level])
-
-    def test_the_decode_peak_is_what_the_card_needs(self, tmp_path):
-        estimates = estimate_cuda_image_memory(self._model(tmp_path, lora=False), (None, 4, 8))
-
-        for level in (None, 4, 8):
-            assert estimates[level].gpu_bytes == int(model_memory._MOSS_CUDA_WORKING_BYTES + self._VAE * 4)
-
-    def test_the_embedding_table_stays_bfloat16(self, tmp_path):
-        estimate = estimate_cuda_image_memory(self._model(tmp_path, lora=False), (4,))[4]
-
-        without_embedding_in_bf16 = self._TE * model_memory._NF4_BYTES_PER_WEIGHT + self._EMBED * model_memory._NF4_BYTES_PER_WEIGHT
-        dit = self._DIT * model_memory._NF4_BYTES_PER_WEIGHT
-        assert estimate.system_bytes == int(self._text_encoder_bytes(self._TE) + dit + 1024 * 2 + model_memory._MOSS_CUDA_SYSTEM_WORKING_BYTES[4])
-        assert estimate.system_bytes > int(without_embedding_in_bf16 + dit + 1024 * 2 + model_memory._MOSS_CUDA_SYSTEM_WORKING_BYTES[4])
-
-    def test_system_memory_grows_with_the_transformer_precision(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(model_memory, "_MOSS_CUDA_SYSTEM_WORKING_BYTES", {4: 0, 8: 0, None: 0})
-        estimates = estimate_cuda_image_memory(self._model(tmp_path), (None, 4, 8))
-
-        assert estimates[4].system_bytes < estimates[8].system_bytes < estimates[None].system_bytes
-
-    def test_an_unlisted_level_is_estimated_like_unquantized(self, tmp_path):
-        estimates = estimate_cuda_image_memory(self._model(tmp_path), (None, 6))
-
-        assert estimates[6] == estimates[None]
-
-    def test_the_turbo_lora_adds_to_the_gpu_and_sft_has_none(self, tmp_path):
-        turbo = estimate_cuda_image_memory(self._model(tmp_path), (None, 4))
-        sft = estimate_cuda_image_memory(self._model(tmp_path, "moss-sft", lora=False), (None, 4))
-
-        assert turbo[None].gpu_bytes == sft[None].gpu_bytes + self._LORA
-        assert turbo[4].gpu_bytes == sft[4].gpu_bytes + self._LORA
-        assert turbo[None].system_bytes == sft[None].system_bytes
-
-    def test_a_stored_copy_counts_its_stored_weights_whatever_level_is_asked(self, tmp_path):
-        self._model(tmp_path)  # the base folder holds the Turbo LoRA the copy shares
-        stored = self._model(tmp_path, "moss@q4", lora=False, stored=4)
-
-        estimate = estimate_cuda_image_memory(stored, (None,))[None]
-
-        assert estimate == estimate_cuda_image_memory(stored, (4,))[4]
-        assert estimate.system_bytes == int(self._TE // 2 + self._EMBED * 2 + self._DIT // 2 + 1024 * 2 + model_memory._MOSS_CUDA_SYSTEM_WORKING_BYTES[4])
-        assert estimate.gpu_bytes == int(self._LORA + model_memory._MOSS_CUDA_WORKING_BYTES + self._VAE * 4)
-
-
-@pytest.mark.parametrize(
-    ("gpu", "system", "expected"),
-    [
-        (4 * _GIB, 20 * _GIB, "fits"),
-        (4 * _GIB, 25 * _GIB, "tight"),  # over 80% of system memory: weights stream from disk
-        (9.5 * _GIB, 4 * _GIB, "tight"),  # over 90% of the GPU
-        (10 * _GIB + 1, 4 * _GIB, "too_large"),
-    ],
-)
-def test_classify_cuda_memory_fit(gpu, system, expected):
-    assert classify_cuda_memory_fit(CudaMemoryEstimate(int(gpu), int(system)), MemoryBudget(10 * _GIB, 30 * _GIB)) == expected
+        assert estimates[None] == 8192 * 1024 * 2 + model_memory._MOSS_MLX_TEXT_ENCODER_WORKING_BYTES
 
 
 class TestEstimateLtxCudaSystemMemory:
@@ -709,20 +589,44 @@ class TestEstimateLtxCudaSystemMemory:
         assert q4.text_encoder_bytes == 12 * _GIB
 
     def test_taking_turns_holds_the_larger_one_and_together_holds_both_with_the_connectors(self):
-        runtime = model_memory._LTX_CUDA_RUNTIME_BYTES
+        runtime = model_memory._LTX_CUDA_RUNTIME_BYTES[4]
         estimate = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
 
         assert estimate.taking_turns == 15 * _GIB + runtime
         assert estimate.together == 25 * _GIB + runtime
 
-    @pytest.mark.parametrize(
-        ("quantize", "taking_turns", "together"),
-        [(4, 22_815_172_976, 33_261_754_346)],
-    )
-    def test_the_ltx_2_3_estimates_are_unchanged(self, quantize, taking_turns, together):
-        estimate = estimate_ltx_cuda_system_memory(block_matrices=18_555_076_608, transformer_rest=433_761_536, connectors=3_172_227_584, text_encoder=13_200_494_448, quantize=quantize)
+    def test_q8_takes_less_runtime_than_q4(self):
+        q4 = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB, quantize=4)
+        q8 = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB, quantize=8)
 
-        assert (estimate.taking_turns, estimate.together) == (taking_turns, together)
+        saved = model_memory._LTX_CUDA_RUNTIME_BYTES[4] - model_memory._LTX_CUDA_RUNTIME_BYTES[8]
+
+        assert saved > 0
+        assert (q4.taking_turns - q8.taking_turns, q4.together - q8.together) == (saved, saved)
+
+    def test_the_q8_clip_estimate_matches_the_measured_system_memory(self):
+        """Bench run ``cuda-r10``: a 5 s LTX-2.3 q8 clip held 24.13 GiB of system memory (the highest anonymous plus shared memory in one sample); the estimate is that figure."""
+        system = estimate_ltx_cuda_system_memory(block_matrices=18_555_076_608, transformer_rest=433_761_536, connectors=3_172_227_584, text_encoder=13_200_494_448, quantize=8)
+
+        clip = model_memory.estimate_ltx_cuda_clip_memory(system, width=768, height=448, frames=121, low_memory=True)
+
+        assert round(clip.system_bytes / _GIB, 2) == pytest.approx(24.13, abs=0.05)
+
+    @pytest.mark.parametrize("quantize", [4, 8])
+    def test_the_ltx_2_3_estimates_are_the_weights_plus_the_measured_runtime(self, quantize):
+        estimate = estimate_ltx_cuda_system_memory(block_matrices=18_555_076_608, transformer_rest=433_761_536, connectors=3_172_227_584, text_encoder=13_200_494_448, quantize=quantize)
+        runtime = model_memory._LTX_CUDA_RUNTIME_BYTES[quantize]
+
+        assert estimate.taking_turns == max(estimate.text_encoder_bytes, estimate.transformer_bytes) + estimate.resident_bytes + runtime
+        assert estimate.together == estimate.text_encoder_bytes + estimate.transformer_bytes + estimate.resident_bytes + runtime
+
+    def test_ltx_2_3_needs_less_system_memory_at_q4_than_at_q8(self):
+        counts = {"block_matrices": 18_555_076_608, "transformer_rest": 433_761_536, "connectors": 3_172_227_584, "text_encoder": 13_200_494_448}
+
+        q4 = estimate_ltx_cuda_system_memory(**counts, quantize=4)
+        q8 = estimate_ltx_cuda_system_memory(**counts, quantize=8)
+
+        assert q4.taking_turns < q8.taking_turns
 
 
 class TestLtxCudaSystemMemory:
@@ -750,7 +654,7 @@ class TestEstimateLtxCudaClipMemory:
     @pytest.mark.parametrize("quantize", [4, 8])
     def test_the_gpu_peak_is_flat_for_clips_below_the_knee(self, quantize):
         system = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB, quantize=quantize)
-        flat = model_memory._LTX_CUDA_GPU_PLATEAU_BYTES[quantize] + model_memory._LTX_CUDA_GPU_HEADROOM_BYTES
+        flat = model_memory._LTX_CUDA_GPU_PLATEAU_BYTES[quantize]
 
         assert ltx_video_tokens(704, 448, 121) < model_memory._LTX_CUDA_GPU_KNEE_TOKENS[quantize]
         assert self._clip(system).gpu_bytes == self._clip(system, frames=9).gpu_bytes == flat
@@ -765,16 +669,26 @@ class TestEstimateLtxCudaClipMemory:
 
         assert sizes == sorted(sizes)
 
-    def test_the_xl_clip_that_ran_out_of_memory_on_a_10_gb_card_does_not_fit_it(self):
-        xl_15_seconds = self._clip(width=1408, height=896, frames=361)
+    @pytest.mark.parametrize(("frames", "status"), [(241, "fits"), (337, "fits"), (361, "tight")])
+    def test_the_xl_clips_that_ran_on_a_10_gb_card_read_their_measured_status(self, frames, status):
+        """Bench run ``cuda-r15``: 1600x896 at 10, 14 and 15 s ran on the 9.64 GiB card, needing 6.72, 8.44 and 8.99 GiB (the middles of their hold-probe brackets)."""
+        job = MemoryJob(media="video", family="ltx", width=1600, height=896, frames=frames, low_memory=True)
 
-        assert classify_cuda_memory_fit(xl_15_seconds, MemoryBudget(10 * _GIB, 30 * _GIB)) == "too_large"
+        assert judge(job, MemoryBudget(int(9.64 * _GIB), 32 * _GIB), MemoryWeights(ltx_cuda=self._SYSTEM)).status == status
 
-    @pytest.mark.parametrize("frames", [241, 289, 337])
-    def test_the_xl_clips_that_ran_on_a_10_gb_card_are_not_too_large_for_it(self, frames):
-        xl = self._clip(width=1408, height=896, frames=frames)
+    @pytest.mark.parametrize("frames", [337, 361])
+    def test_the_long_xl_clips_are_too_large_for_a_card_a_probe_ran_out_of_memory_on(self, frames):
+        """``cuda-r15-probe``: 14 s ran out of memory on a 8.37 GiB card and 15 s on 8.85."""
+        job = MemoryJob(media="video", family="ltx", width=1600, height=896, frames=frames, low_memory=True)
 
-        assert classify_cuda_memory_fit(xl, MemoryBudget(10 * _GIB, 32 * _GIB)) != "too_large"
+        assert judge(job, MemoryBudget(int(8.3 * _GIB), 32 * _GIB), MemoryWeights(ltx_cuda=self._SYSTEM)).status == "too_large"
+
+    def test_q8_needs_more_than_q4_on_a_long_clip_and_less_on_a_short_one_as_measured(self):
+        """``cuda-r15-probe``: q8 ran 1600x896 at 10 s on 6.86 GiB against 6.72 at q4, and 768x448 at 5 s on 3.99 against 4.76."""
+        q8 = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=18 * _GIB, quantize=8)
+
+        assert self._clip(q8, width=1600, height=896, frames=241).gpu_bytes > self._clip(width=1600, height=896, frames=241).gpu_bytes
+        assert self._clip(q8, width=768, height=448, frames=121).gpu_bytes < self._clip(width=768, height=448, frames=121).gpu_bytes
 
     def test_the_upscale_holds_the_upsampler_on_the_gpu_for_a_small_clip_and_adds_nothing_for_a_large_one(self):
         small = self._clip()
@@ -793,151 +707,3 @@ class TestEstimateLtxCudaClipMemory:
 
         assert plain.system_bytes == self._SYSTEM.taking_turns
         assert self._clip(upscale=True).system_bytes == plain.system_bytes + model_memory._LTX_CUDA_UPSCALE_SYSTEM_BYTES
-
-
-class TestClipMemoryFitOnCuda:
-    _CLIP = {"width": 704, "height": 448, "frames": 121, "low_memory": True}
-    _SYSTEM = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
-
-    @pytest.fixture()
-    def weights(self, monkeypatch):
-        calls: list[tuple] = []
-
-        def _system(resolved_model, model_name, find_local_dir):
-            calls.append((resolved_model, model_name))
-            return self._SYSTEM
-
-        monkeypatch.setattr(model_memory, "ltx_cuda_system_memory", _system)
-        return calls
-
-    def test_reports_the_gpu_when_it_is_the_tighter_memory(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(7 * _GIB, 64 * _GIB), model_name="ltx-4", **self._CLIP)
-
-        assert result is not None
-        assert (result["kind"], result["resource"], result["budget_gb"]) == ("discrete", "gpu", 7.0)
-        assert result["status"] == "tight"  # 6.9 GiB with headroom is over 90% of 7
-        assert weights == [("repo/ltx", "ltx-4")]
-
-    def test_reports_system_memory_when_that_is_the_tighter_memory(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 24 * _GIB), model_name="ltx-4", **self._CLIP)
-
-        assert result is not None
-        assert (result["resource"], result["budget_gb"]) == ("system", 24.0)
-        assert result["status"] == "tight"  # the weights' peak is over 80% of 24
-
-    def test_a_gpu_smaller_than_the_clip_needs_is_too_large(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(4 * _GIB, 64 * _GIB), model_name="ltx-4", **self._CLIP)
-
-        assert result is not None and result["status"] == "too_large"
-
-    def test_weights_beyond_system_memory_are_too_large_since_the_load_is_refused(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 16 * _GIB), model_name="ltx-4", **self._CLIP)
-
-        assert result is not None
-        assert (result["status"], result["resource"]) == ("too_large", "system")
-
-    def test_a_clip_out_of_gpu_memory_names_the_gpu_even_when_system_memory_is_fuller(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(4 * _GIB, 16 * _GIB), model_name="ltx-4", **self._CLIP)
-
-        assert result is not None
-        assert (result["status"], result["resource"], result["budget_gb"]) == ("too_large", "gpu", 4.0)
-
-    def test_a_clip_that_fits_says_so(self, weights):
-        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 64 * _GIB), model_name="ltx-4", **self._CLIP)
-
-        assert result is not None and result["status"] == "fits"
-
-    def test_an_unknown_model_has_no_estimate(self, monkeypatch):
-        monkeypatch.setattr(model_memory, "ltx_cuda_system_memory", lambda *args: None)
-
-        assert clip_memory_fit("repo/ltx", budget=MemoryBudget(10 * _GIB, 30 * _GIB), model_name="ltx-4", **self._CLIP) is None
-
-    def test_a_model_without_a_quantize_level_has_no_estimate_and_no_filesystem_lookup(self):
-        finder = MagicMock(return_value=None)
-
-        assert clip_memory_fit("repo/ltx", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=finder, model_name="not-ltx", **self._CLIP) is None
-        finder.assert_not_called()
-
-
-class TestH3ClipMemoryFit:
-    """MiniMax H3 on unified memory: the family dispatch reaches the macOS estimate, without any file lookup."""
-
-    _BUDGET = MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB)
-    _CLIP = {"width": 768, "height": 448, "frames": 124, "low_memory": False}
-
-    def test_the_reference_clip_is_estimated_without_looking_for_files(self):
-        finder = MagicMock(return_value=None)
-
-        fit = clip_memory_fit("example/h3", budget=self._BUDGET, find_local_dir=finder, family="h3", **self._CLIP)
-
-        assert fit == {"status": "fits", "required_gb": 15.0, "budget_gb": 24.0, "expected_seconds": 23 * 60}
-        finder.assert_not_called()
-
-    def test_the_forwards_set_the_time(self):
-        four = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", forwards=4, **self._CLIP)
-
-        assert four is not None and four["expected_seconds"] < 23 * 60
-
-    def test_an_image_mode_needs_more_than_text_to_video_at_a_small_clip(self):
-        clip = {**self._CLIP, "width": 576, "height": 320, "frames": 73}
-        budget = MemoryBudget(int(12.8 * _GIB), unified_bytes=24 * _GIB)
-
-        text = clip_memory_fit("example/h3", budget=budget, family="h3", **clip)
-        image = clip_memory_fit("example/h3", budget=budget, family="h3", mode="i2v", **clip)
-
-        assert text is not None and image is not None
-        assert (text["status"], image["status"], image["required_gb"]) == ("fits", "tight", 14.2)
-
-    def test_references_raise_the_estimate_and_text_to_video_with_them_is_staged(self):
-        clip = {**self._CLIP, "width": 576, "height": 320, "frames": 73}
-        budget = MemoryBudget(int(12.8 * _GIB), unified_bytes=24 * _GIB)
-
-        plain = clip_memory_fit("example/h3", budget=budget, family="h3", **clip)
-        referenced = clip_memory_fit("example/h3", budget=budget, family="h3", references=1, **clip)
-
-        assert plain is not None and referenced is not None
-        assert (plain["status"], referenced["status"], referenced["required_gb"]) == ("fits", "tight", 14.2)
-        assert referenced["expected_seconds"] > plain["expected_seconds"]
-
-    def test_a_length_h3_cannot_take_has_no_estimate(self):
-        assert clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", **{**self._CLIP, "frames": 121}) is None
-
-    def test_no_budget_has_no_estimate(self):
-        assert clip_memory_fit("example/h3", budget=None, family="h3", **self._CLIP) is None
-
-
-class TestH3CudaClipMemoryFit:
-    """MiniMax H3 on a discrete GPU: the family dispatch reaches the CUDA estimate, without any file lookup."""
-
-    _BUDGET = MemoryBudget(10 * _GIB, system_bytes=30 * _GIB)
-    _CLIP = {"width": 864, "height": 480, "frames": 124, "low_memory": True}
-
-    def test_the_clip_is_estimated_without_looking_for_files(self):
-        finder = MagicMock(return_value=None)
-
-        fit = clip_memory_fit("example/h3", budget=self._BUDGET, find_local_dir=finder, family="h3", **self._CLIP)
-
-        assert fit is not None
-        assert (fit["status"], fit["kind"], fit["resource"], fit["family"]) == ("fits", "discrete", "gpu", "h3")
-        assert abs(fit["expected_seconds"] - 276) <= 2
-        finder.assert_not_called()
-
-    def test_the_mode_forwards_and_loras_reach_the_estimate(self):
-        plain = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", **self._CLIP)
-        tuned = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", mode="i2v", forwards=4, loras_bytes=_GIB, **self._CLIP)
-
-        assert plain is not None and tuned is not None
-        assert tuned["expected_seconds"] < plain["expected_seconds"]
-        assert tuned["required_gb"] >= plain["required_gb"]
-
-    def test_an_upscale_is_estimated_and_takes_longer_than_its_half_size_render_alone(self):
-        fit = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, **{**self._CLIP, "width": 1280, "height": 704})
-        half = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", **{**self._CLIP, "width": 640, "height": 352})
-
-        assert fit is not None and fit["status"] == "fits"
-        assert fit["expected_seconds"] > half["expected_seconds"]
-
-    def test_an_upscale_does_not_read_the_config(self):
-        fit = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, **{**self._CLIP, "width": 1280, "height": 704})
-
-        assert fit is not None

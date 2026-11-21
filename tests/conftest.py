@@ -178,10 +178,25 @@ def hub_offline(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_real_memory_budget(monkeypatch):
-    """Keep ziv-video from querying the real accelerator when it checks a clip against memory; tests that care patch it again."""
+    """Keep ziv-video and ziv-image from querying the real accelerator when they check a run against memory; tests that care patch it again."""
+    import zvisiongenerator.image_cli as image_cli
     import zvisiongenerator.video_cli as video_cli
 
     monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: None)
+    monkeypatch.setattr(image_cli, "accelerator_memory_budget_or_none", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_memory_readout(monkeypatch):
+    """Keep the Web runner from reading the real process or accelerator memory while a test job runs; tests that care pass their own probe.
+
+    The Web server's probe holds ``backends.memory_usage`` itself, so the platform readers it calls are patched.
+    """
+    import zvisiongenerator.backends.cuda.memory as cuda_memory
+    import zvisiongenerator.backends.mac.memory as mac_memory
+
+    monkeypatch.setattr(cuda_memory, "memory_usage", lambda: None)
+    monkeypatch.setattr(mac_memory, "memory_usage", lambda: None)
 
 
 @pytest.fixture()
