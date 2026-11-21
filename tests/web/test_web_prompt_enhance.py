@@ -277,6 +277,13 @@ class TestEnhanceEndpoint:
         assert response.status_code == 409
         assert "all jobs have finished" in response.json()["detail"]
 
+    def test_a_quantization_in_progress_says_so_rather_than_naming_jobs(self, monkeypatch, no_active_job):
+        monkeypatch.setitem(web_server._quantize_slot, "busy", True)
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json={"prompt": "a fox", "settings": {}})
+        assert response.status_code == 409
+        assert response.json()["detail"] == web_server._QUANTIZING_MESSAGE
+
     def test_conflict_while_enhancing(self, monkeypatch, no_active_job):
         monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(busy=True))
         with TestClient(web_server.app) as client:

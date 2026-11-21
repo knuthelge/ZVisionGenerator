@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from zvisiongenerator.utils.memory_grade import TIGHT, TOO_LARGE
 from zvisiongenerator.utils.prompt_compose import compose_video_prompt
 from zvisiongenerator.utils.upscale import SEEDVR2_MEMORY_WARNING, VIDEO_UPSCALE_FACTOR, WARNING_MEMORY, UpscaleOption
 
 if TYPE_CHECKING:
+    from zvisiongenerator.utils.memory_verdict import MemoryVerdict
     from zvisiongenerator.utils.model_memory import MemoryBudget
 
 # Pixels per latent cell of the LTX video VAE: an upscaled clip's sides are multiples of it.
@@ -63,20 +66,37 @@ def ltx_upscale_steps(config: dict[str, Any]) -> int:
     return steps
 
 
+def ltx_upscale_verdict(model_ref: str, model_name: str, width: int, height: int, frame_count: int, *, low_memory: bool = True, budget: MemoryBudget | None) -> MemoryVerdict | None:
+    """Return the memory verdict of a two-stage LTX render at the upscale's output size (*width* x *height*), which covers the upscale's encode, refine and decode.
+
+    ``None`` when there is no memory budget, or the model's weights cannot be sized from its files or the shipped table.
+    """
+    from zvisiongenerator.utils.memory_verdict import MemoryJob, judge
+    from zvisiongenerator.utils.weight_totals import resolve_ltx_weights
+
+    if budget is None or not budget.gpu_bytes:
+        return None
+    resolved = resolve_ltx_weights(model_name, model_ref, platform_key=sys.platform)
+    if resolved is None:
+        return None
+    job = MemoryJob(media="video", family="ltx", width=width, height=height, frames=frame_count, low_memory=low_memory, upscale=True)
+    try:
+        return judge(job, budget, resolved.weights)
+    except ValueError:
+        return None
+
+
 def ltx_video_option(width: int, height: int, frame_count: int | None, *, model_ref: str, model_name: str, budget: MemoryBudget | None) -> UpscaleOption:
     """Return the one 2× option of an LTX video upscale, warned when the clip may not fit this computer's memory.
 
-    The warning comes from ``clip_memory_fit`` for a two-stage render at the output size, which covers the upscale's
-    encode, refine and decode. Without a frame count or a memory budget there is no warning. The option is never disabled.
+    The warning comes from :func:`ltx_upscale_verdict`. Without a frame count or a memory budget there is no warning. The option is never disabled.
     """
-    from zvisiongenerator.utils.model_memory import clip_memory_fit
-
     out_width, out_height = width * VIDEO_UPSCALE_FACTOR, height * VIDEO_UPSCALE_FACTOR
     option = UpscaleOption(factor=VIDEO_UPSCALE_FACTOR, width=out_width, height=out_height, allowed=True)
-    if frame_count is None or budget is None:
+    if frame_count is None:
         return option
-    fit = clip_memory_fit(model_ref, width=out_width, height=out_height, frames=frame_count, low_memory=True, upscale=True, budget=budget, model_name=model_name)
-    if fit is not None and fit.get("status") in ("tight", "too_large"):
+    verdict = ltx_upscale_verdict(model_ref, model_name, out_width, out_height, frame_count, budget=budget)
+    if verdict is not None and verdict.status in (TIGHT, TOO_LARGE):
         return replace(option, warning=SEEDVR2_MEMORY_WARNING, warning_code=WARNING_MEMORY)
     return option
 

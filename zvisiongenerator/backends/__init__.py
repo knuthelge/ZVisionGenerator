@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.converters.ltx_checkpoint import LtxCheckpoint
     from zvisiongenerator.converters.h3_checkpoint import H3Checkpoint
     from zvisiongenerator.core.image_backend import ImageBackend
+    from zvisiongenerator.core.memory_sampler import MemoryUsage
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
     from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
     from zvisiongenerator.core.video_family import VideoFamily
@@ -48,6 +49,7 @@ __all__ = [
     "h3_download_plan",
     "h3_load_options",
     "image_download_plan",
+    "memory_usage",
     "release_accelerator_memory",
     "supports_seedvr2",
     "supports_stored_quants",
@@ -82,6 +84,24 @@ _IMAGE_BACKENDS_MAP: dict[str, tuple[str, Callable[[], "ImageBackend"]]] = {
     "win32": ("diffusers", _create_diffusers_backend),
     "linux": ("diffusers", _create_diffusers_backend),
 }
+
+
+def _configure_accelerator_environment() -> None:
+    """Set the CUDA allocator options on Windows and Linux; macOS is left alone.
+
+    PyTorch reads them once, when CUDA first starts, and some imports (``bitsandbytes``) start it, so this runs when
+    this package is first imported, before any module of ``backends.cuda`` loads. Every entry point (the CLIs, the Web
+    UI and its job processes, the benches) reaches the CUDA code through this package, and child processes inherit the
+    environment this sets.
+    """
+    if _IMAGE_BACKENDS_MAP.get(sys.platform, ("", None))[0] != "diffusers":
+        return
+    from zvisiongenerator.backends.cuda.memory import configure_allocator
+
+    configure_allocator()
+
+
+_configure_accelerator_environment()
 
 
 def _get_image_backend_registration() -> tuple[str, Callable[[], "ImageBackend"]]:
@@ -316,6 +336,22 @@ def accelerator_free_bytes() -> int | None:
     return None
 
 
+def memory_usage() -> MemoryUsage | None:
+    """Return the machine's live memory load, or ``None`` when unknown (other platforms, or a failed read): the whole machine's memory in use on macOS; on Windows and Linux the whole machine's RAM in use and the memory in use on the card CUDA uses."""
+    try:
+        if sys.platform in ("win32", "linux"):
+            from zvisiongenerator.backends.cuda.memory import memory_usage as cuda_memory_usage
+
+            return cuda_memory_usage()
+        if sys.platform == "darwin":
+            from zvisiongenerator.backends.mac.memory import memory_usage as mac_memory_usage
+
+            return mac_memory_usage()
+    except Exception:  # noqa: BLE001 - a failed reading means "unknown", never a failed run
+        return None
+    return None
+
+
 def _no_release() -> None:
     """Do nothing (CUDA keeps its reserved memory between cut-outs so the next one reuses it)."""
 
@@ -395,10 +431,10 @@ def get_accelerator_memory_budget() -> MemoryBudget | None:
         budget = memory_budget_bytes()
         return MemoryBudget(budget, unified_bytes=memory_size_bytes()) if budget else None
     if sys.platform in ("win32", "linux"):
-        from zvisiongenerator.backends.cuda.memory import memory_sizes
+        from zvisiongenerator.backends.cuda.memory import card_sizes, memory_sizes
 
-        sizes = memory_sizes()
-        return MemoryBudget(*sizes) if sizes else None
+        sizes, card = memory_sizes(), card_sizes()
+        return MemoryBudget(*sizes, gpu_total_bytes=card[0]) if sizes and card else None
     return None
 
 

@@ -45,9 +45,9 @@ def first_run_payload(app_config: dict[str, Any], budget: MemoryBudget | None, i
 
 
 def _machine_memory_bytes(budget: MemoryBudget | None) -> int | None:
-    """Return the memory that decides the recommendation: unified memory on a Mac, VRAM on CUDA, else ``None``."""
+    """Return the memory that decides the recommendation: unified memory on a Mac, the card's whole memory on CUDA, else ``None``."""
     if budget is None:
         return None
     if budget.unified_bytes:
         return budget.unified_bytes
-    return budget.gpu_bytes if budget.system_bytes is not None else None
+    return budget.full_gpu_bytes if budget.system_bytes is not None else None

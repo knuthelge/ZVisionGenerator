@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import warnings
 
 import pytest
 from unittest.mock import MagicMock, patch
 
-from zvisiongenerator.image_cli import _build_parser, main
+from tests._factories import _patch_image_main_dependencies
+from PIL import Image
+
+from zvisiongenerator.utils.memory_verdict import MemoryJob
+from zvisiongenerator.image_cli import _build_parser, _warn_if_memory_tight, main
+from zvisiongenerator.utils.memory_verdict import MemoryVerdict, MemoryWeights
+from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 from zvisiongenerator.utils.matte import matte_pins
 from zvisiongenerator.utils.prompts import PromptFileInspection
 
@@ -552,6 +559,204 @@ class TestCLIValidation:
         mock_backend.load_model.assert_not_called()
 
 
+class TestImageMemoryWarning:
+    """``ziv-image`` warns once, before any download, when the memory verdict is Tight or Too large."""
+
+    _MAIN_MOCKS = TestCLIValidation._MAIN_MOCKS
+    _run_main_with_overrides = TestCLIValidation._run_main_with_overrides
+
+    _KLEIN = {
+        "detect_image_model": lambda _path: MagicMock(family="flux2_klein", size="9b"),
+        "resolve_defaults": lambda *a, **kw: {"steps": 4, "guidance": 1.0, "scheduler": None, "max_reference_images": 4},
+    }
+    _MACHINE = MemoryBudget(10 * GIB, system_bytes=30 * GIB)
+
+    @staticmethod
+    def _verdict(status="too_large", resource="gpu", gpu_gb=10.4, ram_gb=None):
+        return MemoryVerdict(round(gpu_gb * GIB), None if ram_gb is None else round(ram_gb * GIB), "resident", status, resource)
+
+    @staticmethod
+    def _resolved(**extra):
+        return MagicMock(family="flux2_klein", model_size="9b", stored_bits=None, weights=MemoryWeights(), **extra)
+
+    @staticmethod
+    def _row_judge(by_level):
+        """Return the engine stand-in the rows of a job's other levels are judged with; a level it has no verdict for cannot be judged."""
+
+        def judge(job, *_):
+            if job.quantize not in (by_level or {}):
+                raise ValueError("no weights")
+            return by_level[job.quantize]
+
+        return judge
+
+    def _run(self, argv, verdict, tmp_path, *, machine=_MACHINE, resolved="default", judge_error=None, by_level=None):
+        """Run a Klein generation with ``judge`` mocked; return the judge and resolver mocks, the backend and the memory warnings caught.
+
+        *by_level* maps a quantize level to the verdict the engine gives the job at it, for the rows of the job's other levels.
+        """
+        refs = []
+        for index in range(2):
+            path = tmp_path / f"ref{index}.png"
+            Image.new("RGB", (1024, 512)).save(path)
+            refs.append(str(path))
+        backend = _backend("flux2_klein")
+        judge = MagicMock(return_value=verdict, side_effect=judge_error)
+        resolve = MagicMock(return_value=self._resolved() if resolved == "default" else resolved)
+        argv = [value.replace("REFS", ",".join(refs)) for value in argv]
+        with warnings.catch_warnings(record=True) as caught, patch("zvisiongenerator.utils.memory_rows.judge", side_effect=self._row_judge(by_level)):
+            warnings.simplefilter("always")
+            self._run_main_with_overrides(
+                ["--prompt", "ok", "-m", "klein", *argv],
+                **self._KLEIN,
+                get_backend=lambda: backend,
+                accelerator_memory_budget_or_none=lambda: machine,
+                resolve_image_weights=resolve,
+                judge=judge,
+            )
+        return judge, resolve, backend, [str(w.message) for w in caught if w.message.args and str(w.message).startswith("Memory for")]
+
+    def test_a_too_large_job_warns_once_with_the_sentence_and_the_figures(self, tmp_path):
+        judge, resolve, backend, messages = self._run(["--width", "1600", "--height", "1600", "-q", "4"], self._verdict(), tmp_path)
+
+        assert messages == ["Memory for this image (1600×1600 · q4): Needs more GPU memory than this card has (about 10.4 of 10 GB). Continuing."]
+        job, machine, weights = judge.call_args.args
+        assert (job.media, job.family, job.model_size, job.quantize, job.width, job.height) == ("image", "flux2_klein", "9b", 4, 1600, 1600)
+        assert machine == self._MACHINE and weights is resolve.return_value.weights
+        assert resolve.call_args.kwargs["hub"] is True
+        backend.load_model.assert_called_once()
+
+    def test_a_tight_job_warns_with_its_sentence(self, tmp_path):
+        _, _, _, messages = self._run([], self._verdict("tight", gpu_gb=9.6), tmp_path)
+
+        assert messages == ["Memory for this image (832×1216): Fits, but close to the GPU's limit. It may run out of memory (about 9.6 of 10 GB). Continuing."]
+
+    def test_a_ram_verdict_names_the_ram(self, tmp_path):
+        _, _, _, messages = self._run([], self._verdict(resource="ram", ram_gb=31.5), tmp_path)
+
+        assert messages[0].endswith("Needs more RAM than this computer has (about 31.5 of 30 GB). Continuing.")
+
+    def test_the_references_are_in_the_heading_and_the_job(self, tmp_path):
+        judge, _, _, messages = self._run(["--width", "1024", "--height", "1024", "--reference", "REFS"], self._verdict(), tmp_path)
+
+        assert messages[0].startswith("Memory for this image (1024×1024 · 2 references):")
+        assert judge.call_args.args[0].reference_megapixels == pytest.approx((0.524288, 0.524288))
+
+    _LEVELS = {None: _verdict("too_large", gpu_gb=17.0), 8: _verdict("too_large", gpu_gb=10.4), 4: _verdict("fits", gpu_gb=6.0)}
+
+    def test_a_too_large_job_names_how_the_other_quants_fit(self, tmp_path):
+        _, _, _, messages = self._run(["--width", "1600", "--height", "1600"], self._LEVELS[None], tmp_path, by_level=self._LEVELS)
+
+        assert messages == [
+            "Memory for this image (1600×1600): Needs more GPU memory than this card has (about 17 of 10 GB). Continuing. Other quants: q8 Too large (10.4 GB) · q4 Fits (6 GB)",
+        ]
+
+    def test_the_level_the_job_runs_at_is_left_out_of_the_other_quants(self, tmp_path):
+        _, _, _, messages = self._run(["-q", "8"], self._LEVELS[8], tmp_path, by_level=self._LEVELS)
+
+        assert messages[0].endswith("Continuing. Other quants: None Too large (17 GB) · q4 Fits (6 GB)")
+
+    def test_a_tight_job_names_the_other_quants_too(self, tmp_path):
+        levels = {**self._LEVELS, None: self._verdict("tight", gpu_gb=9.6)}
+
+        _, _, _, messages = self._run([], levels[None], tmp_path, by_level=levels)
+
+        assert messages[0].endswith("Continuing. Other quants: q8 Too large (10.4 GB) · q4 Fits (6 GB)")
+
+    def test_a_model_stored_at_one_level_has_no_other_quants(self, tmp_path):
+        _, _, _, messages = self._run([], self._verdict(), tmp_path, resolved=MagicMock(family="flux2_klein", model_size="9b", stored_bits=4, weights=MemoryWeights()), by_level=self._LEVELS)
+
+        assert messages == ["Memory for this image (832×1216 · q4): Needs more GPU memory than this card has (about 10.4 of 10 GB). Continuing."]
+
+    def test_a_model_that_cannot_be_quantized_has_no_other_quants(self, tmp_path):
+        with patch("zvisiongenerator.utils.memory_rows.model_capabilities", return_value={"supports_quantize": False}):
+            _, _, _, messages = self._run([], self._verdict(), tmp_path, by_level=self._LEVELS)
+
+        assert messages == ["Memory for this image (832×1216): Needs more GPU memory than this card has (about 10.4 of 10 GB). Continuing."]
+
+    def test_an_edit_is_given_its_loras_and_its_other_quants(self):
+        args = argparse.Namespace(model_name="klein", model="klein", quantize=None, edit_source="a.png", reference_paths=[], lora_paths=["a.safetensors", "b.safetensors"])
+        judge = MagicMock(return_value=self._verdict())
+
+        with patch.multiple("zvisiongenerator.image_cli", accelerator_memory_budget_or_none=lambda: self._MACHINE, resolve_image_weights=MagicMock(return_value=self._resolved()), judge=judge):
+            with patch("zvisiongenerator.utils.memory_rows.judge", side_effect=self._row_judge(self._LEVELS)):
+                with pytest.warns(UserWarning, match=r"^Memory for this edit \(1024×768 · 2 LoRAs\): .* Other quants: q8 Too large \(10\.4 GB\) · q4 Fits \(6 GB\)$"):
+                    _warn_if_memory_tight(args, MemoryJob(media="image", width=1024, height=768))
+
+    def test_one_lora_is_counted_in_the_singular(self):
+        args = argparse.Namespace(model_name="klein", model="klein", quantize=4, edit_source=None, reference_paths=[], lora_paths=["a.safetensors"])
+
+        with patch.multiple(
+            "zvisiongenerator.image_cli",
+            accelerator_memory_budget_or_none=lambda: self._MACHINE,
+            resolve_image_weights=MagicMock(return_value=self._resolved()),
+            judge=MagicMock(return_value=self._verdict()),
+        ):
+            with pytest.warns(UserWarning, match=r"\(1024×768 · q4 · 1 LoRA\)"):
+                _warn_if_memory_tight(args, MemoryJob(media="image", width=1024, height=768))
+
+    def test_a_fitting_job_does_not_warn(self, tmp_path):
+        judge, _, backend, messages = self._run([], self._verdict("fits", gpu_gb=5.0), tmp_path)
+
+        assert messages == []
+        judge.assert_called_once()
+        backend.load_model.assert_called_once()
+
+    def test_without_a_memory_budget_nothing_is_judged(self, tmp_path):
+        judge, resolve, _, messages = self._run([], self._verdict(), tmp_path, machine=None)
+
+        assert messages == []
+        judge.assert_not_called()
+        resolve.assert_not_called()
+
+    def test_weights_that_cannot_be_sized_stay_silent(self, tmp_path):
+        judge, _, backend, messages = self._run([], self._verdict(), tmp_path, resolved=None)
+
+        assert messages == []
+        judge.assert_not_called()
+        backend.load_model.assert_called_once()
+
+    def test_a_job_the_engine_cannot_judge_stays_silent(self, tmp_path):
+        _, _, backend, messages = self._run([], self._verdict(), tmp_path, judge_error=ValueError("no weights"))
+
+        assert messages == []
+        backend.load_model.assert_called_once()
+
+    def test_the_warning_comes_before_the_download_and_the_load(self, tmp_path):
+        backend = _backend("flux2_klein")
+        seen: dict[str, bool] = {}
+        built = MagicMock(return_value=True)
+
+        def _judge(*_args, **_kwargs):
+            seen["built"], seen["loaded"] = built.called, backend.load_model.called
+            return self._verdict()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self._run_main_with_overrides(
+                ["--prompt", "ok", "-m", "klein"],
+                **self._KLEIN,
+                get_backend=lambda: backend,
+                ensure_built_model=built,
+                accelerator_memory_budget_or_none=lambda: self._MACHINE,
+                resolve_image_weights=MagicMock(return_value=self._resolved()),
+                judge=_judge,
+            )
+
+        assert seen == {"built": False, "loaded": False}
+        built.assert_called_once()
+
+    def test_an_edit_is_judged_at_its_canvas_with_its_picture_and_named_an_edit(self, tmp_path):
+        args = argparse.Namespace(model_name="klein", model="klein", quantize=None, edit_source="a.png", reference_paths=[])
+        judge = MagicMock(return_value=self._verdict())
+
+        with patch.multiple("zvisiongenerator.image_cli", accelerator_memory_budget_or_none=lambda: self._MACHINE, resolve_image_weights=MagicMock(return_value=self._resolved()), judge=judge):
+            with pytest.warns(UserWarning, match=r"^Memory for this edit \(1024×768\): Needs more GPU memory"):
+                _warn_if_memory_tight(args, MemoryJob(media="image", width=1024, height=768, reference_megapixels=(0.79,)))
+
+        assert judge.call_args.args[0].reference_megapixels == (0.79,)
+
+
 # ── Post-processing flag parsing ────────────────────────────────────────────
 
 
@@ -701,3 +906,56 @@ class TestReferenceFlag:
 
         assert excinfo.value.code == 2
         assert ran == []
+
+
+class TestMemoryJobHandoff:
+    """The model loads for the size the run draws, so the backend can place its weights for it."""
+
+    @staticmethod
+    def _run(monkeypatch, *argv):
+        backend = _patch_image_main_dependencies(monkeypatch)
+        monkeypatch.setattr("sys.argv", ["ziv-image", "-m", "model", "--prompt", "a cat", *argv])
+        main()
+        return backend.load_model.call_args.kwargs["memory_job"]
+
+    def test_the_preset_size_is_the_jobs_size(self, monkeypatch):
+        job = self._run(monkeypatch)
+
+        assert (job.width, job.height, job.reference_megapixels) == (832, 1216, ())
+
+    def test_explicit_dimensions_override_the_preset(self, monkeypatch):
+        job = self._run(monkeypatch, "--width", "1600", "--height", "1024")
+
+        assert (job.width, job.height) == (1600, 1024)
+
+    def test_an_upscale_draws_its_final_size(self, monkeypatch):
+        job = self._run(monkeypatch, "--width", "1600", "--height", "1024", "--upscale", "2")
+
+        assert (job.width, job.height) == (1600, 1024)  # the size after the upscale, the largest the model draws
+
+    def test_the_references_and_loras_are_counted(self, tmp_path):
+        from PIL import Image
+
+        from zvisiongenerator.image_cli import _image_memory_job
+
+        reference = tmp_path / "ref.png"
+        Image.new("RGB", (2000, 1000)).save(reference)
+        lora = tmp_path / "style.safetensors"
+        lora.write_bytes(b"x" * 40)
+        args = argparse.Namespace(edit_source=None, ratio="2:3", size="m", width=None, height=None, reference_paths=[str(reference)])
+
+        job = _image_memory_job(args, {"2:3": {"m": {"width": 832, "height": 1216}}}, [str(lora)])
+
+        assert (job.width, job.height) == (832, 1216)
+        assert job.reference_megapixels == pytest.approx((2.0,))
+        assert job.lora_bytes == 40
+
+    def test_an_extend_draws_its_canvas_and_holds_it_as_its_one_reference_capped_at_a_megapixel(self):
+        from zvisiongenerator.image_cli import _image_memory_job
+        from zvisiongenerator.processing.edit_region import edit_model_size
+
+        args = argparse.Namespace(edit_source="/in/a.png", edit_size=(3000, 2000), edit_paint=None, edit_extend=("right", 512), reference_paths=[])
+        job = _image_memory_job(args, {}, None)
+
+        assert (job.width, job.height) == edit_model_size(3000, 2000, masked=False, extend=("right", 512))
+        assert job.reference_megapixels == pytest.approx((1024 * 1024 / 1e6,))

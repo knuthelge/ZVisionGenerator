@@ -96,6 +96,7 @@ def _rows(env, config=None, **kwargs) -> dict[str, dict]:
 class TestInventoryRows:
     def test_each_runnable_preset_is_a_row_with_the_fields_the_page_reads(self, env):
         rows = _rows(env, target_present=lambda target: target.repo_id.startswith("m-a-p/"))
+        memory = rows["yue2"]["memory"]
 
         assert list(rows) == ["yue2", "qwen3_tts", "sa3"]
         assert rows["yue2"] == {
@@ -114,10 +115,19 @@ class TestInventoryRows:
             ],
             "downloaded": True,
             "download_needed": False,
-            "memory_fit": {"kind": "discrete", "budget_gb": 10.0, "by_quantize": {"none": {"status": "fits", "required_gb": 6.7}}},
+            "memory": memory,
             "delete": None,
             "disk_size_label": None,
         }
+        assert {key: value for key, value in memory.items() if key not in {"rows", "title", "control_title", "table_heading"}} == {
+            "kind": "discrete",
+            "budget": {"gpu_gb": 10.0, "ram_gb": 64.0},
+            "control": None,
+            "current": "only",
+            "download_size_label": None,
+            "expected_seconds": None,
+        }
+        assert [{key: row[key] for key in ("key", "status", "gpu_gb", "ram_gb")} for row in memory["rows"]] == [{"key": "only", "status": "fits", "gpu_gb": 6.0, "ram_gb": None}]
         assert [rows[name]["kinds"] for name in rows] == [["music"], ["speech"], ["sound"]]
         assert not any("kind" in row for row in rows.values())
         assert rows["sa3"]["downloaded"] is False and rows["sa3"]["download_needed"] is True
@@ -148,7 +158,7 @@ class TestInventoryRows:
         with pytest.warns(UserWarning, match="Could not determine status for audio model 'yue2'"):
             rows = _rows(env, target_present=broken)
 
-        assert (rows["yue2"]["downloaded"], rows["yue2"]["memory_fit"]) == (None, None)
+        assert (rows["yue2"]["downloaded"], rows["yue2"]["memory"]) == (None, None)
         assert rows["yue2"]["download_needed"] is False
         assert rows["sa3"]["downloaded"] is True
 

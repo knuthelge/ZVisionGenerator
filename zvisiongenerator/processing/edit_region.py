@@ -93,6 +93,20 @@ def extend_draw_size(size: tuple[int, int], side: str, amount: int) -> tuple[tup
     return drawn, max(ALIGN, math.ceil(round(amount * scale / ALIGN, 6)) * ALIGN)
 
 
+def edit_model_size(width: int, height: int, *, masked: bool, extend: tuple[str, int] | None) -> tuple[int, int]:
+    """Return the ``(width, height)`` canvas the model draws for an edit of a *width* x *height* picture.
+
+    An Extend draws the source at :func:`extend_draw_size` plus the new strip beside it; a masked edit draws its crop
+    at :func:`target_size` (taken here from the whole picture, the largest crop the model sees); a whole-picture edit
+    draws the picture at :func:`grid_size`.
+    """
+    if extend is not None:
+        side, amount = extend
+        (drawn_w, drawn_h), strip = extend_draw_size((width, height), side, amount)
+        return (drawn_w + strip, drawn_h) if side in ("left", "right") else (drawn_w, drawn_h + strip)
+    return target_size(width, height) if masked else grid_size(width, height)
+
+
 def edit_output_size(width: int, height: int, *, extend: tuple[str, int] | None) -> tuple[int, int]:
     """Return the ``(width, height)`` an edit of a *width* x *height* picture saves.
 

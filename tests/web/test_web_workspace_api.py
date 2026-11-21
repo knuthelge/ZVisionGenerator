@@ -257,13 +257,20 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     calls: list[tuple[str, str, tuple[int, ...]]] = []
     video_names: list[tuple[str | None, bool]] = []
 
-    def _fake_status(resolved_path, *, kind, quantize_options=(), budget=None, find_local_dir=None, model_name=None, app_config=None, family=None):
-        calls.append((resolved_path, kind, quantize_options))
+    def _fake_downloaded(resolved_path, *, kind, family=None, model_name=None, app_config=None, find_local_dir=None):
         if kind == "video":
             video_names.append((model_name, app_config is web_config.app_config))
-        return {"downloaded": resolved_path != "owner/ltx", "memory_fit": None}
+        return resolved_path != "owner/ltx"
 
-    monkeypatch.setattr(workspace_api_module, "describe_model_status", _fake_status)
+    def _fake_image_memory(name, resolved_path, *, levels, **_):
+        calls.append((resolved_path, "image", levels))
+
+    def _fake_video_memory(name, resolved_path, family, **_):
+        calls.append((resolved_path, "video", ()))
+
+    monkeypatch.setattr(workspace_api_module, "model_downloaded", _fake_downloaded)
+    monkeypatch.setattr(workspace_api_module, "reference_image_memory", _fake_image_memory)
+    monkeypatch.setattr(workspace_api_module, "reference_video_memory", _fake_video_memory)
     monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: MemoryBudget(10 * 1024**3))
     monkeypatch.setattr(workspace_api_module, "list_loras", lambda _data_dir: [])
     bootstrap_view = make_workspace_bootstrap_view()
@@ -290,7 +297,7 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     assert workspace_images["zit"]["downloaded"] is True
     assert workspace["video_models"][0]["downloaded"] is False
     assert {entry["name"]: entry["downloaded"] for entry in models["video_models"]} == {"ltx-8": False}
-    assert all("memory_fit" in entry for entry in [*workspace["image_models"], *models["image_models"]])
+    assert all("memory" in entry for entry in [*workspace["image_models"], *models["image_models"]])
     # Both pages estimate exactly the quantize levels the workspace picker offers (from the bootstrap defaults).
     assert ("owner/zit", "image", ()) in workspace_calls
     assert calls[len(workspace_calls) :] == workspace_calls
@@ -358,7 +365,7 @@ def test_workspace_models_without_inventory_entry_report_unknown_status(monkeypa
         build_bootstrap_view=lambda _cfg: make_workspace_bootstrap_view(),
     )
 
-    assert {(entry["downloaded"], entry["memory_fit"]) for entry in workspace["image_models"]} == {(None, None)}
+    assert {(entry["downloaded"], entry["memory"]) for entry in workspace["image_models"]} == {(None, None)}
 
 
 def test_one_failing_model_status_does_not_break_the_listing(monkeypatch):
@@ -369,12 +376,12 @@ def test_one_failing_model_status_does_not_break_the_listing(monkeypatch):
         ImageInventoryEntry(name="local-image", family="zimage", size=None, source="installed", resolved_path="/broken"),
     )
 
-    def _fake_status(resolved_path, **_):
+    def _fake_downloaded(resolved_path, **_):
         if resolved_path == "/broken":
             raise AttributeError("corrupt header")
-        return {"downloaded": True, "memory_fit": None}
+        return True
 
-    monkeypatch.setattr(workspace_api_module, "describe_model_status", _fake_status)
+    monkeypatch.setattr(workspace_api_module, "model_downloaded", _fake_downloaded)
     monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
 
     with pytest.warns(UserWarning, match="local-image"):
@@ -398,7 +405,7 @@ def test_models_page_skips_quantize_resolution_without_a_memory_budget(monkeypat
     web_config = make_web_config()
     web_config.image_inventory = (ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="owner/zit"),)
     monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
-    monkeypatch.setattr(workspace_api_module, "describe_model_status", lambda resolved_path, **_: {"downloaded": True, "memory_fit": None})
+    monkeypatch.setattr(workspace_api_module, "model_downloaded", lambda resolved_path, **_: True)
     monkeypatch.setattr(workspace_api_module, "list_loras", lambda _data_dir: [])
 
     models = workspace_api_module.build_models_response(
@@ -439,7 +446,7 @@ def test_ltx_video_models_carry_their_ltx_version_and_other_video_models_none(mo
         VideoInventoryEntry(name="mine", family="ltx", supports_i2v=True, source="installed", resolved_path=str(local)),
         VideoInventoryEntry(name="h3", family="h3", supports_i2v=True, source="alias", resolved_path="MiniMaxAI/MiniMax-H3"),
     )
-    monkeypatch.setattr(workspace_api_module, "describe_model_status", lambda *args, **kwargs: {"downloaded": True, "memory_fit": None})
+    monkeypatch.setattr(workspace_api_module, "model_downloaded", lambda *args, **kwargs: True)
     monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
 
     workspace = workspace_api_module.build_workspace_response(

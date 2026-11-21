@@ -931,7 +931,7 @@ def test_models_route_lists_the_downloaded_seedvr2_tier_with_its_disk_use(monkey
             "source": "seedvr2",
             "stored_quant": None,
             "downloaded": True,
-            "memory_fit": None,
+            "memory": None,
             "delete": {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": []},
             "disk_size_label": "2.5 GB",
             "download_size_label": "17.0 GB",
@@ -1594,6 +1594,73 @@ def test_jobs_are_refused_while_a_model_is_being_quantized(monkeypatch, tmp_path
     assert response.status_code == 200
     assert admission == ["refused"]
     web_server._reject_while_busy()  # released after the conversion
+
+
+class _EnhancerSession:
+    """Stand-in enhancer session that records whether it was released."""
+
+    def __init__(self, *, busy: bool = False):
+        self._busy = busy
+        self.released = 0
+
+    def busy(self) -> bool:
+        return self._busy
+
+    def reserve(self):
+        return None if self._busy else object()
+
+    def cancel_reservation(self, token) -> None:
+        pass
+
+    def release(self) -> None:
+        self.released += 1
+
+
+def test_a_resident_enhancer_is_released_when_a_quantized_copy_starts(monkeypatch, tmp_path):
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"x")
+    session = _EnhancerSession()
+    monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: session)
+    released_at_run: list[int] = []
+    monkeypatch.setattr(web_server, "_run_model_management_command", lambda args: released_at_run.append(session.released) or "done")
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "flux2-klein-9b", "quantize": "8"})
+
+    assert response.status_code == 200
+    assert released_at_run == [1]
+
+
+def test_a_quantized_copy_is_refused_while_an_enhancement_runs(monkeypatch, tmp_path):
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"x")
+    monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _EnhancerSession(busy=True))
+    monkeypatch.setattr(web_server, "_run_model_management_command", lambda args: pytest.fail("the conversion must not start"))
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "flux2-klein-9b", "quantize": "8"})
+
+    assert response.status_code == 409
+    assert web_server._quantize_slot["busy"] is False
+
+
+def test_an_enhancement_is_refused_while_a_model_is_being_quantized(monkeypatch, tmp_path):
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"x")
+    monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _EnhancerSession())
+    statuses: list[int] = []
+
+    def _enhance_during_conversion(args):
+        statuses.append(TestClient(web_server.app).post("/api/prompt/enhance", json={"prompt": "a fox", "settings": {}}).status_code)
+        return "done"
+
+    monkeypatch.setattr(web_server, "_run_model_management_command", _enhance_during_conversion)
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "flux2-klein-9b", "quantize": "8"})
+
+    assert response.status_code == 200
+    assert statuses == [409]
 
 
 def test_quantize_slot_is_released_when_the_conversion_fails(monkeypatch, tmp_path):

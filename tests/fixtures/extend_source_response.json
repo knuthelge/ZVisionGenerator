@@ -20,6 +20,5 @@
   "reference_images": [],
   "problems": [],
   "extend_frames": 48,
-  "window_frames": 73,
-  "memory_fit": null
+  "window_frames": 73
 }

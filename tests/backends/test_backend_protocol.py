@@ -110,8 +110,9 @@ class TestBackendRegistryLookup:
 
         monkeypatch.setattr(backends.sys, "platform", platform)
         monkeypatch.setattr(memory_cuda, "memory_sizes", lambda: (10, 30))
+        monkeypatch.setattr(memory_cuda, "card_sizes", lambda: (11, 1))
 
-        assert backends.get_accelerator_memory_budget() == MemoryBudget(10, 30)
+        assert backends.get_accelerator_memory_budget() == MemoryBudget(10, 30, gpu_total_bytes=11)
 
     def test_mac_memory_budget_is_the_recommended_working_set_with_the_unified_memory(self, monkeypatch):
         import zvisiongenerator.backends as backends
@@ -174,20 +175,49 @@ class TestBackendRegistryLookup:
 
         assert backends.accelerator_free_bytes() is None
 
-    def test_gpu_memory_comes_from_nvidia_smi_without_starting_cuda(self, monkeypatch):
-        import shutil
-        import subprocess
-
+    @pytest.mark.parametrize(("platform", "module"), [("linux", "cuda"), ("win32", "cuda"), ("darwin", "mac"), ("freebsd", None)])
+    def test_memory_usage_comes_from_the_platform_module(self, monkeypatch, platform, module):
+        import zvisiongenerator.backends as backends
         from zvisiongenerator.backends.cuda import memory as memory_cuda
+        from zvisiongenerator.backends.mac import memory as memory_mac
+        from zvisiongenerator.core.memory_sampler import MemoryUsage
+
+        monkeypatch.setattr(backends.sys, "platform", platform)
+        monkeypatch.setattr(memory_cuda, "memory_usage", lambda: MemoryUsage(111))
+        monkeypatch.setattr(memory_mac, "memory_usage", lambda: MemoryUsage(222))
+
+        expected = {"cuda": MemoryUsage(111), "mac": MemoryUsage(222), None: None}[module]
+        assert backends.memory_usage() == expected
+
+    @pytest.mark.parametrize("platform", ["linux", "darwin"])
+    def test_a_failing_memory_reading_gives_none(self, monkeypatch, platform):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
+        from zvisiongenerator.backends.mac import memory as memory_mac
+
+        def fail():
+            raise ImportError("broken install")
+
+        monkeypatch.setattr(backends.sys, "platform", platform)
+        monkeypatch.setattr(memory_cuda, "memory_usage", fail)
+        monkeypatch.setattr(memory_mac, "memory_usage", fail)
+
+        assert backends.memory_usage() is None
+
+    def test_gpu_memory_comes_from_nvml_without_starting_cuda(self, monkeypatch):
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
+        from zvisiongenerator.backends.cuda import nvml
 
         psutil_mod = MagicMock()
         psutil_mod.virtual_memory.return_value.total = 30
         monkeypatch.setitem(sys.modules, "psutil", psutil_mod)
         monkeypatch.setitem(sys.modules, "torch", None)  # importing torch would raise
-        monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-        monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: MagicMock(stdout="10240\n"))
-
-        assert memory_cuda.memory_sizes() == (10240 * 1024 * 1024, 30)
+        monkeypatch.setattr(nvml, "card_total_and_reserved", lambda: (10240 * 1024 * 1024, 394 * 1024 * 1024))
+        memory_cuda.card_sizes.cache_clear()
+        try:
+            assert memory_cuda.memory_sizes() == ((10240 - 394) * 1024 * 1024, 30)
+        finally:
+            memory_cuda.card_sizes.cache_clear()
 
     def test_drop_cached_files_syncs_and_drops_every_file(self, monkeypatch, tmp_path):
         import os
@@ -216,14 +246,19 @@ class TestBackendRegistryLookup:
 
         assert trimmed == [True]
 
-    def test_no_nvidia_smi_means_no_sizes(self, monkeypatch):
+    def test_no_nvml_and_no_nvidia_smi_means_no_sizes(self, monkeypatch):
         import shutil
 
         from zvisiongenerator.backends.cuda import memory as memory_cuda
+        from zvisiongenerator.backends.cuda import nvml
 
+        monkeypatch.setattr(nvml, "card_total_and_reserved", lambda: None)
         monkeypatch.setattr(shutil, "which", lambda _name: None)
-
-        assert memory_cuda.memory_sizes() is None
+        memory_cuda.card_sizes.cache_clear()
+        try:
+            assert memory_cuda.memory_sizes() is None
+        finally:
+            memory_cuda.card_sizes.cache_clear()
 
     def test_no_cuda_device_means_no_budget(self, monkeypatch):
         import zvisiongenerator.backends as backends

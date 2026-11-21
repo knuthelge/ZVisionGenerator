@@ -14,10 +14,14 @@ import os
 import sys
 import tempfile
 import threading
+import warnings
 from pathlib import Path
 from typing import Any
 
 _FILE_FORMAT = "%(asctime)s %(levelname)s [%(threadName)s] %(name)s: %(message)s"
+
+_WARNINGS_LOGGER = "py.warnings"
+_WARNING_TEXT = "warning_text"  # record attribute: a captured warning's message alone, without its location
 
 _log_path: Path | None = None
 _configured = False
@@ -45,6 +49,7 @@ def setup_logging(command: str) -> Path | None:
     console.setFormatter(_ConsoleFormatter())
     root.addHandler(console)
     logging.captureWarnings(True)
+    _keep_warning_text(warnings.showwarning)
 
     _log_path, open_errors = _open_log_file(command)
     if _log_path is not None:
@@ -58,11 +63,27 @@ def setup_logging(command: str) -> Path | None:
     return _log_path
 
 
+def _keep_warning_text(logged_showwarning: Any) -> None:
+    """Make captured warnings carry their message alone on the record, so the terminal can print it without the location.
+
+    The record's own message stays the full ``warnings.formatwarning`` text, which is what the log file writes.
+    """
+
+    def _show(message, category, filename, lineno, file=None, line=None) -> None:
+        if file is not None:
+            logged_showwarning(message, category, filename, lineno, file, line)
+            return
+        text = warnings.formatwarning(message, category, filename, lineno, line)
+        logging.getLogger(_WARNINGS_LOGGER).warning("%s", text, extra={_WARNING_TEXT: str(message)})
+
+    warnings.showwarning = _show
+
+
 class _ConsoleFormatter(logging.Formatter):
-    """One line per problem on the terminal; tracebacks go only to the log file."""
+    """One line per problem on the terminal; tracebacks go only to the log file; a warning shows its message without its location."""
 
     def format(self, record: logging.LogRecord) -> str:
-        return f"{record.levelname}: {record.getMessage()}"
+        return f"{record.levelname}: {getattr(record, _WARNING_TEXT, record.getMessage())}"
 
 
 def log_file_path() -> Path | None:

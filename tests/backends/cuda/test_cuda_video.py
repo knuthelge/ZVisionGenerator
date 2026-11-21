@@ -143,7 +143,7 @@ def test_without_a_checkpoint_the_repos_own_transformer_is_prepared(monkeypatch,
 def test_load_model_checks_system_memory_before_loading_weights(monkeypatch, fake_weights):
     _patch_runtime(monkeypatch, _make_runtime())
 
-    def _refuse(estimate, quantize, *, converted):
+    def _refuse(estimate, quantize, **_kwargs):
         raise RuntimeError("needs more memory")
 
     monkeypatch.setattr(video_diffusers_module, "_check_system_memory", _refuse)
@@ -153,6 +153,18 @@ def test_load_model_checks_system_memory_before_loading_weights(monkeypatch, fak
 
     assert fake_weights.prepared == []
     assert fake_weights.transformers == []
+
+
+def test_load_model_checks_system_memory_for_the_job_it_loads_for(monkeypatch, fake_weights, tmp_path):
+    _patch_runtime(monkeypatch, _make_runtime())
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._resolve_upsampler_weights", lambda repo_id, filename: "/fake/upsampler.safetensors")
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._read_state_dict", lambda path: _UPSAMPLER_STATE)
+    lora = tmp_path / "style.safetensors"
+    lora.write_bytes(b"x" * 1234)
+
+    DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", upscale=True, latent_upsampler=_UPSAMPLER_SOURCE, loras=[(str(lora), 1.0)])
+
+    assert fake_weights.memory_job == (True, 1234)
 
 
 @pytest.mark.parametrize("quantize", [None, 6])
@@ -427,30 +439,71 @@ def test_two_stage_upscale_encodes_the_prompt_once_for_both_stages(monkeypatch, 
     assert [call["prompt_embeds"] for call in pipeline.calls] == ["embeds:a city", "embeds:a city"]
 
 
-def _check_stock_memory(quantize):
-    return real_check_system_memory(real_ltx_system_estimate(Path("/fake/repo"), Path("/fake/ckpt"), quantize), quantize, converted=False)
+def _check_stock_memory(quantize, *, upscale=False, lora_bytes=0):
+    return real_check_system_memory(real_ltx_system_estimate(Path("/fake/repo"), Path("/fake/ckpt"), quantize), quantize, converted=False, upscale=upscale, lora_bytes=lora_bytes)
 
 
 def test_a_load_larger_than_system_memory_is_refused_and_names_the_smaller_level(monkeypatch):
-    _patch_memory(monkeypatch, total_gib=12)  # 10 G block weights at q8 and the runtime: 16 GB
+    _patch_memory(monkeypatch, total_gib=12)  # 10 G block weights at q8 and the runtime: 13.4 GB
 
-    with pytest.raises(RuntimeError, match="ltx-4"):
+    with pytest.raises(RuntimeError, match=r"LTX at q8 needs about 13\.\d GB of system memory; this machine has 12 GB\. Use ltx-4 instead\."):
         _check_stock_memory(8)
 
 
-def test_a_tight_load_warns(monkeypatch):
-    _patch_memory(monkeypatch, total_gib=19)  # 10 G block weights at q8 and the runtime: 16 GB, more than 80% of 19
+def test_a_tight_load_is_not_refused_and_adds_no_warning(monkeypatch, recwarn):
+    _patch_memory(monkeypatch, total_gib=16)  # 10 G block weights at q8 and the runtime: 13.4 GB, more than 80% of 16
 
-    with pytest.warns(UserWarning, match="ltx-4"):
-        _check_stock_memory(8)
+    _check_stock_memory(8)
+
+    assert len(recwarn) == 0
+
+
+@pytest.mark.parametrize("upscale", [False, True])
+@pytest.mark.parametrize("lora_bytes", [0, 3 * 1024**3])
+@pytest.mark.parametrize("total_gib", [12, 14, 15, 16, 17, 20, 24])
+def test_the_load_refuses_the_jobs_the_tag_calls_too_large(monkeypatch, total_gib, lora_bytes, upscale):
+    """The tag (``judge``) and the load grade the same figure against the same line, so web and command-line runs refuse alike."""
+    from zvisiongenerator.utils.memory_grade import TOO_LARGE
+    from zvisiongenerator.utils.memory_verdict import MemoryJob, MemoryWeights, judge
+    from zvisiongenerator.utils.model_memory import MemoryBudget
+
+    _patch_memory(monkeypatch, total_gib=total_gib)
+    estimate = real_ltx_system_estimate(Path("/fake/repo"), Path("/fake/ckpt"), 8)
+    job = MemoryJob(media="video", family="ltx", width=768, height=448, frames=121, low_memory=True, lora_bytes=lora_bytes, upscale=upscale)
+    verdict = judge(job, MemoryBudget(gpu_bytes=1024**4, system_bytes=total_gib * 1024**3), MemoryWeights(ltx_cuda=estimate))
+
+    if verdict.status == TOO_LARGE:
+        with pytest.raises(RuntimeError, match="system memory"):
+            _check_stock_memory(8, upscale=upscale, lora_bytes=lora_bytes)
+    else:
+        _check_stock_memory(8, upscale=upscale, lora_bytes=lora_bytes)
+
+
+def test_the_loras_and_the_upscale_count_toward_the_refusal(monkeypatch):
+    _patch_memory(monkeypatch, total_gib=14)  # the 13.4 GB of the weights and the runtime is Tight here
+
+    _check_stock_memory(8)
+    with pytest.raises(RuntimeError, match="system memory"):
+        _check_stock_memory(8, lora_bytes=2 * 1024**3)
+    with pytest.raises(RuntimeError, match="system memory"):
+        _check_stock_memory(8, upscale=True)
 
 
 @pytest.mark.parametrize(("total_gib", "together"), [(64, True), (24, False)])
 def test_the_check_says_whether_text_encoder_and_transformer_fit_together(monkeypatch, total_gib, together):
-    # 10 G block weights and a 10 G text encoder at q8: 10 GB each, 22.5 GB together with the runtime.
+    # 10 G block weights and a 10 G text encoder at q8: 10 GB each, 23.4 GB together with the runtime.
     _patch_memory(monkeypatch, total_gib=total_gib, text_encoder=10 * 1024**3)
 
     assert _check_stock_memory(8) is together
+
+
+def test_the_loras_and_the_upscale_count_toward_fitting_together(monkeypatch):
+    # 23.4 GB together with the runtime, and the Fits line at 80% of 30 GB is 24 GB: it fits bare but not with a LoRA or the upscale's second stage.
+    _patch_memory(monkeypatch, total_gib=30, text_encoder=10 * 1024**3)
+
+    assert _check_stock_memory(8) is True
+    assert _check_stock_memory(8, lora_bytes=1024**3) is False
+    assert _check_stock_memory(8, upscale=True) is False
 
 
 def test_resolve_pipeline_classes_requires_ltx2():

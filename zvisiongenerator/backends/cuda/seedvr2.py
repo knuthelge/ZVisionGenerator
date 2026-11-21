@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 from PIL import Image
 
 from zvisiongenerator.backends.cuda.driver import require_cuda
-from zvisiongenerator.backends.cuda.memory import configure_allocator
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, seedvr2_files, seedvr2_tiers
 from zvisiongenerator.utils.upscale import seedvr2_input_image
 
@@ -140,7 +139,6 @@ def _require_cuda() -> None:
     Raises:
         RuntimeError: If CUDA is not available.
     """
-    configure_allocator()
     import torch
 
     require_cuda(torch, "The SeedVR2 upscale on Windows and Linux")
@@ -194,7 +192,6 @@ def _prepare_runner(model: TorchSeedVR2Model, tile: tuple[int, int]) -> tuple[An
     models themselves are built by the phases, not here. The text embeddings are left unset: the upscale phase loads them
     for each run and frees them again, so a context shared between chunks must not hold them.
     """
-    configure_allocator()
     from seedvr2_torch.src.core.generation_utils import prepare_runner, setup_generation_context
     from seedvr2_torch.src.utils.debug import Debug
 

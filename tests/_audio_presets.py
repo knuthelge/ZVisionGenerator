@@ -74,7 +74,7 @@ def qwen3_tts_preset() -> dict[str, Any]:
         "voices": [{"id": voice, "label": label, "language": language} for voice, label, language in QWEN_VOICES],
         "limits": {"max_new_tokens": 1200, "part_chars": 500, "max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30},
         "settings": {"language": "auto", "join_pause_ms": 300, "join_fade_ms": 10, "part_level_match_db": 3, "edge_silence_max_ms": 150},
-        "platforms": {"cuda": {"memory_gb": 6.0}, "mps": {"family": "qwen3_tts_mlx", "memory_gb": 12.0}},
+        "platforms": {"cuda": {"memory_gb": 4.84}, "mps": {"family": "qwen3_tts_mlx", "memory_gb": 11.84}},
     }
 
 
@@ -115,7 +115,7 @@ def yue2_preset() -> dict[str, Any]:
             "vae_core_frames": 512,
             "fade_seconds": 2,
         },
-        "platforms": {"cuda": {"memory_gb": 6.7}, "mps": {"memory_gb": 10.5}},
+        "platforms": {"cuda": {"memory_gb": 5.58}, "mps": {"memory_gb": 11.52}},
     }
 
 
@@ -128,7 +128,7 @@ def sa3_preset() -> dict[str, Any]:
         "files": sa3_files(),
         "limits": {"max_seconds": 380},
         "settings": {"steps": 8, "cfg_scale": 1.0, "sample_size": 16777216},
-        "platforms": {"cuda": {"memory_gb": 6.1}, "mps": {"memory_gb": 6.1}},
+        "platforms": {"cuda": {"memory_gb": 5.27}, "mps": {"memory_gb": 8.49}},
     }
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -15,8 +16,10 @@ from zvisiongenerator.backends.mac.memory import (
     load_resident,
     materialize_weights,
     memory_size_bytes,
+    memory_usage,
     mlx_cache_limit,
 )
+from zvisiongenerator.core.memory_sampler import MemoryUsage
 
 
 @pytest.fixture
@@ -85,6 +88,9 @@ class TestBufferCachePolicy:
         assert [c[0] for c in mx.method_calls] == ["set_cache_limit", "clear_cache"]
         mx.set_cache_limit.assert_called_once_with(BUFFER_CACHE_LIMIT_BYTES)
 
+    def test_the_policy_keeps_the_free_buffer_cache_off(self):
+        assert BUFFER_CACHE_LIMIT_BYTES == 0
+
 
 class TestLoadResident:
     @pytest.fixture
@@ -112,6 +118,14 @@ class TestLoadResident:
 
         assert loaded is build.return_value
         assert order.mock_calls == [call.enter(0), call.build(), call.materialize(build.return_value), call.exit(), call.policy()]
+
+    def test_leaves_the_cache_limit_at_zero_for_the_job(self, mx, monkeypatch):
+        monkeypatch.setattr(memory, "materialize_weights", MagicMock())
+
+        load_resident(lambda: "model")
+
+        assert mx.set_cache_limit.call_args_list == [call(0), call("previous"), call(0)]
+        assert mx.method_calls[-1] == call.clear_cache()
 
     def test_restores_the_cache_limit_and_skips_the_policy_when_the_build_fails(self, order):
         order.build.side_effect = RuntimeError("boom")
@@ -205,3 +219,31 @@ def _refuse_torch_import(real_import):
         return real_import(name, *args, **kwargs)
 
     return guarded
+
+
+class TestMemoryUsage:
+    """Mock-tested only: the figures come from ``psutil``, which the tests replace."""
+
+    @staticmethod
+    def _machine(monkeypatch, *, total: int = 32 * 1024**3, available: int = 12 * 1024**3) -> MagicMock:
+        psutil = MagicMock(name="psutil")
+        psutil.virtual_memory.return_value = SimpleNamespace(total=total, available=available)
+        monkeypatch.setitem(sys.modules, "psutil", psutil)
+        return psutil
+
+    def test_reports_the_whole_machines_memory_in_use(self, monkeypatch):
+        self._machine(monkeypatch)
+
+        assert memory_usage() == MemoryUsage(system_used_bytes=20 * 1024**3)
+
+    def test_an_unreadable_machine_gives_none(self, monkeypatch):
+        self._machine(monkeypatch).virtual_memory.side_effect = OSError("no sysctl")
+
+        assert memory_usage() is None
+
+    def test_does_not_touch_mlx(self, mx, monkeypatch):
+        self._machine(monkeypatch)
+
+        memory_usage()
+
+        assert mx.mock_calls == []

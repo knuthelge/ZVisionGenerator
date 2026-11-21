@@ -3,7 +3,7 @@
 # config.yaml, so a user file cannot change it. Changing a pin rebuilds what is built from it (MOSS-Image, Ideogram 4 Instant,
 # stored copies).
 #
-# The sections: licences, image_families, video_families and models. Settings (defaults, steps, guidance) live in config.yaml.
+# The sections: licences, image_families, video_families, models and weight_totals. Settings (defaults, steps, guidance) live in config.yaml.
 #
 # licences: one record per licence, keyed by record id, in the order they are listed. Required: name, supplier, summary
 # (short, plain language) and url. Optional: url_label (default "Licence") and attribution (a credit line the licence
@@ -31,6 +31,11 @@
 #   entries; a plain value applies to every platform and a mapping keyed by darwin, win32 and linux gives one value per platform.
 #   Required beyond kind, name, licences and downloads: a video entry needs family (and quantize, 4 or 8, for ltx); an audio
 #   entry needs family, kinds and limits; the seedvr2 entries need memory per platform.
+# weight_totals: what the memory verdict reads from each image and LTX model's weight files, so a model that is not downloaded yet
+# can be judged. Generated, never edited: `uv run python -m zvisiongenerator.utils.weight_totals_table`. A row is keyed by
+# the ref@sha of a download above (the bare repo id for an image repo that is not pinned, whose row records the revision it was
+# read at); a contract test refuses a pinned image or LTX model whose downloads have no row. The row fields are documented in
+# utils/weight_totals.py and utils/weight_totals_table.py. It stays the last section: the command rewrites it to the end of the file.
 # Gemma 3 is the text encoder of ltx-4 and ltx-8 on every platform; ltx25-4 uses Gemma 4, which is Apache-2.0, as are the
 # text encoder and latent upscaler of h3, so these three carry no extra record.
 licences:
@@ -464,8 +469,10 @@ models:
   # first the default), the backend family, the pinned files to download (the order of the targets is load-bearing: the audio
   # loaders unpack them by position), limits and settings (settings live in config.yaml under audio_model_presets). A model
   # that sings sets lyrics: true; a speech model may list built-in voices, and the role: voice targets that following a recording
-  # needs on top of its other targets. A platforms entry (cuda | mps) may name its own family and records the GPU memory peak
-  # measured on it (memory_gb; leave it out while unmeasured).
+  # needs on top of its other targets. A platforms entry (cuda | mps) may name its own family and records the memory the model needs
+  # on it, in GiB, measured at its most demanding take (memory_gb; leave it out while unmeasured): on CUDA the allocated peak (the verdict adds the CUDA
+  # offset), on a Mac the process's peak footprint. A windows entry records only memory_gb, for a model whose Windows peak differs from cuda's (measured
+  # on Linux); a Windows machine reads it in place of cuda's, and cuda's serves Windows where there is none.
   yue2:
     kind: audio
     family: yue2
@@ -474,8 +481,8 @@ models:
     lyrics: true
     limits: { max_seconds: 360 }
     platforms:
-      cuda: { memory_gb: 6.7 }
-      mps: { memory_gb: 10.5 }
+      cuda: { memory_gb: 5.58 } # measured: the longest song
+      mps: { memory_gb: 11.52 } # measured: the longest song
     licences: [yue2-creator-nc]
     downloads:
       - { ref: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1", files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json] }
@@ -498,10 +505,10 @@ models:
       - { id: sohee, label: Sohee, language: Korean }
     limits: { max_new_tokens: 1200, part_chars: 500, max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }
     platforms:
-      cuda: { memory_gb: 6.0 }
+      cuda: { memory_gb: 4.84 } # measured: a long text read aloud
       # On macOS mlx-audio runs the same official checkpoints (it converts the PyTorch convolution layouts while loading), so the
       # targets below are used as they are.
-      mps: { family: qwen3_tts_mlx, memory_gb: 12.0 }
+      mps: { family: qwen3_tts_mlx, memory_gb: 11.84 } # measured: a long text read aloud
     licences: [qwen3-tts-apache]
     downloads:
       # CustomVoice: the built-in voices. It downloads with the model.
@@ -517,8 +524,9 @@ models:
     kinds: [sound, music]
     limits: { max_seconds: 380 }
     platforms:
-      cuda: { memory_gb: 6.1 }
-      mps: { memory_gb: 6.1 }
+      cuda: { memory_gb: 5.27 } # measured: the longest take
+      windows: { memory_gb: 6.46 } # measured: sa3-sound-max, sa3-music-max (380 s)
+      mps: { memory_gb: 8.49 } # measured: the longest take
     licences: [stability-community, gemma]
     downloads:
       - { ref: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9", files: [checkpoints/stable_audio_3_medium.safetensors] }
@@ -605,3 +613,79 @@ models:
     downloads:
       - { ref: "ZhengPeng7/BiRefNet@e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4", files: [model.safetensors], role: birefnet }
       - { ref: "hustvl/vitmatte-small-composition-1k@6a58ad7646403c1df626fbd746900aec7361ea1d", files: [config.json, model.safetensors, preprocessor_config.json], role: vitmatte }
+
+weight_totals:
+  "Hippotes/Ideogram4-Fal-ComfyUI@9fcb42ce3f82267f61123755d4b65227c2e53a69":
+    files:
+      Ideogram4-instant_bf16.safetensors: { float_matrix_elements: 9277940736, float_other_elements: 1347712, bytes: 18558576896 }
+  "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9":
+    transformers:
+      ltx-2.3-22b-distilled-1.1.safetensors: { block_matrices: 18555076608, transformer_rest: 433761536 }
+  "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5":
+    ltx_mlx: { connector: 4032332800, transformer: 11309578752, decoders: 1179005524, upsampler: 995735808, gemma: 10562908256 }
+  "OpenMOSS-Team/MOSS-Image-SFT@f972bd4b4b9e3852133cc5da954d87bc32cd8fb9":
+    family: moss
+    components:
+      text_encoder: { float_matrix_elements: 8389455872, float_other_elements: 3239152, embedding_elements: 1017118720 }
+      transformer: { float_matrix_elements: 5081923584, float_other_elements: 385040 }
+      vae: { float_matrix_elements: 1638400, float_other_elements: 60734947, packed_bytes: 8 }
+    text_encoder_text_only: { float_matrix_elements: 7935623168, float_other_elements: 1061376, embedding_elements: 1017118720 }
+  "Tongyi-MAI/Z-Image-Turbo":
+    revision: f332072aa78be7aecdf3ee76d5c247082da564a6
+    family: zimage
+    components:
+      text_encoder: { float_matrix_elements: 4022272000, float_other_elements: 196096, embedding_elements: 388956160 }
+      transformer: { float_matrix_elements: 6153870848, float_other_elements: 1037888 }
+      vae: { float_matrix_elements: 2097152, float_other_elements: 81722531 }
+  "akhaliq/MOSS-Image-SFT-4-steps@2ded95c37a029360245926fe72e475e30039bbfb":
+    files:
+      moss_image_sft_4step_v2.0.safetensors: { float_matrix_elements: 297271296, float_other_elements: 252, bytes: 1189086192 }
+  "black-forest-labs/FLUX.2-klein-4B":
+    revision: e7b7dc27f91deacad38e78976d1f2b499d76a294
+    family: flux2_klein
+    size: "4b"
+    components:
+      text_encoder: { float_matrix_elements: 4022272000, float_other_elements: 196096, embedding_elements: 388956160 }
+      transformer: { float_matrix_elements: 3875536896, float_other_elements: 7680 }
+      vae: { float_matrix_elements: 2097152, float_other_elements: 81949219, packed_bytes: 8 }
+  "dgrauet/ltx-2.3-mlx-q4@56a5866d638ecfe37c54d348e88938235185c2d4":
+    ltx_mlx: { connector: 6344455168, transformer: 11311536640, decoders: 1179005524, upsampler: 995735808 }
+  "dgrauet/ltx-2.3-mlx-q8@6671a7572a530862d1d60ce393b5d93491e3f76b":
+    ltx_mlx: { connector: 6344455168, transformer: 20586715648, decoders: 1179005524, upsampler: 995735808 }
+  "diffusers/LTX-2.3-Distilled-Diffusers@432e0d3c2d1769aaa4d295f9243f7062bf6b47ee":
+    ltx_cuda: { connectors: 3172227584, text_encoder_bytes: 13200494448 }
+  "mlx-community/gemma-3-12b-it-4bit@86cc6a8dedbc456dd0e4af01a9d09f396f77e558":
+    ltx_mlx: { gemma: 8028445920 }
+  "unsloth/FLUX.2-klein-9B":
+    revision: "455f1273c2f08f1fc93d725c2e6f1d7fc681cd94"
+    family: flux2_klein
+    size: "9b"
+    components:
+      text_encoder: { float_matrix_elements: 7568097280, float_other_elements: 308224, embedding_elements: 622329856 }
+      transformer: { float_matrix_elements: 9078571008, float_other_elements: 10240 }
+      vae: { float_matrix_elements: 2097152, float_other_elements: 81949219, packed_bytes: 8 }
+  "unsloth/Krea-2-Turbo":
+    revision: "2489d0f4cb200616c0b5410f96f64d8fdc611b06"
+    family: krea2
+    components:
+      text_encoder: { float_matrix_elements: 4435673088, float_other_elements: 2142720, embedding_elements: 388956160 }
+      transformer: { float_matrix_elements: 12819623948, float_other_elements: 449088 }
+      vae: { float_other_elements: 126892531 }
+  "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2":
+    ltx_cuda: { connectors: 3172227584, text_encoder_bytes: 13019512880 }
+    transformers:
+      transformer: { block_matrices: 18555076608, transformer_rest: 432782592 }
+  "unsloth/ideogram-4-fp8@518e05e745736960acb56d8726138ffbc174f0a9":
+    family: ideogram4
+    components:
+      text_encoder: { float_matrix_elements: 624984064, float_other_elements: 4247136, fp8_matrix_elements: 7517270016, embedding_elements: 622329856 }
+      transformer: { float_matrix_elements: 9216, float_other_elements: 3617024, fp8_matrix_elements: 9277931520 }
+      unconditional_transformer: { float_matrix_elements: 9216, float_other_elements: 3617024, fp8_matrix_elements: 9277931520 }
+      vae: { float_matrix_elements: 2097152, float_other_elements: 81949219, packed_bytes: 8 }
+  "unsloth/ideogram-4-nf4-diffusers@cb5b5dda5e0406c04160f3555c48256ec0cfc899":
+    family: ideogram4
+    components:
+      text_encoder: { float_matrix_elements: 624984064, float_other_elements: 120002992, packed_bytes: 3758665292, embedding_elements: 622329856 }
+      transformer: { float_matrix_elements: 9216, float_other_elements: 146319856, packed_bytes: 4638988737 }
+      unconditional_transformer: { float_matrix_elements: 9216, float_other_elements: 146319856, packed_bytes: 4638988737 }
+      vae: { float_matrix_elements: 2097152, float_other_elements: 81949219, packed_bytes: 8 }

@@ -29,6 +29,7 @@ from zvisiongenerator.core.video_backend import VideoBackend  # noqa: E402
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment  # noqa: E402
 from zvisiongenerator.utils import hf_snapshot  # noqa: E402
 from zvisiongenerator.downloads.target import HubFiles  # noqa: E402
+from zvisiongenerator.utils.h3_memory import h3_cuda_system_bytes  # noqa: E402
 from zvisiongenerator.utils.h3_preset import H3Files, H3Preset, H3Schedule  # noqa: E402
 from zvisiongenerator.utils.model_memory import MemoryBudget  # noqa: E402
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo  # noqa: E402
@@ -245,6 +246,18 @@ class TestLoadModel:
         assert model.mode == mode
         assert isinstance(info, VideoModelInfo)
         assert (info.family, info.backend, info.supports_i2v, info.default_fps, info.resolution_alignment) == ("h3", "h3", True, 24, 32)
+
+    @pytest.mark.parametrize(("mode", "references", "vision"), [("t2v", False, False), ("i2v", False, True), ("extend", False, False), ("t2v", True, True)])
+    def test_the_memory_check_counts_the_vision_tower_of_a_keyframe_or_references(self, rig, monkeypatch, mode, references, vision):
+        asked: list[bool] = []
+        monkeypatch.setattr(h3_backend, "_check_system_memory", lambda loras, *, vision: asked.append(vision))
+        monkeypatch.setattr(h3_backend.converted_h3, "ensure_ref2va_copy", lambda *_a, **_k: rig.tmp_path / "ref2va")
+        monkeypatch.setattr(h3_backend, "_converted_copy", lambda *_a, **_k: (rig.note("copy"), (None, rig.tmp_path))[1])
+        monkeypatch.setattr(h3_backend, "read_converted_h3", lambda *_a, **_k: None)
+
+        H3VideoBackend().load_model("m", mode=mode, preset=PRESET, references=references)
+
+        assert asked == [vision]
 
     def test_defaults_to_text_to_video(self, rig):
         assert H3VideoBackend().load_model("m", preset=PRESET)[0].mode == "t2v"
@@ -1714,7 +1727,7 @@ class TestRuntimeLeaves:
 
 
 class TestSystemMemoryCheck:
-    """``load_model`` refuses a load that needs more system memory than the machine has, and warns above 80%."""
+    """``load_model`` refuses a load that is Too large for system memory (the tag's line) and loads a Tight one without a warning of its own."""
 
     @pytest.fixture
     def machine(self, monkeypatch):
@@ -1728,26 +1741,36 @@ class TestSystemMemoryCheck:
         return _set
 
     def test_a_machine_with_less_than_the_base_is_refused(self, machine):
+        machine(12)
+
+        with pytest.raises(RuntimeError, match=r"needs about 15.5 GB of system memory; this machine has 12 GB"):
+            h3_backend._check_system_memory(())
+
+    def test_a_tight_machine_loads_without_a_warning(self, machine, recwarn):
+        """The command line and the tag have already said Tight: the load adds no second warning."""
+        machine(18)
+
+        h3_backend._check_system_memory(())
+
+        assert len(recwarn) == 0
+
+    def test_a_machine_just_above_the_need_loads_and_just_below_it_is_refused(self, machine, recwarn):
+        need = h3_cuda_system_bytes()
+        machine(need / 1024**3 + 0.01)
+        h3_backend._check_system_memory(())
+
+        machine(need / 1024**3 - 0.01)
+        with pytest.raises(RuntimeError, match="system memory"):
+            h3_backend._check_system_memory(())
+        assert len(recwarn) == 0
+
+    def test_a_keyframe_or_references_load_the_vision_tower_and_count_toward_the_estimate(self, machine, recwarn):
         machine(16)
+        h3_backend._check_system_memory(())
 
-        with pytest.raises(RuntimeError, match=r"needs about 18 GB of system memory; this machine has 16 GB"):
-            h3_backend._check_system_memory(())
-
-    def test_a_machine_above_80_percent_is_warned(self, machine):
-        machine(20)
-
-        with pytest.warns(UserWarning, match="leaving little for other apps") as seen:
-            h3_backend._check_system_memory(())
-
-        assert seen[0].filename == __file__
-
-    def test_references_load_the_vision_tower_and_count_toward_the_estimate(self, machine):
-        machine(18.5)
-        with pytest.warns(UserWarning, match="leaving little"):
-            h3_backend._check_system_memory(())
-
-        with pytest.raises(RuntimeError, match=r"needs about 19 GB of system memory; this machine has 18 GB"):
-            h3_backend._check_system_memory((), references=True)
+        with pytest.raises(RuntimeError, match=r"needs about 16.2 GB of system memory; this machine has 16 GB"):
+            h3_backend._check_system_memory((), vision=True)
+        assert len(recwarn) == 0
 
     def test_a_roomy_machine_loads_silently(self, machine, recwarn):
         machine(32)
@@ -1760,7 +1783,7 @@ class TestSystemMemoryCheck:
         lora = tmp_path / "big.safetensors"
         with lora.open("wb") as handle:
             handle.truncate(2 * 1024**3)
-        machine(18)
+        machine(16)
 
         with pytest.raises(RuntimeError, match="system memory"):
             h3_backend._check_system_memory(((lora, 1.0),))

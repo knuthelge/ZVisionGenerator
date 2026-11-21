@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import gc
 import importlib.metadata
+import sys
 import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -13,6 +15,7 @@ from PIL import Image
 from diffusers import AutoPipelineForText2Image
 
 from zvisiongenerator.backends.cuda.block_streaming import group_offload
+from zvisiongenerator.backends.cuda import nvml
 from zvisiongenerator.backends.cuda.driver import require_cuda
 from zvisiongenerator.backends.cuda.image.edit import blend_callback, match_strip
 from zvisiongenerator.backends.cuda.image.edit import prepare as prepare_edit
@@ -22,9 +25,10 @@ from zvisiongenerator.backends.cuda.image.ideogram4 import save_quantized as sav
 from zvisiongenerator.backends.cuda.image.moss import generate as generate_moss
 from zvisiongenerator.backends.cuda.image.moss import load_pipeline as load_moss_pipeline
 from zvisiongenerator.backends.cuda.image.moss import write_stored_copy as write_moss_stored_copy
+from zvisiongenerator.backends.cuda.image.placement import PlacementChoice, choose_placement
 from zvisiongenerator.backends.cuda.image.preview import LivePreview, create_live_preview
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
-from zvisiongenerator.backends.cuda.memory import configure_allocator
+from zvisiongenerator.backends.cuda.memory import memory_sizes
 from zvisiongenerator.backends.cuda.quant import load_fp8_components, load_nf4_components, write_fp8_copy
 from zvisiongenerator.core.ideogram4 import sampler_settings
 from zvisiongenerator.core.image_types import JobPrompt
@@ -33,22 +37,20 @@ from zvisiongenerator.core.moss import run_size as moss_run_size
 from zvisiongenerator.core.moss import sampler_settings as moss_sampler_settings
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.lora_files import normalised_lora_state
+from zvisiongenerator.utils.memory_offsets import CUDA_CONTEXT_BYTES
+from zvisiongenerator.utils.memory_verdict import TURNS, MemoryJob
 from zvisiongenerator.utils.model_files import is_moss_model
 from zvisiongenerator.utils.moss_build import turbo_lora_for
 from zvisiongenerator.utils.stored_quant import STORED_QUANT_BITS, stored_quant_bits
+from zvisiongenerator.utils.weight_totals import resolve_image_weights
 
 if TYPE_CHECKING:
     import numpy as np
 
-# CUDA allocation and kernel tuning hints for the diffusers image backend.
-configure_allocator()
+
+# Kernel tuning hints for the diffusers image backend; the allocator options are set when ``zvisiongenerator.backends`` is imported.
 torch.backends.cudnn.benchmark = True
 torch.set_float32_matmul_precision("high")
-
-
-# Families whose NF4 text encoder and transformer do not fit a 10-12 GB card together (Krea 2: ~3 + ~7 GB).
-# They take turns on the GPU through model CPU offload instead of both staying resident.
-_Q4_CPU_OFFLOAD_FAMILIES = frozenset({"krea2"})
 
 
 def _krea2_guidance_scale(guidance: float) -> float:
@@ -160,9 +162,8 @@ def _supported_bits(bits: int | None) -> int | None:
     return None
 
 
-def _load_nf4(model_path: str, torch_dtype: torch.dtype, family: str, *, prequantized: bool):
-    """Load the pipeline with its transformer and text encoder in NF4 on the GPU (q4)."""
-    offload = family in _Q4_CPU_OFFLOAD_FAMILIES
+def _load_nf4(model_path: str, torch_dtype: torch.dtype, *, prequantized: bool, offload: bool):
+    """Load the pipeline with its transformer and text encoder in NF4 on the GPU (q4); *offload* says whether they take turns there."""
     components = load_nf4_components(model_path, torch_dtype, prequantized=prequantized, text_encoder_to_cpu=offload)
     pipeline = AutoPipelineForText2Image.from_pretrained(model_path, dtype=torch_dtype, **components)
     if offload:
@@ -178,6 +179,40 @@ def _stream_to_gpu(pipeline: Any, torch_dtype: torch.dtype) -> None:
     group_offload(pipeline.transformer, device, "block_level")
     group_offload(pipeline.text_encoder, device)
     pipeline.vae.to(device=device, dtype=torch_dtype)
+
+
+def _gpu_memory() -> tuple[int, int]:
+    """Return ``(the card's budget, the memory this job can have)`` in bytes, read after garbage is collected and the cache is emptied.
+
+    The budget is the card's total less the driver's reserve (read once for the process), which the memory tag judges against;
+    the driver's own total stands in without it. The memory the job can have is what the driver reports free plus what this process holds on
+    the card without using: its CUDA context, which exists by now and which a figure's offset contains, and any memory the allocator has reserved
+    but not allocated (about none after the cache is emptied). Tensors still alive are not free: a pipeline from an earlier step that cycles keep it
+    until the collector runs, so it is collected first, and what survives is in use. When NVML is available
+    the free memory is the lesser of CUDA's and NVML's, because on Windows CUDA's figure ignores other programs' allocations and NVML's does not.
+    """
+    gc.collect()
+    torch.cuda.empty_cache()
+    free, total = torch.cuda.mem_get_info()
+    own = max(0, int(torch.cuda.memory_reserved()) - int(torch.cuda.memory_allocated())) + CUDA_CONTEXT_BYTES
+    available = int(free) + own
+    card = nvml.card_memory()
+    if card is not None:
+        available = min(available, card.free + own)
+    sizes = memory_sizes()
+    return (sizes[0] if sizes is not None else int(total)), available
+
+
+def _choose_placement(model_path: str, model_info: ImageModelInfo, bits: int | None, memory_job: MemoryJob | None) -> PlacementChoice | None:
+    """Return where the model at *model_path* loads, from its weight sizes and the GPU memory free now, or ``None`` when its sizes are unknown.
+
+    Without sizes (a model that is neither on disk nor in the shipped table) a q4 model takes turns (loads with CPU offload).
+    """
+    resolved = resolve_image_weights(None, model_path, platform_key=sys.platform)
+    if resolved is None:
+        return None
+    card, free = _gpu_memory()
+    return choose_placement(resolved.weights.components, bits, job=memory_job or MemoryJob(media="image"), family=model_info.family, model_size=model_info.size, card_bytes=card, free_bytes=free)
 
 
 def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] | None, *, family: str, cpu_offload: bool = False) -> None:
@@ -400,7 +435,13 @@ class DiffusersBackend:
         precision: str = "bfloat16",
         lora_paths: list[str] | None = None,
         lora_weights: list[float] | None = None,
+        memory_job: MemoryJob | None = None,
+        on_note: Callable[[str], None] | None = None,
     ) -> tuple[Any, "ImageModelInfo"]:
+        """Load the model at *model_path*; *memory_job* sizes the job the weights are placed for (the 1 MP reference job when omitted).
+
+        *on_note* receives the short sentence for the job's card when the weights were placed for less free memory than the memory tag assumed.
+        """
         require_cuda(torch, "The diffusers/CUDA image backend on Windows and Linux")
         dtype_map = {
             "bfloat16": torch.bfloat16,
@@ -425,7 +466,7 @@ class DiffusersBackend:
             # The adapters (Turbo's and the user's) are installed unmerged, before the transformer is placed.
             pipeline = load_moss_pipeline(model_path, torch_dtype, bits, prequantized=stored_bits is not None, turbo_lora=turbo_lora, lora_paths=lora_paths, lora_weights=lora_weights)
         else:
-            pipeline = self._load_pipeline(model_path, model_info, quantize, torch_dtype, lora_paths, lora_weights)
+            pipeline = self._load_pipeline(model_path, model_info, quantize, torch_dtype, lora_paths, lora_weights, memory_job, on_note)
 
         # Decode in slices and tiles to bound VAE memory. Called on the VAE itself: some pipelines (Krea 2) have no
         # enable_vae_tiling wrapper and would otherwise decode the whole frame at once.
@@ -445,13 +486,26 @@ class DiffusersBackend:
         torch_dtype: torch.dtype,
         lora_paths: list[str] | None,
         lora_weights: list[float] | None,
+        memory_job: MemoryJob | None = None,
+        on_note: Callable[[str], None] | None = None,
     ) -> Any:
-        """Load a text-to-image pipeline at the requested quantize level (or a stored copy's), with its LoRAs."""
+        """Load a text-to-image pipeline at the requested quantize level (or a stored copy's), with its LoRAs.
+
+        The weights are placed by the memory verdict (see :func:`_choose_placement`): q4 keeps the NF4 pair on the GPU or
+        takes turns, q8 and full precision stream from system memory. A model whose sizes are unknown
+        takes the placements that need the least GPU memory: q4 takes turns, and q8 and full precision stream.
+        """
         stored_bits = stored_quant_bits(Path(model_path))
         bits = _supported_bits(stored_bits if stored_bits is not None else quantize)
+        choice = _choose_placement(model_path, model_info, bits, memory_job)
+        if choice is not None and choice.warning is not None:
+            warnings.warn(choice.warning, stacklevel=2)
+        if choice is not None and choice.note is not None and on_note is not None:
+            on_note(choice.note)
+        takes_turns = choice is None or choice.placement == TURNS
 
         if bits == 4:
-            pipeline = _load_nf4(model_path, torch_dtype, model_info.family, prequantized=stored_bits is not None)
+            pipeline = _load_nf4(model_path, torch_dtype, prequantized=stored_bits is not None, offload=takes_turns)
         else:
             components = {}
             if bits == 8:
@@ -460,7 +514,7 @@ class DiffusersBackend:
             _stream_to_gpu(pipeline, torch_dtype)
 
         if lora_paths:
-            _load_loras(pipeline, lora_paths, lora_weights, family=model_info.family, cpu_offload=bits == 4 and model_info.family in _Q4_CPU_OFFLOAD_FAMILIES)
+            _load_loras(pipeline, lora_paths, lora_weights, family=model_info.family, cpu_offload=bits == 4 and takes_turns)
         return pipeline
 
     def _step_callback_kwargs(self, skip_signal, step_callback, steps: int, height: int, width: int, *, blend=None) -> dict[str, Any]:

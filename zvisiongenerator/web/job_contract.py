@@ -16,6 +16,8 @@ ACTIVE_STATUSES = frozenset({QUEUED_STATUS, "running", "paused"})
 STARTED_EVENT = "job_started"
 # Progress of a model download a job waits on; only the latest one is kept in a job's event history.
 DOWNLOADING_EVENT = "model_downloading"
+# Live memory reading of an exclusive job; a side channel: it is never a job's last event and only the latest is kept in its history.
+MEMORY_EVENT = "memory_usage"
 # ``reason`` of a ``job_cancelled`` event for a job removed from the queue before it started.
 REMOVED_REASON = "removed"
 GENERATION_CONTROLS = ("next", "pause", "resume", "repeat", "quit")
@@ -64,6 +66,7 @@ def public_job_snapshot(
     started_at: float | None = None,
     queue_position: int | None = None,
     review: dict[str, Any] | None = None,
+    memory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the public snake_case job snapshot payload."""
     snapshot = {
@@ -84,6 +87,8 @@ def public_job_snapshot(
         # ``{"iteration": n, "attempt": k}`` while a render waits for approve or discard, else None; never a filesystem path.
         "review": dict(review) if review is not None else None,
         "result_path": result_path,
+        # The latest ``memory_usage`` reading of an exclusive job; None otherwise.
+        "memory": dict(memory) if memory is not None else None,
         "outputs": outputs or [],
         "preview_version": preview_version,
         "prompt": context.get("prompt", ""),

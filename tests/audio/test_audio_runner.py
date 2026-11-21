@@ -22,6 +22,7 @@ from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.memory_offsets import CUDA_OFFSET_LINUX_BYTES
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 
 CONFIG = audio_config()
@@ -541,7 +542,8 @@ class TestOutOfMemory:
         with pytest.raises(RuntimeError) as raised:
             _run(_speech(), QWEN, tmp_path)
 
-        assert "about 6 GB" in str(raised.value) and "8 GB" in str(raised.value)
+        peak = round((QWEN.memory_gb_for("cuda") * GIB + CUDA_OFFSET_LINUX_BYTES) / GIB, 1)
+        assert f"about {peak:g} GB" in str(raised.value) and "8 GB" in str(raised.value)  # the recorded peak and the CUDA offset
 
     def test_another_runtime_error_is_not_rewritten(self, monkeypatch, tmp_path):
         backend = fake_backend(clip())

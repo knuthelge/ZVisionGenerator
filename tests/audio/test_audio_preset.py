@@ -188,7 +188,30 @@ class TestPlatformSettings:
 
         yue2 = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "yue2")
 
-        assert (yue2.memory_gb_for("cuda"), yue2.memory_gb_for("mps")) == (6.7, None)
+        assert (yue2.memory_gb_for("cuda"), yue2.memory_gb_for("mps")) == (_packaged_entry("yue2")["platforms"]["cuda"]["memory_gb"], None)
+
+    def test_a_windows_figure_is_read_from_the_metadata_beside_the_cuda_one(self, monkeypatch, tmp_path):
+        entry = _packaged_entry("sa3")
+        entry["platforms"]["windows"] = {"memory_gb": 6.5}
+        _serve(monkeypatch, tmp_path, "sa3", entry)
+
+        sa3 = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "sa3")
+
+        assert (sa3.memory_gb_for("windows"), sa3.memory_gb_for("cuda")) == (6.5, entry["platforms"]["cuda"]["memory_gb"])
+
+    @pytest.mark.parametrize("key", ["settings", "family"])
+    def test_a_windows_platform_takes_no_settings_or_family(self, monkeypatch, tmp_path, key):
+        entry = _packaged_entry("sa3")
+        entry["platforms"]["windows"] = {"memory_gb": 6.5}
+        config = audio_config()
+        if key == "family":
+            entry["platforms"]["windows"]["family"] = "sa3"
+        else:
+            config["audio_model_presets"]["sa3"]["platforms"] = {"windows": {"settings": {"steps": 4}}}
+        _serve(monkeypatch, tmp_path, "sa3", entry)
+
+        with pytest.raises(ValueError, match=rf"platforms\.windows\.{key}: a windows platform"):
+            parse_audio_presets(config)
 
     def test_a_preset_without_platforms_uses_the_shared_values_everywhere(self, monkeypatch, tmp_path):
         entry = _packaged_entry("sa3")

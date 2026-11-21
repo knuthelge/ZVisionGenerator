@@ -24,7 +24,10 @@ from zvisiongenerator.backends.cuda.video.runtime import fit_image as _fit_image
 from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.audio_track import read_track, window_waveform
 from zvisiongenerator.utils.lora_files import normalised_lora_state
+from zvisiongenerator.utils.lora_size import lora_files_bytes
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
+from zvisiongenerator.utils.memory_grade import CUDA_RAM_RATIOS, FITS, TOO_LARGE, grade
+from zvisiongenerator.utils.memory_wording import gb_figure
 from zvisiongenerator.utils.model_files import LTX2_UNLOADED_COMPONENTS
 from zvisiongenerator.utils.paths import split_huggingface_revision
 from zvisiongenerator.utils.input_images import open_image_upright
@@ -48,8 +51,6 @@ _MAX_SEQUENCE_LENGTH = 1024
 # Tokens a token-wise layer (feed-forward, RMSNorm) computes at once: a feed-forward's 4x-wide activation is then
 # 128 MB and an RMSNorm's float32 copy 64 MB, however long the clip.
 _TOKEN_CHUNK = 4096
-# A load whose estimated peak passes this share of system memory leaves little to the rest of the machine.
-_SYSTEM_MEMORY_TIGHT_RATIO = 0.8
 # A distilled checkpoint runs without guidance, as on macOS. Every guidance term is set to its neutral value:
 # diffusers 0.40+ default to audio guidance 7, spatio-temporal guidance 1 and modality guidance 3 even at
 # guidance_scale 1.0, which over-sharpens the video, distorts the audio and adds three extra passes per step.
@@ -275,6 +276,7 @@ def _load_generation_pipeline(
     transformer_source: tuple[str, str] | None,
     loras: list[tuple[str, float]],
     model_name: str | None,
+    upscale: bool,
     converted: dict[str, Any] | None = None,
     repo_ignore: Sequence[str] = (),
 ) -> tuple[Any, _TextEncoderSource, _TransformerSource]:
@@ -282,7 +284,8 @@ def _load_generation_pipeline(
 
     The transformer (at *quantize*, with *loras*) is attached now when it fits in system memory beside the text
     encoder, and otherwise only once the first prompt is encoded. A converted folder (*converted* is its manifest)
-    loads its own stored weights; otherwise they are the prepared copies of the picked alias.
+    loads its own stored weights; otherwise they are the prepared copies of the picked alias. The load is refused when the
+    job (*loras* and *upscale* included) needs more system memory than the machine has.
 
     Returns:
         The pipeline, and where its text encoder and transformer load from.
@@ -290,10 +293,13 @@ def _load_generation_pipeline(
 
     from zvisiongenerator.backends.cuda.memory import release_memory
 
+    lora_bytes = lora_files_bytes(path for path, _weight in loras)
     if converted is not None:
-        repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _converted_weights(Path(model_path).expanduser(), converted)
+        repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _converted_weights(Path(model_path).expanduser(), converted, upscale=upscale, lora_bytes=lora_bytes)
     else:
-        repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _stock_weights(model_path, model_name, transformer_source, quantize, runtime.torch.device("cuda"), repo_ignore)
+        repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _stock_weights(
+            model_path, model_name, transformer_source, quantize, runtime.torch.device("cuda"), repo_ignore, upscale=upscale, lora_bytes=lora_bytes
+        )
     connectors = _load_connectors(repo_dir, torch_dtype)
     try:
         pipeline = pipeline_class.from_pretrained(str(repo_dir), transformer=None, connectors=connectors, text_encoder=None, dtype=torch_dtype, **_absent_optional_components(repo_dir))
@@ -414,7 +420,9 @@ def _resolve_upsampler_weights(repo_id: str, filename: str) -> str:
     return str(_download_hub_file(repo_id, filename, "LTX latent upsampler"))
 
 
-def _stock_weights(model_path: str, model_name: str | None, transformer_source: tuple[str, str] | None, quantize: int, device: Any, repo_ignore: Sequence[str]) -> tuple[Path, Path, Path, bool]:
+def _stock_weights(
+    model_path: str, model_name: str | None, transformer_source: tuple[str, str] | None, quantize: int, device: Any, repo_ignore: Sequence[str], *, upscale: bool, lora_bytes: int
+) -> tuple[Path, Path, Path, bool]:
     """Return the repo folder, the prepared transformer and text encoder at *quantize*, and whether they fit together, for a stock model.
 
     The repo is downloaded without the *repo_ignore* patterns, the finished list :func:`~zvisiongenerator.utils.ltx_facts.ltx_load_options` gives.
@@ -425,53 +433,56 @@ def _stock_weights(model_path: str, model_name: str | None, transformer_source: 
     checkpoint = _download_hub_file(*transformer_source, "LTX transformer") if transformer_source else None
     repo_dir = _repo_dir(model_path, ignore=repo_ignore)
     transformer_input = checkpoint or repo_dir / "transformer"
-    fits_together = _check_system_memory(ltx_system_estimate(repo_dir, transformer_input, quantize), quantize, converted=False)
+    fits_together = _check_system_memory(ltx_system_estimate(repo_dir, transformer_input, quantize), quantize, converted=False, upscale=upscale, lora_bytes=lora_bytes)
     prepared_transformer, prepared_text_encoder = _prepared_weights(model_name, model_path, repo_dir, transformer_input, quantize, device)
     return repo_dir, prepared_transformer, prepared_text_encoder, fits_together
 
 
-def _converted_weights(model_dir: Path, manifest: dict[str, Any]) -> tuple[Path, Path, Path, bool]:
+def _converted_weights(model_dir: Path, manifest: dict[str, Any], *, upscale: bool, lora_bytes: int) -> tuple[Path, Path, Path, bool]:
     """Return the converted folder *model_dir*, its stored transformer and text encoder, and whether they fit together.
 
     Nothing is read from the source checkpoint, the configured transformer or the alias table.
     """
     from zvisiongenerator.backends.cuda.video.memory_estimate import converted_ltx_system_estimate
 
-    fits_together = _check_system_memory(converted_ltx_system_estimate(model_dir, manifest), manifest["bits"], converted=True)
+    fits_together = _check_system_memory(converted_ltx_system_estimate(model_dir, manifest), manifest["bits"], converted=True, upscale=upscale, lora_bytes=lora_bytes)
     return model_dir, model_dir / "transformer", model_dir / "text_encoder", fits_together
 
 
-def _check_system_memory(estimate: Any, quantize: int, *, converted: bool) -> bool:
-    """Refuse a load that cannot fit in system memory, and warn when it leaves little to the rest of the machine.
+def _check_system_memory(estimate: Any, quantize: int, *, converted: bool, upscale: bool, lora_bytes: int) -> bool:
+    """Refuse a load whose job is Too large for system memory, judged as the memory tag judges it.
+
+    The figure is the memory engine's for the job (the weights taking turns, the user LoRAs and, with *upscale*, the second stage)
+    and the line is the one the tag's Too large starts at. A Tight job loads: the command line and the tag have already said so.
 
     Args:
         estimate: The model's :class:`LtxCudaMemoryEstimate`.
         quantize: Its level.
         converted: Whether it is a converted folder, which gets smaller by converting it again rather than by picking ``ltx-4``.
+        upscale: Whether the clips are made with the two-stage upscale.
+        lora_bytes: The total size of the user LoRA files.
 
     Returns:
-        Whether the transformer and the text encoder fit in system memory together; otherwise they take turns.
+        Whether the transformer and the text encoder fit system memory together, counting the LoRAs and the upscale's second stage (the Fits line); otherwise they take turns.
 
     Raises:
-        RuntimeError: If even taking turns needs more than the machine's system memory.
+        RuntimeError: If the job is Too large for the machine's system memory.
     """
 
     import psutil
 
+    from zvisiongenerator.backends.cuda.video.memory_estimate import ltx_job_system_bytes
+    from zvisiongenerator.utils.model_memory import estimate_ltx_cuda_together_bytes
+
     total = int(psutil.virtual_memory().total)
-    need = estimate.taking_turns
-    level = f"q{quantize}"
-    smaller = None
-    if quantize == 8:
-        smaller = "convert the checkpoint again with --quantize 4 under a new name" if converted else "use ltx-4"
-    if need > total:
+    need = ltx_job_system_bytes(estimate, upscale=upscale, lora_bytes=lora_bytes)
+    if grade(need, total, CUDA_RAM_RATIOS) == TOO_LARGE:
+        smaller = None
+        if quantize == 8:
+            smaller = "convert the checkpoint again with --quantize 4 under a new name" if converted else "use ltx-4"
         advice = f" {smaller[0].upper()}{smaller[1:]} instead." if smaller else ""
-        raise RuntimeError(f"LTX at {level} needs about {need / 1024**3:.0f} GB of system memory; this machine has {total / 1024**3:.0f} GB.{advice}")
-    limit = total * _SYSTEM_MEMORY_TIGHT_RATIO
-    if need > limit:
-        advice = f" If it is stopped for lack of memory, {smaller}." if smaller else ""
-        warnings.warn(f"LTX at {level} needs about {need / 1024**3:.0f} GB of this machine's {total / 1024**3:.0f} GB of system memory, leaving little for other apps.{advice}", stacklevel=4)
-    return estimate.together <= limit
+        raise RuntimeError(f"LTX at q{quantize} needs about {gb_figure(need):g} GB of system memory; this machine has {gb_figure(total):g} GB.{advice}")
+    return grade(estimate_ltx_cuda_together_bytes(estimate, upscale=upscale, lora_bytes=lora_bytes), total, CUDA_RAM_RATIOS) == FITS
 
 
 def _prepared_weights(model_name: str | None, model_path: str, repo_dir: Path, transformer_input: Path, quantize: int, device: Any) -> tuple[Path, Path]:
@@ -1329,6 +1340,7 @@ class DiffusersVideoBackend:
             transformer_source=kwargs.get("transformer_source"),
             loras=loras,
             model_name=kwargs.get("model_name"),
+            upscale=upscale,
             converted=converted,
             repo_ignore=kwargs.get("repo_ignore", ()),
         )

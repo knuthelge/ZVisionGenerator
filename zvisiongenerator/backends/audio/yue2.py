@@ -103,8 +103,6 @@ class YuE2Backend:
         weight_swap = bool(settings.get("weight_swap", device == "cuda"))
         model_files, vae_files = preset.files
         self._device = device
-        if weight_swap and device == "cuda":
-            _stop_pin_rounding()
         try:
             raise_if_cancelled(cancelled)
             with stop_while_building(cancelled):
@@ -365,17 +363,6 @@ def _install_model(pipe: Any, device: str, *, weight_swap: bool, cancelled: Canc
     # The kit's decode moves the model to the CPU to make room for the VAE; bring it back for the next take.
     pipe._load_model = lambda for_nar=False: model.to(device)
     return None
-
-
-def _stop_pin_rounding() -> None:
-    """Keep PyTorch from rounding the pinned weights up to powers of two, which would add about a third to their size.
-
-    PyTorch reads the allocator options when CUDA first starts, so this only helps when nothing in the process has used
-    CUDA yet; the other CUDA backends make the same call at their start.
-    """
-    from zvisiongenerator.backends.cuda.memory import configure_allocator
-
-    configure_allocator()
 
 
 def _lift_memory_fraction() -> None:

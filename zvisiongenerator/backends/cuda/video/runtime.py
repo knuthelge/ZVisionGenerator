@@ -9,9 +9,6 @@ __all__ = ["configure_torch_runtime", "fit_image"]
 
 def configure_torch_runtime(torch: Any) -> None:
     """Apply the same lightweight CUDA tuning used by the image diffusers backend."""
-    from zvisiongenerator.backends.cuda.memory import configure_allocator
-
-    configure_allocator()
     if hasattr(torch, "backends") and hasattr(torch.backends, "cudnn"):
         torch.backends.cudnn.benchmark = True
     if hasattr(torch, "set_float32_matmul_precision"):

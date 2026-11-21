@@ -166,7 +166,7 @@ class TestRepoDirArguments:
         monkeypatch.setattr(video_diffusers_module, "_check_system_memory", lambda *args, **kwargs: True)
         monkeypatch.setattr(video_diffusers_module, "_prepared_weights", lambda *args: (Path("/fake/t"), Path("/fake/e")))
 
-        video_diffusers_module._stock_weights("owner/ltx", model_name, options["transformer_source"], 4, None, options["repo_ignore"])
+        video_diffusers_module._stock_weights("owner/ltx", model_name, options["transformer_source"], 4, None, options["repo_ignore"], upscale=False, lora_bytes=0)
         (repo_target, *_) = video_download_plan("owner/ltx", family="ltx", transformer_source=options["transformer_source"], repo_ignore=options["repo_ignore"])
 
         assert skipped == [None if repo_target.ignore_patterns is None else list(repo_target.ignore_patterns)]

@@ -30,6 +30,7 @@ class TestRecommendedFirstRunModel:
             (MemoryBudget(gpu_bytes=24 * GIB, system_bytes=64 * GIB), "klein4b"),
             (MemoryBudget(gpu_bytes=int(30.5 * GIB), system_bytes=64 * GIB), "klein9b"),
             (MemoryBudget(gpu_bytes=int(30.3 * GIB), system_bytes=64 * GIB), "klein4b"),
+            (MemoryBudget(gpu_bytes=30 * GIB, system_bytes=64 * GIB, gpu_total_bytes=32607 * _MIB), "klein9b"),  # the card's whole memory decides, not the budget less the driver's reserve
             (None, "klein4b"),
             (MemoryBudget(gpu_bytes=64 * GIB), "klein4b"),
         ],

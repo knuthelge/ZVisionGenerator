@@ -1,46 +1,55 @@
-"""How an audio model's measured GPU peak fits this machine, and the words that say so.
+"""The memory verdict of an audio model's measured GPU peak, and what it needs of this machine in the words the out-of-memory message of a take uses.
 
-One fit is shared by the Web UI badge, the CLI's warning before a download and the out-of-memory message, so they
-cannot disagree. The functions are pure: the caller passes the memory budget.
+The peak is judged by the memory verdict engine; the functions are pure: the caller passes the memory budget.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import sys
 
 from zvisiongenerator.utils.audio_preset import AudioPreset
-from zvisiongenerator.utils.model_memory import GIB, CudaMemoryEstimate, MemoryBudget, classify_cuda_memory_fit, classify_memory_fit
+from zvisiongenerator.utils.memory_verdict import MemoryJob, MemoryVerdict, MemoryWeights, judge
+from zvisiongenerator.utils.memory_wording import memory_figures
+from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 
-__all__ = ["audio_memory_fit", "memory_need_text", "memory_warning_text"]
+__all__ = ["audio_memory_need", "audio_verdict"]
 
 
-def audio_memory_fit(preset: AudioPreset, platform_key: str, budget: MemoryBudget | None) -> dict[str, Any] | None:
-    """Return how the preset's recorded GPU peak on *platform_key* fits *budget*, or ``None`` without a budget or a measured peak.
+def audio_verdict(preset: AudioPreset, platform_key: str, budget: MemoryBudget | None) -> MemoryVerdict | None:
+    """Return the verdict of the preset's recorded GPU peak on *platform_key* against *budget*, or ``None`` without a budget or a measured peak.
 
-    Returns:
-        ``{"status", "required_gb", "budget_gb", "kind"}``: ``status`` is ``fits``, ``tight`` or ``too_large``, and ``kind``
-        is ``"unified"`` on Apple Silicon (the budget is Apple's recommended GPU working set) or ``"discrete"`` on CUDA
-        (the budget is the card's memory).
+    A Mac budget without the machine's total unified memory cannot be judged (:func:`judge` raises ``ValueError``), so it gives ``None`` as well.
+    On Windows the preset's ``windows`` figure, when it has one, is read in place of its ``cuda`` one.
     """
-    peak_gb = preset.memory_gb_for(platform_key)
-    if budget is None or peak_gb is None:
+    peak_gb = _peak_gb(preset, platform_key)
+    if budget is None or not budget.gpu_bytes or peak_gb is None:
         return None
-    required = round(peak_gb * GIB)
-    if budget.system_bytes is None:
-        status, kind = classify_memory_fit(required, budget.gpu_bytes), "unified"
-    else:
-        status, kind = classify_cuda_memory_fit(CudaMemoryEstimate(required, 0), budget), "discrete"
-    return {"status": status, "required_gb": round(required / GIB, 1), "budget_gb": round(budget.gpu_bytes / GIB, 1), "kind": kind}
-
-
-def memory_need_text(fit: dict[str, Any]) -> str:
-    """Return what the model needs against what the machine has, such as ``it needs about 8.2 GB and the GPU has 8 GB``."""
-    return f"it needs about {fit['required_gb']:g} GB and the GPU has {fit['budget_gb']:g} GB"
-
-
-def memory_warning_text(label: str, fit: dict[str, Any] | None) -> str | None:
-    """Return the warning for a model that is ``too_large`` or ``tight`` on this machine, or ``None`` when it fits or is unknown."""
-    if fit is None or fit["status"] == "fits":
+    try:
+        return judge(MemoryJob(media="audio"), budget, MemoryWeights(audio_peak_bytes=round(peak_gb * GIB)))
+    except ValueError:
         return None
-    outcome = "it is likely to run out of GPU memory" if fit["status"] == "too_large" else "it may run slowly or run out of GPU memory"
-    return f"{label}: {memory_need_text(fit)}; {outcome}."
+
+
+def _peak_gb(preset: AudioPreset, platform_key: str) -> float | None:
+    """Return the measured peak to judge on this machine: the ``windows`` figure on a Windows CUDA machine that has one, else *platform_key*'s."""
+    if platform_key == "cuda" and sys.platform == "win32":
+        windows_gb = preset.memory_gb_for("windows")
+        if windows_gb is not None:
+            return windows_gb
+    return preset.memory_gb_for(platform_key)
+
+
+def audio_memory_need(preset: AudioPreset, platform_key: str, budget: MemoryBudget | None) -> str | None:
+    """Return what the preset's recorded GPU peak on *platform_key* needs against what *budget* has, or ``None`` without a budget or a measured peak.
+
+    The text reads like ``it needs about 8.2 GB and the GPU has 8 GB``; on a Mac, which has one memory, ``it needs about 8.2 GB and this Mac has 24 GB``
+    (its total memory).
+    """
+    verdict = audio_verdict(preset, platform_key, budget)
+    if verdict is None or budget is None:
+        return None
+    figures = memory_figures(verdict, budget)
+    if figures is None:
+        return None
+    holder = "this Mac" if verdict.resource == "unified" else "the GPU"
+    return f"it needs about {figures[0]:g} GB and {holder} has {figures[1]:g} GB"

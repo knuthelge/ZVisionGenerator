@@ -77,10 +77,7 @@ class TransformersPromptEnhancer:
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
-        from zvisiongenerator.backends.cuda.memory import configure_allocator
 
-        # Preflight enhancement can be the first thing in the process to start CUDA.
-        configure_allocator()
         self.repo = repo
         self.revision = revision
         self.on_cuda = torch.cuda.is_available()

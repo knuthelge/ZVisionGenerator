@@ -69,6 +69,22 @@ def test_load_model_builds_and_upcasts_the_vae_inside_load_resident(image_mac, m
     ]
 
 
+def test_load_model_leaves_the_free_buffer_cache_off_for_the_job(image_mac, monkeypatch):
+    from zvisiongenerator.backends.mac import memory
+
+    module, _mx = image_mac
+    core = MagicMock(name="mlx_core")
+    core.set_cache_limit.return_value = "previous"
+    monkeypatch.setitem(sys.modules, "mlx", MagicMock(core=core))
+    monkeypatch.setitem(sys.modules, "mlx.core", core)
+    monkeypatch.setattr(memory, "materialize_weights", MagicMock())
+    monkeypatch.setattr(module, "load_resident", memory.load_resident)
+
+    _load_zimage(module, monkeypatch)
+
+    assert core.set_cache_limit.call_args_list == [call(0), call("previous"), call(0)]
+
+
 @pytest.mark.parametrize("skipped", [False, True])
 def test_text_to_image_clears_the_cache_after_each_generation(image_mac, monkeypatch, skipped):
     module, mx = image_mac

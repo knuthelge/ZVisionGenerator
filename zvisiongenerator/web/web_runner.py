@@ -25,11 +25,12 @@ from typing import Any
 
 from PIL import Image
 
-from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_video_backend, release_accelerator_memory
+from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_video_backend, prompt_enhancer_session, release_accelerator_memory
 from zvisiongenerator.audio_runner import run_audio_batch, run_voice_design
 from zvisiongenerator.built_models import ensure_built_model
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceDesignRequest
 from zvisiongenerator.core.image_types import ImageGenerationRequest
+from zvisiongenerator.core.memory_sampler import MemorySampler, MemoryUsage
 from zvisiongenerator.core.progress_events import exception_message
 from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.core.workflow import GenerationWorkflow
@@ -53,12 +54,15 @@ from zvisiongenerator.video_file_upscale_runner import run_ltx_video_upscale, ru
 from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.config import video_load_options
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
+from zvisiongenerator.utils.image_memory_job import image_memory_job, run_memory_job
+from zvisiongenerator.utils.memory_verdict import MemoryJob
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, seedvr2_tier_label
+from zvisiongenerator.utils.upscale import upscale_output_size
 from zvisiongenerator.utils.video_cut import applied_extend_cut
 from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import audio_peaks, gallery_asset_for_output_path, gallery_asset_to_json
@@ -75,10 +79,12 @@ from zvisiongenerator.web.job_downloads import (
     video_model_part,
 )
 from zvisiongenerator.web.job_log import JobLog, build_job_log_entry, is_loggable
+from zvisiongenerator.web.memory_readout import MemoryProbe, reading_payload
 from zvisiongenerator.web.job_contract import (
     CANCELLED_TERMINAL_EVENT,
     DOWNLOADING_EVENT,
     FAILED_TERMINAL_EVENT,
+    MEMORY_EVENT,
     QUEUED_STATUS,
     REMOVED_REASON,
     REVIEW_DECISION_CONTROLS,
@@ -254,6 +260,12 @@ class _JobRecord:
     # ``completed`` or ``cancelled``, and feed the job log.
     failed_runs: int = 0
     last_failure: str | None = None
+    # The note the model load last gave the job card (``model_loading`` with a ``note``); it is also the last of the context's ``notices``, so a reload still shows it.
+    load_note: str | None = None
+    # The latest ``memory_usage`` reading of an exclusive job.
+    memory: dict[str, Any] | None = None
+    # Stops this job's memory sampler; server-side only, never in events or snapshots.
+    memory_stop: Callable[[], None] | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -277,12 +289,14 @@ class WebRunner:
         max_terminal_jobs: int = 25,
         download_flights: DownloadFlights | None = None,
         job_log: JobLog | None = None,
+        memory_probe: MemoryProbe | None = None,
     ) -> None:
         """Create the thread-backed web runner facade.
 
         *download_flights* is the registry that lets jobs (and the server's download lane) share one download per
         destination; it defaults to a registry of its own. A started image, video or upscale job is logged to *job_log*
-        when it ends.
+        when it ends. With a *memory_probe*, each generation job is sampled while it runs: its ``memory_usage`` events carry
+        the live readings, and sampling stops at its first terminal event.
         """
         self._download_flights = download_flights if download_flights is not None else DownloadFlights()
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ziv-web-runner")
@@ -291,6 +305,7 @@ class WebRunner:
         self._terminal_retention_seconds = max(0.0, terminal_retention_seconds)
         self._max_terminal_jobs = max(0, max_terminal_jobs)
         self._job_log = job_log
+        self._memory_probe = memory_probe
         self._jobs: dict[str, _JobRecord] = {}
         # Final snapshot + terminal event of pruned jobs, so late clients (e.g. a laptop waking up) still learn the
         # real outcome instead of a 404. Bounded; only a server restart makes a job truly unknown.
@@ -666,6 +681,7 @@ class WebRunner:
                 preview_version=record.preview_version if record.preview_jpeg is not None else 0,
                 started_at=record.started_at,
                 queue_position=queue_position,
+                memory=record.memory,
             )
 
     def get_job_result_path(self, job_id: str) -> str | None:
@@ -840,6 +856,17 @@ class WebRunner:
         """Claim the job, run its synchronous target, free accelerator memory, and publish terminal events."""
         if not self._claim(job_id):
             return
+        record = self._get_job(job_id)
+        try:
+            if release_memory:
+                self._start_memory_sampling(record)
+            self._run_claimed_target(job_id, record, target, release_memory=release_memory)
+        finally:
+            # Normally the terminal event has taken it; this catches a terminal event that never came.
+            self._stop_memory_sampling(record)
+
+    def _run_claimed_target(self, job_id: str, record: _JobRecord, target: Callable[[], None], *, release_memory: bool) -> None:
+        """Run the claimed job's target and publish its terminal event."""
         failure_message: str | None = None
         try:
             with worker_runtime_context():
@@ -857,11 +884,38 @@ class WebRunner:
             self._publish_event(job_id, {"type": FAILED_TERMINAL_EVENT, "message": failure_message})
             return
 
-        record = self._get_job(job_id)
         with record.lock:
             status = record.status
         if status not in self._TERMINAL_STATUSES:
             self._publish_event(job_id, {"type": SUCCESS_TERMINAL_EVENT, "mode": record.job_type})
+
+    def _start_memory_sampling(self, record: _JobRecord) -> None:
+        """Start sampling the job's memory when the machine has a probe; the job's first terminal event stops it.
+
+        A reading is published only when its totals are known: from the reading itself, else from the machine's budget.
+        """
+        probe = self._memory_probe
+        if probe is None:
+            return
+        budget = probe.budget()
+        job_id = record.job_id
+
+        def publish(usage: MemoryUsage) -> None:
+            payload = reading_payload(usage, budget)
+            if payload is not None:
+                self._publish_event(job_id, {"type": MEMORY_EVENT, "memory": payload})
+
+        sampler = MemorySampler(probe.read, publish)
+        sampler.start()
+        with record.lock:
+            record.memory_stop = sampler.stop
+
+    def _stop_memory_sampling(self, record: _JobRecord) -> None:
+        """Stop the job's memory sampler if its terminal event has not already."""
+        with record.lock:
+            stop, record.memory_stop = record.memory_stop, None
+        if stop is not None:
+            stop()
 
     def _claim(self, job_id: str) -> bool:
         """Take a generation job off the queue as it starts; return False when it was removed meanwhile."""
@@ -924,7 +978,9 @@ class WebRunner:
             return
         if not self._ensure_matte_downloads(request, total_iterations=len(plan.iterations), progress_callback=progress_callback, control_signal=control_signal):
             return
-        backend, model, model_info = _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal)
+        # The model loads for the job the run draws: an edit's canvas and picture, else the request's size, references and LoRAs.
+        memory_job = run_memory_job(args, size=lambda: (request.width, request.height), reference_paths=request.reference_paths, lora_paths=request.lora_paths)
+        backend, model, model_info = _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal, memory_job)
         run_batch(
             backend,
             model,
@@ -935,7 +991,7 @@ class WebRunner:
             plan=plan,
             progress_callback=progress_callback,
             skip_signal=control_signal,
-            reload_model=lambda: _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal)[1],
+            reload_model=lambda: _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal, memory_job)[1],
         )
 
     def _run_upscale_request(
@@ -951,11 +1007,15 @@ class WebRunner:
     ) -> None:
         """Load the upscale model inside the worker thread (SeedVR2 or the recorded image model) and run the upscale workflow once.
 
+        The image model is loaded for the upscaled size, where the refine runs, with the LoRAs and without the recorded references, which an upscale never loads.
+
         *model_part* is the model's download part as planned when the job was submitted; without it the part is planned here.
         """
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
             return
+        # An enhancer an on-demand Enhance left resident: this job does not run preflight, which would reuse it, so it is freed before the model loads.
+        prompt_enhancer_session.release_resident_enhancer()
         if not self._ensure_downloads(
             model_part or upscale_model_part(request, model_ref, platform_key=sys.platform),
             mode="image",
@@ -969,7 +1029,8 @@ class WebRunner:
         if request.upscale_method == UPSCALE_METHOD_SEEDVR2:
             backend, model = _load_seedvr2_with_progress(request.upscale_model, progress_callback, mode="image")
         else:
-            backend, model, _model_info = _load_image_model_with_progress(request, model_ref, request.quantize, progress_callback, control_signal)
+            memory_job = image_memory_job(*upscale_output_size(request.width, request.height, request.upscale_factor), lora_paths=request.lora_paths, from_picture=True)
+            backend, model, _model_info = _load_image_model_with_progress(request, model_ref, request.quantize, progress_callback, control_signal, memory_job)
             if model is not None:
                 backend.prepare_prompts(model, upscale_prompts(request), width=request.width, height=request.height, cancelled=lambda: control_signal.pending() == "quit")
         run_upscale(backend, model, request, workflow, progress_callback=progress_callback, skip_signal=control_signal)
@@ -985,6 +1046,8 @@ class WebRunner:
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
             return
+        # An enhancer an on-demand Enhance left resident: this job does not run preflight, which would reuse it, so it is freed before the model loads.
+        prompt_enhancer_session.release_resident_enhancer()
         if not self._ensure_downloads(
             seedvr2_part(request.upscale_model, platform_key=sys.platform),
             mode="video",
@@ -1012,6 +1075,8 @@ class WebRunner:
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
             return
+        # An enhancer an on-demand Enhance left resident: this job does not run preflight, which would reuse it, so it is freed before the model loads.
+        prompt_enhancer_session.release_resident_enhancer()
         if not self._ensure_downloads(
             model_part or ltx_video_upscale_part(request, config, platform_key=sys.platform),
             mode="video",
@@ -1263,6 +1328,19 @@ class WebRunner:
             require_checked(outcome, part.targets, part.label)
         return True
 
+    @staticmethod
+    def _keep_load_note(record: _JobRecord, event: EventPayload) -> EventPayload:
+        """Store the load's *event* note among the job's notices, in place of the one an earlier load gave, and return the event naming the note it replaces.
+
+        The caller holds the record's lock. Stored on the record, the note outlives the capped event history, so a reload still shows it.
+        """
+        note = event["note"]
+        previous = record.load_note
+        notices = [notice for notice in record.context.get("notices", ()) if notice != previous]
+        record.context["notices"] = [*notices, note] if note not in notices else notices
+        record.load_note = note
+        return {**event, "replaces": previous} if previous is not None and previous != note else event
+
     def _make_progress_callback(self, job_id: str) -> Callable[[EventPayload], None]:
         """Bind a job id to a runner progress callback."""
         return lambda event: self._publish_event(job_id, event)
@@ -1279,8 +1357,22 @@ class WebRunner:
             # A private key of the video runner: the file stays on the record and is never published.
             event = dict(event)
             review_path = event.pop("review_path")
+        event = self._normalize_event(event)
+        if event["type"] == MEMORY_EVENT:
+            with record.lock:
+                delivery = self._record_memory_event(record, event)
+            if delivery is not None:
+                memory_event, memory_subscribers = delivery
+                for subscriber in memory_subscribers:
+                    subscriber.put(memory_event)
+            return
+        memory_stop = None
+        if event["type"] in self._TERMINAL_EVENT_TYPES:
+            with record.lock:
+                memory_stop, record.memory_stop = record.memory_stop, None
+        if memory_stop is not None:
+            memory_stop()
         with record.lock:
-            event = self._normalize_event(event)
             timestamp = time.time()
             if preview_jpeg is not None:
                 record.preview_version += 1
@@ -1296,6 +1388,8 @@ class WebRunner:
                 record.review_decided = False
                 if review_path is not None:
                     record.review_path = review_path
+            if event["type"] == "model_loading" and isinstance(event.get("note"), str):
+                event = self._keep_load_note(record, event)
             if event["type"] == "prompt_started":
                 record.prompt_progress = {key: event[key] for key in ("prompt", "run_index", "total_runs", "ran_iterations", "total_iterations", "enhance_status") if key in event}
             elif event["type"] == "prompt_enhanced" and "enhanced_prompt" in event:
@@ -1373,6 +1467,32 @@ class WebRunner:
                 self._prune_terminal_jobs_locked(exclude_job_id=job_id)
 
         self._write_job_log(log_args)
+
+    def _record_memory_event(self, record: _JobRecord, event: EventPayload) -> tuple[EventPayload, list[queue.Queue[EventPayload]]] | None:
+        """Record a ``memory_usage`` event and return it with the subscribers to deliver it to; the caller holds the record lock.
+
+        A reading is a side channel: it updates ``record.memory`` and replaces the previous reading in the history, but is
+        never the job's last event, never counts as an event and never changes its status. One that arrives after the job
+        ended is dropped (``None``).
+        """
+        if record.status in self._TERMINAL_STATUSES:
+            return None
+        timestamp = time.time()
+        memory_event = {
+            "event_id": record.next_event_id,
+            "job_id": record.job_id,
+            "job_type": record.job_type,
+            "timestamp": timestamp,
+            "elapsed_secs": max(0.0, timestamp - (record.started_at or record.created_at)),
+            **event,
+        }
+        record.next_event_id += 1
+        record.memory = event.get("memory")
+        record.history[:] = [past for past in record.history if past["type"] != MEMORY_EVENT]
+        record.history.append(memory_event)
+        if len(record.history) > self._max_history_events:
+            del record.history[: len(record.history) - self._max_history_events]
+        return memory_event, list(record.subscribers)
 
     def _write_job_log(self, log_args: dict[str, Any] | None) -> None:
         """Append the finished job to the log; any failure becomes a warning and never touches the job.
@@ -1490,8 +1610,12 @@ def _load_image_model_with_progress(
     quantize: int | None,
     progress_callback: Callable[[EventPayload], None],
     control_signal: SkipSignal,
+    memory_job: MemoryJob,
 ) -> tuple[Any, Any, Any]:
     """Load the request's image model (stored quants, LoRAs) and report ``model_loading`` events.
+
+    *memory_job* is the job the model is loaded for. A backend that placed the weights for less free memory than the memory tag assumed reports it as one more
+    ``model_loading`` event with a ``note``, which the job's card shows.
 
     A model built on first use (Ideogram 4 Instant, MOSS-Image) is built first when it is missing (the ``building`` phase).
 
@@ -1519,6 +1643,8 @@ def _load_image_model_with_progress(
         on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "phase": phase, "quantize": quantize}),
         cancelled=lambda: control_signal.pending() == "quit",
         release_memory=_release_accelerator_memory,
+        memory_job=memory_job,
+        on_note=lambda note: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "note": note}),
     )
     return backend, model, model_info
 

@@ -7,9 +7,26 @@ import sys
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
-# Freed buffers MLX may keep for reuse. Its default (the whole memory limit) let the cache grow to 16-29 GB
-# alongside the model and pushed macOS into swap; 4 GB showed no step slowdown.
-BUFFER_CACHE_LIMIT_BYTES = 4 * 1024**3
+from zvisiongenerator.core.memory_sampler import MemoryUsage
+
+__all__ = [
+    "BUFFER_CACHE_LIMIT_BYTES",
+    "apply_buffer_cache_policy",
+    "evaluate",
+    "free_bytes",
+    "load_resident",
+    "materialize_weights",
+    "memory_budget_bytes",
+    "memory_size_bytes",
+    "memory_usage",
+    "mlx_cache_limit",
+    "release_memory",
+    "upcast_weights",
+]
+
+# Freed buffers MLX may keep for reuse once the weights are resident. Its default (the whole memory limit) lets the cache grow alongside the model and pushes macOS into swap, and any cache above 0 adds to an image job's
+# footprint; with the cache off the step time is unchanged. measured: klein4b-q4-m, zit-m, krea2-m.
+BUFFER_CACHE_LIMIT_BYTES = 0
 
 
 def release_memory() -> None:
@@ -25,12 +42,30 @@ def release_memory() -> None:
         torch.mps.empty_cache()
 
 
+def memory_usage() -> MemoryUsage | None:
+    """Return the whole machine's memory in use (its total minus what is available), or ``None`` when it cannot be read.
+
+    Apple Silicon has one memory pool, so there is no separate GPU figure. The reading is the machine's load, every program's
+    included, not this app's share.
+    """
+    import psutil
+
+    try:
+        memory = psutil.virtual_memory()
+        return MemoryUsage(system_used_bytes=int(memory.total - memory.available))
+    except OSError, AttributeError:
+        return None
+
+
 def free_bytes() -> int | None:
     """Return the unified memory still available to the GPU, in bytes, or ``None`` when the budget is unknown.
 
     The budget (Apple's recommended working set) minus what MLX has active, what MLX keeps cached for reuse and what
     the torch MPS allocator holds. MLX's cache counts as taken because the MPS allocator cannot reuse it. The result
     never goes below 0.
+
+    This stays a GPU-side check (against the working set), whatever a verdict grades a job against: it asks what the
+    GPU can still take now, not whether a job fits the machine.
     """
     import mlx.core as mx
 
@@ -128,7 +163,7 @@ def evaluate[T](value: T) -> T:
 
 
 def apply_buffer_cache_policy() -> None:
-    """Cap MLX's free-buffer cache and drop what loading left behind."""
+    """Set MLX's free-buffer cache limit to ``BUFFER_CACHE_LIMIT_BYTES`` and drop what loading left behind."""
     import mlx.core as mx
 
     mx.set_cache_limit(BUFFER_CACHE_LIMIT_BYTES)
@@ -136,7 +171,7 @@ def apply_buffer_cache_policy() -> None:
 
 
 def load_resident[T](build: Callable[[], T]) -> T:
-    """Build a model with MLX's buffer cache disabled, keep its weights resident, then cap the cache.
+    """Build a model with MLX's buffer cache disabled, keep its weights resident, then set the cache limit for the job.
 
     ``build`` and the weight evaluation run with the buffer cache at 0, so freed buffers (the bf16
     originals while quantizing) return to the system instead of piling up beside the model. The cache

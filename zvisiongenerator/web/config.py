@@ -148,7 +148,7 @@ def _resolve_seedvr2(app_config: dict[str, Any], data_dir: Path) -> SeedVR2Setup
         app_config,
         platform_key=sys.platform,
         weights=upscaler.weights,
-        budget_bytes=budget.gpu_bytes if budget else None,
+        budget_bytes=budget.full_gpu_bytes if budget else None,
         system_bytes=budget.system_bytes if budget else None,
         models_dir=resolve_models_dir(data_dir=data_dir),
     )

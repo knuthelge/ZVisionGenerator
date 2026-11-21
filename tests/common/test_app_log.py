@@ -64,6 +64,26 @@ def test_errors_and_warnings_are_logged_but_info_is_not(fresh_logging, capsys):
     assert "Traceback" not in err
 
 
+def test_a_warning_reaches_the_console_as_its_message_alone_and_the_file_keeps_its_location(fresh_logging, capsys):
+    path = app_log.setup_logging("image")
+    warnings.warn("X", UserWarning, stacklevel=1)
+    _flush()
+
+    err = capsys.readouterr().err
+    assert err.strip() == "WARNING: X"
+    text = path.read_text()
+    assert "test_app_log.py" in text and "UserWarning: X" in text
+    assert 'warnings.warn("X"' in text
+
+
+def test_other_records_print_unchanged_on_the_console(fresh_logging, capsys):
+    app_log.setup_logging("image")
+    logging.getLogger("zvisiongenerator.test").warning("plain %s", "problem")
+    _flush()
+
+    assert capsys.readouterr().err.strip() == "WARNING: plain problem"
+
+
 def test_uncaught_exception_traceback_goes_to_file(fresh_logging, monkeypatch):
     printed = []
     monkeypatch.setattr(sys, "excepthook", lambda *exc: printed.append(exc))

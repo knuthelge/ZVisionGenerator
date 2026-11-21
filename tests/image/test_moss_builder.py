@@ -21,6 +21,7 @@ from zvisiongenerator.downloads.plans import built_model_plan, image_plan
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.image_model_loader import LOADING_PHASE
 from zvisiongenerator.moss_builder import build_moss_model, ensure_moss_model, moss_model_index
+from zvisiongenerator.utils.memory_verdict import MemoryJob
 from zvisiongenerator.utils import built_model
 from zvisiongenerator.utils.built_model import BUILD_RECORD_NAME, BUILDING_PHASE
 from zvisiongenerator.utils.moss_build import (
@@ -343,7 +344,7 @@ class TestCallSites:
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *a, **k: order.append("load") or (MagicMock(), MagicMock()))
         request = MagicMock(model_name="moss", lora_paths=None, lora_weights=None)
 
-        web_runner_module._load_image_model_with_progress(request, "/models/moss", None, events.append, MagicMock())
+        web_runner_module._load_image_model_with_progress(request, "/models/moss", None, events.append, MagicMock(), MemoryJob(media="image"))
 
         assert order == ["ensure", "load"]
         assert {"type": "model_loading", "mode": "image", "model": "moss", "phase": BUILDING_PHASE} in events

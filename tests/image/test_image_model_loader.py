@@ -6,11 +6,13 @@ import json
 import os
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from zvisiongenerator.utils.memory_verdict import MemoryJob
 from zvisiongenerator.image_model_loader import LOADING_PHASE, SAVING_QUANT_PHASE, LoadPlan, create_stored_quant, load_image_model, plan_image_model_load, save_stored_quant, store_copy
 from zvisiongenerator.utils.stored_quant import build_manifest, is_current, write_manifest
 
@@ -40,6 +42,8 @@ class _FakeBackend:
         self._files_sources = files_sources
         self.queries: list[tuple[int, str | None]] = []
         self.loads: list[dict] = []
+        self.memory_jobs: list[MemoryJob | None] = []
+        self.notes: list = []
         self.saved: list[str] = []
         self.written: list[tuple[str, str, int]] = []
         self.save_finished = threading.Event()
@@ -60,8 +64,10 @@ class _FakeBackend:
         (Path(path) / "transformer" / "0.safetensors").write_bytes(b"q")
         self.written.append((source, path, bits))
 
-    def load_model(self, model_path, quantize=None, precision="bfloat16", lora_paths=None, lora_weights=None):
+    def load_model(self, model_path, quantize=None, precision="bfloat16", lora_paths=None, lora_weights=None, memory_job=None, on_note=None):
         self.loads.append({"path": model_path, "quantize": quantize, "lora_paths": lora_paths})
+        self.memory_jobs.append(memory_job)
+        self.notes.append(on_note)
         return MagicMock(name=f"model-{len(self.loads)}"), "info"
 
     def runs_after_save(self, model) -> bool:
@@ -231,6 +237,32 @@ class TestLoad:
             {"path": str(models_dir / "atlas@q8"), "quantize": None, "lora_paths": ["style.safetensors"]},
         ]
         release.assert_called_once()
+
+    def test_every_load_gets_the_memory_job_and_the_lora_free_one_gets_none_of_its_lora_bytes(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend()
+        job = MemoryJob(media="image", width=1344, height=768, reference_megapixels=(0.5,), lora_bytes=123)
+
+        load_image_model(backend, str(source), quantize=8, models_dir=models_dir, lora_paths=["style.safetensors"], lora_weights=[1.0], release_memory=MagicMock(), memory_job=job)
+
+        assert backend.memory_jobs == [replace(job, lora_bytes=0), job]
+
+    def test_every_load_gets_the_note_callback_so_a_placement_note_reaches_the_job(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend()
+        on_note = MagicMock()
+
+        load_image_model(backend, str(source), quantize=8, models_dir=models_dir, lora_paths=["style.safetensors"], lora_weights=[1.0], release_memory=MagicMock(), on_note=on_note)
+
+        assert backend.notes == [on_note, on_note]
+
+    def test_a_load_without_a_memory_job_passes_none(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend()
+
+        load_image_model(backend, str(source), quantize=None, models_dir=models_dir)
+
+        assert backend.memory_jobs == [None]
 
     def test_existing_stored_quant_loads_with_loras_and_never_saves(self, models_dir):
         source = _make_source(models_dir)

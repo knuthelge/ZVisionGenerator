@@ -13,6 +13,7 @@ from PIL import Image
 
 from zvisiongenerator.core.image_types import JobPrompt
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.memory_verdict import MemoryJob
 
 if TYPE_CHECKING:
     import numpy as np
@@ -45,8 +46,16 @@ class ImageBackend(Protocol):
         precision: str = "bfloat16",
         lora_paths: list[str] | None = None,
         lora_weights: list[float] | None = None,
+        memory_job: MemoryJob | None = None,
+        on_note: Callable[[str], None] | None = None,
     ) -> tuple[Any, ImageModelInfo]:
-        """Load a model. Returns (model_handle, model_info)."""
+        """Load a model. Returns (model_handle, model_info).
+
+        memory_job is the image job the model is loaded for (its size, references and LoRA bytes). A backend that places weights
+        by the memory it has free reads it; the others ignore it. ``None`` means the 1024x1024 reference job (``MemoryJob(media="image")``).
+        on_note receives the short sentence for the running job's card when the backend placed the weights differently from what the memory tag
+        assumed because too little memory was free; the others never call it.
+        """
         ...
 
     def text_to_image(

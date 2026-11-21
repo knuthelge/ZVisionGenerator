@@ -3,39 +3,49 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
-from zvisiongenerator.utils.h3_memory import h3_lora_bytes
-from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
-from zvisiongenerator.utils.paths import resolve_lora_path
+from zvisiongenerator.utils.lora import parse_lora_arg
+from zvisiongenerator.utils.lora_size import lora_files_bytes
+from zvisiongenerator.utils.paths import is_remote_lora_reference, resolve_lora_path
+
+__all__ = ["LoraSize", "lora_size_for_fit"]
 
 
-def lora_bytes_for_fit(lora: str | None, *, family: str, downloading: Mapping[str, int] | None = None) -> int:
-    """Return the total size of the LoRA files the ``name:weight,...`` list *lora* names, for a model of *family*.
+@dataclass(frozen=True)
+class LoraSize:
+    """What a LoRA list adds to a memory estimate: the bytes of the files it could size, and the LoRAs it could not."""
 
-    Only MiniMax H3 adds LoRA files to its memory estimate; any other family counts nothing, so an LTX estimate never
-    depends on its LoRAs. The list resolves exactly as in a job (local names and paths; a folder is accepted). A LoRA
-    whose file is not there yet but is downloading counts the size the download expects.
+    total: int = 0
+    unavailable: tuple[str, ...] = ()
+
+
+def lora_size_for_fit(lora: str | None, downloading: Mapping[str, int] | None = None) -> LoraSize:
+    """Return the size of the LoRA files the ``name:weight,...`` list *lora* names, and the names of those that are not available.
+
+    A name resolves as in a job (local names and paths; a folder is accepted). Which models add the files to their estimate is the
+    engine's decision. A LoRA whose file is not there yet but is downloading counts the size the download expects. A LoRA that is not there, or that is a remote Hugging Face reference (a job refuses it), counts 0
+    bytes and is listed in ``unavailable`` by its file name, so the estimate still judges the job.
 
     Args:
         lora: The ``name:weight,...`` list.
-        family: The video model's family.
         downloading: ``{name: expected size in bytes}`` of the LoRAs being downloaded (the curated entry's size or the Hub's).
 
     Raises:
-        ValueError: If *lora* is malformed, a remote Hugging Face reference, or names a LoRA that is not there and is not downloading.
+        ValueError: If *lora* is malformed.
     """
     text = (lora or "").strip()
-    if family != "h3" or not text:
-        return 0
-    expected = 0
-    resolvable = []
-    for name, weight in parse_lora_arg(text):
-        if name in (downloading or {}) and not Path(resolve_lora_path(name)).exists():
-            expected += (downloading or {})[name]
+    if not text:
+        return LoraSize()
+    total = 0
+    unavailable = []
+    for name, _weight in parse_lora_arg(text):
+        path = resolve_lora_path(name)
+        if name in (downloading or {}) and not Path(path).exists():
+            total += (downloading or {})[name]
+        elif is_remote_lora_reference(name) or not Path(path).exists():
+            unavailable.append(Path(name).name)
         else:
-            resolvable.append(f"{name}:{weight}")
-    if not resolvable:
-        return expected
-    paths, _weights = resolve_lora_references(",".join(resolvable), require_file=False)
-    return expected + h3_lora_bytes(paths)
+            total += lora_files_bytes([path])
+    return LoraSize(total, tuple(unavailable))

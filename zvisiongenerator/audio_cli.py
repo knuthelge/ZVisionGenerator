@@ -20,7 +20,7 @@ from zvisiongenerator.enhance_cli import add_enhance_arguments, parse_enhance_ar
 from zvisiongenerator.job_controls import seed_range
 from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.app_log import setup_logging
-from zvisiongenerator.utils.audio_memory import audio_memory_fit, memory_warning_text
+from zvisiongenerator.utils.audio_memory import audio_verdict
 from zvisiongenerator.utils.audio_preset import AUDIO_KINDS, AudioPreset, parse_audio_presets
 from zvisiongenerator.utils.audio_track import TRACK_UNREADABLE
 from zvisiongenerator.utils.audio_request import check_seed, check_speech_request, find_audio_preset, resolve_audio_seconds, resolve_speaker
@@ -49,6 +49,7 @@ from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.library_noise import MUTED_ERROR_TEXT, mute_library_warnings
 from zvisiongenerator.utils.live_line import route_stderr_through_live_line
+from zvisiongenerator.utils.memory_wording import judged_heading, memory_warning
 from zvisiongenerator.utils.music_mode import INSTRUMENTAL, music_mode
 from zvisiongenerator.utils.prompt_enhance_audio import AudioEnhanceSettings, audio_enhance_context, caption_task
 from zvisiongenerator.utils.voice_library import SavedVoice, find_voice, list_voices
@@ -396,9 +397,13 @@ def _announce_music(request: AudioGenerationRequest, preset: AudioPreset, platfo
     print(f"Making an instrumental of {count} sections." if kind == INSTRUMENTAL else "Making a song from the lyrics.", flush=True)
 
 
-def _warn_if_memory_short(preset: AudioPreset, platform_key: str) -> None:
-    """Warn when the model's recorded GPU peak is too large or tight for this machine; the run goes on, as the download may still be wanted."""
-    text = memory_warning_text(preset.label, audio_memory_fit(preset, platform_key, accelerator_memory_budget_or_none()))
+def _warn_if_memory_tight(preset: AudioPreset, platform_key: str) -> None:
+    """Warn once when the model's measured GPU peak is Tight or Too large for this machine; the run goes on, as the download may still be wanted."""
+    machine = accelerator_memory_budget_or_none()
+    verdict = audio_verdict(preset, platform_key, machine)
+    if machine is None or verdict is None:
+        return
+    text = memory_warning(judged_heading("track", label=preset.label), verdict, machine)
     if text:
         warnings.warn(text, stacklevel=2)
 
@@ -488,7 +493,7 @@ def main(*, prog: str = "ziv-audio") -> None:
     _announce_music(request, preset, platform_key)
 
     # Before anything downloads: a card that is too small should be known before the model's files are fetched.
-    _warn_if_memory_short(preset, platform_key)
+    _warn_if_memory_tight(preset, platform_key)
     # The terms of a model that has them are named before its files download.
     try:
         print_licence_notice(preset.id, lambda: audio_plan(preset))

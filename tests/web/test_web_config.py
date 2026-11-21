@@ -16,6 +16,7 @@ from zvisiongenerator.web import config as web_config_module
 from zvisiongenerator.web import model_inventory as model_inventory_module
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.config import load_config
+from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.seedvr2 import MLX_WEIGHTS
 
 
@@ -654,8 +655,13 @@ def test_load_web_config_has_no_seedvr2_where_it_is_unsupported(monkeypatch, tmp
 @pytest.mark.parametrize(
     ("budget", "expected_gpu", "expected_system"),
     [
-        (SimpleNamespace(gpu_bytes=26_800_000_000, system_bytes=None), 26_800_000_000, None),
-        (SimpleNamespace(gpu_bytes=10_700_000_000, system_bytes=33_400_000_000), 10_700_000_000, 33_400_000_000),
+        (MemoryBudget(gpu_bytes=26_800_000_000, unified_bytes=32_000_000_000), 26_800_000_000, None),
+        (MemoryBudget(gpu_bytes=10_700_000_000, system_bytes=33_400_000_000), 10_700_000_000, 33_400_000_000),
+        (
+            MemoryBudget(gpu_bytes=10_700_000_000, system_bytes=33_400_000_000, gpu_total_bytes=11_100_000_000),
+            11_100_000_000,
+            33_400_000_000,
+        ),  # a card's whole memory, not the budget less the driver's reserve
         (None, None, None),
     ],
 )
@@ -701,7 +707,7 @@ def test_gallery_api_reports_a_seedvr2_copy_stored_after_the_server_started(monk
     monkeypatch.setattr(web_config_module, "load_config", _seedvr2_app_config)
     monkeypatch.setattr(web_config_module, "supports_seedvr2", lambda: True)
     monkeypatch.setattr(web_config_module, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=MLX_WEIGHTS))
-    monkeypatch.setattr(web_config_module, "memory_budget", lambda: SimpleNamespace(gpu_bytes=26_800_000_000, system_bytes=None))
+    monkeypatch.setattr(web_config_module, "memory_budget", lambda: MemoryBudget(gpu_bytes=26_800_000_000, unified_bytes=32_000_000_000))
     outputs = Path(web_config_module.load_web_config().output_dir)
     Image.new("RGB", (64, 64)).save(outputs / "a.png")
 

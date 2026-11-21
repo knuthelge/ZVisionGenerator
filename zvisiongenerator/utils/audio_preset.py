@@ -38,8 +38,11 @@ __all__ = [
 AUDIO_KINDS: Final = ("music", "speech", "sound")
 """The kinds of audio a preset can make."""
 
-AUDIO_PLATFORMS: Final = ("cuda", "mps")
-"""The platform keys of a preset's ``platforms`` mapping: a CUDA card, or Apple MPS."""
+AUDIO_PLATFORMS: Final = ("cuda", "mps", "windows")
+"""The platform keys of a preset's ``platforms`` mapping: a CUDA card, Apple MPS, or Windows.
+
+``windows`` records only a measured ``memory_gb``, which a Windows machine reads in place of ``cuda``'s; a ``settings`` or ``family`` under it is rejected.
+"""
 
 _SECTION: Final = "audio_model_presets"
 _AUDIO_KIND: Final = "audio"
@@ -125,7 +128,7 @@ class AudioPreset:
         files: The pinned files to download, in order.
         limits: The model's ceilings: the union of what each of its kinds sets.
         settings: The model knobs every platform shares, an open mapping.
-        platforms: The platform keys (``cuda``, ``mps``) the preset says something about; the others use the shared values.
+        platforms: The platform keys (``cuda``, ``mps``, ``windows``) the preset says something about; the others use the shared values.
         voices: The built-in voices of a speech model, the first one the default; empty for a model without any.
         voice_files: The pinned files a take that follows a voice recording also needs (speech), downloaded only for such a take; empty when
             ``files`` already serve cloning.
@@ -174,12 +177,12 @@ class AudioPreset:
         return kind == "speech" and self.has_kind(kind)
 
     def settings_for(self, platform_key: str) -> dict[str, Any]:
-        """Return the settings that apply on *platform_key* (``cuda`` or ``mps``): the shared ones, overridden by the platform's."""
+        """Return the settings that apply on *platform_key* (``cuda``, ``mps`` or ``windows``): the shared ones, overridden by the platform's."""
         override = self.platforms[platform_key].settings if platform_key in self.platforms else {}
         return {**copy.deepcopy(dict(self.settings)), **copy.deepcopy(dict(override))}
 
     def on_platform(self, platform_key: str) -> AudioPreset:
-        """Return this preset as *platform_key* (``cuda`` or ``mps``) runs it: with that platform's ``family`` when it names one."""
+        """Return this preset as *platform_key* (``cuda``, ``mps`` or ``windows``) runs it: with that platform's ``family`` when it names one."""
         platform = self.platforms.get(platform_key)
         if platform is None or platform.family is None:
             return self
@@ -194,7 +197,7 @@ def parse_audio_presets(config: Mapping[str, Any]) -> tuple[AudioPreset, ...]:
     """Return one frozen preset per audio model of the metadata, in the order the metadata lists them.
 
     A preset joins the model's facts (the ``models`` entry and its declared downloads) with its settings from
-    ``audio_model_presets.<id>`` of *config*: ``settings``, and ``platforms.<cuda|mps>.settings`` per accelerator. A config id
+    ``audio_model_presets.<id>`` of *config*: ``settings``, and ``platforms.<cuda|mps>.settings`` per accelerator (``platforms.windows`` takes no settings). A config id
     that names no audio model is ignored, and so is any other key of an entry. Nothing is written into *config* or the metadata.
 
     Args:
@@ -204,7 +207,7 @@ def parse_audio_presets(config: Mapping[str, Any]) -> tuple[AudioPreset, ...]:
         One frozen preset per audio model.
 
     Raises:
-        ValueError: If a settings block is not a mapping, or a model that sings lyrics has no ``instrumental_sections`` setting.
+        ValueError: If a settings block is not a mapping, a ``windows`` platform names ``settings`` or ``family``, or a model that sings lyrics has no ``instrumental_sections`` setting.
     """
     section = config.get(_SECTION)
     if section is None:
@@ -268,17 +271,21 @@ def _settings(value: object, where: str) -> Mapping[str, Any]:
 def _platforms(facts: object, configured: object, where: str) -> Mapping[str, AudioPlatform]:
     """Join the measured ``platforms`` facts of an entry with the ``platforms`` settings of its config block.
 
-    The result has a key for each accelerator (``cuda``, ``mps``) either of them names.
+    The result has a key for each platform (``cuda``, ``mps``, ``windows``) either of them names.
     """
     configured_platforms = {} if configured is None else _mapping(configured, f"{where}.platforms")
     facts_by_platform = facts or {}
     keys = [key for key in AUDIO_PLATFORMS if key in facts_by_platform or key in configured_platforms]
-    return MappingProxyType({key: _platform(facts_by_platform.get(key) or {}, configured_platforms.get(key), f"{where}.platforms.{key}") for key in keys})
+    return MappingProxyType({key: _platform(key, facts_by_platform.get(key) or {}, configured_platforms.get(key), f"{where}.platforms.{key}") for key in keys})
 
 
-def _platform(facts: Mapping[str, Any], configured: object, where: str) -> AudioPlatform:
-    """Build one platform entry: the measured ``memory_gb`` and own ``family`` of the metadata, the ``settings`` of the config."""
+def _platform(key: str, facts: Mapping[str, Any], configured: object, where: str) -> AudioPlatform:
+    """Build one platform entry: the measured ``memory_gb`` and own ``family`` of the metadata, the ``settings`` of the config; ``windows`` takes neither of the last two."""
     block = {} if configured is None else _mapping(configured, where)
+    if key == "windows":
+        for name, source in (("settings", block), ("family", facts)):
+            if source.get(name) is not None:
+                raise ValueError(f"{where}.{name}: a windows platform records only memory_gb and takes no {name}")
     memory = facts.get("memory_gb")
     return AudioPlatform(
         memory_gb=None if memory is None else float(memory),

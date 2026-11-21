@@ -46,6 +46,20 @@ def _no_web_download_planning(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _linux_cuda_offset(monkeypatch):
+    """Pin the CUDA memory offset to the Linux figure, so the memory tests judge the same numbers on every OS.
+
+    The offset is bound by name where it is read (``from ... import``), so each reader is patched; a test that judges Windows sets its own.
+    """
+    from zvisiongenerator.backends.cuda.image import placement
+    from zvisiongenerator.utils import h3_memory, memory_verdict
+    from zvisiongenerator.utils.memory_offsets import CUDA_OFFSET_LINUX_BYTES
+
+    for module in (placement, h3_memory, memory_verdict):
+        monkeypatch.setattr(module, "CUDA_OFFSET_BYTES", CUDA_OFFSET_LINUX_BYTES)
+
+
+@pytest.fixture(autouse=True)
 def _no_hugging_face_token(monkeypatch):
     """Keep every test from seeing or overwriting the real Hugging Face token (env or token file); tests that need one inject it."""
     import huggingface_hub
@@ -178,10 +192,25 @@ def hub_offline(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_real_memory_budget(monkeypatch):
-    """Keep ziv-video from querying the real accelerator when it checks a clip against memory; tests that care patch it again."""
+    """Keep ziv-video and ziv-image from querying the real accelerator when they check a run against memory; tests that care patch it again."""
+    import zvisiongenerator.image_cli as image_cli
     import zvisiongenerator.video_cli as video_cli
 
     monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: None)
+    monkeypatch.setattr(image_cli, "accelerator_memory_budget_or_none", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_memory_readout(monkeypatch):
+    """Keep the Web runner from reading the real process or accelerator memory while a test job runs; tests that care pass their own probe.
+
+    The Web server's probe holds ``backends.memory_usage`` itself, so the platform readers it calls are patched.
+    """
+    import zvisiongenerator.backends.cuda.memory as cuda_memory
+    import zvisiongenerator.backends.mac.memory as mac_memory
+
+    monkeypatch.setattr(cuda_memory, "memory_usage", lambda: None)
+    monkeypatch.setattr(mac_memory, "memory_usage", lambda: None)
 
 
 @pytest.fixture()
@@ -238,3 +267,14 @@ def _model_metadata_cache_unchanged():
 def packaged_config() -> dict[str, Any]:
     """Return a private deep copy of the packaged config with no user override."""
     return load_packaged_config()
+
+
+@pytest.fixture(scope="session")
+def symlinks_allowed(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Skip the test when the OS refuses to create a symlink (Windows without Developer Mode or administrator rights); the probe runs once per session."""
+    probe = tmp_path_factory.mktemp("symlink-probe")
+    (probe / "target").write_bytes(b"")
+    try:
+        (probe / "link").symlink_to(probe / "target")
+    except OSError:
+        pytest.skip("this OS refuses to create a symlink")

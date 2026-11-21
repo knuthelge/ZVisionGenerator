@@ -49,7 +49,6 @@ from zvisiongenerator.converters.lora_import import import_lora_local
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceDesignRequest, VoiceRef
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
-from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, SettledSteps, settle_video_steps
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads.declaration import declared_repo_ids
 from zvisiongenerator.downloads.flights import DownloadFlights
@@ -70,7 +69,6 @@ from zvisiongenerator.utils.config import (
     resolve_upscale_steps,
     validate_scheduler,
     validate_sharpen_amount,
-    video_family,
 )
 from zvisiongenerator.utils.paths import join_huggingface_revision
 from zvisiongenerator.utils.enhance_record import parse_enhance_record
@@ -82,7 +80,6 @@ from zvisiongenerator.utils.image_model_detect import declared_image_model, dete
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.licences import load_licences
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
-from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.utils.prompt_enhance import (
     ENHANCE_FORMATS,
@@ -139,7 +136,6 @@ from zvisiongenerator.web.discover_api import build_curated, check_json, hf_sour
 from zvisiongenerator.web.discover_hub import RepoDetail, check_family, list_adapters, read_repo
 from zvisiongenerator.web.listing_filter import ListingFilter, content_filter_level, listing_filter_for, packaged_listing_filter
 from zvisiongenerator.web.download_lane import DownloadLane
-from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_video_size_for_ratio
 from zvisiongenerator.web.extend_api import EXTEND_UNAVAILABLE_MESSAGE, extend_context_from_body, extend_source_response, load_source_video, requested_extend_frames
 from zvisiongenerator.web.gallery import (
     audio_peaks,
@@ -159,8 +155,19 @@ from zvisiongenerator.web.gallery import (
 from zvisiongenerator.web.asset_records import AssetRecordsError
 from zvisiongenerator.web.gallery_zip import zip_stream
 from zvisiongenerator.web.job_log import JOB_LOG_PAGE_SIZE, JobLog, JobLogError
+from zvisiongenerator.web.memory_readout import machine_probe
 from zvisiongenerator.web.hub_client import CachedFetch, HubError, validated_file, validated_repo
 from zvisiongenerator.web.json_fields import json_field
+from zvisiongenerator.web.memory_api import memory_response
+from zvisiongenerator.web.request_fields import (
+    image_ratio,
+    image_size_name,
+    optional_text,
+    settled_video_steps,
+    text_or_default,
+    video_model_name,
+    video_ratio_and_size,
+)
 from zvisiongenerator.web.lora_details import describe_installed
 from zvisiongenerator.web.lora_download import LoraInstaller, import_source
 from zvisiongenerator.web.lora_sources import SOURCES, LoraSourcesError
@@ -186,7 +193,6 @@ from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware, is_c
 from zvisiongenerator.web.adjust_api import adjust_json_request, save_adjusted
 from zvisiongenerator.web.upscale_api import plan_ltx_video_upscale, plan_seedvr2_upscale, plan_upscale, plan_video_upscale, upscale_json_request, upscale_size_label, video_upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
-from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.projects import PROJECT_FIELD, create_project, folder_project, list_projects, project_dir
@@ -231,7 +237,7 @@ _PROMPT_FILE_EXTENSIONS = tuple(PROMPT_FILE_CONTRACT["accepted_extensions"])
 download_flights = DownloadFlights()
 job_log = JobLog(app_db.app_db_path)
 recent_prompts = RecentPrompts(app_db.app_db_path)
-web_runner = WebRunner(download_flights=download_flights, job_log=job_log)
+web_runner = WebRunner(download_flights=download_flights, job_log=job_log, memory_probe=machine_probe())
 download_lane = DownloadLane(flights=download_flights)
 lora_sources = SOURCES
 lora_installer = LoraInstaller(download_lane, loras_dir=lambda: get_ziv_data_dir() / "loras", sources=lora_sources)
@@ -454,13 +460,13 @@ def _list_browse_directory(purpose: BrowsePurpose, path: str, *, show_hidden: bo
 
 @app.post("/api/extend/source")
 async def api_extend_source(request: Request) -> dict[str, Any]:
-    """Inspect a host-local video that may be extended: its facts, recorded scene and prompt, problems and memory fit."""
+    """Inspect a host-local video that may be extended: its facts, recorded scene and prompt, and problems."""
     try:
         payload = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
     try:
-        return await run_in_threadpool(extend_source_response, payload, load_web_config(), downloading_loras=lora_installer.pending_sizes())
+        return await run_in_threadpool(extend_source_response, payload, load_web_config())
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -497,16 +503,19 @@ async def api_references_check(request: Request) -> dict[str, list[str]]:
     return {"missing": await run_in_threadpool(missing_reference_files, paths)}
 
 
-@app.post("/api/video/memory-fit")
-async def api_video_memory_fit(request: Request) -> dict[str, Any]:
-    """Check whether a Text to Video or Image to Video clip of the given size and length fits this machine's memory; queues nothing."""
+@app.post("/api/memory")
+async def api_memory(request: Request) -> dict[str, Any] | None:
+    """Judge whether a job fits this machine's memory, one row per choice of its quantize level or Low memory; starts no job.
+
+    Answers ``null`` when this machine has no memory budget or the model's weights are unknown. See :func:`memory_response`.
+    """
     try:
         payload = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
     try:
-        return await run_in_threadpool(_video_memory_fit_response, payload, load_web_config())
-    except ValueError as exc:
+        return await run_in_threadpool(memory_response, payload, load_web_config(), budget=memory_budget(), downloading_loras=lora_installer.pending_sizes())
+    except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -640,7 +649,11 @@ async def enhance_prompt_endpoint(request: Request) -> StreamingResponse:
     session = get_prompt_enhancer_session()
     reservation: list[object] = []
 
+    busy_message = "Prompt enhancement is available when all jobs have finished."
+
     def _reserve() -> None:
+        if _quantize_slot["busy"]:
+            raise JobConflictError(_QUANTIZING_MESSAGE)
         token = session.reserve()
         if token is None:
             raise JobConflictError("Another prompt enhancement is in progress.")
@@ -648,7 +661,7 @@ async def enhance_prompt_endpoint(request: Request) -> StreamingResponse:
 
     try:
         # Atomic with job admission: no job can start between this check and the enhancer claiming the slot.
-        web_runner.admit_exclusive(_reserve, busy_message="Prompt enhancement is available when all jobs have finished.")
+        web_runner.admit_exclusive(_reserve, busy_message=busy_message)
     except JobConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -670,6 +683,10 @@ async def enhance_prompt_endpoint(request: Request) -> StreamingResponse:
     return StreamingResponse(_stream(), media_type="application/x-ndjson", headers={"Cache-Control": "no-store"})
 
 
+_ENHANCING_MESSAGE = "Prompt enhancement in progress. Wait for it to finish before starting a job."
+_QUANTIZING_MESSAGE = "A model is being quantized on the Models page. Wait for it to finish before starting a job."
+
+
 def _reject_while_busy() -> None:
     """Job admission check: refuse a job while an on-demand enhancement or a model quantization holds memory.
 
@@ -679,9 +696,9 @@ def _reject_while_busy() -> None:
     if web_runner.has_active_jobs():
         return
     if get_prompt_enhancer_session().busy():
-        raise JobConflictError("Prompt enhancement in progress. Wait for it to finish before starting a job.")
+        raise JobConflictError(_ENHANCING_MESSAGE)
     if _quantize_slot["busy"]:
-        raise JobConflictError("A model is being quantized on the Models page. Wait for it to finish before starting a job.")
+        raise JobConflictError(_QUANTIZING_MESSAGE)
 
 
 # A converter run that saves a quantized copy loads a full model, so it excludes generation jobs (and vice versa).
@@ -696,6 +713,11 @@ def _claim_quantize_slot() -> Iterator[None]:
     def _claim() -> None:
         if _quantize_slot["busy"]:
             raise JobConflictError("Another model is being quantized. Wait for it to finish.")
+        session = get_prompt_enhancer_session()
+        if session.busy():
+            raise JobConflictError(_ENHANCING_MESSAGE)
+        # The converter loads a full model: free an enhancer an on-demand Enhance left resident.
+        session.release()
         _quantize_slot["busy"] = True
 
     web_runner.admit_exclusive(_claim, busy_message="Wait for all jobs to finish before saving a quantized copy; both would need a full model in memory.")
@@ -1031,14 +1053,14 @@ def _remember_prompt(form: Any, mode: str) -> None:
     """Store the inline prompt of an accepted submit in the recent prompts of *mode* (an audio kind for audio); a failure only warns."""
     try:
         entry = recent_prompt_entry(
-            prompt_source=_optional_text(form, "prompt_source"),
-            prompt=_optional_text(form, "prompt"),
-            json_prompt=_optional_text(form, "json_prompt"),
-            scene=_optional_text(form, "scene"),
-            negative_prompt=_optional_text(form, "negative_prompt"),
+            prompt_source=optional_text(form, "prompt_source"),
+            prompt=optional_text(form, "prompt"),
+            json_prompt=optional_text(form, "json_prompt"),
+            scene=optional_text(form, "scene"),
+            negative_prompt=optional_text(form, "negative_prompt"),
             mode=mode,
             used_at=time.time(),
-            lyrics=_optional_text(form, "lyrics"),
+            lyrics=optional_text(form, "lyrics"),
         )
         if entry is not None:
             recent_prompts.record(entry)
@@ -1590,10 +1612,10 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         ValueError: If the form is invalid.
     """
     app_config = web_config.app_config
-    workflow = _workflow_from_form(_optional_text(form, "workflow"), fallback="txt2img")
+    workflow = _workflow_from_form(optional_text(form, "workflow"), fallback="txt2img")
     if workflow == EDIT_WORKFLOW:
         return _parse_edit_job(form, web_config)
-    model_name = _text_or_default(form, "model", web_config.default_models.image)
+    model_name = text_or_default(form, "model", web_config.default_models.image)
     if not model_name:
         raise ValueError("An image model is required.")
 
@@ -1604,7 +1626,7 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
     save_dir = _project_save_dir(form, output_dir)
     upscale = _optional_int(form, "upscale")
     args = argparse.Namespace(
-        ratio=_choice_or_default(form, "ratio", web_config.image_ratios, app_config["generation"].get("default_ratio", "2:3")),
+        ratio=image_ratio(form, web_config),
         size=None,
         width=_optional_int(form, "width"),
         height=_optional_int(form, "height"),
@@ -1612,7 +1634,7 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         seed=_optional_int(form, "seed"),
         steps=_optional_int(form, "steps"),
         guidance=_optional_float(form, "guidance"),
-        scheduler=_optional_text(form, "scheduler"),
+        scheduler=optional_text(form, "scheduler"),
         upscale=upscale,
         upscale_denoise=_optional_float(form, "upscale_denoise"),
         upscale_steps=_optional_int(form, "upscale_steps"),
@@ -1636,7 +1658,7 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         first_sigma=None,
         json_prompt_enabled=False,
     )
-    args.size = _resolve_image_size(form, web_config, args.ratio)
+    args.size = image_size_name(form, web_config, args.ratio)
     if args.image_strength is None:
         args.image_strength = 0.5
     if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and args.image_path is None:
@@ -1651,13 +1673,13 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         {key: value for key, value in {"steps": args.steps, "guidance": args.guidance, "scheduler": args.scheduler}.items() if value is not None},
         get_backend_name(),
     )
-    json_prompt_text = _optional_text(form, "json_prompt")
+    json_prompt_text = optional_text(form, "json_prompt")
     if json_prompt_text is not None:
         # JSON caption mode: bypass _resolve_prompt_submission so a JSON-only submission
         # is not rejected by the required-prompt check.
-        if _optional_text(form, "prompt") is not None:
+        if optional_text(form, "prompt") is not None:
             raise ValueError("Provide either a prompt or a structured JSON caption, not both.")
-        prompt_source = _optional_text(form, "prompt_source") or DEFAULT_PROMPT_SOURCE
+        prompt_source = optional_text(form, "prompt_source") or DEFAULT_PROMPT_SOURCE
         if prompt_source == "file":
             raise ValueError("A structured JSON caption cannot be combined with prompt-file mode.")
         try:
@@ -1674,9 +1696,9 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         enhance_by_set = None
     else:
         _prompt_source, prompt, negative_prompt, prompts_data, enhance_by_set, _scene_by_set = _resolve_prompt_submission_with_enhance(form)
-        enhance_by_set = image_enhance_entries(enhance_by_set, caption=_optional_text(form, "enhance_format") == "json")
+        enhance_by_set = image_enhance_entries(enhance_by_set, caption=optional_text(form, "enhance_format") == "json")
     _apply_enhance_submission(args, form, mode="image", json_caption=args.json_prompt_enabled)
-    args.prompt_input = _optional_text(form, "prompt_input")
+    args.prompt_input = optional_text(form, "prompt_input")
     args.enhance_record = _enhance_record_from_form(form, mode="image", app_config=app_config)
     first_sigma = _optional_float(form, "first_sigma")
     if first_sigma is not None and not (0.0 < first_sigma <= 2.0):
@@ -1795,7 +1817,7 @@ def _parse_edit_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         ValueError: If the form is invalid or the edit cannot run (the refusals of ``check_edit_inputs``).
     """
     app_config = web_config.app_config
-    model_name = _text_or_default(form, "model", web_config.default_models.image)
+    model_name = text_or_default(form, "model", web_config.default_models.image)
     if not model_name:
         raise ValueError("An image model is required.")
     output_dir = _resolve_output_dir(web_config.output_dir)
@@ -1805,7 +1827,7 @@ def _parse_edit_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         raise ValueError("Pick the picture to edit.")
     planned_source = isinstance(form.get(_upload_field(EDIT_SOURCE_FIELD)), PlannedUpload)
     size, cutout = (None, False) if planned_source else read_edit_source(source_path)
-    extend_side, extend_amount = _optional_text(form, "edit_extend_side"), _optional_text(form, "edit_extend_amount")
+    extend_side, extend_amount = optional_text(form, "edit_extend_side"), optional_text(form, "edit_extend_amount")
     extend = None if extend_side is None and extend_amount is None else parse_extend((extend_side or "", extend_amount or ""))
     mask_upload = form.get(EDIT_MASK_FIELD)
     has_mask = _is_uploaded_file(mask_upload)
@@ -1944,21 +1966,21 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         HTTPException: With status 400 when review is asked for on a platform without it.
     """
     app_config = web_config.app_config
-    workflow = _workflow_from_form(_optional_text(form, "workflow"), fallback="txt2vid")
+    workflow = _workflow_from_form(optional_text(form, "workflow"), fallback="txt2vid")
     extend = workflow == "extend"
     if extend and not supports_video_extend():
         raise ValueError(EXTEND_UNAVAILABLE_MESSAGE)
-    model_name = _video_model_name(form, web_config)
+    model_name = video_model_name(form, web_config)
 
     # An extension takes its size, frame rate and length from the source clip, so the size and start-image fields are ignored; its references are not.
-    ratio, size = (None, None) if extend else _video_ratio_and_size(form, web_config)
+    ratio, size = (None, None) if extend else video_ratio_and_size(form, web_config)
     output_dir = _resolve_output_dir(web_config.output_dir)
     save_dir = _project_save_dir(form, output_dir)
     image_path = None if extend else _resolve_reference_image(form, output_dir)
     end_image_path = None if extend else _resolve_reference_image(form, output_dir, path_key="end_image_path")
     reference_paths = _resolve_reference_images(form, output_dir)
     # The source is checked again here: the file may have changed since the Workspace inspected it.
-    source = load_source_video(_optional_text(form, "source_video"), key="source_video") if extend else None
+    source = load_source_video(optional_text(form, "source_video"), key="source_video") if extend else None
     if source is not None:
         # An extension lands beside its source when that is an asset in the output folder; a staged or outside source uses the picked project.
         save_dir = output_source_folder(output_dir, str(source.path)) or save_dir
@@ -1969,7 +1991,7 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
     audio_track = _audio_track_from_form(form, audio_track_path)
     # A track is the clip's sound, so it overrides the Audio switch.
     audio_enabled = (_checkbox(form, "audio", default=True) and supports_video_audio()) or audio_track is not None
-    scene = _optional_text(form, "scene")
+    scene = optional_text(form, "scene")
     if source is not None and "scene" not in form:
         scene = source.scene
     _prompt_source, prompt, _negative_prompt, prompts_data, enhance_by_set, scene_by_set = _resolve_prompt_submission_with_enhance(form, allow_empty_prompt=scene is not None or extend)
@@ -1978,8 +2000,8 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         model=model_name,
         prompt=prompt,
         scene=scene,
-        scene_input=_optional_text(form, "scene_input"),
-        prompt_input=_optional_text(form, "prompt_input"),
+        scene_input=optional_text(form, "scene_input"),
+        prompt_input=optional_text(form, "prompt_input"),
         prompts_file=None,
         image_path=image_path,
         end_image_path=end_image_path,
@@ -2158,8 +2180,8 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
     except RuntimeError as exc:
         raise ValueError(str(exc)) from exc
     app_config = web_config.app_config
-    preset = find_audio_model(app_config, _optional_text(form, "model"))
-    workflow = _optional_text(form, "workflow") or preset.default_kind
+    preset = find_audio_model(app_config, optional_text(form, "model"))
+    workflow = optional_text(form, "workflow") or preset.default_kind
     runs = _optional_int(form, "runs") or 1
     if runs < 1:
         raise ValueError("Runs must be at least 1.")
@@ -2175,17 +2197,17 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
         seconds=_optional_float(form, "seconds"),
         voice_path=None if saved_voice is not None or not follows_voice else _resolve_voice_file(form, output_dir),
         saved_voice=saved_voice,
-        voice_text=_optional_text(form, "voice_text"),
+        voice_text=optional_text(form, "voice_text"),
         voice_consent=_checkbox(form, "voice_consent"),
-        speaker=_optional_text(form, "speaker"),
-        tempo=_optional_text(form, "tempo"),
-        key=_optional_text(form, "key"),
-        emotion=_optional_text(form, "emotion"),
-        manner=_optional_text(form, "manner"),
-        pace=_optional_text(form, "pace"),
-        pitch=_optional_text(form, "pitch"),
-        expressiveness=_optional_text(form, "expressiveness"),
-        sound_type=_optional_text(form, "sound_type"),
+        speaker=optional_text(form, "speaker"),
+        tempo=optional_text(form, "tempo"),
+        key=optional_text(form, "key"),
+        emotion=optional_text(form, "emotion"),
+        manner=optional_text(form, "manner"),
+        pace=optional_text(form, "pace"),
+        pitch=optional_text(form, "pitch"),
+        expressiveness=optional_text(form, "expressiveness"),
+        sound_type=optional_text(form, "sound_type"),
         prompt_input=_untrimmed_text(form, "prompt_input"),
         enhance_record=_enhance_record_from_form(form, mode="audio", app_config=app_config),
         voice_unread=planning,
@@ -2245,7 +2267,7 @@ def _resolve_saved_voice(form: Any) -> VoiceRef | None:
     Raises:
         ValueError: When no saved voice has that slug.
     """
-    slug = _optional_text(form, "saved_voice")
+    slug = optional_text(form, "saved_voice")
     if slug is None:
         return None
     try:
@@ -2263,7 +2285,7 @@ def _resolve_voice_file(form: Any, output_dir: str) -> str | None:
     uploaded_file = form.get(_upload_field("voice_path"))
     if _is_uploaded_file(uploaded_file):
         return _save_upload(uploaded_file, output_dir, audio=True, label="Voice recording")
-    path = _optional_text(form, "voice_path")
+    path = optional_text(form, "voice_path")
     return None if path is None else _host_local_file(path, "voice_path", resolve=False)
 
 
@@ -2285,7 +2307,7 @@ def _resolve_prompt_submission_with_enhance(
         form: The submitted form.
         allow_empty_prompt: Accept a blank inline prompt (a video job whose scene carries the text).
     """
-    prompt_source = _text_or_default(form, "prompt_source", DEFAULT_PROMPT_SOURCE)
+    prompt_source = text_or_default(form, "prompt_source", DEFAULT_PROMPT_SOURCE)
     if prompt_source not in PROMPT_SOURCE_VALUES:
         raise ValueError(f"Unknown prompt source '{prompt_source}'.")
     if prompt_source == "file":
@@ -2301,8 +2323,8 @@ def _resolve_prompt_submission_with_enhance(
         first = options[0]
         return prompt_source, first.prompt, first.negative_prompt, prompts_data, group_enhance_by_set(options), group_scene_by_set(options)
 
-    prompt = (_optional_text(form, "prompt") or "") if allow_empty_prompt else _required_text(form, "prompt")
-    negative_prompt = _optional_text(form, "negative_prompt")
+    prompt = (optional_text(form, "prompt") or "") if allow_empty_prompt else _required_text(form, "prompt")
+    negative_prompt = optional_text(form, "negative_prompt")
     return prompt_source, prompt, negative_prompt, {"web": [(prompt, negative_prompt)]}, None, None
 
 
@@ -2316,7 +2338,7 @@ def _apply_enhance_submission(args: argparse.Namespace, form: Any, *, mode: str,
     args.enhance_format = None if json_caption or mode != "image" else _form_choice(form, "enhance_format", ENHANCE_FORMATS)
     if json_caption or not _checkbox(form, "enhance_auto"):
         return
-    raw = _optional_text(form, "enhance_settings")
+    raw = optional_text(form, "enhance_settings")
     try:
         data = json.loads(raw) if raw else {}
     except json.JSONDecodeError as exc:
@@ -2332,7 +2354,7 @@ def _enhance_record_from_form(form: Any, *, mode: str, app_config: dict[str, Any
     The tier is worked out from the model, not taken from the browser. The record only describes how the text was made,
     so an invalid one (e.g. naming an option that has since been removed) is dropped with a warning instead of failing the job.
     """
-    raw = _optional_text(form, "enhance_record")
+    raw = optional_text(form, "enhance_record")
     if raw is None:
         return None
     try:
@@ -2344,7 +2366,7 @@ def _enhance_record_from_form(form: Any, *, mode: str, app_config: dict[str, Any
 
 def _form_choice(form: Any, key: str, allowed: tuple[str, ...]) -> str | None:
     """Return the form's *key* when it is one of *allowed*, ``None`` when absent."""
-    value = _optional_text(form, key)
+    value = optional_text(form, key)
     if value is not None and value not in allowed:
         raise ValueError(f"{key} must be one of: {', '.join(allowed)}.")
     return value
@@ -2359,26 +2381,14 @@ def _replace_prompt_negatives(
 
 
 def _required_text(form: Any, key: str) -> str:
-    value = _optional_text(form, key)
+    value = optional_text(form, key)
     if not value:
         raise ValueError(f"Field '{key}' is required.")
     return value
 
 
-def _optional_text(form: Any, key: str) -> str | None:
-    value = form.get(key)
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _text_or_default(form: Any, key: str, default: str | None) -> str | None:
-    return _optional_text(form, key) or default
-
-
 def _optional_int(form: Any, key: str) -> int | None:
-    value = _optional_text(form, key)
+    value = optional_text(form, key)
     if value is None:
         return None
     try:
@@ -2396,7 +2406,7 @@ def _resolve_audio_track_file(form: Any, output_dir: str) -> str | None:
     uploaded_file = form.get(_upload_field("audio_track_path"))
     if _is_uploaded_file(uploaded_file):
         return _save_upload(uploaded_file, output_dir, audio=True)
-    return _optional_text(form, "audio_track_path")
+    return optional_text(form, "audio_track_path")
 
 
 def _audio_track_inspection(payload: Any) -> dict[str, Any]:
@@ -2438,7 +2448,7 @@ def _audio_track_from_form(form: Any, path: str | None) -> AudioTrack | None:
 
 
 def _optional_float(form: Any, key: str) -> float | None:
-    value = _optional_text(form, key)
+    value = optional_text(form, key)
     if value is None:
         return None
     try:
@@ -2454,27 +2464,8 @@ def _checkbox(form: Any, key: str, *, default: bool = False) -> bool:
     return any(value not in {"", "0", "false", "off", "no"} for value in normalized)
 
 
-def _choice_or_default(form: Any, key: str, choices: tuple[str, ...], default: str) -> str:
-    value = _optional_text(form, key) or default
-    if value not in choices:
-        raise ValueError(f"Field '{key}' must be one of {list(choices)}.")
-    return value
-
-
-def _resolve_image_size(form: Any, web_config: WebUiConfig, ratio: str) -> str:
-    choices = web_config.image_size_options[ratio]
-    default = default_image_size_for_ratio(web_config, ratio)
-    return _choice_or_default(form, "size", choices, default)
-
-
-def _resolve_video_size(form: Any, web_config: WebUiConfig, ratio: str) -> str:
-    choices = web_config.video_size_options[ratio]
-    default = default_video_size_for_ratio(web_config, ratio)
-    return _choice_or_default(form, "size", choices, default)
-
-
 def _optional_path(form: Any, key: str) -> str | None:
-    value = _optional_text(form, key)
+    value = optional_text(form, key)
     return None if value is None else _host_local_file(value, key)
 
 
@@ -2492,57 +2483,6 @@ def _host_local_file(value: str, key: str, *, resolve: bool = True) -> str:
     return str(path.resolve() if resolve else path)
 
 
-def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[str, Any]:
-    """Build the ``POST /api/video/memory-fit`` response: the size and length a video job would use, and how that clip fits memory.
-
-    The size and length resolve exactly as in a Text to Video or Image to Video job. ``image`` (an Image to Video clip,
-    which holds a keyframe), ``steps`` (settled by the model's step rules), ``lora`` (the job's ``name:weight,...`` list,
-    whose files H3 holds in memory), ``review`` (the upscale pauses to review, so H3 loads its transformer twice) and
-    ``references`` (how many reference images the job holds, whose rows and vision tower H3 counts)
-    refine MiniMax H3's estimate; LTX ignores all five. ``memory_fit`` is ``None`` when this machine has no memory budget or the model has no estimate: an LTX model
-    that is not a downloaded MLX model with its text encoder, or a MiniMax H3 clip size it cannot take. MiniMax H3
-    adds ``expected_seconds``, an estimate of the generation time.
-
-    Raises:
-        ValueError: If the body, model, ratio, size, steps, upscale or review is invalid, or an H3 clip names a LoRA that is not there.
-    """
-    if not isinstance(payload, dict):
-        raise ValueError("Request body must be a JSON object.")
-    for key in ("model", "ratio", "size"):
-        json_field(payload, key, str, "a string")
-    width, height, frames, upscale, steps = (json_field(payload, key, int, "a positive integer", minimum=1) for key in ("width", "height", "frames", "upscale", "steps"))
-    low_memory = json_field(payload, "low_memory", bool, "a boolean")
-    image = json_field(payload, "image", bool, "a boolean")
-    lora = json_field(payload, "lora", str, "a string")
-    review = json_field(payload, "review", bool, "a boolean")
-    references = json_field(payload, "references", int, "a non-negative whole number", minimum=0)
-
-    app_config = web_config.app_config
-    model_name = _video_model_name(payload, web_config)
-    ratio, size = _video_ratio_and_size(payload, web_config)
-    require_upscale_factor(upscale)
-    resolved_model, model_info = resolve_video_model(app_config, model_name)
-    clip = resolve_video_clip(app_config, model_info, ratio=ratio, size=size, steps=steps, width=width, height=height, frames=frames, upscale=bool(upscale), quiet=True)
-    forwards = _settled_video_steps(clip.steps, bool(upscale), app_config, model_info).steps
-    memory_fit = clip_memory_fit(
-        resolved_model,
-        width=clip.width,
-        height=clip.height,
-        frames=clip.num_frames,
-        low_memory=low_memory is not False,
-        upscale=bool(upscale),
-        budget=memory_budget(),
-        model_name=model_name,
-        family=model_info.family,
-        mode="i2v" if image else "t2v",
-        forwards=forwards or 8,
-        loras_bytes=lora_bytes_for_fit(lora, family=model_info.family, downloading=lora_installer.pending_sizes()),
-        review=bool(upscale) and review is True,
-        references=references or 0,
-    )
-    return {"memory_fit": memory_fit, "width": clip.width, "height": clip.height, "frames": clip.num_frames}
-
-
 def _required_path(form: Any, key: str) -> str:
     """Return a validated path field or raise a field-specific error."""
     value = _optional_path(form, key)
@@ -2558,7 +2498,7 @@ def _checkpoint_path(form: Any, key: str) -> str:
         ValueError: As :func:`_required_path`.
     """
     _required_path(form, key)
-    return str(Path(str(_optional_text(form, key))).expanduser().absolute())
+    return str(Path(str(optional_text(form, key))).expanduser().absolute())
 
 
 def _upload_field(path_key: str) -> str:
@@ -2681,7 +2621,7 @@ def _project_save_dir(form: Any, root: str) -> str:
     Raises:
         ValueError: If the project is not one plain folder name.
     """
-    return str(project_dir(Path(root), _optional_text(form, PROJECT_FIELD)))
+    return str(project_dir(Path(root), optional_text(form, PROJECT_FIELD)))
 
 
 def _resolve_output_dir(value: str | None) -> str:
@@ -2703,7 +2643,7 @@ def _resolve_numeric_toggle(form: Any, enabled_key: str, amount_key: str, *, def
 
 
 def _resolve_loras(form: Any, *, require_file: bool) -> tuple[list[str] | None, list[float] | None]:
-    lora_value = _optional_text(form, "lora")
+    lora_value = optional_text(form, "lora")
     if lora_value is None:
         return None, None
     return resolve_lora_references(lora_value, require_file=require_file)
@@ -2794,39 +2734,11 @@ def _validate_video_args(args: argparse.Namespace) -> None:
     require_upscale_factor(args.upscale)
 
 
-def _video_model_name(form: Any, web_config: WebUiConfig) -> str:
-    """Return the video model a request names, else the configured default.
-
-    Raises:
-        ValueError: If neither names one.
-    """
-    model_name = _text_or_default(form, "model", web_config.default_models.video)
-    if not model_name:
-        raise ValueError("A video model is required.")
-    return model_name
-
-
-def _video_ratio_and_size(form: Any, web_config: WebUiConfig) -> tuple[str, str]:
-    """Return the ratio and size a request names, else the configured defaults.
-
-    Raises:
-        ValueError: If a value is not one the Web UI offers.
-    """
-    ratio = _choice_or_default(form, "ratio", web_config.video_ratios, web_config.app_config.get("video_generation", {}).get("default_ratio", "16:9"))
-    return ratio, _resolve_video_size(form, web_config, ratio)
-
-
-def _settled_video_steps(steps: int | None, upscale: bool, config: dict[str, Any], model_info: VideoModelInfo) -> SettledSteps:
-    """Settle the requested *steps* of a video job by the upscale and the model family's step rules."""
-    family = video_family(config, model_info.family)
-    return settle_video_steps(steps, upscale=upscale, family=family, default_upscale_steps=family.default_upscale_steps if family is not None else UNDESCRIBED_UPSCALE_STEPS)
-
-
 def _normalize_video_steps(args: argparse.Namespace, config: dict[str, Any], model_info: VideoModelInfo) -> None:
     """Settle the step counts of a video job: upscale steps and the model family's step rules (silently)."""
     if args.steps is not None and args.steps < 1:
         raise ValueError("Steps must be at least 1.")
-    settled = _settled_video_steps(args.steps, bool(args.upscale), config, model_info)
+    settled = settled_video_steps(args.steps, bool(args.upscale), config, model_info)
     args.steps = settled.steps
     args.upscale_steps = settled.upscale_steps
 
@@ -2844,18 +2756,18 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
             being quantized (each holds a full model in memory). Jobs are refused while it runs.
     """
     input_path = _checkpoint_path(form, "input_path")
-    model_type = _optional_text(form, "model_type") or "zimage"
+    model_type = optional_text(form, "model_type") or "zimage"
     if model_type not in MODEL_TYPES:
         raise ValueError(f"Model type must be one of {', '.join(MODEL_TYPES)}.")
 
     args = ["model", "--input", input_path, "--model-type", model_type]
-    model_name = _optional_text(form, "name")
+    model_name = optional_text(form, "name")
     if model_name:
         args.extend(["--name", model_name])
     if model_type in VIDEO_MODEL_TYPES:
         return _start_video_conversion(form, args, model_type, model_name or Path(input_path).stem)
     if model_type == "zimage":
-        args.extend(["--base-model", _optional_text(form, "base_model") or "Tongyi-MAI/Z-Image-Turbo"])
+        args.extend(["--base-model", optional_text(form, "base_model") or "Tongyi-MAI/Z-Image-Turbo"])
     if _checkbox(form, "copy"):
         args.append("--copy")
     quantize = _optional_int(form, "quantize")
@@ -2910,7 +2822,7 @@ def _start_video_conversion(form: Any, args: list[str], model_type: str, name: s
 def _import_local_lora_from_form(form: Any) -> dict[str, str]:
     """Validate and import a LoRA from a local safetensors file."""
     source_path = Path(_required_path(form, "source_path"))
-    imported = import_lora_local(source_path, get_ziv_data_dir() / "loras", name=_optional_text(form, "name"))
+    imported = import_lora_local(source_path, get_ziv_data_dir() / "loras", name=optional_text(form, "name"))
     return {
         "tone": "success",
         "message": f"Imported local LoRA '{imported.stem}'.",
@@ -2924,8 +2836,8 @@ def _import_hf_lora_from_form(form: Any) -> dict[str, Any]:
     The name defaults to the file's stem and gets ``-2``, ``-3`` and so on when taken; a name the user typed that is
     taken is refused.
     """
-    source = import_source(_required_text(form, "repo_id"), _optional_text(form, "filename"))
-    typed = _optional_text(form, "name")
+    source = import_source(_required_text(form, "repo_id"), optional_text(form, "filename"))
+    typed = optional_text(form, "name")
     result = lora_installer.start(source, name=typed, suffix_on_clash=typed is None, default_name=Path(source.file).stem)
     if result.status == "installed":
         message = f"Hugging Face LoRA '{result.name}' is already installed."
@@ -3165,13 +3077,13 @@ def _save_voice_from_form(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         require_ffmpeg()
     except RuntimeError as exc:
         raise ValueError(str(exc)) from exc
-    preset = find_audio_model(web_config.app_config, _optional_text(form, "model"))
-    fields = {"name": _optional_text(form, "name") or "", "text": _untrimmed_text(form, "voice_text"), "ticked": _checkbox(form, "voice_consent")}
+    preset = find_audio_model(web_config.app_config, optional_text(form, "model"))
+    fields = {"name": optional_text(form, "name") or "", "text": _untrimmed_text(form, "voice_text"), "ticked": _checkbox(form, "voice_consent")}
     uploaded_file = form.get(_upload_field("voice_path"))
     if _is_uploaded_file(uploaded_file):
         with staged_upload(uploaded_file) as path:
             return voice_payload(save_recording_voice(preset, path=path, **fields))
-    typed_path = _optional_text(form, "voice_path")
+    typed_path = optional_text(form, "voice_path")
     if typed_path is None:
         raise ValueError("Choose or record the voice first.")
     return voice_payload(save_recording_voice(preset, path=_host_local_file(typed_path, "voice_path"), **fields))
@@ -3296,7 +3208,7 @@ async def api_models_convert_inspect(request: Request) -> dict[str, Any]:
     payload = await request.json()
     try:
         path = Path(_checkpoint_path(payload, "input_path"))
-        model_type = _optional_text(payload, "model_type") or LTX_MODEL_TYPES[0]
+        model_type = optional_text(payload, "model_type") or LTX_MODEL_TYPES[0]
         return await run_in_threadpool(inspect_checkpoint_for_form, path, load_web_config().app_config, model_type)
     except (ValueError, FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

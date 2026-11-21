@@ -1,4 +1,4 @@
-"""Build the Web UI's extend responses: check and describe a source video, fit its window to memory, and build the rewrite context of an extension."""
+"""Build the Web UI's extend responses: check and describe a source video, and build the rewrite context of an extension."""
 
 from __future__ import annotations
 
@@ -7,13 +7,11 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, supports_video_audio, supports_video_extend, video_family_on_platform
-from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, settle_video_steps
+from zvisiongenerator.backends import supports_video_audio, supports_video_extend, video_family_on_platform
 from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.utils.model_metadata import alias_map
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
-from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import EnhanceContext
 from zvisiongenerator.utils.video_extend import (
@@ -33,12 +31,9 @@ from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.gallery import output_source_folder
 from zvisiongenerator.web.json_fields import json_field
-from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.path_browser import SOURCE_VIDEO_EXTENSIONS
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from zvisiongenerator.core.video_family import VideoFamily
 
 EXTEND_UNAVAILABLE_MESSAGE = "Extending a video is not available on this platform."
@@ -134,17 +129,14 @@ def _resolve_video_model(model: str | None, app_config: dict[str, Any]) -> tuple
     return resolved, detect_video_model(resolved).family
 
 
-def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading_loras: Mapping[str, int] | None = None) -> dict[str, Any]:
+def extend_source_response(payload: Any, web_config: WebUiConfig) -> dict[str, Any]:
     """Build the ``POST /api/extend/source`` response for a request body.
 
-    The optional ``steps`` are the steps the job would run; they set MiniMax H3's estimated time. The optional ``lora`` is the
-    job's ``name:weight,...`` list, whose files H3 holds in memory; the estimate is ``None`` when it names a LoRA that is not there.
-    An extension is never upscaled, so Review does not change its estimate and is not sent. *downloading_loras* maps the
-    LoRAs still downloading to the size they will have, so their files count before they exist. The optional ``references`` is how many
-    reference images the job holds, whose rows and vision tower H3's estimate counts.
+    The optional ``model`` is the video model the extension would use; its family sets the step the length is a multiple of and
+    the problems reported. How the extension fits memory is asked of ``POST /api/memory``.
 
     Raises:
-        ValueError: If the body, path, length, model, steps or low-memory flag is invalid.
+        ValueError: If the body, path, length or model is invalid.
         FileNotFoundError: If no file is at the path.
     """
     if not isinstance(payload, dict):
@@ -152,25 +144,18 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading
     path = source_video_path(payload.get("path"), key="path")
     requested_frames = json_field(payload, "extend_frames", int, "a positive integer", minimum=1)
     model = json_field(payload, "model", str, "a string")
-    low_memory = json_field(payload, "low_memory", bool, "a boolean")
-    steps = json_field(payload, "steps", int, "a positive integer", minimum=1)
-    lora = json_field(payload, "lora", str, "a string")
-    references = json_field(payload, "references", int, "a non-negative whole number", minimum=0)
 
     inspection = _inspect_source(path)
     probe = inspection.probe
     scene, prompt = recorded_prompts(inspection.recorded)
     recorded_model = inspection.recorded.model if inspection.recorded is not None else None
     fps = probe.fps if probe is not None else 0.0
-    memory_model = model or (recorded_model if recorded_model in web_config.video_model_options else None) or preferred_option(web_config.default_models.video, web_config.video_model_options)
-    resolved_model = _resolve_video_model(memory_model, web_config.app_config)
+    chosen_model = model or (recorded_model if recorded_model in web_config.video_model_options else None) or preferred_option(web_config.default_models.video, web_config.video_model_options)
+    resolved_model = _resolve_video_model(chosen_model, web_config.app_config)
     family = video_family_on_platform(web_config.app_config, resolved_model[1]) if resolved_model is not None else None
     inspection = with_family_problems(inspection, family)
     extend_frames = None if requested_frames is None and fps <= 0 else resolve_extend_frames(frames=requested_frames, seconds=None, fps=fps, strict=False, step=extend_step(family))[0]
     window = window_frames(extend_frames, family) if extend_frames is not None else None
-    memory_fit = None
-    if inspection.source is not None and extend_frames is not None:
-        memory_fit = _extend_memory_fit(resolved_model, memory_model, inspection.source, extend_frames, low_memory is not False, steps, lora, web_config, downloading_loras, references=references or 0)
     frame_count = probe.frame_count if probe is not None else None
     track_path = inspection.recorded.audio_track_path if inspection.recorded is not None else None
     track_end = inspection.recorded.audio_track_end if inspection.recorded is not None else None
@@ -197,7 +182,6 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading
         "problems": [{"code": problem.code, "message": problem.message} for problem in inspection.problems],
         "extend_frames": extend_frames,
         "window_frames": window,
-        "memory_fit": memory_fit,
     }
 
 
@@ -206,50 +190,6 @@ def _source_duration(probe: Any, fps: float, frame_count: int | None) -> float |
     if frame_count is not None and fps > 0:
         return round(frame_count / fps, 3)
     return probe.duration if probe is not None else None
-
-
-def _extend_memory_fit(
-    resolved_model: tuple[str, str] | None,
-    model: str | None,
-    source: ExtendSource,
-    extend_frames: int,
-    low_memory: bool,
-    steps: int | None,
-    lora: str | None,
-    web_config: WebUiConfig,
-    downloading_loras: Mapping[str, int] | None = None,
-    *,
-    references: int = 0,
-) -> dict[str, Any] | None:
-    """Return how an extension window fits this machine's memory (``status``, ``required_gb``, ``budget_gb``, and an estimated ``expected_seconds`` for H3), or ``None`` when unknown.
-
-    The window is what the model generates: the carried frames plus *extend_frames*. H3 runs the requested *steps* as its step rules
-    settle them, and its family's default steps when the request names none.
-    """
-    budget = memory_budget()
-    if resolved_model is None or budget is None:
-        return None
-    family = resolved_model[1]
-    description = video_family_on_platform(web_config.app_config, family)
-    window = window_frames(extend_frames, description)
-    try:
-        loras_bytes = lora_bytes_for_fit(lora, family=family, downloading=downloading_loras)
-    except ValueError:
-        return None
-    return clip_memory_fit(
-        resolved_model[0],
-        width=source.width,
-        height=source.height,
-        frames=window,
-        low_memory=low_memory,
-        budget=budget,
-        model_name=model,
-        family=family,
-        mode="extend",
-        forwards=settle_video_steps(steps, upscale=False, family=description, default_upscale_steps=UNDESCRIBED_UPSCALE_STEPS).steps or 8,
-        loras_bytes=loras_bytes,
-        references=references,
-    )
 
 
 def _model_family(model: str | None) -> VideoFamily | None:
