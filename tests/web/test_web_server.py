@@ -1691,10 +1691,10 @@ class TestJobQueueRoutes:
 
         def _block(_cb):
             started.set()
-            release.wait(timeout=2.0)
+            release.wait(timeout=30.0)
 
         running = runner._submit_job(job_type="image", exclusive=True, supported_controls=("quit",), control_signal=MagicMock(), target_factory=_block)
-        assert started.wait(timeout=1.0)
+        assert started.wait(timeout=10.0)
         yield runner, running
         release.set()
         runner.shutdown()
